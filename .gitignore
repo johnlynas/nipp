@@ -1,0 +1,100 @@
+# ==========================
+# Dependencies
+# ==========================
+/node_modules
+/.pnp
+.pnp.js
+.yarn/install-state.gz
+
+# ==========================
+# Next.js / Build Outputs
+# ==========================
+/.next/
+/out/
+/build
+/dist
+/.turbo
+
+# ==========================
+# Environment Variables
+# ==========================
+# Note: .env.example or .env.local.example should be committed!
+.env
+.env*.local
+.env.development
+.env.production
+.env.staging
+.env.test
+
+# ==========================
+# Claude Code & AI Tooling
+# ==========================
+# Claude Code local state, settings, and session history
+.claude/
+.claude.json
+.opencode
+.pi
+.qwen
+
+
+# Local Model Context Protocol (MCP) server configurations
+# (Uncomment the line below if you prefer to commit your MCP configs to the repo)
+# .mcp.json 
+
+# Other AI IDEs / Extensions (Cursor, Continue, etc.)
+.cursor/
+.cursorrules
+.continue/
+.windsurf/
+
+# NOTE: CLAUDE.md is intentionally NOT ignored. 
+# It is best practice to commit CLAUDE.md to your repository so that 
+# Claude Code (and other AI agents) can read your project's context and rules.
+
+# ==========================
+# Logs & Debugging
+# ==========================
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+.pnpm-debug.log*
+logs
+*.log
+
+# ==========================
+# Testing & Coverage
+# ==========================
+/coverage
+/.nyc_output
+test-results/
+playwright-report/
+blob-report/
+
+# ==========================
+# IDE, Editor & OS Files
+# ==========================
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+Thumbs.db
+
+# ==========================
+# TypeScript & Linting
+# ==========================
+*.tsbuildinfo
+.eslintcache
+.next/types/
+
+# ==========================
+# Vercel
+# ==========================
+.vercel
+
+# ==========================
+# Misc / Secrets
+# ==========================
+*.pem
+*.key
