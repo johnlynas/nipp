@@ -1,0 +1,99 @@
+@import 'tailwindcss';
+
+/* ============================================================
+   Property NI Navy & Amber Design Tokens
+   ============================================================ */
+
+@theme {
+  /* Color Palette */
+  --color-brand-primary: #1e3a5f;
+  --color-brand-primary-dark: #152940;
+  --color-brand-accent: #f4a261;
+  --color-brand-accent-hover: #e76f51;
+  --color-surface-default: #ffffff;
+  --color-surface-subtle: #f8f9fa;
+  --color-text-primary: #1e3a5f;
+  --color-text-secondary: #6c757d;
+  --color-text-placeholder: #adb5bd;
+  --color-border-default: #dee2e6;
+  --color-state-error: #dc3545;
+  --color-state-success: #28a745;
+
+  /* Typography */
+  --font-sans: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+
+  /* Spacing Scale (8px grid) */
+  --spacing-xs: 0.5rem;   /* 8px */
+  --spacing-sm: 1rem;     /* 16px */
+  --spacing-md: 1.5rem;   /* 24px */
+  --spacing-lg: 2rem;     /* 32px */
+  --spacing-xl: 4rem;     /* 64px */
+
+  /* Border Radii */
+  --radius-pill: 26px;
+  --radius-sm: 8px;
+  --radius-md: 12px;
+
+  /* Shadows */
+  --shadow-button: 0 4px 12px rgba(244, 162, 97, 0.3);
+  --shadow-button-hover: 0 6px 16px rgba(244, 162, 97, 0.4);
+  --shadow-focus-ring: 0 0 0 3px rgba(30, 58, 95, 0.1);
+
+  /* Transitions */
+  --transition-fast: 0.15s ease;
+  --transition-normal: 0.2s ease;
+  --transition-spinner: 0.8s linear infinite;
+}
+
+/* ============================================================
+   Global Styles
+   ============================================================ */
+
+:root {
+  --background: #ffffff;
+  --foreground: #1e3a5f;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --background: #0a0a0a;
+    --foreground: #ededed;
+  }
+}
+
+body {
+  color: var(--foreground);
+  background: var(--background);
+  font-family: var(--font-sans);
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+/* ============================================================
+   Accessibility Rules
+   ============================================================ */
+
+/* WCAG AA: Amber (#f4a261) MUST NEVER be used for text on white background (~2.5:1 contrast ratio) */
+/* Amber is strictly for backgrounds, borders, and icons only. Text on Amber backgrounds MUST be White. */
+
+/* Focus ring utility for keyboard navigation */
+.focus-ring {
+  outline: none;
+  box-shadow: var(--shadow-focus-ring);
+}
+
+/* ============================================================
+   Custom Utilities (Tailwind v4 @utility)
+   ============================================================ */
+
+@utility rounded-pill {
+  border-radius: var(--radius-pill);
+}
+
+/* ============================================================
+   Split-Screen Login Layout Structure (Scaffolded for Future Implementation)
+   ============================================================ */
+
+/* Desktop (>1024px): 50/50 split */
+/* Tablet (768px-1024px): Split maintained with reduced padding */
+/* Mobile (<768px): Stacked vertically, left panel min-height 40vh */

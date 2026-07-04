@@ -1,0 +1,143 @@
+// ============================================================
+// TENANT ISOLATION REQUIREMENT
+// ============================================================
+// Every organization-scoped model MUST include:
+//
+//   organizationId String
+//   organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+//   @@index([organizationId])
+//
+// This is required for both:
+//   1. Prisma Extension (lib/tenant-db.ts) - Application layer
+//   2. PostgreSQL RLS - Database layer
+//
+// Without organizationId, tenant isolation is BROKEN for that model.
+//
+// Exempt models (global, not org-scoped):
+//   User, Session, Account, Organization, Member, Invitation
+// ============================================================
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ============================================================
+// Authentication Models (BetterAuth — global, not org-scoped)
+// ============================================================
+
+model User {
+  id            String    @id @default(cuid())
+  name          String
+  email         String    @unique
+  emailVerified Boolean   @default(false)
+  image         String?
+  passwordHash  String?
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+
+  sessions Session[]
+  accounts Account[]
+  members  Member[]
+}
+
+model Session {
+  id           String    @id @default(cuid())
+  expiresAt    DateTime
+  token        String    @unique
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
+  ipAddress    String?
+  userAgent    String?
+  userId       String
+  user         User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+}
+
+model Account {
+  id                String    @id @default(cuid())
+  accountId         String
+  providerId        String
+  providerAccountId String
+  refresh_token     String?
+  access_token      String?
+  expires_at        Int?
+  token_type        String?
+  scope             String?
+  id_token          String?
+  session_state      String?
+  createdAt         DateTime  @default(now())
+  updatedAt         DateTime  @updatedAt
+
+  userId   String
+  user     User    @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([providerId, providerAccountId])
+  @@index([userId])
+}
+
+// ============================================================
+// Multi-Tenancy Models (BetterAuth Organization Plugin)
+// These are global — not org-scoped.
+// ============================================================
+
+model Organization {
+  id          String   @id @default(cuid())
+  slug        String?  @unique
+  name        String
+  metadata    Json?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  members      Member[]
+  invitations  Invitation[]
+  sentInvitations SentInvitation[]
+}
+
+model Member {
+  id         String   @id @default(cuid())
+  role       String   @default("member")
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  userId     String
+  user       User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  orgId      String
+  organization Organization @relation(fields: [orgId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, orgId])
+}
+
+model Invitation {
+  id         String   @id @default(cuid())
+  email      String
+  role       String?
+  token      String   @unique
+  expiresAt  DateTime
+  createdAt  DateTime @default(now())
+
+  orgId      String
+  organization Organization @relation(fields: [orgId], references: [id], onDelete: Cascade)
+
+  @@index([email])
+}
+
+// SentInvitation (BetterAuth internal model for tracking sent invitations)
+model SentInvitation {
+  id         String   @id @default(cuid())
+  email      String
+  role       String?
+  token      String   @unique
+  expiresAt  DateTime
+  createdAt  DateTime @default(now())
+
+  orgId      String
+  organization Organization @relation(fields: [orgId], references: [id], onDelete: Cascade)
+
+  @@index([email])
+}
