@@ -22,8 +22,23 @@ export async function signInEmail(email: string, password: string) {
 }
 
 /**
- * Sign out the current session.
+ * Sign out the current session. Returns { success: true } on success,
+ * or { error: string } on failure.
  */
 export async function signOutUser() {
-  return authClient.signOut();
+  const result = await authClient.signOut({
+    fetchOptions: {
+      onSuccess: () => {
+        // Clear all session cookie variants on the client side
+        document.cookie = 'better-auth.session_token=; path=/; max-age=0; secure; samesite=lax';
+        document.cookie = 'better-auth-session_token=; path=/; max-age=0; secure; samesite=lax';
+      },
+    },
+  });
+
+  if (result.error) {
+    return { error: result.error.message || 'Sign out failed' };
+  }
+
+  return { success: true };
 }

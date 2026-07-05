@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server';
 import type { NextRequest } from 'next/server';
+import { auth } from '@/lib/auth';
 
 /**
  * Route protection and tenant context middleware.
@@ -19,29 +20,54 @@ function isPublicRoute(pathname: string): boolean {
   return PUBLIC_PATTERNS.some((pattern) => pathname === pattern || pathname.startsWith(`${pattern}/`));
 }
 
-export function middleware(request: NextRequest) {
-  const { pathname } = request.nextUrl;
+export async function middleware(request: NextRequest) {
+  const { pathname, protocol } = request.nextUrl;
 
-  // Skip middleware for public routes
+  // Skip middleware for public routes and auth API endpoints
   if (isPublicRoute(pathname)) {
     return NextResponse.next();
   }
 
-  // Check authentication via BetterAuth session cookie (dot and dash variants)
+  // Validate session using BetterAuth's internal getSession function.
+  // This properly checks the database for invalidated/revoked sessions,
+  // not just cookie presence.
   const sessionCookie =
     request.cookies.get('better-auth.session_token')?.value ||
     request.cookies.get('better-auth-session_token')?.value;
 
-  // All non-public routes require authentication
   if (!sessionCookie) {
     const loginUrl = new URL('/login', request.url);
     loginUrl.searchParams.set('callbackUrl', pathname);
     return NextResponse.redirect(loginUrl);
   }
 
-  // TODO: Extract organization context from session and set in AsyncLocalStorage
+  // Validate session against the database (handles invalidated/revoked sessions)
+  let valid = false;
+  try {
+    const sessionData = await auth.api.getSession({
+      headers: request.headers,
+    });
+    valid = !!sessionData;
+  } catch {
+    // DB unreachable — treat as unauthenticated to be safe
+    valid = false;
+  }
 
-  return NextResponse.next();
+  if (!valid) {
+    // Session invalid/expired/revoked — redirect to login
+    const loginUrl = new URL('/login', request.url);
+    loginUrl.searchParams.set('callbackUrl', pathname);
+    return NextResponse.redirect(loginUrl);
+  }
+
+  // Prevent caching of protected pages (ensures logout is respected)
+  const response = NextResponse.next();
+  response.headers.set('Cache-Control', 'no-store, max-age=0');
+  response.headers.set('Surrogate-Control', 'no-store');
+  response.headers.set('Pragma', 'no-cache');
+  response.headers.set('Expires', '0');
+
+  return response;
 }
 
 // Run middleware on all routes except static files and API health checks
