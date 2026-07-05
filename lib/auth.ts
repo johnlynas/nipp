@@ -50,7 +50,7 @@ export const auth = betterAuth({
     organization(),
     admin({
       defaultRole: 'member',
-      adminRoles: ['super_admin'],
+      adminRoles: ['admin'],
     }),
   ],
 

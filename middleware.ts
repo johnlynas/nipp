@@ -8,49 +8,38 @@ import type { NextRequest } from 'next/server';
  * and establishes organization context via AsyncLocalStorage.
  */
 
-// Protected routes — require authentication
-const PROTECTED_PATTERNS = [
-  '/dashboard',
-  '/admin',
-  '/organizations',
-];
-
-// Public routes — accessible without authentication
+// Public routes — accessible without authentication (checked first)
 const PUBLIC_PATTERNS = [
-  '/',
   '/login',
   '/register',
   '/api/auth',
 ];
 
-function isProtectedRoute(pathname: string): boolean {
-  return PROTECTED_PATTERNS.some((pattern) => pathname.startsWith(pattern));
-}
-
 function isPublicRoute(pathname: string): boolean {
-  return PUBLIC_PATTERNS.some((pattern) => pathname.startsWith(pattern));
+  return PUBLIC_PATTERNS.some((pattern) => pathname === pattern || pathname.startsWith(`${pattern}/`));
 }
 
 export function middleware(request: NextRequest) {
   const { pathname } = request.nextUrl;
 
-  // Skip middleware for public routes and API auth
+  // Skip middleware for public routes
   if (isPublicRoute(pathname)) {
     return NextResponse.next();
   }
 
-  // Check authentication via BetterAuth session cookie
-  const sessionCookie = request.cookies.get('better-auth.session_token')?.value;
+  // Check authentication via BetterAuth session cookie (dot and dash variants)
+  const sessionCookie =
+    request.cookies.get('better-auth.session_token')?.value ||
+    request.cookies.get('better-auth-session_token')?.value;
 
-  if (!sessionCookie && isProtectedRoute(pathname)) {
-    // Redirect unauthenticated users to login
+  // All non-public routes require authentication
+  if (!sessionCookie) {
     const loginUrl = new URL('/login', request.url);
     loginUrl.searchParams.set('callbackUrl', pathname);
     return NextResponse.redirect(loginUrl);
   }
 
   // TODO: Extract organization context from session and set in AsyncLocalStorage
-  // This will be implemented when tenant-context.ts is integrated
 
   return NextResponse.next();
 }

@@ -37,6 +37,10 @@ model User {
   emailVerified Boolean   @default(false)
   image         String?
   passwordHash  String?
+  role          String    @default("member")
+  banned        Boolean?  @default(false)
+  banReason     String?
+  banExpires    DateTime?
   createdAt     DateTime  @default(now())
   updatedAt     DateTime  @updatedAt
 
@@ -63,7 +67,8 @@ model Account {
   id                String    @id @default(cuid())
   accountId         String
   providerId        String
-  providerAccountId String
+  providerAccountId String?
+  password          String?
   refresh_token     String?
   access_token      String?
   expires_at        Int?
