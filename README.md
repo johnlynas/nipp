@@ -19,38 +19,143 @@ A full-stack property management portal for Northern Ireland, built with Next.js
 
 ## Prerequisites
 
-- **Node.js 22 LTS** — Pinned via `.nvmrc` and `package.json` engines field
-- **PostgreSQL 16+** — Installed locally (no Docker for development)
+| Requirement | Version | How to Install |
+|---|---|---|
+| **Node.js** | 22 LTS (pinned) | [nvm](https://github.com/nvm-sh/nvm) — `nvm install 22 && nvm use` |
+| **PostgreSQL** | 16+ | [postgresapp.com](https://postgresapp.com) (macOS), `brew install postgresql`, or your distro's package manager |
+| **Redis** *(optional)* | 7+ | `brew install redis` (macOS) — used for permission caching; app degrades gracefully without it |
+| **Git** | Latest | [git-scm.com](https://git-scm.com) |
 
 ```bash
-# Switch to Node.js 22
-nvm use
-
-# Verify versions
-node -v  # Should be v22.x.x
-npm -v   # Should be 10.x+
-psql --version  # Should be 16+
+# Verify prerequisites
+node -v   # v22.x.x
+npm -v    # 10.x+
+psql --version  # 16+
+redis-cli --version  # optional — 7+
 ```
 
-## Getting Started
+## Getting Started (Step by Step)
+
+### 1. Clone and install dependencies
 
 ```bash
-# Install dependencies
-npm install
+git clone <repo-url> && cd nipp
+nvm use                          # switch to Node.js 22 (from .nvmrc)
+npm install                      # install all dependencies
+```
 
-# Copy environment files and fill in values
+### 2. Set up PostgreSQL
+
+Create the development and production databases:
+
+```bash
+# Option A — one-liner (creates both nipp_dev and nipp_prod)
+bash scripts/setup-db.sh
+
+# Option B — run the SQL file directly
+psql -U postgres -f scripts/setup-db.sql
+```
+
+Then update `DATABASE_URL` in `.env` to match your connection string (see step 3).
+
+### 3. Configure environment variables
+
+```bash
+# Copy the template and fill in real values
 cp .env.example .env
-cp .env.local-prod.example .env.local-prod
+```
 
-# Push schema to database (no migrations in init phase)
+Edit `.env` and set:
+
+| Variable | What it is | How to generate / what to put |
+|---|---|---|
+| `DATABASE_URL` | PostgreSQL connection string | e.g. `postgresql://postgres@localhost:5432/nipp_dev` |
+| `BETTER_AUTH_SECRET` | Session encryption key | `openssl rand -base64 32` |
+| `GOOGLE_CLIENT_ID` | Google OAuth client ID | From [Google Cloud Console](https://console.cloud.google.com) (optional — skip if not using Google login) |
+| `GOOGLE_CLIENT_SECRET` | Google OAuth client secret | From [Google Cloud Console](https://console.cloud.google.com) (optional — skip if not using Google login) |
+| `PII_ENCRYPTION_KEY` | AES-256-GCM key for PII encryption | `openssl rand -hex 32` (64 hex chars) |
+| `REDIS_URL` | Redis connection string | `redis://localhost:6379` (optional — app works without it) |
+| `LOG_LEVEL` | Logging verbosity | `debug`, `info`, `warn`, or `error` (default: `debug`) |
+| `FRONTEND_URL` / `NEXT_PUBLIC_API_URL` | App URLs | `http://localhost:3000` (default) |
+
+> **Never commit `.env`** — it is in `.gitignore`. Only `.env.example` (with placeholder values) is committed.
+
+### 4. Initialize the database
+
+```bash
+# Generate the Prisma client (required before any prisma command)
+npx prisma generate
+
+# Push the schema to your database (creates all tables)
 npx prisma db push
 
-# Start development server
-npm run dev
-
-# Start local production (HTTPS)
-npm run dev:https
+# Seed the database with:
+#   - Platform Organization (for Super Admins)
+#   - Master permission catalog (~50 resource:action permissions)
+#   - Default admin user (admin@nipp.gov.uk / Admin@1234)
+npm run db:seed
 ```
+
+After seeding, check your `.env` file — the `PLATFORM_ORGANIZATION_ID` will be written automatically.
+
+### 5. Start the development server
+
+```bash
+npm run dev
+```
+
+Open [http://localhost:3000](http://localhost:3000) in your browser.
+
+### 6. (Optional) Run tests
+
+```bash
+npm test              # run all unit tests
+npm run test:watch    # watch mode — re-runs on file changes
+npm run test:auth     # auth-specific tests only
+```
+
+---
+
+## Available Scripts
+
+| Script | Command | Description |
+|--------|---------|-------------|
+| **Development** | | |
+| `npm run dev` | `next dev` | Start dev server (HTTP, hot-reload) |
+| `npm run dev:https` | `next dev --experimental-https` | Start dev server with local HTTPS |
+| **Database** | | |
+| `npm run db:push` | `prisma db push` | Push schema changes to the database (no migration files) |
+| `npm run db:migrate` | `prisma migrate dev` | Create and apply a migration file |
+| `npm run db:seed` | `tsx prisma/seed.ts` | Run the seed script (create admin user, permissions catalog) |
+| `npm run db:studio` | `prisma studio` | Open the Prisma Studio GUI |
+| `npm run db:reset` | `prisma migrate reset --skip-seed` | Reset the database (drops all data) |
+| **Setup** | | |
+| `bash scripts/setup-db.sh` | — | Create databases and guide through remaining setup steps |
+| **Build & Deploy** | | |
+| `npm run build` | `next build` | Production build |
+| `npm start` | `next start` | Start production server |
+| `npm run lint` | `next lint` | Run ESLint |
+| `npm run type-check` | `tsc --noEmit` | TypeScript type checking (no output) |
+| **Testing** | | |
+| `npm test` | `vitest run` | Run all unit tests |
+| `npm run test:watch` | `vitest` | Watch mode |
+| `npm run test:coverage` | `vitest run --coverage` | Run tests with coverage report |
+| **Cloud** *(placeholders)* | | |
+| `npm run build:cloud` | — | Placeholder for cloud build pipeline |
+| `npm run deploy:cloud` | — | Placeholder for cloud deployment |
+
+---
+
+## Troubleshooting
+
+| Problem | Solution |
+|---|---|
+| `@prisma/client did not initialize` | Run `npx prisma generate` |
+| `DATABASE_URL not found` | Ensure `.env` exists and contains a valid `DATABASE_URL` |
+| `Invalid admin roles: super_admin` | The BetterAuth admin plugin requires all `adminRoles` to be defined in its `roles` config. This is handled automatically — if you see this, check that `lib/auth.ts` has the correct admin config |
+| Redis connection errors | Redis is optional. The app degrades gracefully — permissions are fetched from the database directly if Redis is unavailable |
+| Port 3000 already in use | Kill the process: `lsof -ti:3000 \| xargs kill` or start on a different port with `PORT=3001 npm run dev` |
+| TypeScript errors after adding models | Run `npx prisma generate` to regenerate the Prisma client types |
 
 ## Build Targets
 

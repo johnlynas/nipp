@@ -13,6 +13,8 @@ const EXEMPT_MODELS = new Set([
   'Member',
   'Invitation',
   'SentInvitation',
+  // RBAC: Permission is global (catalog shared across orgs).
+  'Permission',
 ]);
 
 /**
@@ -101,6 +103,12 @@ const tenantDb: Record<string, unknown> = {
 };
 
 for (const model of ['User', 'Session', 'Account', 'Organization', 'Member', 'Invitation', 'SentInvitation']) {
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  (tenantDb as any)[model] = createTenantModel(model);
+}
+
+// RBAC models — org-scoped, require tenant context
+for (const model of ['Role', 'RolePermission']) {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   (tenantDb as any)[model] = createTenantModel(model);
 }

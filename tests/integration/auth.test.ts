@@ -77,8 +77,8 @@ describe('Login flow (integration)', () => {
 
   it('should verify password hash correctly', async () => {
     const hash = await hashPassword(correctPassword);
-    const valid = await verifyPassword(correctPassword, hash);
-    const invalid = await verifyPassword('WrongPassword123!', hash);
+    const valid = await verifyPassword({ password: correctPassword, hash });
+    const invalid = await verifyPassword({ password: 'WrongPassword123!', hash });
 
     expect(valid).toBe(true);
     expect(invalid).toBe(false);

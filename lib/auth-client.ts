@@ -29,9 +29,13 @@ export async function signOutUser() {
   const result = await authClient.signOut({
     fetchOptions: {
       onSuccess: () => {
-        // Clear all session cookie variants on the client side
-        document.cookie = 'better-auth.session_token=; path=/; max-age=0; secure; samesite=lax';
-        document.cookie = 'better-auth-session_token=; path=/; max-age=0; secure; samesite=lax';
+        // Clear all session cookie variants on the client side.
+        // BetterAuth prefixes with __Secure- when BETTER_AUTH_URL uses https://,
+        // so we clear both prefixed and unprefixed variants.
+        document.cookie = '__Secure-better-auth.session_token=; path=/; max-age=0';
+        document.cookie = 'better-auth.session_token=; path=/; max-age=0';
+        document.cookie = '__Secure-better-auth-session_token=; path=/; max-age=0';
+        document.cookie = 'better-auth-session_token=; path=/; max-age=0';
       },
     },
   });

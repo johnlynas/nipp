@@ -14,7 +14,7 @@
 // Without organizationId, tenant isolation is BROKEN for that model.
 //
 // Exempt models (global, not org-scoped):
-//   User, Session, Account, Organization, Member, Invitation
+//   User, Session, Account, Organization, Member, Invitation, SentInvitation, Permission
 // ============================================================
 
 generator client {
@@ -102,6 +102,9 @@ model Organization {
   members      Member[]
   invitations  Invitation[]
   sentInvitations SentInvitation[]
+  // RBAC: roles and role-permission mappings scoped to this organization
+  roles           Role[]
+  rolePermissions RolePermission[]
 }
 
 model Member {
@@ -145,4 +148,64 @@ model SentInvitation {
   organization Organization @relation(fields: [orgId], references: [id], onDelete: Cascade)
 
   @@index([email])
+}
+
+// ============================================================
+// RBAC Models (Authorization & Role-Based Access Control)
+// ============================================================
+
+/**
+ * Permission — Global master catalog of all available permissions.
+ * Uses resource:action syntax (e.g., properties:view, tenants:create).
+ * Global because the permission catalog is shared across all organizations.
+ */
+model Permission {
+  id          String   @id @default(cuid())
+  key         String   @unique // e.g., "properties:view"
+  resource    String   // e.g., "properties"
+  action      String   // e.g., "view"
+  description String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  roles       RolePermission[]
+}
+
+/**
+ * Role — Organization-scoped role definition.
+ * Roles can be default (bootstrapped) or custom (created by Org Admins).
+ */
+model Role {
+  id          String   @id @default(cuid())
+  name        String   // e.g., "Property Manager", "Custom Viewer"
+  description String?
+  isDefault   Boolean  @default(false) // true = bootstrapped, false = custom
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  organizationId String
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+
+  permissions   RolePermission[]
+}
+
+/**
+ * RolePermission — Junction table mapping roles to permissions.
+ * Org-scoped for tenant isolation (redundant with Role.organizationId but required by schema rules).
+ */
+model RolePermission {
+  id         String   @id @default(cuid())
+  createdAt  DateTime @default(now())
+
+  roleId     String
+  role       Role     @relation(fields: [roleId], references: [id], onDelete: Cascade)
+
+  permissionId String
+  permission Permission @relation(fields: [permissionId], references: [id], onDelete: NoAction)
+
+  organizationId String
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+
+  @@unique([roleId, permissionId])
+  @@index([organizationId])
 }

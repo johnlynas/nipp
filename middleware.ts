@@ -31,8 +31,12 @@ export async function middleware(request: NextRequest) {
   // Validate session using BetterAuth's internal getSession function.
   // This properly checks the database for invalidated/revoked sessions,
   // not just cookie presence.
+  // BetterAuth prefixes cookies with __Secure- when BETTER_AUTH_URL uses https://.
+  // Check both prefixed and unprefixed variants for compatibility with HTTP and HTTPS dev modes.
   const sessionCookie =
+    request.cookies.get('__Secure-better-auth.session_token')?.value ||
     request.cookies.get('better-auth.session_token')?.value ||
+    request.cookies.get('__Secure-better-auth-session_token')?.value ||
     request.cookies.get('better-auth-session_token')?.value;
 
   if (!sessionCookie) {

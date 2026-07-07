@@ -1,6 +1,20 @@
 import type { NextConfig } from 'next';
 
 const nextConfig: NextConfig = {
+
+  // Keeps the Node.js runtime (Server Components) happy
+  serverExternalPackages: ['ioredis'],
+
+  // Fixes the Edge runtime (Middleware) build error
+  webpack(config, { nextRuntime }) {
+    if (nextRuntime === 'edge') {
+      config.externals = config.externals || [];
+      config.externals.push('ioredis');
+    }
+    return config;
+  },
+
+
   // Content Security Policy
   async headers() {
     return [
@@ -39,13 +53,9 @@ const nextConfig: NextConfig = {
     ],
   },
 
-  // Security headers (helmet-equivalent)
   async rewrites() {
     return [];
   },
-
-  // Redirect HTTP to HTTPS in production-like environments
-  // This is handled by --experimental-https flag in dev:https target
 };
 
 export default nextConfig;

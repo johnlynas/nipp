@@ -27,6 +27,12 @@ const envSchema = z.object({
   // URLs
   FRONTEND_URL: z.string().url('FRONTEND_URL must be a valid URL').default('http://localhost:3000'),
   NEXT_PUBLIC_API_URL: z.string().url('NEXT_PUBLIC_API_URL must be a valid URL').default('http://localhost:3000'),
+
+  // Redis — optional, used for permission caching
+  REDIS_URL: z.string().url('REDIS_URL must be a valid Redis connection string').optional().default('redis://localhost:6379'),
+
+  // Platform Organization — optional, generated on first seed
+  PLATFORM_ORGANIZATION_ID: z.string().cuid().optional(),
 });
 
 /**
