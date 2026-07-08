@@ -17,6 +17,7 @@
 export const PLATFORM_ORGANIZATION_ID_ENV =
   process.env.PLATFORM_ORGANIZATION_ID || null;
 
+
 /**
  * Default permissions assigned to each bootstrapped role.
  * These are the 7 default roles defined in the authorization spec.
@@ -122,7 +123,15 @@ export const DEFAULT_ROLE_PERMISSIONS: Record<string, string[]> = {
 /**
  * The 7 default role names.
  */
-export const DEFAULT_ROLE_NAMES = Object.keys(DEFAULT_ROLE_PERMISSIONS) as string[];
+export const DEFAULT_ROLE_NAMES = [
+  'Organization Admin',
+  'Property Manager',
+  'Letting Agent',
+  'Accountant',
+  'Maintenance Staff',
+  'Tenant',
+  'Contractor',
+];
 
 /**
  * Permission categories (resources) used in the catalog.

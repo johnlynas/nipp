@@ -8,7 +8,7 @@
 'use client';
 
 import { useHasPermission, useIsSuperAdmin } from '@/hooks/usePermission';
-import { RequirePermission } from '@/hooks/require-permission';
+import { RequirePermission } from '@/components/auth/require-permission';
 
 interface NavItem {
   label: string;
