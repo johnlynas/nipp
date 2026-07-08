@@ -1,145 +1,78 @@
-/**
- * Frontend authorization hooks.
- *
- * Provides React hooks to check user permissions from the BetterAuth session.
- */
-
 'use client';
 
+import { useSession } from '@/lib/auth-client';
 import { useEffect, useState } from 'react';
-import { authClient } from '@/lib/auth-client';
 
-interface SessionData {
-  user: { id: string; name: string; email: string; image?: string | null };
-  session: { token: string; expiresAt: Date };
-  permissions?: Record<string, string[]>;
-  isSuperAdmin?: boolean;
-}
-
-/**
- * Custom hook to fetch and cache the current session.
- */
-function useSessionData(): SessionData | null {
-  const [session, setSession] = useState<SessionData | null>(null);
+export function usePermission(permission: string): boolean {
+  const { data: session } = useSession();
+  const [permissions, setPermissions] = useState<string[]>([]);
+  const [isSuperAdmin, setIsSuperAdmin] = useState(false);
 
   useEffect(() => {
-    let cancelled = false;
-
-    async function load() {
-      const result = await authClient.getSession({
-        fetchOptions: {
-          onError: () => { /* silently ignore */ },
-        },
-      });
-      if (!cancelled && result.data) {
-        setSession(result.data as unknown as SessionData);
-      }
+    if (session?.user?.permissions) {
+      // Permissions already in session (from Node.js runtime)
+      setPermissions(session.user.permissions);
+      setIsSuperAdmin(session.user.isSuperAdmin || false);
+    } else if (session) {
+      // Permissions not in session (from Edge Runtime) — fetch them
+      fetch('/api/auth/permissions')
+        .then(res => res.json())
+        .then(data => {
+          setPermissions(data.permissions || []);
+          setIsSuperAdmin(data.isSuperAdmin || false);
+        })
+        .catch(() => {
+          setPermissions([]);
+          setIsSuperAdmin(false);
+        });
     }
+  }, [session]);
 
-    load();
-    return () => { cancelled = true; };
-  }, []);
-
-  return session;
+  if (isSuperAdmin) return true;
+  return permissions.includes(permission);
 }
 
-// ---------------------------------------------------------------------------
-// Permission checking hooks
-// ---------------------------------------------------------------------------
+export function useAnyPermission(permissions: string[]): boolean {
+  const { data: session } = useSession();
+  const [userPermissions, setUserPermissions] = useState<string[]>([]);
+  const [isSuperAdmin, setIsSuperAdmin] = useState(false);
 
-/**
- * Check if the current user has a specific permission in an organization.
- */
-export function useHasPermission(
-  permission: string,
-  orgId?: string
-): boolean {
-  const session = useSessionData();
+  useEffect(() => {
+    if (session?.user?.permissions) {
+      setUserPermissions(session.user.permissions);
+      setIsSuperAdmin(session.user.isSuperAdmin || false);
+    } else if (session) {
+      fetch('/api/auth/permissions')
+        .then(res => res.json())
+        .then(data => {
+          setUserPermissions(data.permissions || []);
+          setIsSuperAdmin(data.isSuperAdmin || false);
+        })
+        .catch(() => {
+          setUserPermissions([]);
+          setIsSuperAdmin(false);
+        });
+    }
+  }, [session]);
 
-  if (!session?.user) return false;
-  if (session.isSuperAdmin) return true;
-
-  if (orgId) {
-    const orgPerms = session.permissions?.[orgId];
-    return Array.isArray(orgPerms) && orgPerms.includes(permission);
-  }
-
-  const perms = session.permissions;
-  if (!perms || typeof perms !== 'object') return false;
-  return Object.values(perms).some(
-    (orgPerms) => Array.isArray(orgPerms) && orgPerms.includes(permission)
-  );
+  if (isSuperAdmin) return true;
+  return permissions.some(p => userPermissions.includes(p));
 }
 
-/**
- * Check if the current user has ANY of the specified permissions.
- */
-export function useAnyPermission(
-  permissions: string[],
-  orgId?: string
-): boolean {
-  const session = useSessionData();
-
-  if (!session?.user) return false;
-  if (session.isSuperAdmin) return true;
-
-  if (orgId) {
-    const orgPerms = session.permissions?.[orgId];
-    return Array.isArray(orgPerms) && permissions.some((p) => orgPerms.includes(p));
-  }
-
-  const perms = session.permissions;
-  if (!perms || typeof perms !== 'object') return false;
-  return Object.values(perms).some(
-    (orgPerms) => Array.isArray(orgPerms) && permissions.some((p) => orgPerms.includes(p))
-  );
-}
-
-/**
- * Check if the current user has ALL of the specified permissions.
- */
-export function useAllPermissions(
-  permissions: string[],
-  orgId?: string
-): boolean {
-  const session = useSessionData();
-
-  if (!session?.user) return false;
-  if (session.isSuperAdmin) return true;
-
-  if (orgId) {
-    const orgPerms = session.permissions?.[orgId];
-    return Array.isArray(orgPerms) && permissions.every((p) => orgPerms.includes(p));
-  }
-
-  const perms = session.permissions;
-  if (!perms || typeof perms !== 'object') return false;
-  return Object.values(perms).every(
-    (orgPerms) => Array.isArray(orgPerms) && permissions.every((p) => orgPerms.includes(p))
-  );
-}
-
-/**
- * Check if the current user is a Super Admin.
- */
 export function useIsSuperAdmin(): boolean {
-  const session = useSessionData();
-  return !!session?.isSuperAdmin;
-}
+  const { data: session } = useSession();
+  const [isSuperAdmin, setIsSuperAdmin] = useState(false);
 
-/**
- * Get the current user's session data with permissions.
- */
-export function useAuthSession() {
-  return useSessionData();
-}
+  useEffect(() => {
+    if (session?.user?.isSuperAdmin !== undefined) {
+      setIsSuperAdmin(session.user.isSuperAdmin);
+    } else if (session) {
+      fetch('/api/auth/permissions')
+        .then(res => res.json())
+        .then(data => setIsSuperAdmin(data.isSuperAdmin || false))
+        .catch(() => setIsSuperAdmin(false));
+    }
+  }, [session]);
 
-/**
- * Get the current user's role in a specific organization.
- */
-export function useOrgRole(orgId: string): string | null {
-  const session = useSessionData();
-
-  if (session?.isSuperAdmin) return 'super_admin';
-  return null;
+  return isSuperAdmin;
 }

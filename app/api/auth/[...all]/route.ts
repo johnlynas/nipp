@@ -2,26 +2,22 @@ import { auth } from '@/lib/auth';
 import { toNextJsHandler } from 'better-auth/next-js';
 import { handleCreateOrganization } from '@/lib/org-bootstrap';
 
-export async function POST(req: Request) {
-  // Intercept organization creation to bootstrap default roles (7.1-7.2)
-  const nextReq = new Request(req.url, {
-    method: 'POST',
-    headers: req.headers,
-    body: req.body,
-    duplex: 'half',
-  });
+// Force Node.js runtime (required for Prisma)
+export const runtime = 'nodejs';
 
-  const intercepted = await handleCreateOrganization(nextReq as any);
-  if (intercepted) {
-    return intercepted;
+// Create a custom handler that intercepts organization creation
+async function handler(req: Request): Promise<Response> {
+  const { pathname } = new URL(req.url);
+  
+  // Intercept organization creation to bootstrap default roles
+  if (req.method === 'POST' && pathname.includes('/api/auth/organization/create-organization')) {
+    return handleCreateOrganization(req);
   }
-
-  // Fall through to BetterAuth handler for all other endpoints
-  const { POST: authPost } = toNextJsHandler(auth);
-  return authPost(req);
+  
+  // For all other requests, use BetterAuth's default handler
+  return auth.handler(req);
 }
 
-export async function GET(req: Request) {
-  const { GET: authGet } = toNextJsHandler(auth);
-  return authGet(req);
-}
+// Export handlers
+export const { GET } = toNextJsHandler(auth);
+export { handler as POST };

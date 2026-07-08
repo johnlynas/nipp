@@ -19,11 +19,11 @@
     "db:seed": "tsx prisma/seed.ts",
     "build:cloud": "echo 'Placeholder — configure cloud build'",
     "deploy:cloud": "echo 'Placeholder — configure cloud deploy'",
-    "test": "vitest run",
-    "test:watch": "vitest",
-    "test:coverage": "vitest run --coverage",
-    "test:auth": "vitest run tests/unit/auth.test.ts",
-    "test:organization": "vitest run tests/unit/organization.test.ts"
+    "test": "vitest run tests/unit",
+    "test:integration": "vitest run tests/integration tests/isolation",
+    "test:all": "vitest run",
+    "test:watch": "vitest tests/unit",
+    "test:coverage": "vitest run tests/unit --coverage"
   },
   "dependencies": {
     "@prisma/client": "^6.5.0",

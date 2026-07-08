@@ -1,101 +1,242 @@
-/**
- * Organization creation interceptor.
- *
- * Intercepts POST /api/auth/organization/create-organization to automatically
- * bootstrap default roles for the newly created organization (7.1-7.2).
- */
-
-import { NextRequest, NextResponse } from 'next/server';
-import prisma from '@/lib/db';
-import { invalidatePermissionCache } from '@/lib/permissions/resolver';
+import { prisma } from '@/lib/db';
+import { getRedis } from '@/lib/redis';
+import { PERMISSIONS_CACHE_TTL } from '@/lib/constants';
 
 /**
- * Bootstrap the 7 default roles for a newly created organization.
+ * Bootstraps default roles and permissions for a newly created organization.
+ * Called automatically when a new organization is created via BetterAuth.
  */
-export async function bootstrapOrganizationRoles(orgId: string): Promise<void> {
+export async function bootstrapOrganizationRoles(organizationId: string, creatorUserId: string) {
   try {
-    // Fetch all permissions from the catalog
-    const allPermissions = await prisma.permission.findMany({
-      select: { id: true, key: true },
+    // Define the 7 default roles
+    const defaultRoles = [
+      'Organization Admin',
+      'Property Manager',
+      'Letting Agent',
+      'Accountant',
+      'Maintenance Staff',
+      'Tenant',
+      'Contractor',
+    ];
+
+    // Create all default roles in one batch
+    await prisma.role.createMany({
+      data: defaultRoles.map((name) => ({
+        name,
+        organizationId,
+        isDefault: true,
+      })),
     });
 
-    const permissionMap = new Map<string, string>(
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      allPermissions.map((p: any) => [p.key, p.id])
-    );
+    // Fetch the created roles
+    const roles = await prisma.role.findMany({
+      where: { organizationId, isDefault: true },
+    });
 
-    // Import default role definitions
-    const { DEFAULT_ROLE_PERMISSIONS } = await import('@/lib/constants');
+    // Fetch all permissions from the catalog
+    const permissions = await prisma.permission.findMany();
 
-    // Create the 7 default roles and map permissions (7.2)
-    for (const roleName of Object.keys(DEFAULT_ROLE_PERMISSIONS)) {
-      const rolePermissionKeys = DEFAULT_ROLE_PERMISSIONS[roleName as keyof typeof DEFAULT_ROLE_PERMISSIONS];
+    // Define permission mappings for each role
+    const rolePermissionMap: Record<string, string[]> = {
+      'Organization Admin': permissions.map((p) => p.name), // All permissions
+      'Property Manager': [
+        'properties:view',
+        'properties:create',
+        'properties:update',
+        'tenants:view',
+        'tenants:create',
+        'tenants:update',
+        'leases:view',
+        'leases:create',
+        'leases:update',
+        'maintenance:view',
+        'maintenance:create',
+        'maintenance:update',
+        'financials:view',
+        'financials:export',
+        'users:view',
+        'settings:view',
+      ],
+      'Letting Agent': [
+        'properties:view',
+        'tenants:view',
+        'tenants:create',
+        'tenants:update',
+        'leases:view',
+        'leases:create',
+        'leases:update',
+        'maintenance:view',
+        'financials:view',
+        'users:view',
+      ],
+      Accountant: [
+        'properties:view',
+        'tenants:view',
+        'leases:view',
+        'maintenance:view',
+        'financials:view',
+        'financials:create',
+        'financials:update',
+        'financials:export',
+        'users:view',
+      ],
+      'Maintenance Staff': [
+        'properties:view',
+        'tenants:view',
+        'leases:view',
+        'maintenance:view',
+        'maintenance:create',
+        'maintenance:update',
+      ],
+      Tenant: [
+        'properties:view:own',
+        'tenants:view:own',
+        'leases:view:own',
+        'maintenance:view:own',
+        'maintenance:create',
+        'financials:view:own',
+        'financials:pay',
+      ],
+      Contractor: [
+        'properties:view:assigned',
+        'maintenance:view:assigned',
+        'maintenance:update:assigned',
+        'financials:view:own',
+        'financials:invoice:create',
+      ],
+    };
 
-      await prisma.role.create({
-        data: {
-          name: roleName,
-          isDefault: true,
-          organizationId: orgId,
-          permissions: {
-            create: rolePermissionKeys
-              .map((permKey) => {
-                const permId = permissionMap.get(permKey);
-                return permId
-                  ? { permissionId: permId, organizationId: orgId }
-                  : null;
-              })
-              .filter((p): p is NonNullable<typeof p> => p !== null),
+    // Create role-permission mappings
+    const rolePermissionData = roles.flatMap((role) => {
+      const permissionNames = rolePermissionMap[role.name] || [];
+      const rolePermissions = permissions.filter((p) => permissionNames.includes(p.name));
+
+      return rolePermissions.map((permission) => ({
+        roleId: role.id,
+        permissionId: permission.id,
+      }));
+    });
+
+    if (rolePermissionData.length > 0) {
+      await prisma.rolePermission.createMany({
+        data: rolePermissionData,
+      });
+    }
+
+    // Assign creator as Organization Admin
+    const orgAdminRole = roles.find((r) => r.name === 'Organization Admin');
+    if (orgAdminRole) {
+      // Find or create member record for the creator
+      let member = await prisma.member.findFirst({
+        where: {
+          userId: creatorUserId,
+          organizationId,
+        },
+      });
+
+      if (!member) {
+        member = await prisma.member.create({
+          data: {
+            userId: creatorUserId,
+            organizationId,
           },
+        });
+      }
+
+      // Create member-role association
+      await prisma.memberRole.create({
+        data: {
+          memberId: member.id,
+          roleId: orgAdminRole.id,
+          organizationId,
         },
       });
     }
 
-    // Invalidate permission cache for all members of this org (roles just created)
-    const members = await prisma.member.findMany({
-      where: { orgId },
-      select: { userId: true },
-    });
+    // Invalidate permission cache for all members of this organization
+    await invalidateOrgPermissionCache(organizationId);
 
-    for (const member of members) {
-      await invalidatePermissionCache(member.userId, orgId);
-    }
-  } catch {
-    // Silently fail — organization creation should not be blocked by role bootstrapping
+    console.log(`[Bootstrap] Successfully created default roles for organization ${organizationId}`);
+  } catch (error) {
+    console.error(`[Bootstrap] Failed to bootstrap roles for organization ${organizationId}:`, error);
+    // Don't throw - org was created successfully, roles can be added manually if needed
   }
 }
 
 /**
- * Handle organization creation with automatic role bootstrapping.
+ * Intercepts organization creation requests to BetterAuth and bootstraps roles.
+ * This is called from the auth route handler.
  */
-export async function handleCreateOrganization(req: NextRequest): Promise<Response | null> {
-  // Only intercept POST to create-organization
-  const url = new URL(req.url);
-  if (req.method !== 'POST' || !url.pathname.includes('create-organization')) {
-    return null; // Not our endpoint — let the catch-all handler deal with it
+export async function handleCreateOrganization(req: Request) {
+  // Read body ONCE before forwarding
+  let body: any = null;
+  try {
+    body = await req.clone().json();
+  } catch {
+    // Body may be empty or non-JSON, continue without it
   }
 
-  // Forward to BetterAuth handler
-  const forwardReq = new NextRequest(req.url, {
-    method: 'POST',
+  // Forward to BetterAuth using a cloned request
+  const forwardReq = new Request(req, {
+    method: req.method,
     headers: req.headers,
-    body: req.body,
+    body: req.method !== 'GET' && req.method !== 'HEAD' ? await req.clone().arrayBuffer() : undefined,
   });
 
-  const response = await fetch(forwardReq);
+  const { auth } = await import('@/lib/auth');
+  const response = await auth.handler(forwardReq);
 
-  // If creation succeeded, bootstrap roles
-  if (response.ok) {
+  // If creation succeeded, extract org ID and bootstrap roles
+  if (response.ok && body?.name) {
     try {
-      const body = await req.json();
-      const orgId = (body as { data?: { id: string } })?.data?.id;
+      const { auth } = await import('@/lib/auth');
+      const { headers } = await import('next/headers');
 
-      if (orgId) {
-        await bootstrapOrganizationRoles(orgId);
+      const session = await auth.api.getSession({
+        headers: await headers(),
+      });
+
+      if (session?.user?.id) {
+        // Fetch the newly created org by name (BetterAuth doesn't return ID in response body easily)
+        const org = await prisma.organization.findFirst({
+          where: { name: body.name },
+          orderBy: { createdAt: 'desc' },
+        });
+
+        if (org) {
+          await bootstrapOrganizationRoles(org.id, session.user.id);
+        }
       }
-    } catch {
-      // Role bootstrapping failure should not affect organization creation
+    } catch (error) {
+      // Log but don't fail the request - org was created successfully
+      console.error('[Auth] Failed to bootstrap organization roles:', error);
     }
   }
 
   return response;
 }
+
+
+/**
+ * Invalidates the permission cache for all members of an organization.
+ */
+async function invalidateOrgPermissionCache(organizationId: string) {
+  try {
+    const members = await prisma.member.findMany({
+      where: { organizationId },
+      select: { userId: true },
+    });
+
+    const redis = getRedis();
+    if (!redis) return;
+
+    const keys = members.map((m) => `perm:${m.userId}:${organizationId}`);
+
+    if (keys.length > 0) {
+      await redis.del(...keys);
+    }
+  } catch (error) {
+    console.error('[Cache] Failed to invalidate org permission cache:', error);
+  }
+}
+

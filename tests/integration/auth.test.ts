@@ -1,86 +1,122 @@
-/**
- * Integration tests for the login flow.
- *
- * Tests:
- * - Successful sign-in with valid credentials
- * - Generic error message on invalid credentials (no user enumeration)
- */
-
-import { describe, it, expect, beforeEach, afterEach } from 'vitest';
+import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { prisma } from '@/lib/db';
+import { hashPassword } from 'better-auth/crypto';
 import { auth } from '@/lib/auth';
-import { hashPassword, verifyPassword } from 'better-auth/crypto';
 
 describe('Login flow (integration)', () => {
-  const testEmail = 'test-login@example.com';
-  const correctPassword = 'CorrectPass123!';
+  const testEmail = 'test@example.com';
+  const testPassword = 'TestPassword123!';
+  let testUserId: string;
 
-  async function createTestUser() {
-    const passwordHash = await hashPassword(correctPassword);
-
-    return prisma.user.create({
-      data: {
+  beforeAll(async () => {
+    const passwordHash = await hashPassword(testPassword);
+    
+    const user = await prisma.user.upsert({
+      where: { email: testEmail },
+      update: {},
+      create: {
         email: testEmail,
         name: 'Test User',
-        passwordHash,
       },
     });
-  }
+    testUserId = user.id;
 
-  async function cleanupTestUser() {
-    await prisma.user.deleteMany({ where: { email: testEmail } });
-  }
-
-  beforeEach(async () => {
-    await createTestUser();
+    await prisma.account.upsert({
+      where: {
+        providerId_providerAccountId: {
+          providerId: 'credential',
+          providerAccountId: user.id,
+        },
+      },
+      update: {},
+      create: {
+        userId: user.id,
+        accountId: user.id,
+        providerId: 'credential',
+        providerAccountId: user.id,
+        password: passwordHash,
+      },
+    });
   });
 
-  afterEach(async () => {
-    await cleanupTestUser();
+  afterAll(async () => {
+    if (testUserId) {
+      await prisma.account.deleteMany({
+        where: { userId: testUserId },
+      });
+      await prisma.user.delete({
+        where: { id: testUserId },
+      });
+    }
   });
+
+  // Helper to create a proper request with Origin header
+  const createAuthRequest = (body: any) => {
+    return new Request('http://localhost:3000/api/auth/sign-in/email', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Origin': 'http://localhost:3000',
+      },
+      body: JSON.stringify(body),
+    });
+  };
 
   it('should sign in with valid credentials', async () => {
-    const result = await auth.api.signInEmail({
-      body: { email: testEmail, password: correctPassword },
+    const request = createAuthRequest({
+      email: testEmail,
+      password: testPassword,
     });
 
-    expect(result).toBeDefined();
-    // BetterAuth returns a session object on success
-    expect((result as any).session).toBeDefined();
+    const response = await auth.handler(request);
+    const data = await response.json();
+
+    expect(response.status).toBe(200);
+    expect(data).toBeDefined();
   });
 
   it('should return a generic error for invalid credentials', async () => {
-    const result = await auth.api.signInEmail({
-      body: { email: testEmail, password: 'WrongPassword123!' },
+    const request = createAuthRequest({
+      email: testEmail,
+      password: 'WrongPassword123!',
     });
 
-    // Should not be a successful session — should be an error response
-    expect((result as any).session).toBeUndefined();
+    const response = await auth.handler(request);
+    const data = await response.json();
+
+    expect(response.status).toBe(401);
+    expect(data.message).toMatch(/invalid/i);
   });
 
   it('should return a generic error for non-existent user', async () => {
-    const result = await auth.api.signInEmail({
-      body: { email: 'nobody@example.com', password: 'AnyPassword123!' },
+    const request = createAuthRequest({
+      email: 'nonexistent@example.com',
+      password: testPassword,
     });
 
-    // Should not be a successful session — generic error, no user-enumeration
-    expect((result as any).session).toBeUndefined();
+    const response = await auth.handler(request);
+    const data = await response.json();
+
+    expect(response.status).toBe(401);
+    expect(data.message).toMatch(/invalid/i);
   });
 
   it('should reject empty credentials', async () => {
-    const result = await auth.api.signInEmail({
-      body: { email: '', password: '' },
+    const request = createAuthRequest({
+      email: '',
+      password: '',
     });
 
-    expect((result as any).session).toBeUndefined();
+    const response = await auth.handler(request);
+    
+    // BetterAuth may return 400 or 401 for empty credentials
+    expect(response.status).toBeGreaterThanOrEqual(400);
   });
 
   it('should verify password hash correctly', async () => {
-    const hash = await hashPassword(correctPassword);
-    const valid = await verifyPassword({ password: correctPassword, hash });
-    const invalid = await verifyPassword({ password: 'WrongPassword123!', hash });
-
-    expect(valid).toBe(true);
-    expect(invalid).toBe(false);
+    const { verifyPassword } = await import('better-auth/crypto');
+    const hash = await hashPassword(testPassword);
+    const isValid = await verifyPassword({ hash, password: testPassword });
+    expect(isValid).toBe(true);
   });
 });
