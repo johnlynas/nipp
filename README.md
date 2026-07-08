@@ -109,9 +109,11 @@ Open [http://localhost:3000](http://localhost:3000) in your browser.
 ### 6. (Optional) Run tests
 
 ```bash
-npm test              # run all unit tests
-npm run test:watch    # watch mode — re-runs on file changes
-npm run test:auth     # auth-specific tests only
+npm test                 # Fast unit tests (no running system needed)
+npm run test:watch       # watch mode — re-runs on file changes
+npm run test:integration # Integration tests (needs PostgreSQL + Redis running)
+npm run test:all         # Run all unit and integration
+npm run test:coverage    # Run unit tests with code coverage report
 ```
 
 ---
