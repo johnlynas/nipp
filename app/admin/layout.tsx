@@ -1,53 +1,74 @@
-/**
- * Admin dashboard layout — scaffolding with role-based navigation.
- *
- * All /admin/* routes are strictly gated by <RequireSuperAdmin>.
- */
-
 'use client';
 
 import { RequireSuperAdmin } from '@/components/auth/RequireSuperAdmin';
-import { useIsSuperAdmin } from '@/hooks/usePermission';
-
-interface NavItem {
-  label: string;
-  href: string;
-}
-
-const NAV_ITEMS: NavItem[] = [
-  { label: 'Organizations', href: '/admin/organizations' },
-  { label: 'Permissions', href: '/admin/permissions' },
-  { label: 'Audit Logs', href: '/admin/audit-logs' },
-];
+import { useRouter } from 'next/navigation';
+import Link from 'next/link';
+import { usePathname } from 'next/navigation';
 
 export default function AdminLayout({ children }: { children: React.ReactNode }) {
-  const isSuperAdmin = useIsSuperAdmin();
+  const router = useRouter();
+  const pathname = usePathname();
 
-  if (!isSuperAdmin) {
-    return null; // RequireSuperAdmin wrapper handles the fallback
-  }
+  const handleLogout = async () => {
+    try {
+      await fetch('/api/auth/sign-out', { method: 'POST' });
+    } catch (error) {
+      console.error('Logout failed:', error);
+    }
+    window.location.href = '/login';
+  };
+
+  const navLinks = [
+    { href: '/admin/organizations', label: 'Organizations' },
+    { href: '/admin/permissions', label: 'Permissions' },
+    { href: '/admin/audit-logs', label: 'Audit Logs' },
+  ];
 
   return (
     <RequireSuperAdmin>
-      <div className="flex min-h-screen">
-        {/* Sidebar Navigation */}
-        <aside className="w-64 border-r p-4" style={{ backgroundColor: '#1B2A4A' }}>
-          <h2 className="mb-4 text-lg font-semibold" style={{ color: '#F5A623' }}>Admin Panel</h2>
-          <nav className="space-y-1">
-            {NAV_ITEMS.map((item) => (
-              <a
-                key={item.href}
-                href={item.href}
-                className="block rounded px-3 py-2 text-sm text-slate-300 hover:bg-slate-800 hover:text-white"
+      <div className="min-h-screen bg-gray-50 flex">
+        {/* Sidebar - Property NI Navy */}
+        <aside className="w-64 bg-[#1B2A4A] text-white flex-shrink-0">
+          <div className="p-6">
+            <h2 className="text-2xl font-bold text-[#F5A623]">Admin Panel</h2>
+          </div>
+          <nav className="mt-6">
+            {navLinks.map((link) => (
+              <Link
+                key={link.href}
+                href={link.href}
+                className={`block px-6 py-3 text-sm font-medium transition-colors ${
+                  pathname === link.href
+                    ? 'bg-[#24355c] text-[#F5A623] border-r-4 border-[#F5A623]'
+                    : 'text-gray-300 hover:bg-[#24355c] hover:text-white'
+                }`}
               >
-                {item.label}
-              </a>
+                {link.label}
+              </Link>
             ))}
           </nav>
         </aside>
 
-        {/* Main Content */}
-        <main className="flex-1 p-6">{children}</main>
+        {/* Main Content Area */}
+        <div className="flex-1 flex flex-col">
+          {/* Top Header - Property NI Navy */}
+          <header className="bg-[#1B2A4A] text-white px-8 py-4 flex justify-between items-center shadow-md">
+            <h1 className="text-xl font-semibold">Property NI Admin</h1>
+            
+            {/* Logout Button - Property NI Amber */}
+            <button
+              onClick={handleLogout}
+              className="bg-[#F5A623] hover:bg-[#e0951f] text-white px-4 py-2 rounded-md font-medium transition-colors focus:outline-none focus:ring-2 focus:ring-[#F5A623] focus:ring-offset-2 focus:ring-offset-[#1B2A4A]"
+            >
+              Logout
+            </button>
+          </header>
+
+          {/* Page Content */}
+          <main className="flex-1 p-8 overflow-y-auto">
+            {children}
+          </main>
+        </div>
       </div>
     </RequireSuperAdmin>
   );

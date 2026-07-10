@@ -1,100 +1,20 @@
-/**
- * Prisma seed script.
- *
- * Creates:
- * - The Platform Organization (for Super Admins)
- * - The master permission catalog (all resource:action pairs)
- * - The initial Super Admin user assigned to the Platform Organization
- *
- * Default roles for tenant organizations are NO LONGER seeded here.
- * They are automatically created via BetterAuth's organization lifecycle hooks
- * (see lib/auth.ts plugins configuration).
- *
- * Run with: `npm run db:seed` (or `npx prisma db seed`).
- */
-
 import { PrismaClient } from '@prisma/client';
 import { hashPassword } from 'better-auth/crypto';
-import { DEFAULT_ROLE_PERMISSIONS, DEFAULT_ROLE_NAMES } from '@/lib/constants';
 
 const prisma = new PrismaClient();
 
-// ---------------------------------------------------------------------------
-// Permission catalog — all resource:action pairs used across the application
-// ---------------------------------------------------------------------------
-
 const PERMISSION_CATALOG = [
-  // Properties
-  { key: 'properties:view', resource: 'properties', action: 'view', description: 'View properties' },
-  { key: 'properties:create', resource: 'properties', action: 'create', description: 'Create properties' },
-  { key: 'properties:update', resource: 'properties', action: 'update', description: 'Update properties' },
-  { key: 'properties:delete', resource: 'properties', action: 'delete', description: 'Delete properties' },
-  { key: 'properties:manage', resource: 'properties', action: 'manage', description: 'Full property management' },
-
-  // Tenants
-  { key: 'tenants:view', resource: 'tenants', action: 'view', description: 'View tenants' },
-  { key: 'tenants:create', resource: 'tenants', action: 'create', description: 'Create tenants' },
-  { key: 'tenants:update', resource: 'tenants', action: 'update', description: 'Update tenants' },
-  { key: 'tenants:delete', resource: 'tenants', action: 'delete', description: 'Delete tenants' },
-  { key: 'tenants:manage', resource: 'tenants', action: 'manage', description: 'Full tenant management' },
-
-  // Financials
-  { key: 'financials:view', resource: 'financials', action: 'view', description: 'View financial data' },
-  { key: 'financials:create', resource: 'financials', action: 'create', description: 'Create financial records' },
-  { key: 'financials:update', resource: 'financials', action: 'update', description: 'Update financial records' },
-  { key: 'financials:delete', resource: 'financials', action: 'delete', description: 'Delete financial records' },
-  { key: 'financials:export', resource: 'financials', action: 'export', description: 'Export financial reports' },
-  { key: 'financials:report', resource: 'financials', action: 'report', description: 'Generate financial reports' },
-  { key: 'financials:manage', resource: 'financials', action: 'manage', description: 'Full financial management' },
-
-  // Maintenance
-  { key: 'maintenance:view', resource: 'maintenance', action: 'view', description: 'View maintenance requests' },
-  { key: 'maintenance:create', resource: 'maintenance', action: 'create', description: 'Create maintenance requests' },
-  { key: 'maintenance:update', resource: 'maintenance', action: 'update', description: 'Update maintenance requests' },
-  { key: 'maintenance:delete', resource: 'maintenance', action: 'delete', description: 'Delete maintenance requests' },
-  { key: 'maintenance:manage', resource: 'maintenance', action: 'manage', description: 'Full maintenance management' },
-
-  // Contractors
-  { key: 'contractors:view', resource: 'contractors', action: 'view', description: 'View contractors' },
-  { key: 'contractors:create', resource: 'contractors', action: 'create', description: 'Create contractors' },
-  { key: 'contractors:update', resource: 'contractors', action: 'update', description: 'Update contractors' },
-  { key: 'contractors:delete', resource: 'contractors', action: 'delete', description: 'Delete contractors' },
-  { key: 'contractors:manage', resource: 'contractors', action: 'manage', description: 'Full contractor management' },
-
-  // Roles (RBAC management)
-  { key: 'roles:view', resource: 'roles', action: 'view', description: 'View roles' },
-  { key: 'roles:create', resource: 'roles', action: 'create', description: 'Create roles' },
-  { key: 'roles:update', resource: 'roles', action: 'update', description: 'Update roles' },
-  { key: 'roles:delete', resource: 'roles', action: 'delete', description: 'Delete roles' },
-  { key: 'roles:manage', resource: 'roles', action: 'manage', description: 'Full role management' },
-
-  // Members
-  { key: 'members:view', resource: 'members', action: 'view', description: 'View members' },
-  { key: 'members:invite', resource: 'members', action: 'invite', description: 'Invite members' },
-  { key: 'members:update', resource: 'members', action: 'update', description: 'Update member roles' },
-  { key: 'members:delete', resource: 'members', action: 'delete', description: 'Remove members' },
-  { key: 'members:manage', resource: 'members', action: 'manage', description: 'Full member management' },
-
-  // Viewings
-  { key: 'viewings:manage', resource: 'viewings', action: 'manage', description: 'Manage viewings' },
-
-  // Applications
-  { key: 'applications:review', resource: 'applications', action: 'review', description: 'Review applications' },
-
-  // Platform Management (Super Admin only)
   { key: 'platform:manage_organizations', resource: 'platform', action: 'manage_organizations', description: 'Manage tenant organizations' },
   { key: 'platform:manage_roles', resource: 'platform', action: 'manage_roles', description: 'Manage global roles' },
   { key: 'platform:manage_permissions', resource: 'platform', action: 'manage_permissions', description: 'Manage global permission catalog' },
   { key: 'platform:view_audit_logs', resource: 'platform', action: 'view_audit_logs', description: 'View audit logs across all organizations' },
-] as const;
+];
 
 async function main() {
   const adminEmail = process.env.ADMIN_EMAIL || 'admin@nipp.gov.uk';
   const adminPassword = process.env.ADMIN_PASSWORD || 'Admin@1234';
 
-  // -----------------------------------------------------------------------
-  // Step 1: Create or retrieve the Platform Organization
-  // -----------------------------------------------------------------------
+  // Step 1: Create Platform Organization
   let platformOrg = await prisma.organization.findFirst({
     where: { name: 'Platform' },
   });
@@ -104,119 +24,96 @@ async function main() {
       data: {
         name: 'Platform',
         slug: 'platform',
-        metadata: { type: 'platform' as const },
+        status: 'ACTIVE',
+        metadata: { type: 'platform' },
       },
     });
-    console.log(`Created Platform Organization: ${platformOrg.id}`);
-
-    // Persist the ID so it can be used at runtime
-    const fs = await import('fs');
-    const path = await import('path');
-    const envPath = path.join(process.cwd(), '.env');
-    let envContent = '';
-    try {
-      envContent = fs.readFileSync(envPath, 'utf-8');
-    } catch {
-      // .env may not exist yet; that's OK — the value is in process.env if set
-    }
-
-    const marker = 'PLATFORM_ORGANIZATION_ID=';
-    const existingLine = envContent.split('\n').find((line) => line.startsWith(marker));
-    if (existingLine) {
-      envContent = envContent.replace(existingLine, `${marker}${platformOrg.id}`);
-    } else {
-      envContent += `\n${marker}${platformOrg.id}\n`;
-    }
-    fs.writeFileSync(envPath, envContent);
-    console.log(`PLATFORM_ORGANIZATION_ID=${platformOrg.id} written to .env`);
+    console.log(`✅ Created Platform Organization: ${platformOrg.id}`);
   } else {
-    console.log(`Platform Organization already exists: ${platformOrg.id}`);
+    console.log(`Platform Organization exists: ${platformOrg.id}`);
   }
 
-  // -----------------------------------------------------------------------
-  // Step 2: Bootstrap the master permission catalog (upsert each permission)
-  // -----------------------------------------------------------------------
-  let permissionsCreated = 0;
+  // Step 2: Write PLATFORM_ORG_ID to .env
+  const fs = await import('fs');
+  const path = await import('path');
+  const envPath = path.join(process.cwd(), '.env');
+  let envContent = '';
+  try {
+    envContent = fs.readFileSync(envPath, 'utf-8');
+  } catch {}
+
+  const marker = 'PLATFORM_ORG_ID=';
+  const existingLine = envContent.split('\n').find((line) => line.startsWith(marker));
+  if (existingLine) {
+    envContent = envContent.replace(existingLine, `${marker}${platformOrg.id}`);
+  } else {
+    envContent += `\n${marker}${platformOrg.id}\n`;
+  }
+  fs.writeFileSync(envPath, envContent);
+  console.log(`✅ PLATFORM_ORG_ID=${platformOrg.id} written to .env`);
+
+  // Step 3: Create permission catalog and collect IDs
+  const permissionIds: string[] = [];
   for (const perm of PERMISSION_CATALOG) {
-    const result = await prisma.permission.upsert({
+    const created = await prisma.permission.upsert({
       where: { key: perm.key },
-      update: { description: perm.description },
-      create: {
-        key: perm.key,
-        resource: perm.resource,
-        action: perm.action,
-        description: perm.description,
+      update: {},
+      create: perm,
+    });
+    permissionIds.push(created.id);
+  }
+  console.log(`✅ Permission catalog: ${PERMISSION_CATALOG.length} permissions`);
+
+    // Step 4: Create Super Admin Role and assign permissions via junction table
+  let superAdminRole = await prisma.role.findFirst({
+    where: {
+      name: 'Super Admin',
+      organizationId: platformOrg.id,
+    },
+  });
+
+  if (!superAdminRole) {
+    // 1. Create the Role first
+    superAdminRole = await prisma.role.create({
+      data: {
+        name: 'Super Admin',
+        description: 'Full platform administration access',
+        organizationId: platformOrg.id,
+        isDefault: true,
       },
     });
-    if (result.id) {
-      // First upsert creates; subsequent ones are no-ops
-    }
-  }
-  console.log(`Permission catalog ensured: ${PERMISSION_CATALOG.length} permissions`);
+    console.log(`✅ Created Super Admin role: ${superAdminRole.id}`);
 
-  // -----------------------------------------------------------------------
-  // Step 3: Create or update the Super Admin user
-  // -----------------------------------------------------------------------
+    // 2. Create the RolePermission records using relation syntax
+    for (const permId of permissionIds) {
+      await prisma.rolePermission.create({
+        data: {
+          role: { connect: { id: superAdminRole.id } },
+          permission: { connect: { id: permId } },
+        },
+      });
+    }
+    console.log(`✅ Assigned ${permissionIds.length} permissions to Super Admin role`);
+  } else {
+    console.log(`Super Admin role exists: ${superAdminRole.id}`);
+  }
+
+  // Step 5: Create or update Super Admin user
   let superAdmin = await prisma.user.findUnique({ where: { email: adminEmail } });
 
   if (superAdmin) {
-    // Update existing user
     await prisma.user.update({
       where: { id: superAdmin.id },
       data: {
         name: 'System Administrator',
         emailVerified: true,
         role: 'super_admin',
+        activeOrganizationId: platformOrg.id,
       },
     });
-
-    // Ensure credential account exists
-    const existingAccount = await prisma.account.findFirst({
-      where: { userId: superAdmin.id, providerId: 'credential' },
-    });
-
-    if (!existingAccount) {
-      const passwordHash = await hashPassword(adminPassword);
-      await prisma.account.create({
-        data: {
-          id: superAdmin.id,
-          accountId: superAdmin.id,
-          providerId: 'credential',
-          password: passwordHash,
-          userId: superAdmin.id,
-        },
-      });
-    } else {
-      // Update password hash if it doesn't match (e.g., password changed)
-      const passwordHash = await hashPassword(adminPassword);
-      if (existingAccount.password !== passwordHash) {
-        await prisma.account.update({
-          where: { id: existingAccount.id },
-          data: { password: passwordHash },
-        });
-      }
-    }
-
-    // Ensure Super Admin is a member of the Platform Organization
-    const existingMember = await prisma.member.findFirst({
-      where: { userId: superAdmin.id, orgId: platformOrg.id },
-    });
-
-    if (!existingMember) {
-      await prisma.member.create({
-        data: {
-          userId: superAdmin.id,
-          orgId: platformOrg.id,
-          role: 'super_admin',
-        },
-      });
-    }
-
-    console.log(`Super Admin user ensured: ${adminEmail}`);
+    console.log(`✅ Updated Super Admin user: ${adminEmail}`);
   } else {
-    // Create new Super Admin user and account
     const passwordHash = await hashPassword(adminPassword);
-
     superAdmin = await prisma.user.create({
       data: {
         name: 'System Administrator',
@@ -224,9 +121,19 @@ async function main() {
         passwordHash,
         emailVerified: true,
         role: 'super_admin',
+        activeOrganizationId: platformOrg.id,
       },
     });
+    console.log(`✅ Created Super Admin user: ${adminEmail}`);
+  }
 
+  // Step 6: Ensure credential account exists
+  const existingAccount = await prisma.account.findFirst({
+    where: { userId: superAdmin.id, providerId: 'credential' },
+  });
+
+  if (!existingAccount) {
+    const passwordHash = await hashPassword(adminPassword);
     await prisma.account.create({
       data: {
         id: superAdmin.id,
@@ -236,30 +143,53 @@ async function main() {
         userId: superAdmin.id,
       },
     });
+  }
 
-    await prisma.member.create({
+  // Step 7: Create Member record
+  let member = await prisma.member.findFirst({
+    where: { userId: superAdmin.id, orgId: platformOrg.id },
+  });
+
+  if (!member) {
+    member = await prisma.member.create({
       data: {
         userId: superAdmin.id,
         orgId: platformOrg.id,
-        role: 'super_admin',
+        role: 'admin',
       },
     });
-
-    console.log(`Super Admin user created: ${adminEmail}`);
+    console.log(`✅ Created Member record: ${member.id}`);
   }
 
-  // -----------------------------------------------------------------------
-  // Step 4: Verify no tenant default roles were seeded here.
-  // Default roles are created via BetterAuth onCreateOrganization hook.
-  // -----------------------------------------------------------------------
-  console.log('Tenant default roles are NOT seeded here — handled by lifecycle hooks.');
 
-  console.log('\n✅ Seed completed successfully.');
+     // Step 8: Assign Super Admin role to member via MemberRole
+  const existingMemberRole = await prisma.memberRole.findFirst({
+    where: { memberId: member.id, roleId: superAdminRole.id },
+  });
+
+  if (!existingMemberRole) {
+    await prisma.memberRole.create({
+      data: {
+        member: { connect: { id: member.id } },
+        role: { connect: { id: superAdminRole.id } },
+        organization: { connect: { id: platformOrg.id } },
+      },
+    });
+    console.log(`✅ Assigned Super Admin role to member`);
+  }
+
+  
+  console.log('\n✅ Seed completed successfully!');
+  console.log(`\n📝 Next steps:`);
+  console.log(`1. Restart your dev server: npm run dev`);
+  console.log(`2. Log out completely`);
+  console.log(`3. Log back in as ${adminEmail}`);
+  console.log(`4. You should now see the Super Admin dashboard!`);
 }
 
 main()
   .catch((e) => {
-    console.error('Seed failed:', e);
+    console.error('❌ Seed failed:', e);
     process.exit(1);
   })
   .finally(async () => {

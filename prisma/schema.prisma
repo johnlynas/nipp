@@ -62,6 +62,7 @@ model User {
   banExpires    DateTime?
   createdAt     DateTime  @default(now())
   updatedAt     DateTime  @updatedAt
+  activeOrganizationId  String?   @map("activeOrganizationId")
 
   sessions Session[]
   accounts Account[]
