@@ -76,3 +76,38 @@ export function useIsSuperAdmin(): boolean {
 
   return isSuperAdmin;
 }
+
+/**
+ * Alias for usePermission — checks if user has a specific permission.
+ */
+export function useHasPermission(permission: string): boolean {
+  return usePermission(permission);
+}
+
+/**
+ * Checks if user has ALL of the given permissions.
+ */
+export function useAllPermissions(permissions: string[]): boolean {
+  const { data: session } = useSession();
+  const [hasAll, setHasAll] = useState(false);
+
+  useEffect(() => {
+    if (session?.user?.isSuperAdmin) {
+      setHasAll(true);
+      return;
+    }
+
+    if (session?.user?.permissions) {
+      setHasAll(permissions.every((p) => session.user.permissions.includes(p)));
+    } else if (session) {
+      fetch('/api/auth/permissions')
+        .then(res => res.json())
+        .then(data => {
+          setHasAll(permissions.every((p) => (data.permissions || []).includes(p)));
+        })
+        .catch(() => setHasAll(false));
+    }
+  }, [session, permissions]);
+
+  return hasAll;
+}

@@ -15,6 +15,7 @@
 //
 // Exempt models (global, not org-scoped):
 //   User, Session, Account, Organization, Member, Invitation, SentInvitation, Permission
+//   AuditLog (global audit trail), NotificationLog (notification tracking)
 // ============================================================
 
 generator client {
@@ -24,6 +25,24 @@ generator client {
 datasource db {
   provider = "postgresql"
   url      = env("DATABASE_URL")
+}
+
+// ============================================================
+// Enums
+// ============================================================
+
+/** Organization lifecycle states */
+enum OrgStatus {
+  PENDING
+  ACTIVE
+  SUSPENDED
+  ARCHIVED
+}
+
+/** Notification delivery status */
+enum NotificationStatus {
+  SENT
+  FAILED
 }
 
 // ============================================================
@@ -95,16 +114,20 @@ model Organization {
   id          String   @id @default(cuid())
   slug        String?  @unique
   name        String
+  status      OrgStatus @default(PENDING)
   metadata    Json?
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
 
-  members      Member[]
-  invitations  Invitation[]
-  sentInvitations SentInvitation[]
+  members            Member[]
+  invitations        Invitation[]
+  sentInvitations    SentInvitation[]
+  memberRoles        MemberRole[]
+  auditLogs          AuditLog[]
+  notificationLogs   NotificationLog[]
   // RBAC: roles and role-permission mappings scoped to this organization
-  roles           Role[]
-  rolePermissions RolePermission[]
+  roles              Role[]
+  rolePermissions    RolePermission[]
 }
 
 model Member {
@@ -117,6 +140,7 @@ model Member {
   user       User     @relation(fields: [userId], references: [id], onDelete: Cascade)
   orgId      String
   organization Organization @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  memberRoles MemberRole[]
 
   @@unique([userId, orgId])
 }
@@ -186,7 +210,8 @@ model Role {
   organizationId String
   organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
 
-  permissions   RolePermission[]
+  permissions        RolePermission[]
+  memberRoles        MemberRole[]
 }
 
 /**
@@ -208,4 +233,71 @@ model RolePermission {
 
   @@unique([roleId, permissionId])
   @@index([organizationId])
+}
+
+/**
+ * MemberRole — Junction table linking members to their assigned roles.
+ * Fixes pre-existing bug: this table was referenced in code (org-bootstrap.ts)
+ * but missing from the schema. Org-scoped for tenant isolation.
+ */
+model MemberRole {
+  id         String   @id @default(cuid())
+  createdAt  DateTime @default(now())
+
+  memberId   String
+  member     Member   @relation(fields: [memberId], references: [id], onDelete: Cascade)
+
+  roleId     String
+  role       Role     @relation(fields: [roleId], references: [id], onDelete: Cascade)
+
+  organizationId String
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+
+  @@unique([memberId, roleId])
+  @@index([organizationId])
+}
+
+
+/**
+ * AuditLog — Records security-relevant admin actions for all organizations.
+ * Global model (not org-scoped) so Super Admins can query across tenants.
+ */
+model AuditLog {
+  id             String       @id @default(cuid())
+  timestamp      DateTime     @default(now())
+  userId         String?
+  userName       String?
+  action         String       // e.g., "organization.created", "role.deleted"
+  resourceType   String       // e.g., "Organization", "Role", "Permission"
+  resourceId     String?
+  organizationId String?
+  ipAddress      String?
+  userAgent      String?
+  success        Boolean      @default(true)
+  metadata       Json?
+
+  organization   Organization? @relation(fields: [organizationId], references: [id], onDelete: SetNull)
+
+  @@index([userId])
+  @@index([organizationId])
+  @@index([timestamp])
+  @@index([resourceType])
+}
+
+/**
+ * NotificationLog — Tracks email notifications sent by the notification system.
+ */
+model NotificationLog {
+  id               String         @id @default(cuid())
+  timestamp        DateTime       @default(now())
+  recipientEmail   String
+  eventType        String
+  message          String?
+  status           NotificationStatus @default(SENT)
+  organizationId   String?
+
+  organization     Organization? @relation(fields: [organizationId], references: [id], onDelete: SetNull)
+
+  @@index([organizationId])
+  @@index([timestamp])
 }

@@ -15,6 +15,9 @@ const EXEMPT_MODELS = new Set([
   'SentInvitation',
   // RBAC: Permission is global (catalog shared across orgs).
   'Permission',
+  // Audit and notification logs are global (Super Admin cross-org access).
+  'AuditLog',
+  'NotificationLog',
 ]);
 
 /**

@@ -2,6 +2,41 @@
 
 A full-stack property management portal for Northern Ireland, built with Next.js 15, BetterAuth, Prisma, and PostgreSQL.
 
+## Super Admin Dashboard
+
+The application includes a Super Admin dashboard for managing tenant organizations, roles, permissions, and audit logs.
+
+### Admin Routes
+
+| Route | Description | Access |
+|-------|-------------|--------|
+| `/admin/organizations` | List all organizations with search, filter, pagination | Super Admin only |
+| `/admin/organizations/create` | Create a new organization | Super Admin only |
+| `/admin/organizations/[id]` | Organization detail (Overview, Members, Roles, Audit tabs) | Super Admin only |
+| `/admin/permissions` | Global permission catalog CRUD | Super Admin only |
+| `/admin/audit-logs` | Audit log viewer with filters | Super Admin only |
+
+### Platform Permissions
+
+The following platform-level permissions are available (Super Admin only):
+
+| Permission Key | Description |
+|---------------|-------------|
+| `platform:manage_organizations` | Manage tenant organizations |
+| `platform:manage_roles` | Manage global roles |
+| `platform:manage_permissions` | Manage global permission catalog |
+| `platform:view_audit_logs` | View audit logs across all organizations |
+
+### Organization Lifecycle States
+
+Organizations follow a strict state machine: `PENDING` → `ACTIVE` ↔ `SUSPENDED` → `ARCHIVED` (terminal).
+
+### Tenant Isolation & Super Admin Access
+
+- Regular tenant users are scoped to their organization via Prisma Extension + PostgreSQL RLS.
+- Super Admins (Platform Organization members) use `lib/global-db.ts` — an explicitly unscoped Prisma client — to query across all organizations.
+- All `/admin/*` routes are wrapped with `<RequireSuperAdmin>` and guarded by `requireSuperAdmin()` API middleware.
+
 ## Tech Stack
 
 | Layer | Technology | Version |

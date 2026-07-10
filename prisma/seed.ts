@@ -80,6 +80,12 @@ const PERMISSION_CATALOG = [
 
   // Applications
   { key: 'applications:review', resource: 'applications', action: 'review', description: 'Review applications' },
+
+  // Platform Management (Super Admin only)
+  { key: 'platform:manage_organizations', resource: 'platform', action: 'manage_organizations', description: 'Manage tenant organizations' },
+  { key: 'platform:manage_roles', resource: 'platform', action: 'manage_roles', description: 'Manage global roles' },
+  { key: 'platform:manage_permissions', resource: 'platform', action: 'manage_permissions', description: 'Manage global permission catalog' },
+  { key: 'platform:view_audit_logs', resource: 'platform', action: 'view_audit_logs', description: 'View audit logs across all organizations' },
 ] as const;
 
 async function main() {

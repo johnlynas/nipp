@@ -3,8 +3,34 @@
  */
 
 import { createAuthClient } from 'better-auth/client';
+import { useSyncExternalStore } from 'react';
 
 export const authClient = createAuthClient();
+
+/**
+ * Stable empty session object used as the server snapshot for useSyncExternalStore.
+ * Must be a module-level constant so Object.is comparison never sees a "change".
+ */
+const EMPTY_SERVER_SNAPSHOT = { data: null, error: null, isPending: true };
+
+/**
+ * React hook to get the current session.
+ * Subscribes to BetterAuth's $session nanostore atom via useSyncExternalStore.
+ */
+export function useSession() {
+  const sessionAtom = authClient.useSession;
+
+  const atomValue = useSyncExternalStore(
+    (callback) => sessionAtom.subscribe(callback),
+    () => sessionAtom.get(),
+    () => EMPTY_SERVER_SNAPSHOT // stable server snapshot (module-level constant)
+  );
+
+  return {
+    data: atomValue?.data ?? null,
+    loading: !!atomValue?.isPending,
+  };
+}
 
 /**
  * Sign in with email/password. Returns { success: true } on success,

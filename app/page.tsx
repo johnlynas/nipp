@@ -1,8 +1,24 @@
 'use client';
 
+import { useEffect } from 'react';
+import { useRouter } from 'next/navigation';
 import { signOutUser } from '@/lib/auth-client';
+import { useIsSuperAdmin } from '@/hooks/usePermission';
 
 export default function Home() {
+  const router = useRouter();
+  const isSuperAdmin = useIsSuperAdmin();
+
+  useEffect(() => {
+    if (isSuperAdmin) {
+      router.replace('/admin/organizations');
+    }
+  }, [isSuperAdmin, router]);
+
+  if (isSuperAdmin) {
+    return null; // Redirecting to /admin/organizations
+  }
+
   return (
     <main className="min-h-screen bg-[#f8f9fa] p-8">
       <div className="max-w-2xl mx-auto">

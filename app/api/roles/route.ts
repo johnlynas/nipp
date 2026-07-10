@@ -8,6 +8,9 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { auth } from '@/lib/auth';
 import prisma from '@/lib/db';
+import { recordAuditLog } from '@/lib/audit-log';
+
+export const runtime = 'nodejs';
 
 export async function POST(req: NextRequest) {
   const session = await auth.api.getSession({ headers: req.headers });
@@ -78,6 +81,20 @@ export async function POST(req: NextRequest) {
       isDefault: false,
       organizationId,
     },
+  });
+
+  // Audit log the role creation
+  await recordAuditLog({
+    userId: session.user.id,
+    userName: session.user.name,
+    action: 'role.created',
+    resourceType: 'Role',
+    resourceId: role.id,
+    organizationId,
+    ipAddress: req.headers.get('x-forwarded-for') || 'unknown',
+    userAgent: req.headers.get('user-agent') || 'unknown',
+    success: true,
+    metadata: { name },
   });
 
   return NextResponse.json({ role }, { status: 201 });
