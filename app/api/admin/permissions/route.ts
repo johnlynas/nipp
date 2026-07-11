@@ -11,84 +11,98 @@ import { NextRequest, NextResponse } from 'next/server';
 import globalDb from '@/lib/global-db';
 import { requireSuperAdmin, getRequestMetadata } from '@/lib/require-super-admin';
 import { recordAuditLog } from '@/lib/audit-log';
+import { auth } from '@/lib/auth';
+import { prisma } from '@/lib/db';
+import { setRLSContext } from '@/lib/rls';
 
 export const runtime = 'nodejs';
 
-/**
- * GET — List all permissions in the global catalog.
- */
 export async function GET(request: NextRequest) {
-  const authError = await requireSuperAdmin(request.headers);
-  if (authError) return authError;
+  try {
+    const session = await auth.api.getSession({
+      headers: request.headers,
+    });
 
-  const permissions = await globalDb.permission.findMany({
-    orderBy: { resource: 'asc' },
-  });
+    if (!session) {
+      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+    }
 
-  return NextResponse.json({ permissions });
+    // ✅ CRITICAL: Set RLS Context before ANY database queries
+    const orgId = session.session.activeOrganizationId || process.env.PLATFORM_ORG_ID!;
+    await setRLSContext(session.user.id, orgId);
+
+    // Get query parameters for filtering
+    const searchParams = request.nextUrl.searchParams;
+    const resource = searchParams.get('resource');
+    const search = searchParams.get('search') || '';
+
+    // Build where clause
+    const where: any = {};
+    
+    if (resource) {
+      where.resource = resource;
+    }
+    
+    if (search) {
+      where.OR = [
+        { key: { contains: search, mode: 'insensitive' } },
+        { description: { contains: search, mode: 'insensitive' } },
+      ];
+    }
+
+    // ✅ Fetch permissions - RLS policy 'permission_read_all' allows this
+    const permissions = await prisma.permission.findMany({
+      where,
+      orderBy: [
+        { resource: 'asc' },
+        { action: 'asc' },
+      ],
+    });
+
+    return NextResponse.json({ permissions });
+  } catch (error) {
+    console.error('[Permissions API] Error:', error);
+    return NextResponse.json({ error: 'Internal Server Error' }, { status: 500 });
+  }
 }
 
-/**
- * POST — Create a new permission in the global catalog.
- */
 export async function POST(request: NextRequest) {
-  const authError = await requireSuperAdmin(request.headers);
-  if (authError) return authError;
+  try {
+    const session = await auth.api.getSession({
+      headers: request.headers,
+    });
 
-  const body = await request.json();
-  const { key, resource, action, description } = body as {
-    key: string;
-    resource: string;
-    action: string;
-    description?: string;
-  };
+    if (!session) {
+      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+    }
 
-  if (!key || !resource || !action) {
-    return NextResponse.json(
-      { error: 'key, resource, and action are required' },
-      { status: 400 }
-    );
+    // ✅ Set RLS Context
+    const orgId = session.session.activeOrganizationId || process.env.PLATFORM_ORG_ID!;
+    await setRLSContext(session.user.id, orgId);
+
+    const body = await request.json();
+    const { key, resource, action, description } = body;
+
+    if (!key || !resource || !action) {
+      return NextResponse.json({ 
+        error: 'Key, resource, and action are required' 
+      }, { status: 400 });
+    }
+
+    const permission = await prisma.permission.create({
+      data: {
+        key,
+        resource,
+        action,
+        description,
+      },
+    });
+
+    return NextResponse.json({ permission }, { status: 201 });
+  } catch (error) {
+    console.error('[Permissions API] Error:', error);
+    return NextResponse.json({ error: 'Internal Server Error' }, { status: 500 });
   }
-
-  // Validate resource:action format
-  if (!key.includes(':')) {
-    return NextResponse.json(
-      { error: 'Permission key must follow resource:action format' },
-      { status: 400 }
-    );
-  }
-
-  // Check for duplicate key
-  const existing = await globalDb.permission.findUnique({ where: { key } });
-  if (existing) {
-    return NextResponse.json(
-      { error: `Permission with key "${key}" already exists` },
-      { status: 409 }
-    );
-  }
-
-  const session = await (await import('@/lib/auth')).auth.api.getSession({
-    headers: request.headers,
-  });
-
-  const permission = await globalDb.permission.create({
-    data: { key, resource, action, description },
-  });
-
-  await recordAuditLog({
-    userId: session?.user?.id,
-    userName: session?.user?.name,
-    action: 'permission.created',
-    resourceType: 'Permission',
-    resourceId: permission.id,
-    organizationId: null,
-    ipAddress: request.headers.get('x-forwarded-for') || 'unknown',
-    userAgent: request.headers.get('user-agent') || 'unknown',
-    success: true,
-    metadata: { key },
-  });
-
-  return NextResponse.json({ permission }, { status: 201 });
 }
 
 /**

@@ -37,7 +37,7 @@ export default function AuditLogsPage() {
       const res = await fetch(`/api/admin/audit-logs?${params}`);
       if (res.ok) {
         const data = await res.json();
-        setEntries(data.entries || []);
+        setEntries(data.auditLogs || []);
       }
     } catch (error) {
       console.error('Failed to fetch audit logs:', error);

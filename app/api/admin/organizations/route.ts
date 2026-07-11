@@ -10,6 +10,8 @@ import { auth } from '@/lib/auth';
 import globalDb from '@/lib/global-db';
 import { requireSuperAdmin, getRequestMetadata } from '@/lib/require-super-admin';
 import { recordAuditLog } from '@/lib/audit-log';
+import { prisma } from '@/lib/db';
+import { setRLSContext } from '@/lib/rls'; // <-- Import the helper
 
 export const runtime = 'nodejs';
 
@@ -58,58 +60,31 @@ async function generateUniqueSlug(name: string): Promise<string> {
  * GET — List all organizations with pagination, search, and status filter.
  */
 export async function GET(request: NextRequest) {
-  const authError = await requireSuperAdmin(request.headers);
-  if (authError) return authError;
+  try {
+    const session = await auth.api.getSession({
+      headers: request.headers,
+    });
 
-  const { searchParams } = new URL(request.url);
-  const page = parseInt(searchParams.get('page') || '1', 10);
-  const pageSize = Math.min(parseInt(searchParams.get('pageSize') || '20', 10), 100);
-  const search = searchParams.get('search') || '';
-  const status = searchParams.get('status') || '';
+    if (!session) {
+      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+    }
 
-  const skip = (page - 1) * pageSize;
+    // 1. CRITICAL: Set RLS Context before ANY database queries
+    // For Super Admins, we use the Platform Org ID as the context
+    const orgId = session.session.activeOrganizationId || process.env.PLATFORM_ORG_ID!;
+    await setRLSContext(session.user.id, orgId);
 
-  const where: Record<string, unknown> = {};
-  if (search) {
-    where.OR = [
-      { name: { contains: search, mode: 'insensitive' } },
-      { slug: { contains: search, mode: 'insensitive' } },
-    ];
-  }
-  if (status) {
-    where.status = status;
-  }
-
-  const [organizations, total] = await Promise.all([
-    globalDb.organization.findMany({
-      where,
-      skip,
-      take: pageSize,
+    // 2. NOW it is safe to query the database. RLS will allow the Super Admin bypass.
+    const organizations = await prisma.organization.findMany({
       orderBy: { createdAt: 'desc' },
-      select: {
-        id: true,
-        name: true,
-        slug: true,
-        status: true,
-        createdAt: true,
-        members: { select: { id: true } },
-      },
-    }),
-    globalDb.organization.count({ where }),
-  ]);
+      // Add your pagination/search logic here
+    });
 
-  return NextResponse.json({
-    organizations: organizations.map((org) => ({
-      ...org,
-      memberCount: org.members.length,
-    })),
-    pagination: {
-      page,
-      pageSize,
-      total,
-      totalPages: Math.ceil(total / pageSize),
-    },
-  });
+    return NextResponse.json({ organizations });
+  } catch (error) {
+    console.error('[Organizations API] Error:', error);
+    return NextResponse.json({ error: 'Internal Server Error' }, { status: 500 });
+  }
 }
 
 /**
