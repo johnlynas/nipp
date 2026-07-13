@@ -4,6 +4,7 @@ import { RequireSuperAdmin } from '@/components/auth/RequireSuperAdmin';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
+import { authClient } from '@/lib/auth-client';
 
 export default function AdminLayout({ children }: { children: React.ReactNode }) {
   const router = useRouter();
@@ -11,10 +12,20 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
 
   const handleLogout = async () => {
     try {
-      await fetch('/api/auth/sign-out', { method: 'POST' });
+      // 1. Officially revoke session and clear cookie via BetterAuth client
+      await authClient.signOut();
     } catch (error) {
       console.error('Logout failed:', error);
     }
+    
+    // 2. Manual fallback: Explicitly clear the cookies in the browser 
+    // in case the server response was somehow blocked
+    document.cookie = 'better-auth.session_token=; Path=/; Expires=Thu, 01 Jan 1970 00:00:01 GMT;';
+    document.cookie = '__Secure-better-auth.session_token=; Path=/; Expires=Thu, 01 Jan 1970 00:00:01 GMT;';
+    document.cookie = 'better-auth-session_token=; Path=/; Expires=Thu, 01 Jan 1970 00:00:01 GMT;';
+    document.cookie = '__Secure-better-auth-session_token=; Path=/; Expires=Thu, 01 Jan 1970 00:00:01 GMT;';
+
+    // 3. Hard redirect to bust all React/SWR/Next.js caches
     window.location.href = '/login';
   };
 

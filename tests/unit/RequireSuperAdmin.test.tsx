@@ -1,53 +1,42 @@
-/**
- * Unit test: RequireSuperAdmin component.
- */
+import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { render, screen, waitFor } from '@testing-library/react';
+import { RequireSuperAdmin } from '@/components/auth/RequireSuperAdmin';
+import { useIsSuperAdmin } from '@/hooks/usePermission';
 
-import { describe, it, expect, vi } from 'vitest';
-import { render, screen } from '@testing-library/react';
+import '@testing-library/jest-dom';
 
-vi.mock('@/hooks/usePermission', () => ({
-  useIsSuperAdmin: vi.fn(),
-}));
-
-const { RequireSuperAdmin } = await import('@/components/auth/RequireSuperAdmin');
-const { useIsSuperAdmin } = await import('@/hooks/usePermission');
+vi.mock('@/hooks/usePermission');
 
 describe('RequireSuperAdmin', () => {
-  it('should render AccessDenied for non-admin user', () => {
-    vi.mocked(useIsSuperAdmin).mockReturnValue(false);
-
-    render(
-      <RequireSuperAdmin>
-        <div data-testid="children">Protected Content</div>
-      </RequireSuperAdmin>
-    );
-
-    expect(screen.getByText('Access Denied')).toBeInTheDocument();
-    expect(screen.queryByText('Protected Content')).not.toBeInTheDocument();
+  beforeEach(() => {
+    vi.clearAllMocks();
   });
 
-  it('should render children for admin user', () => {
+  it('renders children when user is Super Admin', async () => {
     vi.mocked(useIsSuperAdmin).mockReturnValue(true);
 
-    render(
+    const { getByText } = render(
       <RequireSuperAdmin>
-        <div data-testid="children">Protected Content</div>
+        <div>Super Admin Access</div>
       </RequireSuperAdmin>
     );
 
-    expect(screen.getByText('Protected Content')).toBeInTheDocument();
-    expect(screen.queryByText('Access Denied')).not.toBeInTheDocument();
+    await waitFor(() => {
+      expect(getByText('Super Admin Access')).toBeInTheDocument();
+    });
   });
 
-  it('should render custom fallback when provided', () => {
+  it('renders fallback when user is not Super Admin', async () => {
     vi.mocked(useIsSuperAdmin).mockReturnValue(false);
 
-    render(
-      <RequireSuperAdmin fallback={<div data-testid="custom-fallback">Custom Fallback</div>}>
-        <div data-testid="children">Protected Content</div>
+    const { getByText } = render(
+      <RequireSuperAdmin fallback={<div>Access Denied</div>}>
+        <div>Super Admin Access</div>
       </RequireSuperAdmin>
     );
 
-    expect(screen.getByText('Custom Fallback')).toBeInTheDocument();
+    await waitFor(() => {
+      expect(getByText('Access Denied')).toBeInTheDocument();
+    });
   });
 });

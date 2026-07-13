@@ -34,7 +34,7 @@ export async function isSuperAdmin(
       const member = await prisma.member.findFirst({
         where: {
           userId,
-          organizationId: platformOrgId,
+          organization: { id: platformOrgId },
         },
       });
       return !!member;
@@ -64,3 +64,4 @@ export async function getPlatformOrgId(): Promise<string | null> {
     return null;
   }
 }
+

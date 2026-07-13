@@ -49,7 +49,7 @@ export async function GET(request: NextRequest) {
     ]);
 
     // Fetch user details for each audit log (since there's no direct relation)
-    const userIds = [...new Set(auditLogs.map(log => log.userId).filter(Boolean))];
+    const userIds = [...new Set(auditLogs.map(log => log.userId).filter((id): id is string => id !== null))]; // Filter out null values
     const users = await prisma.user.findMany({
       where: { id: { in: userIds } },
       select: {

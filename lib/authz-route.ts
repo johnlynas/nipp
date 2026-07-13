@@ -105,7 +105,13 @@ export function requireAnyPermission(permissions: string[]) {
       );
     }
 
-    const hasAny = await authz.hasAnyPermission(userId, orgId, permissions);
+    let hasAny = false;
+    for (const permission of permissions) {
+      if (await authz.hasPermission(userId, orgId, permission)) {
+        hasAny = true;
+        break;
+      }
+    }
 
     if (!hasAny) {
       return NextResponse.json(
@@ -150,11 +156,10 @@ export function requireNonPlatformOrgRoute() {
     }
 
     // Check if this is the Platform Organization
-    const isPlatform = await authz.isPlatformOrg(orgId);
-
-    if (isPlatform) {
+    const platformOrgId = await authz.getPlatformOrgId();
+    if (orgId === platformOrgId) {
       // Super Admins are allowed
-      const isSuper = await authz.isSuperAdmin(userId);
+      const isSuper = await authz.isSuperAdmin(userId, orgId);
 
       if (!isSuper) {
         return NextResponse.json(
@@ -167,4 +172,3 @@ export function requireNonPlatformOrgRoute() {
     return handler(req, ...args);
   };
 }
-

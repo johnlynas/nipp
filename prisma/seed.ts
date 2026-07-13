@@ -64,11 +64,11 @@ async function main() {
   }
   console.log(`✅ Permission catalog: ${PERMISSION_CATALOG.length} permissions`);
 
-    // Step 4: Create Super Admin Role and assign permissions via junction table
+  // Step 4: Create Super Admin Role and assign permissions via junction table
   let superAdminRole = await prisma.role.findFirst({
     where: {
       name: 'Super Admin',
-      organizationId: platformOrg.id,
+      organization: { id: platformOrg.id },
     },
   });
 
@@ -78,7 +78,7 @@ async function main() {
       data: {
         name: 'Super Admin',
         description: 'Full platform administration access',
-        organizationId: platformOrg.id,
+        organization: { connect: { id: platformOrg.id } },
         isDefault: true,
       },
     });
@@ -90,6 +90,7 @@ async function main() {
         data: {
           role: { connect: { id: superAdminRole.id } },
           permission: { connect: { id: permId } },
+          organization: { connect: { id: platformOrg.id  } },
         },
       });
     }
@@ -161,8 +162,7 @@ async function main() {
     console.log(`✅ Created Member record: ${member.id}`);
   }
 
-
-     // Step 8: Assign Super Admin role to member via MemberRole
+  // Step 8: Assign Super Admin role to member via MemberRole
   const existingMemberRole = await prisma.memberRole.findFirst({
     where: { memberId: member.id, roleId: superAdminRole.id },
   });
@@ -172,13 +172,12 @@ async function main() {
       data: {
         member: { connect: { id: member.id } },
         role: { connect: { id: superAdminRole.id } },
-        organization: { connect: { id: platformOrg.id } },
+        organization: { connect: { id: platformOrg.id } }, // Add the organization relation
       },
     });
     console.log(`✅ Assigned Super Admin role to member`);
   }
 
-  
   console.log('\n✅ Seed completed successfully!');
   console.log(`\n📝 Next steps:`);
   console.log(`1. Restart your dev server: npm run dev`);

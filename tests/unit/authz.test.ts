@@ -67,10 +67,10 @@ describe('authz', () => {
   describe('isSuperAdmin', () => {
     it('returns true when user is member of Platform Organization', async () => {
       // Mock getPlatformOrgId to return the platform org ID
-      vi.mocked(prisma.organization.findFirst).mockResolvedValue({ id: 'platform-org-id' });
+      vi.mocked(prisma.organization.findFirst).mockResolvedValue({ id: 'platform-org-id', name: 'Platform', slug: 'platform', status: 'ACTIVE', metadata: { type: 'platform' }, createdAt: new Date(), updatedAt: new Date() });
       
       // Mock member.findFirst to return a member (user is in the platform org)
-      vi.mocked(prisma.member.findFirst).mockResolvedValue({ id: 'member-1' });
+      vi.mocked(prisma.member.findFirst).mockResolvedValue({ id: 'member-1', createdAt: new Date(), updatedAt: new Date(), userId: 'user-1', orgId: 'platform-org-id', role: 'admin' });
       
       const result = await isSuperAdmin('user-1', 'platform-org-id');
       
@@ -78,7 +78,7 @@ describe('authz', () => {
     });
 
     it('returns false when user is in a different organization', async () => {
-      vi.mocked(prisma.organization.findFirst).mockResolvedValue({ id: 'platform-org-id' });
+      vi.mocked(prisma.organization.findFirst).mockResolvedValue({ id: 'platform-org-id', name: 'Platform', slug: 'platform', status: 'ACTIVE', metadata: { type: 'platform' }, createdAt: new Date(), updatedAt: new Date() });
       vi.mocked(prisma.member.findFirst).mockResolvedValue(null);
       
       const result = await isSuperAdmin('user-1', 'tenant-org-id');

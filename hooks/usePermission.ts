@@ -3,79 +3,73 @@
 import { useSession } from '@/lib/auth-client';
 import { useEffect, useState } from 'react';
 
-export function usePermission(permission: string): { hasPermission: boolean; isLoading: boolean } {
+export function usePermission(permission: string): boolean {
   const { data: session } = useSession();
-  const [permissions, setPermissions] = useState<string[]>([]);
-  const [isSuperAdmin, setIsSuperAdmin] = useState(false);
+  const [hasPermission, setHasPermission] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
 
   useEffect(() => {
     if (!session) {
       setIsLoading(false);
+      setHasPermission(false);
       return;
     }
 
-    if (session?.user?.permissions) {
-      setPermissions(session.user.permissions);
-      setIsSuperAdmin(session.user.isSuperAdmin || false);
+    if ((session?.user as any)?.permissions) {
+      setHasPermission((session.user as any).permissions.includes(permission));
       setIsLoading(false);
     } else {
       fetch('/api/auth/permissions')
         .then(res => res.json())
         .then(data => {
-          setPermissions(data.permissions || []);
-          setIsSuperAdmin(data.isSuperAdmin || false);
+          setHasPermission(data.permissions.includes(permission));
           setIsLoading(false);
         })
         .catch(() => {
-          setPermissions([]);
-          setIsSuperAdmin(false);
+          setHasPermission(false);
           setIsLoading(false);
         });
     }
-  }, [session]);
+  }, [session, permission]);
 
-  if (isSuperAdmin) return { hasPermission: true, isLoading };
-  return { hasPermission: permissions.includes(permission), isLoading };
+  if (isLoading) return false;
+  return hasPermission;
 }
 
-export function useAnyPermission(permissions: string[]): { hasPermission: boolean; isLoading: boolean } {
+export function useAnyPermission(permissions: string[]): boolean {
   const { data: session } = useSession();
-  const [userPermissions, setUserPermissions] = useState<string[]>([]);
-  const [isSuperAdmin, setIsSuperAdmin] = useState(false);
+  const [hasPermission, setHasPermission] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
 
   useEffect(() => {
     if (!session) {
       setIsLoading(false);
+      setHasPermission(false);
       return;
     }
 
-    if (session?.user?.permissions) {
-      setUserPermissions(session.user.permissions);
-      setIsSuperAdmin(session.user.isSuperAdmin || false);
+    if ((session?.user as any)?.permissions) {
+      setHasPermission(permissions.some(p => (session.user as any).permissions.includes(p)));
       setIsLoading(false);
     } else {
       fetch('/api/auth/permissions')
         .then(res => res.json())
         .then(data => {
-          setUserPermissions(data.permissions || []);
-          setIsSuperAdmin(data.isSuperAdmin || false);
+          setHasPermission(permissions.some(p => data.permissions.includes(p)));
           setIsLoading(false);
         })
         .catch(() => {
-          setUserPermissions([]);
-          setIsSuperAdmin(false);
+          setHasPermission(false);
           setIsLoading(false);
         });
     }
-  }, [session]);
+  }, [session, permissions]);
 
-  if (isSuperAdmin) return { hasPermission: true, isLoading };
-  return { hasPermission: permissions.some(p => userPermissions.includes(p)), isLoading };
+  if (isLoading) return false;
+  return hasPermission;
 }
 
-export function useIsSuperAdmin(): { isSuperAdmin: boolean; isLoading: boolean } {
+export function useIsSuperAdmin(): boolean {
   const { data: session } = useSession();
   const [isSuperAdmin, setIsSuperAdmin] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
@@ -83,11 +77,12 @@ export function useIsSuperAdmin(): { isSuperAdmin: boolean; isLoading: boolean }
   useEffect(() => {
     if (!session) {
       setIsLoading(false);
+      setIsSuperAdmin(false);
       return;
     }
 
-    if (session?.user?.isSuperAdmin !== undefined) {
-      setIsSuperAdmin(session.user.isSuperAdmin);
+    if ((session?.user as any)?.isSuperAdmin !== undefined) {
+      setIsSuperAdmin((session.user as any).isSuperAdmin);
       setIsLoading(false);
     } else {
       fetch('/api/auth/permissions')
@@ -103,7 +98,8 @@ export function useIsSuperAdmin(): { isSuperAdmin: boolean; isLoading: boolean }
     }
   }, [session]);
 
-  return { isSuperAdmin, isLoading };
+  if (isLoading) return false;
+  return isSuperAdmin;
 }
 
 /**
@@ -118,25 +114,33 @@ export function useHasPermission(permission: string): boolean {
  */
 export function useAllPermissions(permissions: string[]): boolean {
   const { data: session } = useSession();
-  const [hasAll, setHasAll] = useState(false);
+  const [hasPermission, setHasPermission] = useState(false);
+  const [isLoading, setIsLoading] = useState(true);
 
   useEffect(() => {
-    if (session?.user?.isSuperAdmin) {
-      setHasAll(true);
+    if ((session?.user as any)?.isSuperAdmin) {
+      setHasPermission(true);
+      setIsLoading(false);
       return;
     }
 
-    if (session?.user?.permissions) {
-      setHasAll(permissions.every((p) => session.user.permissions.includes(p)));
+    if ((session?.user as any)?.permissions) {
+      setHasPermission(permissions.every((p) => (session.user as any).permissions.includes(p)));
+      setIsLoading(false);
     } else if (session) {
       fetch('/api/auth/permissions')
         .then(res => res.json())
         .then(data => {
-          setHasAll(permissions.every((p) => (data.permissions || []).includes(p)));
+          setHasPermission(permissions.every((p) => data.permissions.includes(p)));
+          setIsLoading(false);
         })
-        .catch(() => setHasAll(false));
+        .catch(() => {
+          setHasPermission(false);
+          setIsLoading(false);
+        });
     }
   }, [session, permissions]);
 
-  return hasAll;
+  if (isLoading) return false;
+  return hasPermission;
 }

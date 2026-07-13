@@ -3,6 +3,16 @@ import { prismaAdapter } from 'better-auth/adapters/prisma';
 import { prisma } from '@/lib/db';
 import { organization } from 'better-auth/plugins';
 
+interface ExtendedUser {
+  permissions: string[];
+  isSuperAdmin: boolean;
+}
+
+interface ExtendedSession {
+  user: ExtendedUser | null;
+  activeOrganizationId: string | null;
+}
+
 export const auth = betterAuth({
   database: prismaAdapter(prisma, {
     provider: 'postgresql',
@@ -18,13 +28,17 @@ export const auth = betterAuth({
   session: {
     expiresIn: 60 * 60 * 24 * 7,
     updateAge: 60 * 60 * 24,
+    cookieCache: {
+      enabled: true,
+      maxAge: 60 * 5, // 5 minutes
+    },
   },
   
   callbacks: {
-    async session({ session, user }) {
+    async session({ session, user }: { session: ExtendedSession; user: any }): Promise<ExtendedSession> {
       // Check if we're in Edge Runtime (middleware)
       // If so, skip permission resolution to avoid Prisma errors
-      const isEdgeRuntime = typeof globalThis.EdgeRuntime !== 'undefined';
+      const isEdgeRuntime = typeof (globalThis as any).EdgeRuntime !== 'undefined';
       
       if (isEdgeRuntime) {
         // In Edge Runtime, return session without permissions
@@ -50,7 +64,7 @@ export const auth = betterAuth({
               permissions,
               isSuperAdmin,
             },
-          };
+          } as ExtendedSession;
         }
       } catch (error) {
         console.error('[Auth] Failed to resolve permissions:', error);

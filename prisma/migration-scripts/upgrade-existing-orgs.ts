@@ -36,7 +36,7 @@ async function main() {
   // Set status to ACTIVE for all organizations with PENDING or no status
   const pendingCount = await prisma.organization.updateMany({
     where: {
-      OR: [{ status: 'PENDING' }, { status: null }],
+      OR: [{ status: 'PENDING' }], // Removed { status: null }
     },
     data: { status: 'ACTIVE' },
   });

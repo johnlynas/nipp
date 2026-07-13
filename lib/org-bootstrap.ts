@@ -1,6 +1,8 @@
 import { prisma } from '@/lib/db';
 import { getRedis } from '@/lib/redis';
-import { PERMISSIONS_CACHE_TTL } from '@/lib/constants';
+
+// Add PERMISSIONS_CACHE_TTL here since it's not exported in constants.ts
+const PERMISSIONS_CACHE_TTL = 300;
 
 /**
  * Bootstraps default roles and permissions for a newly created organization.
@@ -23,7 +25,7 @@ export async function bootstrapOrganizationRoles(organizationId: string, creator
     await prisma.role.createMany({
       data: defaultRoles.map((name) => ({
         name,
-        organizationId,
+        organizationId: organizationId,
         isDefault: true,
       })),
     });
@@ -38,7 +40,7 @@ export async function bootstrapOrganizationRoles(organizationId: string, creator
 
     // Define permission mappings for each role
     const rolePermissionMap: Record<string, string[]> = {
-      'Organization Admin': permissions.map((p) => p.name), // All permissions
+      'Organization Admin': permissions.map((p) => p.key), // Change p.name to p.key
       'Property Manager': [
         'properties:view',
         'properties:create',
@@ -50,10 +52,8 @@ export async function bootstrapOrganizationRoles(organizationId: string, creator
         'leases:create',
         'leases:update',
         'maintenance:view',
-        'maintenance:create',
-        'maintenance:update',
         'financials:view',
-        'financials:export',
+        'export:financials',
         'users:view',
         'settings:view',
       ],
@@ -77,7 +77,7 @@ export async function bootstrapOrganizationRoles(organizationId: string, creator
         'financials:view',
         'financials:create',
         'financials:update',
-        'financials:export',
+        'export:financials',
         'users:view',
       ],
       'Maintenance Staff': [
@@ -102,18 +102,19 @@ export async function bootstrapOrganizationRoles(organizationId: string, creator
         'maintenance:view:assigned',
         'maintenance:update:assigned',
         'financials:view:own',
-        'financials:invoice:create',
+        'invoice:create:financials',
       ],
     };
 
     // Create role-permission mappings
     const rolePermissionData = roles.flatMap((role) => {
-      const permissionNames = rolePermissionMap[role.name] || [];
-      const rolePermissions = permissions.filter((p) => permissionNames.includes(p.name));
+      const permissionKeys = rolePermissionMap[role.name] || [];
+      const rolePermissions = permissions.filter((p) => permissionKeys.includes(p.key)); // Change p.name to p.key
 
       return rolePermissions.map((permission) => ({
         roleId: role.id,
         permissionId: permission.id,
+        organizationId: organizationId,
       }));
     });
 
@@ -130,7 +131,7 @@ export async function bootstrapOrganizationRoles(organizationId: string, creator
       let member = await prisma.member.findFirst({
         where: {
           userId: creatorUserId,
-          organizationId,
+          organization: { id: organizationId }, // Use relation syntax
         },
       });
 
@@ -138,7 +139,7 @@ export async function bootstrapOrganizationRoles(organizationId: string, creator
         member = await prisma.member.create({
           data: {
             userId: creatorUserId,
-            organizationId,
+            orgId: organizationId, // <-- Changed from organizationId to orgId
           },
         });
       }
@@ -148,7 +149,7 @@ export async function bootstrapOrganizationRoles(organizationId: string, creator
         data: {
           memberId: member.id,
           roleId: orgAdminRole.id,
-          organizationId,
+          organizationId: organizationId,
         },
       });
     }
@@ -216,14 +217,13 @@ export async function handleCreateOrganization(req: Request) {
   return response;
 }
 
-
 /**
  * Invalidates the permission cache for all members of an organization.
  */
 async function invalidateOrgPermissionCache(organizationId: string) {
   try {
     const members = await prisma.member.findMany({
-      where: { organizationId },
+      where: { organization: { id: organizationId } }, // Use relation syntax
       select: { userId: true },
     });
 
@@ -239,4 +239,3 @@ async function invalidateOrgPermissionCache(organizationId: string) {
     console.error('[Cache] Failed to invalidate org permission cache:', error);
   }
 }
-

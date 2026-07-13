@@ -34,7 +34,7 @@ type RequirePermissionProps = {
  * 
  * @example
  * // With fallback
- * <RequirePermission permission="admin:settings" fallback={<AccessDenied />}>
+ * <RequirePermission permission="admin:settings" fallback={<AccessDenied />}">
  *   <SettingsPanel />
  * </RequirePermission>
  */
@@ -58,12 +58,15 @@ export function RequirePermission({
     if (permission.length === 0) {
       hasAccess = true;
     } else if (mode === 'any') {
-      hasAccess = useAnyPermission(permission, orgId);
+      const anyPermissionResult = useAnyPermission(permission);
+      hasAccess = anyPermissionResult;
     } else {
-      hasAccess = useAllPermissions(permission, orgId);
+      const allPermissionsResult = useAllPermissions(permission);
+      hasAccess = allPermissionsResult;
     }
   } else {
-    hasAccess = useHasPermission(permission, orgId);
+    const hasPermissionResult = useHasPermission(permission);
+    hasAccess = hasPermissionResult;
   }
 
   if (!hasAccess) {

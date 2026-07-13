@@ -19,8 +19,9 @@ vi.mock('@/lib/db', () => {
   const mockPrisma = {
     member: { findFirst: vi.fn() },
     role: { findMany: vi.fn() },
+    rolePermission: { findMany: vi.fn() },
   };
-  return { default: mockPrisma };
+  return { default: mockPrisma, prisma: mockPrisma };
 });
 
 import { resolvePermissions, invalidateUserCache } from '@/lib/permissions/resolver';
@@ -43,9 +44,44 @@ describe('resolvePermissions', () => {
 
   it('fetches from DB and caches when Redis misses', async () => {
     vi.mocked(redisGet).mockResolvedValue(null);
-    vi.mocked(prisma.member.findFirst).mockResolvedValue({ role: 'Admin' });
+    vi.mocked(prisma.member.findFirst).mockResolvedValue({
+      id: 'member-1',
+      createdAt: new Date(),
+      updatedAt: new Date(),
+      userId: 'user-1',
+      orgId: 'org-1',
+      role: 'Admin',
+    });
     vi.mocked(prisma.role.findMany).mockResolvedValue([
-      { permissions: [{ permission: { key: 'properties:view' } }] },
+      {
+        id: 'role-1',
+        name: 'Admin',
+        createdAt: new Date(),
+        updatedAt: new Date(),
+        organizationId: 'org-1',
+        description: null,
+        isDefault: false,
+      },
+    ]);
+    vi.mocked(prisma.rolePermission.findMany).mockResolvedValue([
+      {
+        id: 'role-perm-1',
+        createdAt: new Date(),
+        roleId: 'role-1',
+        permissionId: 'perm-1',
+        organizationId: 'test-org-id',
+      },
+    ]);
+    vi.mocked(prisma.permission.findMany).mockResolvedValue([
+      {
+        id: 'perm-1',
+        key: 'properties:view',
+        createdAt: new Date(),
+        updatedAt: new Date(),
+        description: null,
+        action: 'view',
+        resource: 'properties',
+      },
     ]);
 
     const result = await resolvePermissions('user-1', 'org-1');

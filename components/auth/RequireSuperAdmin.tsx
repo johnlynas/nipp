@@ -10,10 +10,10 @@ interface RequireSuperAdminProps {
 }
 
 export function RequireSuperAdmin({ children, fallback }: RequireSuperAdminProps) {
-  const { isSuperAdmin, isLoading } = useIsSuperAdmin();
+  const isSuperAdmin = useIsSuperAdmin();
 
   // Show loading state while checking permissions
-  if (isLoading) {
+  if (isSuperAdmin === false) {
     return (
       <div className="min-h-screen flex items-center justify-center bg-gray-50">
         <div className="text-center">
