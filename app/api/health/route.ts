@@ -1,5 +1,5 @@
 import { prisma } from '@/lib/db';
-import { getRedis } from '@/lib/redis';
+import { getRedis, forceRedisReconnect } from '@/lib/redis';
 import { NextResponse } from 'next/server';
 
 export async function GET() {
@@ -20,20 +20,40 @@ export async function GET() {
   try {
     const redisClient = getRedis();
     if (redisClient) {
+      // Force reconnect attempt to handle stale connections
+      await forceRedisReconnect();
+
       const cacheStart = Date.now();
-      await redisClient.ping();
-      checks.cache = { status: 'healthy', latency_ms: Date.now() - cacheStart };
+      
+      // Check if client is ready before pinging
+      if (redisClient.status === 'ready' || redisClient.status === 'connect') {
+        await redisClient.ping();
+        checks.cache = { status: 'healthy', latency_ms: Date.now() - cacheStart };
+      } else {
+        checks.cache = { status: 'unhealthy', error: `Cache connection failed (status: ${redisClient.status})` };
+        if (overallStatus === 'healthy') {
+          overallStatus = 'degraded';
+        }
+      }
     } else {
       checks.cache = { status: 'skipped', message: 'Cache not configured' };
     }
   } catch (error) {
-    checks.cache = { status: 'unhealthy', error: 'Cache connection failed' };
+    const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+    checks.cache = { status: 'unhealthy', error: `Cache connection failed (${errorMessage})` };
     if (overallStatus === 'healthy') {
       overallStatus = 'degraded';
     }
   }
 
   const statusCode = overallStatus === 'unhealthy' ? 503 : 200;
+
+  // Structured logging for monitoring and admin follow-up
+  if (overallStatus === 'unhealthy') {
+    console.error(`[HEALTH_CHECK_FAILED] Status: ${overallStatus} | Checks: ${JSON.stringify(checks)}`);
+  } else if (overallStatus === 'degraded') {
+    console.warn(`[HEALTH_CHECK_DEGRADED] Status: ${overallStatus} | Checks: ${JSON.stringify(checks)}`);
+  }
 
   return NextResponse.json(
     {

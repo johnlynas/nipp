@@ -15,17 +15,55 @@ export function getRedis(): Redis | null {
     redisInstance = new Redis(process.env.REDIS_URL, {
       maxRetriesPerRequest: 3,
       retryStrategy(times) {
-        if (times > 3) return null; // Stop retrying
-        return Math.min(times * 200, 2000);
+        if (times > 5) return null; // Stop retrying after 5 attempts
+        const delay = Math.min(times * 100, 2000);
+        return delay;
       },
+      reconnectOnError(err) {
+        const targetError = 'READONLY';
+        if (err.message.includes(targetError)) {
+          return 1; // Only retry on READONLY errors
+        }
+        return false;
+      },
+      lazyConnect: true, // Don't connect immediately, wait for first command
     });
 
     redisInstance.on('error', (err) => {
       console.error('[Redis] Connection error:', err.message);
     });
+
+    redisInstance.on('connect', () => {
+      console.log('[Redis] Connected successfully');
+    });
+
+    redisInstance.on('reconnecting', (delay) => {
+      console.log(`[Redis] Reconnecting in ${delay}ms...`);
+    });
+
+    redisInstance.on('ready', () => {
+      console.log('[Redis] Ready to accept commands');
+    });
   }
 
   return redisInstance;
+}
+
+/**
+ * Force reconnects the Redis client.
+ * Useful for health checks to ensure fresh connection state.
+ */
+export async function forceRedisReconnect(): Promise<void> {
+  if (!redisInstance) return;
+
+  try {
+    // Check if client is in a bad state and force reconnect
+    if (redisInstance.status === 'close' || redisInstance.status === 'end') {
+      await redisInstance.connect();
+    }
+  } catch (error) {
+    console.error('[Redis] Force reconnect failed:', error);
+  }
 }
 
 // --- Helper Functions ---

@@ -33,6 +33,7 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
     { href: '/admin/organizations', label: 'Organizations' },
     { href: '/admin/permissions', label: 'Permissions' },
     { href: '/admin/audit-logs', label: 'Audit Logs' },
+    { href: '/admin/system-health', label: 'System Health' },
   ];
 
   return (
