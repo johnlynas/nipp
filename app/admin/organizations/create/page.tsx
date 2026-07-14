@@ -2,111 +2,115 @@
 
 import { useState } from 'react';
 import { useRouter } from 'next/navigation';
-import { RequireSuperAdmin } from '@/components/auth/RequireSuperAdmin';
 
-/**
- * Super Admin — Create new organization form.
- */
 export default function CreateOrganizationPage() {
   const router = useRouter();
-  const [name, setName] = useState('');
-  const [slug, setSlug] = useState('');
-  const [initialAdminEmail, setInitialAdminEmail] = useState('');
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState('');
+  const [formData, setFormData] = useState({
+    name: '',
+    slug: '',
+    adminEmail: '',
+  });
 
-  async function handleSubmit(e: React.FormEvent) {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    setLoading(true);
-    setError('');
-
+    
     try {
-      const res = await fetch('/api/admin/organizations', {
+      const response = await fetch('/api/admin/organizations', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ name, slug: slug || undefined, initialAdminEmail: initialAdminEmail || undefined }),
+        body: JSON.stringify(formData),
       });
-
-      if (!res.ok) {
-        const data = await res.json();
-        throw new Error(data.error || 'Failed to create organization');
+      
+      if (!response.ok) {
+        const errorData = await response.json();
+        throw new Error(errorData.message || 'Failed to create organization');
       }
-
+      
+      // Success - redirect to organizations list
       router.push('/admin/organizations');
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Unknown error');
-    } finally {
-      setLoading(false);
+      router.refresh();
+    } catch (error) {
+      console.error('Failed to create organization:', error);
+      alert(error instanceof Error ? error.message : 'Failed to create organization');
     }
-  }
+  };
 
   return (
-    <RequireSuperAdmin>
-      <div className="min-h-screen">
-        {/* Navy Header */}
-        <header className="px-6 py-4" style={{ backgroundColor: '#1B2A4A' }}>
-          <h1 className="text-xl font-semibold text-white">Property NI Admin</h1>
-        </header>
+    <div className="flex-1 p-8">
+      <div className="max-w-2xl mx-auto">
+        {/* Form Card */}
+        <div className="bg-white rounded-lg shadow-md border border-gray-200">
+          <div className="p-8">
+            <form onSubmit={handleSubmit} className="space-y-6">
+              {/* Organization Name */}
+              <div>
+                <label htmlFor="name" className="block text-sm font-semibold text-gray-900 mb-2">
+                  Organization Name
+                  <span className="text-red-500 ml-1">*</span>
+                </label>
+                <input
+                  type="text"
+                  id="name"
+                  value={formData.name}
+                  onChange={(e) => setFormData({ ...formData, name: e.target.value })}
+                  required
+                  className="w-full px-4 py-3 border border-gray-300 rounded-md text-gray-900 font-medium text-base focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                  style={{ width: '100%', minWidth: '0' }}
+                />
+              </div>
 
-        <main className="p-6">
-          <h2 className="mb-6 text-2xl font-bold" style={{ color: '#1B2A4A' }}>Create Organization</h2>
+              {/* Slug */}
+              <div>
+                <label htmlFor="slug" className="block text-sm font-semibold text-gray-900 mb-2">
+                  Slug
+                  <span className="text-gray-500 font-normal ml-2">(optional, auto-generated)</span>
+                </label>
+                <input
+                  type="text"
+                  id="slug"
+                  value={formData.slug}
+                  onChange={(e) => setFormData({ ...formData, slug: e.target.value })}
+                  className="w-full px-4 py-3 border border-gray-300 rounded-md text-gray-900 font-medium text-base focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                  style={{ width: '100%', minWidth: '0' }}
+                />
+              </div>
 
-          <form onSubmit={handleSubmit} className="max-w-md space-y-4">
-            {error && (
-              <div className="rounded bg-red-50 p-3 text-sm text-red-600" role="alert">{error}</div>
-            )}
+              {/* Initial Admin Email */}
+              <div>
+                <label htmlFor="adminEmail" className="block text-sm font-semibold text-gray-900 mb-2">
+                  Initial Admin Email
+                  <span className="text-gray-500 font-normal ml-2">(optional)</span>
+                </label>
+                <input
+                  type="email"
+                  id="adminEmail"
+                  value={formData.adminEmail}
+                  onChange={(e) => setFormData({ ...formData, adminEmail: e.target.value })}
+                  className="w-full px-4 py-3 border border-gray-300 rounded-md text-gray-900 font-medium text-base focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                  style={{ width: '100%', minWidth: '0' }}
+                />
+              </div>
 
-            <div>
-              <label htmlFor="name" className="mb-1 block text-sm font-medium">Organization Name *</label>
-              <input
-                id="name"
-                type="text"
-                required
-                value={name}
-                onChange={(e) => setName(e.target.value)}
-                className="w-full rounded border px-3 py-2"
-              />
-            </div>
-
-            <div>
-              <label htmlFor="slug" className="mb-1 block text-sm font-medium">Slug (optional, auto-generated)</label>
-              <input
-                id="slug"
-                type="text"
-                value={slug}
-                onChange={(e) => setSlug(e.target.value.toLowerCase().replace(/[^a-z0-9-]/g, '-'))}
-                className="w-full rounded border px-3 py-2"
-                placeholder="e.g., acme-properties"
-              />
-            </div>
-
-            <div>
-              <label htmlFor="email" className="mb-1 block text-sm font-medium">Initial Admin Email (optional)</label>
-              <input
-                id="email"
-                type="email"
-                value={initialAdminEmail}
-                onChange={(e) => setInitialAdminEmail(e.target.value)}
-                className="w-full rounded border px-3 py-2"
-                placeholder="admin@example.com"
-              />
-            </div>
-
-            <button
-              type="submit"
-              disabled={loading}
-              className="rounded px-4 py-2 text-sm font-medium text-white transition hover:opacity-90 disabled:opacity-50"
-              style={{ backgroundColor: '#F5A623' }}
-            >
-              {loading ? 'Creating...' : 'Create Organization'}
-            </button>
-
-            <a href="/admin/organizations" className="text-sm text-gray-500 hover:underline">
-              Cancel
-            </a>
-          </form>
-        </main>
+              {/* Action Buttons */}
+              <div className="flex gap-4 pt-6 border-t border-gray-200">
+                <button
+                  type="submit"
+                  className="flex-1 bg-[#F5A623] hover:bg-[#e0951f] text-white px-6 py-3 rounded-md font-semibold transition-colors focus:outline-none focus:ring-2 focus:ring-[#F5A623] focus:ring-offset-2"
+                >
+                  Create Organization
+                </button>
+                <button
+                  type="button"
+                  onClick={() => router.back()}
+                  className="flex-1 bg-gray-200 hover:bg-gray-300 text-gray-800 px-6 py-3 rounded-md font-semibold transition-colors focus:outline-none focus:ring-2 focus:ring-gray-400 focus:ring-offset-2"
+                >
+                  Cancel
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
       </div>
-    </RequireSuperAdmin>
+    </div>
   );
 }

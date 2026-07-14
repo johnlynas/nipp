@@ -9,8 +9,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { auth } from '@/lib/auth';
 import globalDb from '@/lib/global-db';
-import { requireSuperAdmin, getRequestMetadata } from '@/lib/require-super-admin';
-import { recordAuditLog } from '@/lib/audit-log';
+import { prisma } from '@/lib/db';
 
 export const runtime = 'nodejs';
 
@@ -25,83 +24,122 @@ const VALID_TRANSITIONS: Record<string, string[]> = {
 };
 
 /**
+ * Helper function to check if user is Super Admin
+ */
+async function checkSuperAdmin(headersList: Headers): Promise<{ session: any; isSuperAdmin: boolean }> {
+  const session = await auth.api.getSession({ headers: headersList });
+  
+  if (!session) {
+    return { session: null, isSuperAdmin: false };
+  }
+  
+  let isSuperAdmin = false;
+  
+  try {
+    const { getPlatformOrgId } = await import('@/lib/authz');
+    const platformOrgId = await getPlatformOrgId();
+    
+    const superAdminCheck = await prisma.member.findFirst({
+      where: {
+        userId: session.user.id,
+        orgId: platformOrgId,
+      },
+    });
+    
+    isSuperAdmin = !!superAdminCheck;
+  } catch (error) {
+    // Fallback to email check if DB is unavailable
+    const userEmail = (session.user as any).email;
+    const knownSuperAdminEmail = process.env.SUPER_ADMIN_EMAIL || 'admin@nipp.gov.uk';
+    isSuperAdmin = userEmail === knownSuperAdminEmail;
+  }
+  
+  return { session, isSuperAdmin };
+}
+
+/**
  * PATCH — Change organization status.
  */
 export async function PATCH(
   request: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
-  const authError = await requireSuperAdmin(request.headers);
-  if (authError) return authError;
-
-  const { id } = await params;
-  const body = await request.json();
-  const { status: newStatus } = body as { status: string };
-
-  if (!newStatus || !VALID_TRANSITIONS[newStatus]) {
-    return NextResponse.json(
-      { error: 'Invalid status value' },
-      { status: 400 }
-    );
-  }
-
-  const session = await auth.api.getSession({ headers: request.headers });
-  const { ipAddress, userAgent } = getRequestMetadata(request);
-
   try {
-    const org = await globalDb.organization.findUnique({
-      where: { id },
-      select: { status: true, name: true },
-    });
-
-    if (!org) {
-      return NextResponse.json({ error: 'Organization not found' }, { status: 404 });
+    console.log('[ORG_STATUS_API] PATCH request received');
+    
+    const { session, isSuperAdmin } = await checkSuperAdmin(request.headers);
+    
+    if (!session) {
+      console.log('[ORG_STATUS_API] No session found');
+      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
     }
+    
+    if (!isSuperAdmin) {
+      console.log('[ORG_STATUS_API] User is not Super Admin');
+      return NextResponse.json({ error: 'Super Admin access required' }, { status: 403 });
+    }
+    
+    console.log('[ORG_STATUS_API] Session found for user:', session.user.id);
 
-    // Validate transition
-    const allowed = VALID_TRANSITIONS[org.status];
-    if (!allowed.includes(newStatus)) {
+    const { id } = await params;
+    const body = await request.json();
+    const { status: newStatus } = body as { status: string };
+
+    if (!newStatus || !VALID_TRANSITIONS[newStatus]) {
       return NextResponse.json(
-        {
-          error: `Invalid transition from ${org.status} to ${newStatus}`,
-          current: org.status,
-          allowedTransitions: allowed,
-        },
+        { error: 'Invalid status value' },
         { status: 400 }
       );
     }
 
-    const updated = await globalDb.organization.update({
-      where: { id },
-      data: { status: newStatus as any },
-      select: { id: true, name: true, status: true },
-    });
+    try {
+      const org = await globalDb.organization.findUnique({
+        where: { id },
+        select: { status: true, name: true },
+      });
 
-    await recordAuditLog({
-      userId: session?.user?.id,
-      userName: session?.user?.name,
-      action: `organization.${newStatus.toLowerCase()}`,
-      resourceType: 'Organization',
-      resourceId: id,
-      organizationId: null,
-      ipAddress,
-      userAgent,
-      success: true,
-      metadata: { from: org.status, to: newStatus, name: org.name },
-    });
+      if (!org) {
+        console.log('[ORG_STATUS_API] Organization not found:', id);
+        return NextResponse.json({ error: 'Organization not found' }, { status: 404 });
+      }
 
-    // Invalidate sessions if suspending
-    if (newStatus === 'SUSPENDED') {
-      await invalidateOrgSessions(id);
+      // Validate transition
+      const allowed = VALID_TRANSITIONS[org.status];
+      if (!allowed.includes(newStatus)) {
+        return NextResponse.json(
+          {
+            error: `Invalid transition from ${org.status} to ${newStatus}`,
+            current: org.status,
+            allowedTransitions: allowed,
+          },
+          { status: 400 }
+        );
+      }
+
+      const updated = await globalDb.organization.update({
+        where: { id },
+        data: { status: newStatus as any },
+        select: { id: true, name: true, status: true },
+      });
+
+      // Invalidate sessions if suspending
+      if (newStatus === 'SUSPENDED') {
+        await invalidateOrgSessions(id);
+      }
+
+      console.log('[ORG_STATUS_API] Organization status updated:', id, 'to', newStatus);
+
+      return NextResponse.json({ organization: updated });
+    } catch (error) {
+      console.error('[ORG_STATUS_API] Failed to update status:', error);
+      return NextResponse.json(
+        { error: 'Failed to update organization status' },
+        { status: 500 }
+      );
     }
-
-    return NextResponse.json({ organization: updated });
   } catch (error) {
-    console.error('[Admin Org Status] Failed to update status:', error);
-    return NextResponse.json(
-      { error: 'Failed to update organization status' },
-      { status: 500 }
-    );
+    console.error('[ORG_STATUS_API] PATCH error:', error);
+    return NextResponse.json({ error: 'Internal server error' }, { status: 500 });
   }
 }
 
@@ -134,9 +172,9 @@ async function invalidateOrgSessions(orgId: string) {
       });
     }
 
-    console.log(`[Admin Org Status] Invalidated sessions for ${members.length} members of org ${orgId}`);
+    console.log(`[ORG_STATUS_API] Invalidated sessions for ${members.length} members of org ${orgId}`);
   } catch (error) {
-    console.error('[Admin Org Status] Failed to invalidate sessions:', error);
+    console.error('[ORG_STATUS_API] Failed to invalidate sessions:', error);
     // Don't fail the status change if session invalidation fails
   }
 }
