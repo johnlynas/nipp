@@ -5,6 +5,7 @@ const PUBLIC_PATTERNS = [
   '/login',
   '/register',
   '/api/auth',
+  '/api/health',
 ];
 
 function isPublicRoute(pathname: string): boolean {

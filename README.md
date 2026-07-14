@@ -6,6 +6,12 @@ A full-stack property management portal for Northern Ireland, built with Next.js
 
 The application includes a Super Admin dashboard for managing tenant organizations, roles, permissions, and audit logs.
 
+### API Endpoints
+
+| Route | Description | Access |
+|-------|-------------|--------|
+| `/api/health` | Health check endpoint for load balancers and monitoring services | Public (no auth required) |
+
 ### Admin Routes
 
 | Route | Description | Access |
@@ -335,6 +341,40 @@ When creating a new organization-scoped table:
    CREATE POLICY tenant_isolation ON "<table>"
      USING ("organizationId"::text = current_setting('app.current_org_id', true));
    ```
+
+## Health Check Endpoint
+
+The application includes a `/api/health` endpoint for use by load balancers, container orchestrators (Docker/Kubernetes), and uptime monitoring services.
+
+### Usage
+```bash
+curl http://localhost:3000/api/health
+```
+
+### Response Format
+```json
+{
+  "status": "healthy",
+  "timestamp": "2026-07-14T12:00:00.000Z",
+  "version": "0.1.0",
+  "uptime": 3600,
+  "checks": {
+    "database": { "status": "healthy", "latency_ms": 12 },
+    "cache": { "status": "healthy", "latency_ms": 3 }
+  }
+}
+```
+
+### Status Codes
+- **200 OK**: Application is healthy (all checks pass)
+- **200 OK with degraded status**: Non-critical check failed (e.g., Redis unavailable but database is up)
+- **503 Service Unavailable**: Critical check failed (e.g., database unreachable)
+
+### Configuration
+- The endpoint is excluded from session validation in `middleware.ts` (added to `PUBLIC_PATTERNS`)
+- Database check uses `SELECT 1` with timeout handling
+- Cache (Redis) check is non-critical and gracefully degrades if Redis is not configured
+- No sensitive information is exposed in the response (security best practice)
 
 ## Deferred Items
 

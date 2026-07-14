@@ -35,6 +35,7 @@ nipp/
 │   ├── admin/                    # Super admin dashboard & layouts
 │   ├── api/                      # API endpoints (RESTful routes)
 │   │   ├── auth/[...all]/        # BetterAuth catch-all handler
+│   │   ├── health/               # Health check endpoint for monitoring
 │   │   └── ...                   # Domain-specific API routes
 │   ├── layout.tsx                # Root layout
 │   └── ...                       # Page components & layouts
@@ -110,7 +111,7 @@ Global models (`User`, `Organization`, `Member`, `Permission`, `AuditLog`) are n
 ### Middleware Protection
 - **Edge-Safe Validation:** `middleware.ts` performs a fast check for session cookie presence. This avoids Prisma Edge Runtime crashes while ensuring unauthenticated users are redirected to `/login`.
 - **Cache Control:** Protected routes return `Cache-Control: no-store, max-age=0` headers to prevent caching of sensitive data and ensure logout is respected across tabs.
-- **Public Routes:** `/login`, `/register`, and `/api/auth` are explicitly whitelisted.
+- **Public Routes:** `/login`, `/register`, `/api/auth`, and `/api/health` are explicitly whitelisted.
 
 ## 🗄️ Database Design
 
@@ -207,6 +208,14 @@ Global models (`User`, `Organization`, `Member`, `Permission`, `AuditLog`) are n
 5. Flatten permission keys, store in Redis (TTL: 300s)
 6. Return permission list for authorization check
 
+### Health Check Flow
+1. Load balancer/monitoring service sends `GET /api/health`
+2. Middleware bypasses session validation (public route)
+3. Endpoint executes database check (`SELECT 1`) with timeout
+4. If Redis configured, endpoint executes cache check (`PING`)
+5. Returns JSON response with status, uptime, and individual check results
+6. HTTP 200 for healthy/degraded, HTTP 503 for unhealthy
+
 ## 🛠️ Development Workflow
 
 ### Local Setup
@@ -254,6 +263,33 @@ BetterAuth was selected over NextAuth or custom authentication due to:
 - **Automatic Propagation:** Context flows automatically through async call chains without manual passing.
 - **Thread Safety:** Each request maintains isolated context, preventing cross-request data leakage.
 - **Middleware Integration:** Seamlessly integrates with Next.js middleware and API routes without architectural changes.
+
+## 🏥 Health Check Architecture
+
+The `/api/health` endpoint provides standardized health monitoring for production deployments.
+
+### Design Principles
+- **No Authentication Required:** Publicly accessible for load balancers and monitoring services
+- **Generic Terminology:** Uses `cache` instead of `redis` to avoid leaking technology stack details
+- **Graceful Degradation:** Non-critical checks (Redis) don't cause unhealthy status if unavailable
+- **No Sensitive Data:** Response only includes status, latency, and uptime—no connection strings or internal details
+- **Edge-Safe:** Excluded from middleware session validation to prevent Prisma Edge Runtime crashes
+
+### Implementation Details
+- **Location:** `app/api/health/route.ts`
+- **Database Check:** Uses `prisma.$queryRaw`SELECT 1`` with timeout handling
+- **Cache Check:** Uses `redis.ping()` with 3-second timeout (gracefully skips if Redis not configured)
+- **Status Logic:**
+  - `healthy`: All checks pass
+  - `degraded`: Non-critical check failed (Redis down, database up)
+  - `unhealthy`: Critical check failed (database unreachable) → HTTP 503
+- **Response Fields:** `status`, `timestamp`, `version`, `uptime` (from `process.uptime()`), `checks`
+
+### Monitoring Integration
+- **Load Balancers:** Configure health check to call `/api/health` every 10-30 seconds
+- **Container Orchestrators:** Use as liveness probe (HTTP 200 = running, HTTP 503 = restart)
+- **Uptime Monitoring:** External services can verify application availability and dependency health
+- **Alerting:** Set up alerts for HTTP 503 responses or degraded status
 
 ## 🔮 Future Considerations
 
