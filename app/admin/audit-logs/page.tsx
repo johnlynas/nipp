@@ -49,16 +49,11 @@ export default function AuditLogsPage() {
   return (
     <RequireSuperAdmin>
       <div className="min-h-screen">
-        {/* Navy Header */}
-        <header className="px-6 py-4" style={{ backgroundColor: '#1B2A4A' }}>
-          <h1 className="text-xl font-semibold text-white">Property NI Admin</h1>
-        </header>
-
         <main className="p-6">
           {/* Page Header */}
           <div className="mb-6 flex items-center justify-between">
             <div>
-              <h2 className="text-2xl font-bold" style={{ color: '#1B2A4A' }}>Audit Logs</h2>
+              <h2 className="text-2xl font-bold" style={{ color: '#1B2A4A' }}>Security Audit Logs</h2>
               <p className="text-sm text-gray-500">Security-relevant admin actions across all organizations</p>
             </div>
           </div>

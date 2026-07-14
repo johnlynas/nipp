@@ -49,6 +49,21 @@ export default function SystemHealthCard() {
     return 'bg-gray-100 border-gray-500 text-gray-800';
   };
 
+  const formatUptime = (seconds: number): string => {
+    const days = Math.floor(seconds / 86400);
+    const hours = Math.floor((seconds % 86400) / 3600);
+    const minutes = Math.floor((seconds % 3600) / 60);
+    const secs = seconds % 60;
+
+    const parts: string[] = [];
+    if (days > 0) parts.push(`${days}d`);
+    if (hours > 0) parts.push(`${hours}h`);
+    if (minutes > 0) parts.push(`${minutes}m`);
+    if (secs > 0 || parts.length === 0) parts.push(`${secs}s`);
+
+    return parts.join(' ');
+  };
+
   if (status === 'loading') {
     return <div className="p-4 border rounded-lg bg-gray-50">Loading system health...</div>;
   }
@@ -56,8 +71,7 @@ export default function SystemHealthCard() {
   return (
     <div className={`p-6 border-l-4 rounded-lg shadow-sm ${getStatusColor()}`}>
       <div className="flex justify-between items-center mb-4">
-        <h3 className="text-lg font-bold uppercase tracking-wide">System Health</h3>
-        <span className="text-sm font-mono">Uptime: {Math.floor(health?.uptime || 0)}s</span>
+        <span className="text-sm font-mono">Uptime: {formatUptime(Math.floor(health?.uptime || 0))}</span>
       </div>
       
       <div className="grid grid-cols-2 gap-4">

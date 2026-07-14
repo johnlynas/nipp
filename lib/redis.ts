@@ -1,6 +1,7 @@
 import { Redis } from 'ioredis';
 
 let redisInstance: Redis | null = null;
+let lastKnownState: 'connected' | 'disconnected' | null = null;
 
 /**
  * Returns the Redis client instance.
@@ -13,36 +14,42 @@ export function getRedis(): Redis | null {
 
   if (!redisInstance) {
     redisInstance = new Redis(process.env.REDIS_URL, {
-      maxRetriesPerRequest: 3,
-      retryStrategy(times) {
-        if (times > 5) return null; // Stop retrying after 5 attempts
-        const delay = Math.min(times * 100, 2000);
-        return delay;
-      },
-      reconnectOnError(err) {
-        const targetError = 'READONLY';
-        if (err.message.includes(targetError)) {
-          return 1; // Only retry on READONLY errors
+      retryStrategy: (times) => {
+        if (times > 10) {
+          return null;
         }
-        return false;
+        return Math.min(times * 100, 3000);
       },
-      lazyConnect: true, // Don't connect immediately, wait for first command
+      maxRetriesPerRequest: 3,
     });
 
-    redisInstance.on('error', (err) => {
-      console.error('[Redis] Connection error:', err.message);
-    });
-
+    // Only log on state changes
     redisInstance.on('connect', () => {
-      console.log('[Redis] Connected successfully');
-    });
-
-    redisInstance.on('reconnecting', (delay) => {
-      console.log(`[Redis] Reconnecting in ${delay}ms...`);
+      if (lastKnownState !== 'connected') {
+        console.log('[Redis] Connected');
+        lastKnownState = 'connected';
+      }
     });
 
     redisInstance.on('ready', () => {
-      console.log('[Redis] Ready to accept commands');
+      if (lastKnownState !== 'connected') {
+        console.log('[Redis] Ready');
+        lastKnownState = 'connected';
+      }
+    });
+
+    redisInstance.on('error', (err) => {
+      if (lastKnownState !== 'disconnected') {
+        console.error('[Redis] Connection error:', err.message);
+        lastKnownState = 'disconnected';
+      }
+    });
+
+    redisInstance.on('end', () => {
+      if (lastKnownState !== 'disconnected') {
+        console.log('[Redis] Connection closed');
+        lastKnownState = 'disconnected';
+      }
     });
   }
 

@@ -32,8 +32,9 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
   const navLinks = [
     { href: '/admin/organizations', label: 'Organizations' },
     { href: '/admin/permissions', label: 'Permissions' },
-    { href: '/admin/audit-logs', label: 'Audit Logs' },
+    { href: '/admin/audit-logs', label: 'Security Audit Logs' },
     { href: '/admin/system-health', label: 'System Health' },
+    { href: '/admin/system-logs', label: 'System Logs' },
   ];
 
   return (
@@ -65,7 +66,7 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
         <div className="flex-1 flex flex-col">
           {/* Top Header - Property NI Navy */}
           <header className="bg-[#1B2A4A] text-white px-8 py-4 flex justify-between items-center shadow-md">
-            <h1 className="text-xl font-semibold">Property NI Admin</h1>
+            <div />
             
             {/* Logout Button - Property NI Amber */}
             <button
