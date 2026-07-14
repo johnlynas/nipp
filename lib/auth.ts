@@ -21,6 +21,7 @@ export const auth = betterAuth({
   emailAndPassword: {
     enabled: true,
     requireEmailVerification: false,
+    disableSignUp: true, // Block public registration
   },
   
   plugins: [organization()],

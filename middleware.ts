@@ -3,7 +3,6 @@ import type { NextRequest } from 'next/server';
 
 const PUBLIC_PATTERNS = [
   '/login',
-  '/register',
   '/api/auth',
   '/api/health',
 ];
