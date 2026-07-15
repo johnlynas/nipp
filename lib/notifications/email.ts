@@ -5,6 +5,7 @@
  */
 
 import { createTransport, type Transporter } from 'nodemailer';
+import { env } from '@/lib/env';
 
 /**
  * Email template with Property NI branding.
@@ -61,11 +62,11 @@ export async function sendEmail(
   subject: string,
   message: string
 ): Promise<{ success: boolean; error?: string }> {
-  const smtpHost = process.env.SMTP_HOST || 'localhost';
-  const smtpPort = parseInt(process.env.SMTP_PORT || '587', 10);
-  const smtpUser = process.env.SMTP_USER || '';
-  const smtpPass = process.env.SMTP_PASS || '';
-  const smtpFrom = process.env.SMTP_FROM || 'noreply@nipp.gov.uk';
+  const smtpHost = env.SMTP_HOST;
+  const smtpPort = env.SMTP_PORT;
+  const smtpUser = env.SMTP_USER || '';
+  const smtpPass = env.SMTP_PASS || '';
+  const smtpFrom = env.SMTP_FROM;
 
   const template = createEmailTemplate(subject, message);
 

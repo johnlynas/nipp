@@ -1,4 +1,5 @@
 import prisma from '@/lib/db';
+import { env } from '@/lib/env';
 
 /**
  * Check if a user has a specific permission in an organization.
@@ -50,8 +51,8 @@ export async function isSuperAdmin(
  * Get the Platform Organization ID from environment or database.
  */
 export async function getPlatformOrgId(): Promise<string | null> {
-  if (process.env.PLATFORM_ORG_ID) {
-    return process.env.PLATFORM_ORG_ID;
+  if (env.PLATFORM_ORGANIZATION_ID) {
+    return env.PLATFORM_ORGANIZATION_ID;
   }
   
   try {

@@ -1,11 +1,12 @@
 import { prisma } from '@/lib/db';
+import { env } from '@/lib/env';
 
 /**
  * Sets PostgreSQL session variables for Row Level Security (RLS).
  * MUST be called at the start of every API route before any Prisma query.
  */
 export async function setRLSContext(userId: string, orgId: string) {
-  const platformOrgId = process.env.PLATFORM_ORG_ID;
+  const platformOrgId = env.PLATFORM_ORGANIZATION_ID;
   
   if (!platformOrgId) {
     throw new Error('PLATFORM_ORG_ID is not set in environment variables');

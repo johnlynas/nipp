@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server';
 import { auth } from '@/lib/auth';
 import { headers } from 'next/headers';
 import { prisma } from '@/lib/db';
+import { env } from '@/lib/env';
 
 export async function GET(request: Request) {
   try {
@@ -35,7 +36,7 @@ export async function GET(request: Request) {
       isSuperAdmin = !!superAdminCheck;
     } catch (error) {
       const userEmail = (session.user as any).email;
-      const knownSuperAdminEmail = process.env.SUPER_ADMIN_EMAIL || 'admin@nipp.gov.uk';
+      const knownSuperAdminEmail = env.SUPER_ADMIN_EMAIL || 'admin@nipp.gov.uk';
       isSuperAdmin = userEmail === knownSuperAdminEmail;
     }
     
@@ -120,7 +121,7 @@ export async function POST(request: Request) {
     } catch (error) {
       console.log('[ORGANIZATIONS_API] DB check failed, falling back to email');
       const userEmail = (session.user as any).email;
-      const knownSuperAdminEmail = process.env.SUPER_ADMIN_EMAIL || 'admin@nipp.gov.uk';
+      const knownSuperAdminEmail = env.SUPER_ADMIN_EMAIL || 'admin@nipp.gov.uk';
       isSuperAdmin = userEmail === knownSuperAdminEmail;
       console.log('[ORGANIZATIONS_API] Email check result:', isSuperAdmin);
     }

@@ -20,12 +20,13 @@
  */
 
 import { PrismaClient } from '@prisma/client';
+import { env } from '@/lib/env';
 
 const globalForPrisma = globalThis as unknown as { prisma: PrismaClient };
 
 export const globalDb =
   globalForPrisma.prisma || new PrismaClient();
 
-if (process.env.NODE_ENV !== 'production') globalForPrisma.prisma = globalDb;
+if (env.NODE_ENV !== 'production') globalForPrisma.prisma = globalDb;
 
 export default globalDb;

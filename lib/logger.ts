@@ -1,4 +1,5 @@
 import pino from 'pino';
+import { env } from '@/lib/env';
 
 /**
  * Pino-based structured logging.
@@ -10,9 +11,9 @@ import pino from 'pino';
  * PII redaction rules prevent sensitive data from being logged.
  */
 
-const isProduction = process.env.NODE_ENV === 'production';
+const isProduction = env.NODE_ENV === 'production';
 
-const logLevel = process.env.LOG_LEVEL || (isProduction ? 'info' : 'debug');
+const logLevel = env.LOG_LEVEL || (isProduction ? 'info' : 'debug');
 
 // PII fields that should be redacted from log output
 const piiFields = [
@@ -31,7 +32,7 @@ const piiFields = [
 export const logger = pino({
   level: logLevel,
   transport:
-    process.env.NODE_ENV !== 'production'
+    env.NODE_ENV !== 'production'
       ? {
           target: 'pino-pretty',
           options: {

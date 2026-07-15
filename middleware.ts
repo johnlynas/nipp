@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
 import type { NextRequest } from 'next/server';
 import { generateNonce } from '@/lib/csp-nonce';
+import { env } from '@/lib/env';
 
 const PUBLIC_PATTERNS = [
   '/login',
@@ -24,7 +25,8 @@ export async function middleware(request: NextRequest) {
   request.headers.set('x-csp-nonce', nonce);
 
   // Allow 'unsafe-eval' ONLY in development for Next.js Fast Refresh (HMR)
-  const isDev = process.env.NODE_ENV === 'development';
+  // In Edge runtime, NODE_ENV might not be strictly 'development', so we check if it's NOT production
+  const isDev = env.NODE_ENV !== 'production';
   const scriptSrcDirective = isDev 
     ? `'self' 'unsafe-eval' 'nonce-${nonce}'` 
     : `'self' 'nonce-${nonce}'`;

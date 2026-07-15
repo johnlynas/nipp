@@ -33,6 +33,16 @@ const envSchema = z.object({
 
   // Platform Organization — optional, generated on first seed
   PLATFORM_ORGANIZATION_ID: z.string().cuid().optional(),
+
+  // SMTP — Email notifications for extreme events
+  SMTP_HOST: z.string().default('localhost'),
+  SMTP_PORT: z.coerce.number().default(587),
+  SMTP_USER: z.string().optional(),
+  SMTP_PASS: z.string().optional(),
+  SMTP_FROM: z.string().default('noreply@nipp.gov.uk'),
+
+  // Super Admin fallback email (used only if DB lookup fails)
+  SUPER_ADMIN_EMAIL: z.string().optional(),
 });
 
 /**

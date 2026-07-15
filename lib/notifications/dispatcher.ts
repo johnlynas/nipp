@@ -8,6 +8,7 @@ import globalDb from '@/lib/global-db';
 import { getRedis } from '@/lib/redis';
 import { sendEmail } from './email';
 import { NOTIFICATION_RATE_LIMIT, type ExtremeEventType } from './events';
+import { env } from '@/lib/env';
 
 /**
  * Rate limit key for a given event type and recipient.
@@ -85,7 +86,7 @@ export async function dispatchNotification(
  */
 export async function getSuperAdminEmails(): Promise<string[]> {
   const members = await globalDb.member.findMany({
-    where: { orgId: process.env.PLATFORM_ORG_ID || '' },
+    where: { orgId: env.PLATFORM_ORGANIZATION_ID || '' },
     select: { user: { select: { email: true } } },
   });
 

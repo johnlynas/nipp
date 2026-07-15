@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { auth } from '@/lib/auth';
 import { prisma } from '@/lib/db';
 import { setRLSContext } from '@/lib/rls';
+import { env } from '@/lib/env';
 
 export const runtime = 'nodejs';
 
@@ -16,7 +17,7 @@ export async function GET(request: NextRequest) {
     }
 
     // ✅ CRITICAL: Set RLS Context before ANY database queries
-    const orgId = session.session.activeOrganizationId || process.env.PLATFORM_ORG_ID!;
+    const orgId = session.session.activeOrganizationId || env.PLATFORM_ORGANIZATION_ID!;
     await setRLSContext(session.user.id, orgId);
 
     // Get query parameters for filtering/pagination

@@ -3,6 +3,7 @@ import { getSystemLogs } from '@/lib/system-logs';
 import { auth } from '@/lib/auth';
 import { prisma } from '@/lib/db';
 import { headers } from 'next/headers';
+import { env } from '@/lib/env';
 
 export async function GET(request: Request) {
   try {
@@ -40,7 +41,7 @@ export async function GET(request: Request) {
       // Tier 2: Fallback to session email check (works when DB is down)
       // This is safe because the email is cryptographically signed in the session cookie
       const userEmail = (session.user as any).email;
-      const knownSuperAdminEmail = process.env.SUPER_ADMIN_EMAIL || 'admin@nipp.gov.uk';
+      const knownSuperAdminEmail = env.SUPER_ADMIN_EMAIL || 'admin@nipp.gov.uk';
       
       console.log(`[SYSTEM_LOGS] DB unavailable, falling back to email check for: ${userEmail}`);
       isSuperAdmin = userEmail === knownSuperAdminEmail;

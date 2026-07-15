@@ -11,6 +11,7 @@ import { auth } from '@/lib/auth';
 import { headers } from 'next/headers';
 import globalDb from '@/lib/global-db';
 import { prisma } from '@/lib/db';
+import { env } from '@/lib/env';
 
 export const runtime = 'nodejs';
 
@@ -41,7 +42,7 @@ async function checkSuperAdmin(headersList: Headers): Promise<{ session: any; is
   } catch (error) {
     // Fallback to email check if DB is unavailable
     const userEmail = (session.user as any).email;
-    const knownSuperAdminEmail = process.env.SUPER_ADMIN_EMAIL || 'admin@nipp.gov.uk';
+    const knownSuperAdminEmail = env.SUPER_ADMIN_EMAIL || 'admin@nipp.gov.uk';
     isSuperAdmin = userEmail === knownSuperAdminEmail;
   }
   

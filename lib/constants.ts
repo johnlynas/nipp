@@ -2,6 +2,8 @@
  * Application-wide constants.
  */
 
+import { env } from '@/lib/env';
+
 /**
  * The Platform Organization ID.
  *
@@ -15,7 +17,7 @@
  * `getPlatformOrgId()` to fetch from the database.
  */
 export const PLATFORM_ORGANIZATION_ID_ENV =
-  process.env.PLATFORM_ORGANIZATION_ID || null;
+  env.PLATFORM_ORGANIZATION_ID || null;
 
 
 /**

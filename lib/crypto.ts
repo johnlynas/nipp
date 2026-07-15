@@ -1,4 +1,5 @@
 import { createCipheriv, createDecipheriv, randomBytes } from 'node:crypto';
+import { env } from '@/lib/env';
 
 /**
  * AES-256-GCM encryption/decryption utilities for PII.
@@ -15,7 +16,7 @@ const NONCE_LENGTH = 12;
  * Get the encryption key from environment variables.
  */
 function getEncryptionKey(): Buffer {
-  const key = process.env.PII_ENCRYPTION_KEY;
+  const key = env.PII_ENCRYPTION_KEY;
   if (!key || key.length === 0) {
     throw new Error(
       'PII_ENCRYPTION_KEY environment variable is not set. ' +

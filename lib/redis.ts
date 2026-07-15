@@ -1,4 +1,5 @@
 import { Redis } from 'ioredis';
+import { env } from '@/lib/env';
 
 let redisInstance: Redis | null = null;
 let lastKnownState: 'connected' | 'disconnected' | null = null;
@@ -8,12 +9,12 @@ let lastKnownState: 'connected' | 'disconnected' | null = null;
  * Returns null if REDIS_URL is not configured.
  */
 export function getRedis(): Redis | null {
-  if (!process.env.REDIS_URL) {
+  if (!env.REDIS_URL) {
     return null;
   }
 
   if (!redisInstance) {
-    redisInstance = new Redis(process.env.REDIS_URL, {
+    redisInstance = new Redis(env.REDIS_URL, {
       retryStrategy: (times) => {
         if (times > 10) {
           return null;
