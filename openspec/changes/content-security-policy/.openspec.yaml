@@ -1,0 +1,7 @@
+schema: spec-driven
+change: content-security-policy
+status: proposed
+artifacts:
+  - proposal.md
+  - design.md
+  - tasks.md

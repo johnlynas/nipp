@@ -14,8 +14,9 @@ const nextConfig: NextConfig = {
     return config;
   },
 
-
-  // Content Security Policy
+  // CSP is now handled dynamically in middleware.ts with nonce injection
+  // Old static headers removed to avoid conflicts:
+  /*
   async headers() {
     return [
       {
@@ -42,6 +43,7 @@ const nextConfig: NextConfig = {
       },
     ];
   },
+  */
 
   // Image optimization — only allow images from trusted sources
   images: {

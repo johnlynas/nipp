@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server';
 import type { NextRequest } from 'next/server';
+import { generateNonce } from '@/lib/csp-nonce';
 
 const PUBLIC_PATTERNS = [
   '/login',
@@ -16,15 +17,44 @@ function isPublicRoute(pathname: string): boolean {
 export async function middleware(request: NextRequest) {
   const { pathname } = request.nextUrl;
 
-  // Skip middleware for public routes
+  // Generate CSP nonce for every request (Edge Runtime compatible)
+  const nonce = generateNonce();
+  
+  // Set the nonce header for App Router components to consume
+  request.headers.set('x-csp-nonce', nonce);
+
+  // Allow 'unsafe-eval' ONLY in development for Next.js Fast Refresh (HMR)
+  const isDev = process.env.NODE_ENV === 'development';
+  const scriptSrcDirective = isDev 
+    ? `'self' 'unsafe-eval' 'nonce-${nonce}'` 
+    : `'self' 'nonce-${nonce}'`;
+
+  // Construct the strict CSP string
+  const cspHeader = `
+    default-src 'self';
+    script-src ${scriptSrcDirective};
+    style-src 'self' 'unsafe-inline';
+    img-src 'self' data: blob:;
+    font-src 'self' data:;
+    connect-src 'self';
+    frame-ancestors 'none';
+    base-uri 'self';
+    form-action 'self';
+  `.replace(/\s{2,}/g, ' ').trim();
+
+  // Create response early so CSP header is attached to all responses
+  const response = NextResponse.next();
+
+  // Set to Content-Security-Policy-Report-Only , to detect and log  CSP issues developer console
+  // Set to Content-Security-Policy , to activate CSP checks
+  response.headers.set('Content-Security-Policy', cspHeader);
+
+  // Skip middleware for public routes (but CSP headers are already set)
   if (isPublicRoute(pathname)) {
-    return NextResponse.next();
+    return response;
   }
 
   // SECURE COOKIE CHECK: 
-  // Because the logout handler now forcefully clears cookies, 
-  // the absence of this cookie definitively means the user is logged out.
-  // This avoids Edge Runtime Prisma crashes entirely.
   const sessionCookie =
     request.cookies.get('__Secure-better-auth.session_token')?.value ||
     request.cookies.get('better-auth.session_token')?.value ||
@@ -38,7 +68,6 @@ export async function middleware(request: NextRequest) {
   }
 
   // Prevent caching of protected pages
-  const response = NextResponse.next();
   response.headers.set('Cache-Control', 'no-store, max-age=0');
   response.headers.set('Surrogate-Control', 'no-store');
   response.headers.set('Pragma', 'no-cache');
