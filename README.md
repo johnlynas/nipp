@@ -90,21 +90,10 @@ npm install                      # install all dependencies
 Create the development and production databases:
 
 ```bash
-# Option A — one-liner (creates both nipp_dev and nipp_prod)
+# one-liner (creates both nipp_dev and nipp_prod)
 bash scripts/setup-db.sh
 
-# Option B — run the SQL file directly
-psql -U postgres -f scripts/setup-db.sql
-```
-
-Then update `DATABASE_URL` in `.env` to match your connection string (see step 3).
-
-### 3. Configure environment variables
-
-```bash
-# Copy the template and fill in real values
-cp .env.example .env
-```
+Then update `DATABASE_URL` in `.env` to match your database connection string
 
 Edit `.env` and set:
 
@@ -118,6 +107,8 @@ Edit `.env` and set:
 | `REDIS_URL` | Redis connection string | `redis://localhost:6379` (optional — app works without it) |
 | `LOG_LEVEL` | Logging verbosity | `debug`, `info`, `warn`, or `error` (default: `debug`) |
 | `FRONTEND_URL` / `NEXT_PUBLIC_API_URL` | App URLs | `http://localhost:3000` (default) |
+| `ADMIN_EMAIL` | Admin user email for seeding | e.g. `admin@example.com` (Required for `npm run db:seed`) |
+| `ADMIN_PASSWORD` | Admin user password for seeding | Strong password (Required for `npm run db:seed`) |
 
 > **Never commit `.env`** — it is in `.gitignore`. Only `.env.example` (with placeholder values) is committed.
 
@@ -133,7 +124,7 @@ npx prisma db push
 # Seed the database with:
 #   - Platform Organization (for Super Admins)
 #   - Master permission catalog (~50 resource:action permissions)
-#   - Default admin user (admin@nipp.gov.uk / Admin@1234)
+#   - Default admin user (requires ADMIN_EMAIL and ADMIN_PASSWORD env vars)
 npm run db:seed
 ```
 

@@ -11,8 +11,15 @@ const PERMISSION_CATALOG = [
 ];
 
 async function main() {
-  const adminEmail = process.env.ADMIN_EMAIL || 'admin@nipp.gov.uk';
-  const adminPassword = process.env.ADMIN_PASSWORD || 'Admin@1234';
+  const adminEmail = process.env.ADMIN_EMAIL;
+  if (!adminEmail) {
+    throw new Error('ADMIN_EMAIL environment variable is required.');
+  }
+
+  const adminPassword = process.env.ADMIN_PASSWORD;
+  if (!adminPassword) {
+    throw new Error('ADMIN_PASSWORD environment variable is required.');
+  }
 
   // Step 1: Create Platform Organization
   let platformOrg = await prisma.organization.findFirst({
