@@ -1,256 +1,144 @@
-import { NextResponse } from 'next/server';
+import { NextRequest, NextResponse } from 'next/server';
 import { auth } from '@/lib/auth';
 import { headers } from 'next/headers';
 import { prisma } from '@/lib/db';
-import { env } from '@/lib/env';
+import { verifySuperAdmin } from '@/lib/authz';
+import { logger } from '@/lib/logger';
 
 export async function GET(request: Request) {
   try {
-    console.log('[ORGANIZATIONS_API] GET request received');
+    logger.info({ route: '/api/admin/organizations', method: 'GET' }, 'Request received');
     
-    const session = await auth.api.getSession({
-      headers: await headers(),
-    });
-    
+    const session = await auth.api.getSession({ headers: await headers() });
     if (!session) {
-      console.log('[ORGANIZATIONS_API] No session found');
+      logger.warn({ method: 'GET' }, 'No session found');
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
     }
     
-    console.log('[ORGANIZATIONS_API] Session found for user:', session.user.id);
+    logger.info({ userId: session.user.id, method: 'GET' }, 'Session found');
     
-    // Check Super Admin status
-    let isSuperAdmin = false;
-    
-    try {
-      const { getPlatformOrgId } = await import('@/lib/authz');
-      const platformOrgId = await getPlatformOrgId();
-      
-      const superAdminCheck = await prisma.member.findFirst({
-        where: {
-          userId: session.user.id,
-          orgId: platformOrgId,
-        },
-      });
-      
-      isSuperAdmin = !!superAdminCheck;
-    } catch (error) {
-      const userEmail = (session.user as any).email;
-      const knownSuperAdminEmail = env.SUPER_ADMIN_EMAIL || 'admin@nipp.gov.uk';
-      isSuperAdmin = userEmail === knownSuperAdminEmail;
+    const { authorized, error } = await verifySuperAdmin(session.user.id, undefined);
+    if (!authorized) {
+      const isDbError = error?.includes('Database unavailable') || error?.includes('Platform organization not found') || error?.includes('No organization ID provided');
+      const status = isDbError ? 503 : 403;
+      logger.warn({ userId: session.user.id, error, status }, 'Super admin verification failed');
+      return NextResponse.json({ error: error || 'Super Admin access required' }, { status });
     }
     
-    if (!isSuperAdmin) {
-      return NextResponse.json({ error: 'Super Admin access required' }, { status: 403 });
-    }
-    
-    // Parse query parameters for pagination
     const url = new URL(request.url);
     const page = parseInt(url.searchParams.get('page') || '1', 10);
     const pageSize = parseInt(url.searchParams.get('pageSize') || '20', 10);
     const skip = (page - 1) * pageSize;
     
-    console.log('[ORGANIZATIONS_API] Fetching organizations with pagination:', { page, pageSize, skip });
+    logger.debug({ page, pageSize, skip, method: 'GET' }, 'Fetching organizations with pagination');
     
-    // Fetch organizations with pagination
     const [organizations, total] = await Promise.all([
       prisma.organization.findMany({
         skip,
         take: pageSize,
         orderBy: { createdAt: 'desc' },
-        include: {
-          _count: {
-            select: { members: true },
-          },
-        },
+        include: { _count: { select: { members: true } } },
       }),
       prisma.organization.count(),
     ]);
     
-    console.log('[ORGANIZATIONS_API] Found', organizations.length, 'organizations');
+    logger.info({ count: organizations.length, total, method: 'GET' }, 'Found organizations');
     
-    // Return response
     return NextResponse.json({
       organizations,
-      pagination: {
-        page,
-        pageSize,
-        total,
-        totalPages: Math.ceil(total / pageSize),
-      },
+      pagination: { page, pageSize, total, totalPages: Math.ceil(total / pageSize) },
     });
   } catch (error) {
-    console.error('[ORGANIZATIONS_API] GET error:', error);
+    logger.error({ err: error, route: '/api/admin/organizations', method: 'GET' }, 'Unexpected error in GET handler');
     return NextResponse.json({ error: 'Internal server error' }, { status: 500 });
   }
 }
 
 export async function POST(request: Request) {
   try {
-    console.log('[ORGANIZATIONS_API] POST request received');
+    logger.info({ route: '/api/admin/organizations', method: 'POST' }, 'Request received');
     
-    const session = await auth.api.getSession({
-      headers: await headers(),
-    });
-    
+    const session = await auth.api.getSession({ headers: await headers() });
     if (!session) {
-      console.log('[ORGANIZATIONS_API] No session found');
+      logger.warn({ method: 'POST' }, 'No session found');
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
     }
     
-    console.log('[ORGANIZATIONS_API] Session found for user:', session.user.id);
+    logger.info({ userId: session.user.id, method: 'POST' }, 'Session found');
     
-    // Check Super Admin status
-    let isSuperAdmin = false;
-    
-    try {
-      const { getPlatformOrgId } = await import('@/lib/authz');
-      const platformOrgId = await getPlatformOrgId();
-      
-      console.log('[ORGANIZATIONS_API] Checking super admin status, platformOrgId:', platformOrgId);
-      
-      const superAdminCheck = await prisma.member.findFirst({
-        where: {
-          userId: session.user.id,
-          orgId: platformOrgId,
-        },
-      });
-      
-      isSuperAdmin = !!superAdminCheck;
-      console.log('[ORGANIZATIONS_API] Is Super Admin:', isSuperAdmin);
-    } catch (error) {
-      console.log('[ORGANIZATIONS_API] DB check failed, falling back to email');
-      const userEmail = (session.user as any).email;
-      const knownSuperAdminEmail = env.SUPER_ADMIN_EMAIL || 'admin@nipp.gov.uk';
-      isSuperAdmin = userEmail === knownSuperAdminEmail;
-      console.log('[ORGANIZATIONS_API] Email check result:', isSuperAdmin);
+    const { authorized, error } = await verifySuperAdmin(session.user.id, undefined);
+    if (!authorized) {
+      const isDbError = error?.includes('Database unavailable') || error?.includes('Platform organization not found') || error?.includes('No organization ID provided');
+      const status = isDbError ? 503 : 403;
+      logger.warn({ userId: session.user.id, error, status }, 'Super admin verification failed');
+      return NextResponse.json({ error: error || 'Super Admin access required' }, { status });
     }
     
-    if (!isSuperAdmin) {
-      return NextResponse.json({ error: 'Super Admin access required' }, { status: 403 });
-    }
-    
-    // Parse request body
     let body;
     try {
       body = await request.json();
-      console.log('[ORGANIZATIONS_API] Request body:', body);
-    } catch (error) {
-      console.error('[ORGANIZATIONS_API] Failed to parse request body:', error);
+      logger.debug({ method: 'POST' }, 'Request body parsed');
+    } catch (parseError) {
+      logger.error({ err: parseError, method: 'POST' }, 'Failed to parse request body');
       return NextResponse.json({ error: 'Invalid request body' }, { status: 400 });
     }
     
-    const { name, slug, adminEmail } = body;
-    
-    // Validate required fields
+    const { name, slug, adminEmail } = body as { name?: string; slug?: string; adminEmail?: string };
     if (!name) {
       return NextResponse.json({ error: 'Organization name is required' }, { status: 400 });
     }
     
-    // Check if organization with same name already exists
     const existingOrgByName = await prisma.organization.findFirst({
-      where: { 
-        name: {
-          equals: name,
-          mode: 'insensitive', // Case-insensitive comparison
-        },
-      },
+      where: { name: { equals: name, mode: 'insensitive' } },
     });
-    
     if (existingOrgByName) {
-      return NextResponse.json({ 
-        error: 'An organization with this name already exists' 
-      }, { status: 400 });
+      return NextResponse.json({ error: 'An organization with this name already exists' }, { status: 400 });
     }
     
-    // Generate unique slug
     let generatedSlug = slug || name.toLowerCase().replace(/\s+/g, '-');
     let slugSuffix = 1;
     let uniqueSlug = generatedSlug;
     
-    // Check if slug exists and append number if needed
     while (true) {
-      const existingOrg = await prisma.organization.findUnique({
-        where: { slug: uniqueSlug },
-      });
-      
-      if (!existingOrg) {
-        break; // Slug is unique
-      }
-      
+      const existingOrg = await prisma.organization.findUnique({ where: { slug: uniqueSlug } });
+      if (!existingOrg) break;
       uniqueSlug = `${generatedSlug}-${slugSuffix}`;
       slugSuffix++;
-      
-      // Safety limit
       if (slugSuffix > 100) {
-        return NextResponse.json({ 
-          error: 'Unable to generate unique slug' 
-        }, { status: 400 });
+        return NextResponse.json({ error: 'Unable to generate unique slug' }, { status: 400 });
       }
     }
     
-    console.log('[ORGANIZATIONS_API] Using unique slug:', uniqueSlug);
+    logger.debug({ slug: uniqueSlug, method: 'POST' }, 'Using unique slug');
     
-    // Create organization with unique slug
-    const organization = await prisma.organization.create({
-      data: {
-        name,
-        slug: uniqueSlug,
-      },
-    });
+    const organization = await prisma.organization.create({ data: { name, slug: uniqueSlug } });
+    logger.info({ orgId: organization.id, method: 'POST' }, 'Organization created');
     
-    console.log('[ORGANIZATIONS_API] Organization created:', organization.id);
-    
-    // If admin email provided, create user and assign role
     if (adminEmail) {
-      console.log('[ORGANIZATIONS_API] Creating user for email:', adminEmail);
-      
       try {
-        // Find or create user
-        let user = await prisma.user.findUnique({
-          where: { email: adminEmail },
-        });
-        
+        let user = await prisma.user.findUnique({ where: { email: adminEmail } });
         if (!user) {
-          console.log('[ORGANIZATIONS_API] User not found, creating new user');
           user = await prisma.user.create({
-            data: {
-              email: adminEmail,
-              name: adminEmail.split('@')[0], // Use part before @ as name
-              emailVerified: true,
-            },
+            data: { email: adminEmail, name: adminEmail.split('@')[0], emailVerified: true },
           });
-          console.log('[ORGANIZATIONS_API] User created:', user.id);
+          logger.debug({ userId: user.id, method: 'POST' }, 'User created');
         }
-        
-        // Create member relationship
-        console.log('[ORGANIZATIONS_API] Creating member relationship');
-        await prisma.member.create({
-          data: {
-            userId: user.id,
-            orgId: organization.id,
-            role: 'admin',
-          },
-        });
-        console.log('[ORGANIZATIONS_API] Member relationship created');
+        await prisma.member.create({ data: { userId: user.id, orgId: organization.id, role: 'admin' } });
+        logger.debug({ userId: user.id, orgId: organization.id, method: 'POST' }, 'Member relationship created');
       } catch (userError) {
-        console.error('[ORGANIZATIONS_API] Error creating user/member:', userError);
-        // Don't fail the whole request if user creation fails
-        // The org was created successfully
+        // LOG THE FULL ERROR DETAILS SECURELY ON THE SERVER
+        logger.error({ err: userError, adminEmail, orgId: organization.id, method: 'POST' }, 'Error creating user/member, but organization was created');
+        // Do NOT leak this to the client. The org was still created successfully.
       }
     }
     
-    console.log('[ORGANIZATIONS_API] Success, returning 201');
-    return NextResponse.json({ 
-      message: 'Organization created successfully',
-      organization 
-    }, { status: 201 });
+    return NextResponse.json({ message: 'Organization created successfully', organization }, { status: 201 });
+    
   } catch (error) {
-    console.error('[ORGANIZATIONS_API] Unexpected error:', error);
-    console.error('[ORGANIZATIONS_API] Error stack:', error instanceof Error ? error.stack : 'No stack');
-    return NextResponse.json({ 
-      error: 'Internal server error',
-      details: error instanceof Error ? error.message : String(error)
-    }, { status: 500 });
+    // 1. LOG EVERYTHING: Pino will safely serialize the full error object, including the stack trace, for your devs to see.
+    logger.error({ err: error, route: '/api/admin/organizations', method: 'POST' }, 'Unexpected error in POST handler');
+    
+    // 2. RESPOND SAFELY: Give the client a generic, non-revealing message.
+    return NextResponse.json({ error: 'Internal server error' }, { status: 500 });
   }
 }

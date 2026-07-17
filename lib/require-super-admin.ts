@@ -1,51 +1,40 @@
-/**
- * Route guard: Require Super Admin (Platform Organization member).
- *
- * Import and call this function at the start of API routes that are
- * restricted to Super Admins. Returns a NextResponse error if the user
- * is not authorized, or null if access is granted.
- */
-
-import { NextResponse } from 'next/server';
 import { auth } from '@/lib/auth';
-import { getPlatformOrgId, isSuperAdmin as checkIsSuperAdmin } from '@/lib/authz';
-import type { NextRequest } from 'next/server';
+import { headers } from 'next/headers';
+import { verifySuperAdmin } from '@/lib/authz';
+import { logger } from '@/lib/logger';
 
 /**
- * Synchronous guard: call at the top of an API route handler.
- * Returns an error response if unauthorized, or null if authorized.
+ * Middleware helper to require Super Admin privileges.
+ * Fails CLOSED on database errors. No email fallbacks.
  */
-export async function requireSuperAdmin(
-  headers: Headers
-): Promise<NextResponse | null> {
-  const session = await auth.api.getSession({ headers });
-
-  if (!session?.user) {
-    return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+export async function requireSuperAdmin() {
+  const session = await auth.api.getSession({ headers: await headers() });
+  
+  if (!session) {
+    logger.warn({ route: 'requireSuperAdmin' }, 'No session found');
+    return { session: null, authorized: false, error: 'Unauthorized', status: 401 };
   }
 
-  const isSuper = await checkIsSuperAdmin(session.user.id, undefined);
-
-  if (!isSuper) {
-    return NextResponse.json({ error: 'Forbidden: Super Admin access required' }, { status: 403 });
+  // Use the centralized, fail-closed verification
+  const { authorized, error } = await verifySuperAdmin(session.user.id, undefined);
+  
+  if (!authorized) {
+    // Detect if the failure was due to a DB outage vs actual lack of permissions
+    const isDbError = error?.includes('Database unavailable') || error?.includes('Platform organization not found');
+    const status = isDbError ? 503 : 403;
+    
+    logger.warn(
+      { userId: session.user.id, error, status }, 
+      'Super admin verification failed'
+    );
+    
+    return { 
+      session, 
+      authorized: false, 
+      error: error || 'Super Admin access required', 
+      status 
+    };
   }
 
-  return null; // Authorized
-}
-
-/**
- * Get the current session, returning null if not authenticated.
- */
-export async function getSession(headers: Headers) {
-  return auth.api.getSession({ headers });
-}
-
-/**
- * Extract IP address and user agent from request.
- */
-export function getRequestMetadata(request: NextRequest) {
-  return {
-    ipAddress: request.headers.get('x-forwarded-for') || request.headers.get('x-real-ip') || 'unknown',
-    userAgent: request.headers.get('user-agent') || 'unknown',
-  };
+  return { session, authorized: true, status: 200 };
 }

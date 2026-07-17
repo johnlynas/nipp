@@ -9,8 +9,8 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { auth } from '@/lib/auth';
 import globalDb from '@/lib/global-db';
-import { prisma } from '@/lib/db';
-import { env } from '@/lib/env';
+import { verifySuperAdmin } from '@/lib/authz';
+import { logger } from '@/lib/logger';
 
 export const runtime = 'nodejs';
 
@@ -34,28 +34,15 @@ async function checkSuperAdmin(headersList: Headers): Promise<{ session: any; is
     return { session: null, isSuperAdmin: false };
   }
   
-  let isSuperAdmin = false;
+  const { authorized, error } = await verifySuperAdmin(session.user.id);
   
-  try {
-    const { getPlatformOrgId } = await import('@/lib/authz');
-    const platformOrgId = await getPlatformOrgId();
-    
-    const superAdminCheck = await prisma.member.findFirst({
-      where: {
-        userId: session.user.id,
-        orgId: platformOrgId,
-      },
-    });
-    
-    isSuperAdmin = !!superAdminCheck;
-  } catch (error) {
-    // Fallback to email check if DB is unavailable
-    const userEmail = (session.user as any).email;
-    const knownSuperAdminEmail = env.SUPER_ADMIN_EMAIL || 'admin@nipp.gov.uk';
-    isSuperAdmin = userEmail === knownSuperAdminEmail;
+  if (!authorized) {
+    // Log warning for normal access denial
+    console.warn(`[AUTH] Super admin verification failed for user ${session.user.id}: ${error}`);
+    return { session, isSuperAdmin: false };
   }
   
-  return { session, isSuperAdmin };
+  return { session, isSuperAdmin: true };
 }
 
 /**
@@ -66,21 +53,21 @@ export async function PATCH(
   { params }: { params: Promise<{ id: string }> }
 ) {
   try {
-    console.log('[ORG_STATUS_API] PATCH request received');
+    logger.info('[ORG_STATUS_API] PATCH request received');
     
     const { session, isSuperAdmin } = await checkSuperAdmin(request.headers);
     
     if (!session) {
-      console.log('[ORG_STATUS_API] No session found');
+      logger.warn('[ORG_STATUS_API] No session found');
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
     }
     
     if (!isSuperAdmin) {
-      console.log('[ORG_STATUS_API] User is not Super Admin');
+      logger.warn('[ORG_STATUS_API] User is not Super Admin');
       return NextResponse.json({ error: 'Super Admin access required' }, { status: 403 });
     }
     
-    console.log('[ORG_STATUS_API] Session found for user:', session.user.id);
+    logger.info('[ORG_STATUS_API] Session found for user', { userId: session.user.id });
 
     const { id } = await params;
     const body = await request.json();
@@ -100,7 +87,7 @@ export async function PATCH(
       });
 
       if (!org) {
-        console.log('[ORG_STATUS_API] Organization not found:', id);
+        logger.warn('[ORG_STATUS_API] Organization not found', { id });
         return NextResponse.json({ error: 'Organization not found' }, { status: 404 });
       }
 
@@ -128,18 +115,18 @@ export async function PATCH(
         await invalidateOrgSessions(id);
       }
 
-      console.log('[ORG_STATUS_API] Organization status updated:', id, 'to', newStatus);
+      logger.info('[ORG_STATUS_API] Organization status updated', { id, newStatus });
 
       return NextResponse.json({ organization: updated });
     } catch (error) {
-      console.error('[ORG_STATUS_API] Failed to update status:', error);
+      logger.error('[ORG_STATUS_API] Failed to update status', { error });
       return NextResponse.json(
         { error: 'Failed to update organization status' },
         { status: 500 }
       );
     }
   } catch (error) {
-    console.error('[ORG_STATUS_API] PATCH error:', error);
+    logger.error('[ORG_STATUS_API] PATCH error', { error });
     return NextResponse.json({ error: 'Internal server error' }, { status: 500 });
   }
 }
@@ -173,9 +160,9 @@ async function invalidateOrgSessions(orgId: string) {
       });
     }
 
-    console.log(`[ORG_STATUS_API] Invalidated sessions for ${members.length} members of org ${orgId}`);
+    logger.info(`[ORG_STATUS_API] Invalidated sessions for ${members.length} members of org ${orgId}`);
   } catch (error) {
-    console.error('[ORG_STATUS_API] Failed to invalidate sessions:', error);
+    logger.error('[ORG_STATUS_API] Failed to invalidate sessions', { error });
     // Don't fail the status change if session invalidation fails
   }
 }

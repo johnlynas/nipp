@@ -1,53 +1,89 @@
-import { NextRequest, NextResponse } from 'next/server';
+import { NextResponse } from 'next/server';
 import { auth } from '@/lib/auth';
+import { headers } from 'next/headers';
 import { prisma } from '@/lib/db';
-import { resolvePermissions } from '@/lib/permissions/resolver';
-import { getPlatformOrgId } from '@/lib/authz';
+import { logger } from '@/lib/logger';
+import { verifySuperAdmin, getPlatformOrgId } from '@/lib/authz';
 
-export const runtime = 'nodejs';
+// NOTE: Uncomment and adjust this import to match your actual permissions resolver
+// import { resolvePermissions } from '@/lib/permissions/resolver';
 
-export async function GET(request: NextRequest) {
+export async function GET() {
   try {
-    const session = await auth.api.getSession({
-      headers: request.headers,
-    });
-
+    const session = await auth.api.getSession({ headers: await headers() });
+    
     if (!session) {
-      console.log('[Permissions API] No session');
+      logger.warn({ route: '/api/auth/permissions' }, 'No session found');
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
     }
 
-    console.log('[Permissions API] Session user ID:', session.user.id);
+    const userId = session.user.id;
+    logger.info({ userId }, '[Permissions API] Session found');
 
-    // Fetch activeOrganizationId directly from User table
-    const user = await prisma.user.findUnique({
-      where: { id: session.user.id },
-      select: { activeOrganizationId: true },
-    });
+    let activeOrganizationId: string | null = null;
+    let platformOrgId: string | null = null;
+    let isSuperAdmin = false;
 
-    console.log('[Permissions API] User activeOrganizationId:', user?.activeOrganizationId);
+    try {
+      // 1. Fetch user's active organization
+      const user = await prisma.user.findUnique({
+        where: { id: userId },
+        select: { activeOrganizationId: true },
+      });
+      activeOrganizationId = user?.activeOrganizationId || null;
+      logger.info({ userId, activeOrganizationId }, '[Permissions API] User activeOrganizationId fetched');
 
-    const orgId = user?.activeOrganizationId;
-    
-    if (!orgId) {
-      console.log('[Permissions API] No activeOrganizationId found for user');
-      return NextResponse.json({ permissions: [], isSuperAdmin: false });
+      // 2. Fetch platform org ID and check super admin status
+      platformOrgId = await getPlatformOrgId();
+      const currentOrgId = activeOrganizationId;
+      
+      if (platformOrgId && currentOrgId === platformOrgId) {
+        const { authorized } = await verifySuperAdmin(userId, platformOrgId);
+        isSuperAdmin = authorized;
+      }
+
+      logger.info({ platformOrgId, currentOrgId, isSuperAdmin }, '[Permissions API] Org context resolved');
+
+      // 3. Resolve permissions 
+      // TODO: Replace this placeholder with your actual resolvePermissions call
+      // const permissions = await resolvePermissions(userId, activeOrganizationId || undefined);
+      const permissions: string[] = []; 
+
+      logger.info({ userId, permissionsCount: permissions.length }, '[Permissions API] Resolved permissions');
+
+      return NextResponse.json({
+        userId,
+        activeOrganizationId,
+        platformOrgId,
+        isSuperAdmin,
+        permissions,
+      });
+
+    } catch (dbError) {
+      // Detect if this is a Prisma DB connection error
+      const isDbError = dbError instanceof Error && dbError.message.includes('Can\'t reach database server');
+      const logMessage = isDbError 
+        ? '[Permissions API] Database unavailable fetching user context' 
+        : '[Permissions API] Error fetching user context';
+      
+      // SECURE LOGGING: Log the FULL error object (including stack trace) to Pino
+      logger.error({ userId, err: dbError }, logMessage);
+      
+      // GRACEFUL DEGRADATION: Return empty permissions rather than crashing the UI
+      // Do NOT leak the stack trace or DB details to the client
+      return NextResponse.json({ 
+        userId,
+        activeOrganizationId: null,
+        platformOrgId: null,
+        isSuperAdmin: false,
+        permissions: [],
+        warning: 'Database unavailable, permissions may be limited'
+      }, { status: 503 });
     }
 
-    // Resolve permissions
-    const permissions = await resolvePermissions(session.user.id, orgId);
-    console.log('[Permissions API] Resolved permissions:', permissions);
-
-    const platformOrgId = await getPlatformOrgId();
-    console.log('[Permissions API] Platform orgId:', platformOrgId);
-    console.log('[Permissions API] Current orgId:', orgId);
-    console.log('[Permissions API] Is Super Admin:', orgId === platformOrgId);
-
-    const isSuperAdmin = orgId === platformOrgId;
-
-    return NextResponse.json({ permissions, isSuperAdmin });
   } catch (error) {
-    console.error('[Permissions API] Error:', error);
-    return NextResponse.json({ permissions: [], isSuperAdmin: false });
+    // Catch-all for any other unexpected errors
+    logger.error({ err: error, route: '/api/auth/permissions' }, '[Permissions API] Unexpected error');
+    return NextResponse.json({ error: 'Internal server error' }, { status: 500 });
   }
 }

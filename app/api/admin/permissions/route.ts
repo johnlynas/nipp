@@ -9,41 +9,41 @@
 
 import { NextRequest, NextResponse } from 'next/server';
 import globalDb from '@/lib/global-db';
-import { requireSuperAdmin, getRequestMetadata } from '@/lib/require-super-admin';
+import { requireSuperAdmin } from '@/lib/require-super-admin';
 import { recordAuditLog } from '@/lib/audit-log';
-import { auth } from '@/lib/auth';
 import { prisma } from '@/lib/db';
 import { setRLSContext } from '@/lib/rls';
 import { env } from '@/lib/env';
+import { logger } from '@/lib/logger';
 
 export const runtime = 'nodejs';
 
 export async function GET(request: NextRequest) {
   try {
-    const session = await auth.api.getSession({
-      headers: request.headers,
-    });
-
-    if (!session) {
-      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+    const authResult = await requireSuperAdmin(request.headers);
+    if (!authResult.authorized) {
+      return NextResponse.json({ error: authResult.error || 'Unauthorized' }, { status: authResult.status });
     }
 
-    // ✅ CRITICAL: Set RLS Context before ANY database queries
+    const session = authResult.session;
     const orgId = session.session.activeOrganizationId || env.PLATFORM_ORGANIZATION_ID!;
-    await setRLSContext(session.user.id, orgId);
 
-    // Get query parameters for filtering
+    try {
+      await setRLSContext(session.user.id, orgId);
+    } catch (rlsError) {
+      const isDbError = rlsError instanceof Error && rlsError.message.includes('Can\'t reach database server');
+      logger.error({ userId: session.user.id, err: rlsError }, isDbError ? '[Permissions API] Database unavailable setting RLS context' : '[Permissions API] Error setting RLS context');
+      return NextResponse.json({ error: 'Database unavailable, cannot fetch permissions' }, { status: 503 });
+    }
+
     const searchParams = request.nextUrl.searchParams;
     const resource = searchParams.get('resource');
     const search = searchParams.get('search') || '';
 
-    // Build where clause
     const where: any = {};
-    
     if (resource) {
       where.resource = resource;
     }
-    
     if (search) {
       where.OR = [
         { key: { contains: search, mode: 'insensitive' } },
@@ -51,154 +51,168 @@ export async function GET(request: NextRequest) {
       ];
     }
 
-    // ✅ Fetch permissions - RLS policy 'permission_read_all' allows this
     const permissions = await prisma.permission.findMany({
       where,
-      orderBy: [
-        { resource: 'asc' },
-        { action: 'asc' },
-      ],
+      orderBy: [{ resource: 'asc' }, { action: 'asc' }],
     });
 
+    logger.info({ userId: session.user.id, count: permissions.length }, '[Permissions API] Fetched permissions');
     return NextResponse.json({ permissions });
   } catch (error) {
-    console.error('[Permissions API] Error:', error);
-    return NextResponse.json({ error: 'Internal Server Error' }, { status: 500 });
+    const isDbError = error instanceof Error && error.message.includes('Can\'t reach database server');
+    logger.error({ err: error, route: '/api/admin/permissions', method: 'GET' }, isDbError ? '[Permissions API] Database unavailable' : '[Permissions API] Unexpected error');
+    return NextResponse.json({ error: isDbError ? 'Database unavailable' : 'Internal Server Error' }, { status: isDbError ? 503 : 500 });
   }
 }
 
 export async function POST(request: NextRequest) {
   try {
-    const session = await auth.api.getSession({
-      headers: request.headers,
-    });
-
-    if (!session) {
-      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+    const authResult = await requireSuperAdmin(request.headers);
+    if (!authResult.authorized) {
+      return NextResponse.json({ error: authResult.error || 'Unauthorized' }, { status: authResult.status });
     }
 
-    // ✅ Set RLS Context
+    const session = authResult.session;
     const orgId = session.session.activeOrganizationId || env.PLATFORM_ORGANIZATION_ID!;
-    await setRLSContext(session.user.id, orgId);
 
-    const body = await request.json();
+    try {
+      await setRLSContext(session.user.id, orgId);
+    } catch (rlsError) {
+      const isDbError = rlsError instanceof Error && rlsError.message.includes('Can\'t reach database server');
+      logger.error({ userId: session.user.id, err: rlsError }, isDbError ? '[Permissions API] Database unavailable setting RLS context' : '[Permissions API] Error setting RLS context');
+      return NextResponse.json({ error: 'Database unavailable, cannot create permission' }, { status: 503 });
+    }
+
+    let body;
+    try {
+      body = await request.json();
+    } catch (parseError) {
+      logger.error({ err: parseError, route: '/api/admin/permissions', method: 'POST' }, '[Permissions API] Failed to parse request body');
+      return NextResponse.json({ error: 'Invalid request body' }, { status: 400 });
+    }
+
     const { key, resource, action, description } = body;
 
     if (!key || !resource || !action) {
-      return NextResponse.json({ 
-        error: 'Key, resource, and action are required' 
-      }, { status: 400 });
+      return NextResponse.json({ error: 'Key, resource, and action are required' }, { status: 400 });
     }
 
     const permission = await prisma.permission.create({
-      data: {
-        key,
-        resource,
-        action,
-        description,
-      },
+      data: { key, resource, action, description },
     });
 
+    logger.info({ userId: session.user.id, permissionId: permission.id }, '[Permissions API] Permission created');
     return NextResponse.json({ permission }, { status: 201 });
   } catch (error) {
-    console.error('[Permissions API] Error:', error);
-    return NextResponse.json({ error: 'Internal Server Error' }, { status: 500 });
+    const isDbError = error instanceof Error && error.message.includes('Can\'t reach database server');
+    logger.error({ err: error, route: '/api/admin/permissions', method: 'POST' }, isDbError ? '[Permissions API] Database unavailable' : '[Permissions API] Unexpected error');
+    return NextResponse.json({ error: isDbError ? 'Database unavailable' : 'Internal Server Error' }, { status: isDbError ? 503 : 500 });
   }
 }
 
-/**
- * PATCH — Update a permission.
- */
 export async function PATCH(
   request: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
-  const authError = await requireSuperAdmin(request.headers);
-  if (authError) return authError;
+  try {
+    const authResult = await requireSuperAdmin(request.headers);
+    if (!authResult.authorized) {
+      return NextResponse.json({ error: authResult.error || 'Unauthorized' }, { status: authResult.status });
+    }
 
-  const { id } = await params;
-  const body = await request.json();
-  const { description, key } = body as { description?: string; key?: string };
+    const session = authResult.session;
+    const { id } = await params;
+    
+    let body;
+    try {
+      body = await request.json();
+    } catch (parseError) {
+      logger.error({ err: parseError, route: '/api/admin/permissions', method: 'PATCH' }, '[Permissions API] Failed to parse request body');
+      return NextResponse.json({ error: 'Invalid request body' }, { status: 400 });
+    }
 
-  if (!description && !key) {
-    return NextResponse.json(
-      { error: 'Provide description or key to update' },
-      { status: 400 }
-    );
+    const { description, key } = body as { description?: string; key?: string };
+
+    if (!description && !key) {
+      return NextResponse.json({ error: 'Provide description or key to update' }, { status: 400 });
+    }
+
+    const permission = await globalDb.permission.update({
+      where: { id },
+      data: { ...(description && { description }), ...(key && { key }) },
+    });
+
+    await recordAuditLog({
+      userId: session?.user?.id,
+      userName: session?.user?.name,
+      action: 'permission.updated',
+      resourceType: 'Permission',
+      resourceId: permission.id,
+      organizationId: null,
+      ipAddress: request.headers.get('x-forwarded-for') || 'unknown',
+      userAgent: request.headers.get('user-agent') || 'unknown',
+      success: true,
+      metadata: { key: permission.key },
+    });
+
+    logger.info({ userId: session.user.id, permissionId: id }, '[Permissions API] Permission updated');
+    return NextResponse.json({ permission });
+  } catch (error) {
+    const isDbError = error instanceof Error && error.message.includes('Can\'t reach database server');
+    logger.error({ err: error, route: '/api/admin/permissions', method: 'PATCH' }, isDbError ? '[Permissions API] Database unavailable' : '[Permissions API] Unexpected error');
+    return NextResponse.json({ error: isDbError ? 'Database unavailable' : 'Internal Server Error' }, { status: isDbError ? 503 : 500 });
   }
-
-  const session = await (await import('@/lib/auth')).auth.api.getSession({
-    headers: request.headers,
-  });
-
-  const permission = await globalDb.permission.update({
-    where: { id },
-    data: { ...(description && { description }), ...(key && { key }) },
-  });
-
-  await recordAuditLog({
-    userId: session?.user?.id,
-    userName: session?.user?.name,
-    action: 'permission.updated',
-    resourceType: 'Permission',
-    resourceId: permission.id,
-    organizationId: null,
-    ipAddress: request.headers.get('x-forwarded-for') || 'unknown',
-    userAgent: request.headers.get('user-agent') || 'unknown',
-    success: true,
-    metadata: { key: permission.key },
-  });
-
-  return NextResponse.json({ permission });
 }
 
-/**
- * DELETE — Delete a permission from the global catalog.
- */
 export async function DELETE(
-  _request: NextRequest,
+  request: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
-  const authError = await requireSuperAdmin(_request.headers);
-  if (authError) return authError;
+  try {
+    const authResult = await requireSuperAdmin(request.headers);
+    if (!authResult.authorized) {
+      return NextResponse.json({ error: authResult.error || 'Unauthorized' }, { status: authResult.status });
+    }
 
-  const { id } = await params;
+    const session = authResult.session;
+    const { id } = await params;
 
-  const session = await (await import('@/lib/auth')).auth.api.getSession({
-    headers: _request.headers,
-  });
+    const permission = await globalDb.permission.findUnique({ where: { id } });
+    if (!permission) {
+      return NextResponse.json({ error: 'Permission not found' }, { status: 404 });
+    }
 
-  const permission = await globalDb.permission.findUnique({ where: { id } });
-  if (!permission) {
-    return NextResponse.json({ error: 'Permission not found' }, { status: 404 });
+    const usageCount = await globalDb.rolePermission.count({
+      where: { permissionId: id },
+    });
+
+    if (usageCount > 0) {
+      return NextResponse.json(
+        { error: `Cannot delete permission used by ${usageCount} role(s)` },
+        { status: 400 }
+      );
+    }
+
+    await globalDb.permission.delete({ where: { id } });
+
+    await recordAuditLog({
+      userId: session?.user?.id,
+      userName: session?.user?.name,
+      action: 'permission.deleted',
+      resourceType: 'Permission',
+      resourceId: id,
+      organizationId: null,
+      ipAddress: request.headers.get('x-forwarded-for') || 'unknown',
+      userAgent: request.headers.get('user-agent') || 'unknown',
+      success: true,
+      metadata: { key: permission.key },
+    });
+
+    logger.info({ userId: session.user.id, permissionId: id }, '[Permissions API] Permission deleted');
+    return NextResponse.json({ success: true, message: 'Permission deleted' });
+  } catch (error) {
+    const isDbError = error instanceof Error && error.message.includes('Can\'t reach database server');
+    logger.error({ err: error, route: '/api/admin/permissions', method: 'DELETE' }, isDbError ? '[Permissions API] Database unavailable' : '[Permissions API] Unexpected error');
+    return NextResponse.json({ error: isDbError ? 'Database unavailable' : 'Internal Server Error' }, { status: isDbError ? 503 : 500 });
   }
-
-  // Check if permission is used by any roles
-  const usageCount = await globalDb.rolePermission.count({
-    where: { permissionId: id },
-  });
-
-  if (usageCount > 0) {
-    return NextResponse.json(
-      { error: `Cannot delete permission used by ${usageCount} role(s)` },
-      { status: 400 }
-    );
-  }
-
-  await globalDb.permission.delete({ where: { id } });
-
-  await recordAuditLog({
-    userId: session?.user?.id,
-    userName: session?.user?.name,
-    action: 'permission.deleted',
-    resourceType: 'Permission',
-    resourceId: id,
-    organizationId: null,
-    ipAddress: _request.headers.get('x-forwarded-for') || 'unknown',
-    userAgent: _request.headers.get('user-agent') || 'unknown',
-    success: true,
-    metadata: { key: permission.key },
-  });
-
-  return NextResponse.json({ success: true, message: 'Permission deleted' });
 }

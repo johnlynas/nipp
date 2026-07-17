@@ -1,80 +1,35 @@
-/**
- * GET /api/admin/organizations/:id
- * PATCH /api/admin/organizations/:id
- * DELETE /api/admin/organizations/:id (archive)
- *
- * Super Admin only — manage a specific organization.
- */
-
 import { NextRequest, NextResponse } from 'next/server';
 import { auth } from '@/lib/auth';
-import { headers } from 'next/headers';
 import globalDb from '@/lib/global-db';
-import { prisma } from '@/lib/db';
-import { env } from '@/lib/env';
+import { verifySuperAdmin } from '@/lib/authz';
+import { logger } from '@/lib/logger';
 
 export const runtime = 'nodejs';
 
-/**
- * Helper function to check if user is Super Admin
- */
-async function checkSuperAdmin(headersList: Headers): Promise<{ session: any; isSuperAdmin: boolean }> {
+async function checkSuperAdmin(headersList: Headers): Promise<{ session: any; isSuperAdmin: boolean; error?: string }> {
   const session = await auth.api.getSession({ headers: headersList });
+  if (!session) return { session: null, isSuperAdmin: false };
   
-  if (!session) {
-    return { session: null, isSuperAdmin: false };
-  }
-  
-  let isSuperAdmin = false;
-  
-  try {
-    const { getPlatformOrgId } = await import('@/lib/authz');
-    const platformOrgId = await getPlatformOrgId();
-    
-    const superAdminCheck = await prisma.member.findFirst({
-      where: {
-        userId: session.user.id,
-        orgId: platformOrgId,
-      },
-    });
-    
-    isSuperAdmin = !!superAdminCheck;
-  } catch (error) {
-    // Fallback to email check if DB is unavailable
-    const userEmail = (session.user as any).email;
-    const knownSuperAdminEmail = env.SUPER_ADMIN_EMAIL || 'admin@nipp.gov.uk';
-    isSuperAdmin = userEmail === knownSuperAdminEmail;
-  }
-  
-  return { session, isSuperAdmin };
+  const { authorized, error } = await verifySuperAdmin(session.user.id, undefined);
+  return { session, isSuperAdmin: authorized, error };
 }
 
-/**
- * GET — Get organization detail.
- */
-export async function GET(
-  _request: NextRequest,
-  { params }: { params: Promise<{ id: string }> }
-) {
+export async function GET(_request: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   try {
-    console.log('[ORG_DETAIL_API] GET request received');
-    
-    const { session, isSuperAdmin } = await checkSuperAdmin(_request.headers);
+    logger.info({ route: '/api/admin/organizations/[id]', method: 'GET' }, 'Request received');
+    const { session, isSuperAdmin, error } = await checkSuperAdmin(_request.headers);
     
     if (!session) {
-      console.log('[ORG_DETAIL_API] No session found');
+      logger.warn({ method: 'GET' }, 'No session found');
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
     }
-    
     if (!isSuperAdmin) {
-      console.log('[ORG_DETAIL_API] User is not Super Admin');
-      return NextResponse.json({ error: 'Super Admin access required' }, { status: 403 });
+      const status = error?.includes('Database unavailable') ? 503 : 403;
+      logger.warn({ userId: session.user.id, error, status }, 'Super admin verification failed');
+      return NextResponse.json({ error: error || 'Super Admin access required' }, { status });
     }
     
-    console.log('[ORG_DETAIL_API] Session found for user:', session.user.id);
-    
     const { id } = await params;
-
     const organization = await globalDb.organization.findUnique({
       where: { id },
       include: {
@@ -82,157 +37,93 @@ export async function GET(
         roles: { where: { isDefault: false }, select: { id: true, name: true } },
       },
     });
-
+    
     if (!organization) {
-      console.log('[ORG_DETAIL_API] Organization not found:', id);
+      logger.warn({ orgId: id, method: 'GET' }, 'Organization not found');
       return NextResponse.json({ error: 'Organization not found' }, { status: 404 });
     }
-
-    console.log('[ORG_DETAIL_API] Organization found:', organization.id);
-
+    
+    logger.info({ orgId: organization.id, method: 'GET' }, 'Organization found');
     return NextResponse.json({
-      id: organization.id,
-      name: organization.name,
-      slug: organization.slug,
-      status: organization.status,
-      metadata: organization.metadata,
-      createdAt: organization.createdAt,
-      updatedAt: organization.updatedAt,
-      memberCount: organization.members.length,
-      customRoleCount: organization.roles.length,
+      id: organization.id, name: organization.name, slug: organization.slug,
+      status: organization.status, metadata: organization.metadata,
+      createdAt: organization.createdAt, updatedAt: organization.updatedAt,
+      memberCount: organization.members.length, customRoleCount: organization.roles.length,
     });
   } catch (error) {
-    console.error('[ORG_DETAIL_API] GET error:', error);
+    logger.error({ err: error, method: 'GET' }, 'Unexpected error in GET handler');
     return NextResponse.json({ error: 'Internal server error' }, { status: 500 });
   }
 }
 
-/**
- * PATCH — Update organization.
- */
-export async function PATCH(
-  request: NextRequest,
-  { params }: { params: Promise<{ id: string }> }
-) {
+export async function PATCH(request: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   try {
-    console.log('[ORG_DETAIL_API] PATCH request received');
+    logger.info({ route: '/api/admin/organizations/[id]', method: 'PATCH' }, 'Request received');
+    const { session, isSuperAdmin, error } = await checkSuperAdmin(request.headers);
     
-    const { session, isSuperAdmin } = await checkSuperAdmin(request.headers);
-    
-    if (!session) {
-      console.log('[ORG_DETAIL_API] No session found');
-      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
-    }
-    
+    if (!session) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
     if (!isSuperAdmin) {
-      console.log('[ORG_DETAIL_API] User is not Super Admin');
-      return NextResponse.json({ error: 'Super Admin access required' }, { status: 403 });
+      const status = error?.includes('Database unavailable') ? 503 : 403;
+      return NextResponse.json({ error: error || 'Super Admin access required' }, { status });
     }
     
-    console.log('[ORG_DETAIL_API] Session found for user:', session.user.id);
-
     const { id } = await params;
     const body = await request.json();
     const { name, slug } = body as { name?: string; slug?: string };
-
-    if (!name && !slug) {
-      return NextResponse.json(
-        { error: 'Provide name or slug to update' },
-        { status: 400 }
-      );
-    }
-
+    
+    if (!name && !slug) return NextResponse.json({ error: 'Provide name or slug to update' }, { status: 400 });
+    
     try {
       const organization = await globalDb.organization.update({
-        where: { id },
-        data: {
-          ...(name && { name }),
-          ...(slug && { slug }),
-        },
+        where: { id }, data: { ...(name && { name }), ...(slug && { slug }) },
       });
-
       return NextResponse.json({ organization });
     } catch (error) {
-      console.error('[ORG_DETAIL_API] Failed to update organization:', error);
-      return NextResponse.json(
-        { error: 'Failed to update organization' },
-        { status: 500 }
-      );
+      logger.error({ err: error, orgId: id, method: 'PATCH' }, 'Failed to update organization');
+      return NextResponse.json({ error: 'Failed to update organization' }, { status: 500 });
     }
   } catch (error) {
-    console.error('[ORG_DETAIL_API] PATCH error:', error);
+    logger.error({ err: error, method: 'PATCH' }, 'Unexpected error in PATCH handler');
     return NextResponse.json({ error: 'Internal server error' }, { status: 500 });
   }
 }
 
-/**
- * DELETE — Archive organization (terminal state).
- */
-export async function DELETE(
-  request: NextRequest,
-  { params }: { params: Promise<{ id: string }> }
-) {
+export async function DELETE(request: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   try {
-    console.log('[ORG_DETAIL_API] DELETE request received');
+    logger.info({ route: '/api/admin/organizations/[id]', method: 'DELETE' }, 'Request received');
+    const { session, isSuperAdmin, error } = await checkSuperAdmin(request.headers);
     
-    const { session, isSuperAdmin } = await checkSuperAdmin(request.headers);
-    
-    if (!session) {
-      console.log('[ORG_DETAIL_API] No session found');
-      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
-    }
-    
+    if (!session) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
     if (!isSuperAdmin) {
-      console.log('[ORG_DETAIL_API] User is not Super Admin');
-      return NextResponse.json({ error: 'Super Admin access required' }, { status: 403 });
+      const status = error?.includes('Database unavailable') ? 503 : 403;
+      return NextResponse.json({ error: error || 'Super Admin access required' }, { status });
     }
     
-    console.log('[ORG_DETAIL_API] Session found for user:', session.user.id);
-
     const { id } = await params;
-
     try {
-      // Check current status before archiving
-      const org = await globalDb.organization.findUnique({
-        where: { id },
-        select: { status: true, name: true },
-      });
-
+      const org = await globalDb.organization.findUnique({ where: { id }, select: { status: true, name: true } });
       if (!org) {
-        console.log('[ORG_DETAIL_API] Organization not found:', id);
+        logger.warn({ orgId: id, method: 'DELETE' }, 'Organization not found');
         return NextResponse.json({ error: 'Organization not found' }, { status: 404 });
       }
-
       if (org.status === 'ARCHIVED') {
-        return NextResponse.json(
-          { error: 'Organization is already archived (terminal state)' },
-          { status: 400 }
-        );
+        return NextResponse.json({ error: 'Organization is already archived (terminal state)' }, { status: 400 });
       }
-
       if (org.status === 'PENDING') {
-        // For pending orgs, hard delete instead of archive
         await globalDb.organization.delete({ where: { id } });
-
+        logger.info({ orgId: id, method: 'DELETE' }, 'Pending organization hard deleted');
         return NextResponse.json({ success: true, message: 'Organization deleted' });
       }
-
-      // Archive active/suspended orgs
-      await globalDb.organization.update({
-        where: { id },
-        data: { status: 'ARCHIVED' },
-      });
-
+      
+      await globalDb.organization.update({ where: { id }, data: { status: 'ARCHIVED' } });
+      logger.info({ orgId: id, method: 'DELETE' }, 'Organization archived');
       return NextResponse.json({ success: true, message: 'Organization archived' });
     } catch (error) {
-      console.error('[ORG_DETAIL_API] Failed to archive organization:', error);
-      return NextResponse.json(
-        { error: 'Failed to archive organization' },
-        { status: 500 }
-      );
+      logger.error({ err: error, orgId: id, method: 'DELETE' }, 'Failed to archive organization');
+      return NextResponse.json({ error: 'Failed to archive organization' }, { status: 500 });
     }
   } catch (error) {
-    console.error('[ORG_DETAIL_API] DELETE error:', error);
+    logger.error({ err: error, method: 'DELETE' }, 'Unexpected error in DELETE handler');
     return NextResponse.json({ error: 'Internal server error' }, { status: 500 });
   }
 }
