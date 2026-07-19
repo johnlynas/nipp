@@ -188,24 +188,39 @@ export async function handleCreateOrganization(req: Request) {
   const response = await auth.handler(forwardReq);
 
   // If creation succeeded, extract org ID and bootstrap roles
-  if (response.ok && body?.name) {
+  if (response.ok) {
     try {
-      const { auth } = await import('@/lib/auth');
-      const { headers } = await import('next/headers');
+      let orgId: string | null = null;
 
-      const session = await auth.api.getSession({
-        headers: await headers(),
-      });
+      // Try to extract the organization ID directly from the response body
+      try {
+        const data = await response.json();
+        // BetterAuth typically returns the created organization object or similar structure
+        if (data?.id) orgId = data.id;
+        else if (data?.organization?.id) orgId = data.organization.id;
+      } catch {
+        // Response body might not be JSON or parseable, ignore
+      }
 
-      if (session?.user?.id) {
-        // Fetch the newly created org by name (BetterAuth doesn't return ID in response body easily)
+      if (!orgId && body?.name) {
+        // Fallback: If ID not found in response, look up by name
         const org = await prisma.organization.findFirst({
           where: { name: body.name },
           orderBy: { createdAt: 'desc' },
         });
+        orgId = org?.id || null;
+      }
 
-        if (org) {
-          await bootstrapOrganizationRoles(org.id, session.user.id);
+      if (orgId) {
+        const { auth } = await import('@/lib/auth');
+        const { headers } = await import('next/headers');
+
+        const session = await auth.api.getSession({
+          headers: await headers(),
+        });
+
+        if (session?.user?.id) {
+          await bootstrapOrganizationRoles(orgId, session.user.id);
         }
       }
     } catch (error) {
