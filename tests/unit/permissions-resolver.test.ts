@@ -20,6 +20,7 @@ vi.mock('@/lib/db', () => {
     member: { findFirst: vi.fn() },
     role: { findMany: vi.fn() },
     rolePermission: { findMany: vi.fn() },
+    permission: { findMany: vi.fn() },
   };
   return { default: mockPrisma, prisma: mockPrisma };
 });
@@ -61,6 +62,13 @@ describe('resolvePermissions', () => {
         organizationId: 'org-1',
         description: null,
         isDefault: false,
+        permissions: [
+          {
+            permission: {
+              key: 'properties:view',
+            },
+          },
+        ],
       },
     ]);
     vi.mocked(prisma.rolePermission.findMany).mockResolvedValue([

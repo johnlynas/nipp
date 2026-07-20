@@ -63,11 +63,18 @@ export function validateEnv() {
     });
     // eslint-disable-next-line no-console
     console.error('\n📝 Copy .env.example to .env and fill in the required values.');
-    process.exit(1);
+    
+    // Only exit the process if we are NOT in a testing environment
+    if (process.env.NODE_ENV !== 'test') {
+      process.exit(1);
+    }
   }
 
   return result.data;
 }
 
-// Validate immediately on import (fail-fast at startup)
-export const env = validateEnv();
+// Validate immediately on import (fail-fast)
+// In test mode, we skip immediate validation to allow tests to run without a full .env
+export const env = process.env.NODE_ENV === 'test' 
+  ? (process.env as any) 
+  : validateEnv();

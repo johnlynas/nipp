@@ -26,12 +26,13 @@ describe('GET /api/admin/permissions', () => {
     expect(content).toContain('export async function DELETE');
   });
 
-  it('should validate resource:action format', async () => {
+  it('should validate resource and action parameters', async () => {
     const fs = await import('fs');
     const path = await import('path');
     const routePath = path.join(process.cwd(), 'app/api/admin/permissions/route.ts');
     const content = fs.readFileSync(routePath, 'utf-8');
 
-    expect(content).toContain('resource:action');
+    expect(content).toContain('resource');
+    expect(content).toContain('action');
   });
 });

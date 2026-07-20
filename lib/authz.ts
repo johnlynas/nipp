@@ -69,6 +69,15 @@ export async function verifySuperAdmin(
 }
 
 /**
+ * Check if a user is a Super Admin (member of Platform Organization).
+ * Returns a boolean.
+ */
+export async function isSuperAdmin(userId: string, orgId?: string): Promise<boolean> {
+  const { authorized } = await verifySuperAdmin(userId, orgId);
+  return authorized;
+}
+
+/**
  * Get the Platform Organization ID from environment or database.
  */
 export async function getPlatformOrgId(): Promise<string | null> {

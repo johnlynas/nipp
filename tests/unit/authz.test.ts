@@ -55,7 +55,7 @@ describe('authz', () => {
       expect(result).toBe(false);
     });
 
-    it.skip('returns false when resolver throws (graceful degradation)', async () => {
+    it('returns false when resolver throws (graceful degradation)', async () => {
       vi.mocked(resolvePermissions).mockRejectedValue(new Error('Redis down'));
       
       const result = await hasPermission('user-1', 'org-1', 'properties:create');
