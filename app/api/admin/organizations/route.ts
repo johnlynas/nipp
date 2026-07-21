@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { withSuperAdmin } from '@/lib/middleware/auth';
-import { prisma } from '@/lib/db';
+import { OrganizationService } from '@/services/organization-service';
 import { logger } from '@/lib/logger';
 
 export const GET = withSuperAdmin(async (request, context) => {
@@ -11,26 +11,12 @@ export const GET = withSuperAdmin(async (request, context) => {
     const url = new URL(request.url);
     const page = parseInt(url.searchParams.get('page') || '1', 10);
     const pageSize = parseInt(url.searchParams.get('pageSize') || '20', 10);
-    const skip = (page - 1) * pageSize;
     
-    logger.debug({ page, pageSize, skip, method: 'GET' }, 'Fetching organizations with pagination');
+    const data = await OrganizationService.getPaginatedOrganizations(page, pageSize);
     
-    const [organizations, total] = await Promise.all([
-      prisma.organization.findMany({
-        skip,
-        take: pageSize,
-        orderBy: { createdAt: 'desc' },
-        include: { _count: { select: { members: true } } },
-      }),
-      prisma.organization.count(),
-    ]);
+    logger.info({ count: data.organizations.length, total: data.pagination.total, method: 'GET' }, 'Found organizations');
     
-    logger.info({ count: organizations.length, total, method: 'GET' }, 'Found organizations');
-    
-    return NextResponse.json({
-      organizations,
-      pagination: { page, pageSize, total, totalPages: Math.ceil(total / pageSize) },
-    });
+    return NextResponse.json(data);
   } catch (error) {
     logger.error({ err: error, route: '/api/admin/organizations', method: 'GET' }, 'Unexpected error in GET handler');
     return NextResponse.json({ error: 'Internal server error' }, { status: 500 });
@@ -55,50 +41,28 @@ export const POST = withSuperAdmin(async (request, context) => {
     if (!name) {
       return NextResponse.json({ error: 'Organization name is required' }, { status: 400 });
     }
-    
-    const existingOrgByName = await prisma.organization.findFirst({
-      where: { name: { equals: name, mode: 'insensitive' } },
-    });
-    if (existingOrgByName) {
-      return NextResponse.json({ error: 'An organization with this name already exists' }, { status: 400 });
-    }
-    
-    let generatedSlug = slug || name.toLowerCase().replace(/\s+/g, '-');
-    let slugSuffix = 1;
-    let uniqueSlug = generatedSlug;
-    
-    while (true) {
-      const existingOrg = await prisma.organization.findUnique({ where: { slug: uniqueSlug } });
-      if (!existingOrg) break;
-      uniqueSlug = `${generatedSlug}-${slugSuffix}`;
-      slugSuffix++;
-      if (slugSuffix > 100) {
-        return NextResponse.json({ error: 'Unable to generate unique slug' }, { status: 400 });
+
+    try {
+      const organization = await OrganizationService.createOrganization({ 
+        name, 
+        slug, 
+        adminEmail 
+      });
+
+      logger.info({ orgId: organization.id, method: 'POST' }, 'Organization created');
+      return NextResponse.json({ 
+        message: 'Organization created successfully', 
+        organization 
+      }, { status: 201 });
+
+    } catch (serviceError: any) {
+      // Handle business logic errors thrown by the service
+      if (serviceError.message === 'An organization with this name already exists' || 
+          serviceError.message === 'Unable to generate unique slug') {
+        return NextResponse.json({ error: serviceError.message }, { status: 400 });
       }
+      throw serviceError; // Re-throw unknown errors to the outer catch block
     }
-    
-    logger.debug({ slug: uniqueSlug, method: 'POST' }, 'Using unique slug');
-    
-    const organization = await prisma.organization.create({ data: { name, slug: uniqueSlug } });
-    logger.info({ orgId: organization.id, method: 'POST' }, 'Organization created');
-    
-    if (adminEmail) {
-      try {
-        let user = await prisma.user.findUnique({ where: { email: adminEmail } });
-        if (!user) {
-          user = await prisma.user.create({
-            data: { email: adminEmail, name: adminEmail.split('@')[0], emailVerified: true },
-          });
-          logger.debug({ userId: user.id, method: 'POST' }, 'User created');
-        }
-        await prisma.member.create({ data: { userId: user.id, orgId: organization.id, role: 'admin' } });
-        logger.debug({ userId: user.id, orgId: organization.id, method: 'POST' }, 'Member relationship created');
-      } catch (userError) {
-        logger.error({ err: userError, adminEmail, orgId: organization.id, method: 'POST' }, 'Error creating user/member, but organization was created');
-      }
-    }
-    
-    return NextResponse.json({ message: 'Organization created successfully', organization }, { status: 201 });
     
   } catch (error) {
     logger.error({ err: error, route: '/api/admin/organizations', method: 'POST' }, 'Unexpected error in POST handler');
