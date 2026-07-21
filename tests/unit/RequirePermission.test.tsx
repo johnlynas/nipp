@@ -1,9 +1,10 @@
+/**
+ * @vitest-environment jsdom
+ */
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { render, screen, waitFor } from '@testing-library/react';
 import { RequirePermission } from '@/components/auth/RequirePermission';
-import { useHasPermission, useAnyPermission, useAllPermissions } from '@/hooks/usePermission';
-
-import '@testing-library/jest-dom';
+import { useHasPermission } from '@/hooks/usePermission';
 
 vi.mock('@/hooks/usePermission');
 

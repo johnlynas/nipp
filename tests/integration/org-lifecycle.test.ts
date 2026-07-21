@@ -2,27 +2,18 @@
  * Integration test: Organization lifecycle — Create (PENDING) → Suspend (SUSPENDED) → Archive (ARCHIVED).
  */
 
-import { describe, it, expect, beforeAll, afterAll } from 'vitest';
-import { PrismaClient, OrgStatus } from '@prisma/client';
-
-const prisma = new PrismaClient();
+import { describe, it, expect, afterAll } from 'vitest';
+import { prisma } from '@/lib/db';
+import { OrgStatus } from '@prisma/client';
 
 describe('Organization Lifecycle Integration', () => {
   let createdOrgId: string;
 
-  beforeAll(async () => {
-    // Clean up any leftover test orgs
-    await prisma.organization.deleteMany({
-      where: { slug: 'test-lifecycle-org' },
-    });
-  });
-
   afterAll(async () => {
-    // Cleanup test org
+    // Cleanup test orgs by slug to ensure no leakage
     await prisma.organization.deleteMany({
-      where: { slug: 'test-lifecycle-org' },
+      where: { slug: { in: ['test-lifecycle-org', 'test-invalid-transition'] } },
     });
-    await prisma.$disconnect();
   });
 
   it('should create org in PENDING status', async () => {
@@ -67,17 +58,12 @@ describe('Organization Lifecycle Integration', () => {
   });
 
   it('should reject any transition from ARCHIVED (terminal)', async () => {
-    // Try to reactivate — should fail at the application level
     const org = await prisma.organization.findUnique({
       where: { id: createdOrgId },
       select: { status: true },
     });
 
     expect(org?.status).toBe('ARCHIVED');
-
-    // The state machine in the API route would reject this.
-    // Here we verify the DB allows it but the app layer prevents it.
-    expect(['PENDING', 'ACTIVE', 'SUSPENDED']).not.toContain(org?.status);
   });
 
   it('should reject invalid transition PENDING → SUSPENDED', async () => {
@@ -89,7 +75,6 @@ describe('Organization Lifecycle Integration', () => {
       },
     });
 
-    // PENDING → SUSPENDED is invalid (must go through ACTIVE first)
     const validTransitions: Record<string, string[]> = {
       PENDING: ['ACTIVE'],
       ACTIVE: ['SUSPENDED', 'ARCHIVED'],
@@ -100,7 +85,7 @@ describe('Organization Lifecycle Integration', () => {
     const allowed = validTransitions['PENDING'];
     expect(allowed).not.toContain('SUSPENDED');
 
-    // Cleanup
+    // Cleanup temp org
     await prisma.organization.delete({ where: { id: tempOrg.id } });
   });
 });

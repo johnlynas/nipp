@@ -13,7 +13,7 @@ export function RequireSuperAdmin({ children, fallback }: RequireSuperAdminProps
   const isSuperAdmin = useIsSuperAdmin();
 
   // Show loading state while checking permissions
-  if (isSuperAdmin === false) {
+  if (isSuperAdmin === null || isSuperAdmin === undefined) {
     return (
       <div className="min-h-screen flex items-center justify-center bg-gray-50">
         <div className="text-center">
