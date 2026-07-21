@@ -26,11 +26,30 @@ Authentication is handled by [BetterAuth](https://www.better-auth.com/), configu
 
 ## 👥 Role-Based Access Control (RBAC)
 
-The application implements a granular RBAC system:
-- **Permissions:** Atomic actions tied to resources (e.g., `properties:view`, `leases:create`).
-- **Roles:** Collections of permissions assigned to users within a specific organization.
-- **Super Admin Detection:** The system identifies "Super Admins" by checking if the user's active organization matches the designated Platform Organization ID (`PLATFORM_ORG_ID`).
-- **UI & Route Protection:** Components like `<RequirePermission>` and middleware wrappers like `authz-route.ts` ensure users can only access UI elements and API endpoints they are explicitly authorized for.
+The application implements a granular RBAC system that distinguishes between global identity and organizational authorization.
+
+### Data Model Hierarchy
+To support multi-tenancy, the following hierarchy is used:
+- **`User` (Identity):** Represents a global entity. The `role` field here defines the **System Role** (e.g., `super_admin` vs `member`). This determines if the user has platform-wide privileges.
+- **`Member` (Membership):** A junction table linking a `User` to an `Organization`. This represents the user's presence within a specific tenant.
+- **`Role` (Tenant Authorization):** Organization-scoped role definitions (e.g., "Manager", "Technician").
+- **`MemberRole` (Assignment):** A junction table linking a `Member` to one or more `Roles`. This allows a single user to hold multiple roles within one organization.
+- **`RolePermission` (Capability):** Maps `Roles` to atomic `Permissions`.
+
+### Authorization Logic & Flow
+Authorization is enforced via a multi-layered logical flow:
+
+1.  **Super Admin Bypass (Fast Path):** The system first checks if the user's global identity is a `super_admin`. If true, access is granted immediately. 
+    *   **Note:** This "short-circuits" the permission resolver; Super Admins do not have their permissions cached in Redis because they bypass the granular check entirely.
+2.  **Permission Resolution (Standard Path):** If not a Super Admin, the `resolvePermissions` function is called:
+    *   **Cache Check:** It checks Redis for an existing permission set (`perm:${userId}:${orgId}`).
+    *   **Database Fetch:** On a cache miss, it performs a join: `Member` $\rightarrow$ `MemberRole` $\rightarrow$ `RolePermission` $\rightarrow$ `Permission`.
+    *   **Cache Write:** The resulting flattened list of permissions is written to Redis (TTL: 300s).
+3.  **Enforcement:** The resulting permission list is compared against the required `resource:action` string.
+
+### UI & Route Protection
+- **Components:** `<RequirePermission>` and `<RequireSuperAdmin>` wrap UI elements. 
+- **API Routes:** Use `hasPermission()` and `isSuperAdmin()` checks from `lib/authz.ts`.
 
 ## 🤫 Secrets Management
 

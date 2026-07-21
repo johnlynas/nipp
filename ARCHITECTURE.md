@@ -137,7 +137,8 @@ export default function MyComponent() {
 ### Safe Rollout Strategy
 CSP is currently set via `Content-Security-Policy-Report-Only`. This logs violations to the browser console without blocking resources. Once validated, it can be switched to `Content-Security-Policy` for strict enforcement.
 
-## 🔑 Authentication & Authorization
+
+## 🔐 Authentication & Authorization
 
 ### Authentication Flow
 - **Provider:** BetterAuth v1.6 with email/password and OAuth (Google) support.
@@ -145,11 +146,26 @@ CSP is currently set via `Content-Security-Policy-Report-Only`. This logs violat
 - **Cookie Cache:** Enabled in `lib/auth.ts` (`maxAge: 5 minutes`) for fast, Edge-runtime-safe session validation without hitting Prisma.
 - **Session Callbacks:** In Node.js runtime, the `session` callback resolves user permissions and Super Admin status before returning the session object. In Edge runtime (middleware), it returns a lightweight session without permissions to avoid Prisma initialization errors.
 
-### Authorization Flow
-- **RBAC System:** Granular Role-Based Access Control using a global permission catalog (`Permission` model) with `resource:action` syntax (e.g., `properties:view`, `leases:create`).
-- **Permission Resolution:** The `resolvePermissions` function in `lib/permissions/resolver.ts` fetches permissions for a user's roles, caches them in Redis (TTL: 300s), and returns the flat list.
-- **Super Admin Detection:** Users are identified as Super Admins if their active organization matches the `PLATFORM_ORG_ID` (stored in `.env` or resolved from the database). Super Admins have access to platform-level permissions (`platform:manage_organizations`, etc.).
-- **UI & Route Protection:** Components like `<RequirePermission>` and `<RequireSuperAdmin>` wrap UI elements. API routes use `hasPermission()` and `isSuperAdmin()` checks from `lib/authz.ts`.
+### Authorization Flow & Permission Resolution
+The system uses a multi-layered approach to determine if an action is permitted.
+
+#### 1. Identity vs. Membership (The Data Model)
+It is critical to distinguish between global identity and organizational authorization:
+- **`User` (Identity):** Represents a global entity. The `role` field here defines the **System Role** (e.g., `super_admin` vs `member`). This determines if the user has platform-wide privileges.
+- **`Member` (Membership):** A junction table linking a `User` to an `Organization`. This represents the user's presence within a specific tenant.
+- **`Role` (Tenant Authorization):** Organization-scoped role definitions (e.g., "Manager", "Technician").
+- **`MemberRole` (Assignment):** A junction table linking a `Member` to one or more `Roles`. This allows a single user to hold multiple roles within one organization.
+- **`RolePermission` (Capability):** Maps `Roles` to atomic `Permissions`.
+
+#### 2. The Logical Permission Flow
+When an authorization check is performed (via `hasPermission` or `<RequirePermission>`):
+
+1.  **Super Admin Bypass (Fast Path):** The system first checks if the user's global identity is a `super_admin`. If true, access is granted immediately. **Note:** This "short-circuits" the permission resolver; Super Admins do not have their permissions cached in Redis because they bypass the granular check entirely.
+2.  **Permission Resolution (Standard Path):** If not a Super Admin, the `resolvePermissions` function is called:
+    *   **Cache Check:** It checks Redis for an existing permission set (`perm:${userId}:${orgId}`).
+    *   **Database Fetch:** On a cache miss, it performs a join: `Member` $\rightarrow$ `MemberRole` $\rightarrow$ `RolePermission` $\rightarrow$ `Permission`.
+    *   **Cache Write:** The resulting flattened list of permissions is written to Redis (TTL: 300s).
+3.  **Enforcement:** The resulting permission list is compared against the required `resource:action` string.
 
 ### Middleware Protection
 - **Edge-Safe Validation:** `middleware.ts` performs a fast check for session cookie presence. This avoids Prisma Edge Runtime crashes while ensuring unauthenticated users are redirected to `/login`.
