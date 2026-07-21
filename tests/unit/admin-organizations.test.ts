@@ -30,14 +30,14 @@ describe('GET /api/admin/organizations', () => {
     expect(content).toContain("from '@/lib/db'");
   });
 
-  it('should use verifySuperAdmin guard', async () => {
-    // Verify the route file exists and contains verifySuperAdmin
+  it('should use auth middleware guard', async () => {
+    // Verify the route file exists and contains withSuperAdmin
     const fs = await import('fs');
     const path = await import('path');
     const routePath = path.join(process.cwd(), 'app/api/admin/organizations/route.ts');
     const content = fs.readFileSync(routePath, 'utf-8');
 
-    expect(content).toContain('verifySuperAdmin');
+    expect(content).toContain('withSuperAdmin');
   });
 });
 

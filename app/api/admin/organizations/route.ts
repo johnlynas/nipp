@@ -1,29 +1,12 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { auth } from '@/lib/auth';
-import { headers } from 'next/headers';
+import { withSuperAdmin } from '@/lib/middleware/auth';
 import { prisma } from '@/lib/db';
-import { verifySuperAdmin } from '@/lib/authz';
 import { logger } from '@/lib/logger';
 
-export async function GET(request: Request) {
+export const GET = withSuperAdmin(async (request, context) => {
   try {
     logger.info({ route: '/api/admin/organizations', method: 'GET' }, 'Request received');
-    
-    const session = await auth.api.getSession({ headers: await headers() });
-    if (!session) {
-      logger.warn({ method: 'GET' }, 'No session found');
-      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
-    }
-    
-    logger.info({ userId: session.user.id, method: 'GET' }, 'Session found');
-    
-    const { authorized, error } = await verifySuperAdmin(session.user.id, undefined);
-    if (!authorized) {
-      const isDbError = error?.includes('Database unavailable') || error?.includes('Platform organization not found') || error?.includes('No organization ID provided');
-      const status = isDbError ? 503 : 403;
-      logger.warn({ userId: session.user.id, error, status }, 'Super admin verification failed');
-      return NextResponse.json({ error: error || 'Super Admin access required' }, { status });
-    }
+    logger.info({ userId: context.user.id, method: 'GET' }, 'Session found');
     
     const url = new URL(request.url);
     const page = parseInt(url.searchParams.get('page') || '1', 10);
@@ -52,27 +35,12 @@ export async function GET(request: Request) {
     logger.error({ err: error, route: '/api/admin/organizations', method: 'GET' }, 'Unexpected error in GET handler');
     return NextResponse.json({ error: 'Internal server error' }, { status: 500 });
   }
-}
+});
 
-export async function POST(request: Request) {
+export const POST = withSuperAdmin(async (request, context) => {
   try {
     logger.info({ route: '/api/admin/organizations', method: 'POST' }, 'Request received');
-    
-    const session = await auth.api.getSession({ headers: await headers() });
-    if (!session) {
-      logger.warn({ method: 'POST' }, 'No session found');
-      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
-    }
-    
-    logger.info({ userId: session.user.id, method: 'POST' }, 'Session found');
-    
-    const { authorized, error } = await verifySuperAdmin(session.user.id, undefined);
-    if (!authorized) {
-      const isDbError = error?.includes('Database unavailable') || error?.includes('Platform organization not found') || error?.includes('No organization ID provided');
-      const status = isDbError ? 503 : 403;
-      logger.warn({ userId: session.user.id, error, status }, 'Super admin verification failed');
-      return NextResponse.json({ error: error || 'Super Admin access required' }, { status });
-    }
+    logger.info({ userId: context.user.id, method: 'POST' }, 'Session found');
     
     let body;
     try {
@@ -126,19 +94,14 @@ export async function POST(request: Request) {
         await prisma.member.create({ data: { userId: user.id, orgId: organization.id, role: 'admin' } });
         logger.debug({ userId: user.id, orgId: organization.id, method: 'POST' }, 'Member relationship created');
       } catch (userError) {
-        // LOG THE FULL ERROR DETAILS SECURELY ON THE SERVER
         logger.error({ err: userError, adminEmail, orgId: organization.id, method: 'POST' }, 'Error creating user/member, but organization was created');
-        // Do NOT leak this to the client. The org was still created successfully.
       }
     }
     
     return NextResponse.json({ message: 'Organization created successfully', organization }, { status: 201 });
     
   } catch (error) {
-    // 1. LOG EVERYTHING: Pino will safely serialize the full error object, including the stack trace, for your devs to see.
     logger.error({ err: error, route: '/api/admin/organizations', method: 'POST' }, 'Unexpected error in POST handler');
-    
-    // 2. RESPOND SAFELY: Give the client a generic, non-revealing message.
     return NextResponse.json({ error: 'Internal server error' }, { status: 500 });
   }
-}
+});
