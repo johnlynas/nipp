@@ -50,6 +50,8 @@ nipp/
 │   ├── db.ts                     # Global Prisma client instance
 │   ├── tenant-context.ts         # AsyncLocalStorage for tenant context propagation
 │   └── permissions/              # Permission resolution & caching logic
+├── services/                     # Domain-specific business logic layers
+│   └── organization-service.ts   # Organization management service
 ├── hooks/                        # Custom React hooks (useSession, usePermission)
 ├── prisma/                       # Database schema & migrations
 │   ├── schema.prisma             # Prisma schema definition (enums, models, relations)
@@ -304,6 +306,15 @@ BetterAuth was selected over NextAuth or custom authentication due to:
 - **Automatic Propagation:** Context flows automatically through async call chains without manual passing.
 - **Thread Safety:** Each request maintains isolated context, preventing cross-request data leakage.
 - **Middleware Integration:** Seamlessly integrates with Next.js middleware and API routes without architectural changes.
+
+### Why a Dedicated Service Layer?
+We have introduced a dedicated `services/` layer to sit between the API routes and the database (Prisma). This architectural decision was made for several key reasons:
+
+- **Separation of Concerns:** API routes should focus on HTTP concerns (parsing params, status codes, request validation), while services handle core business logic (slug generation, complex transactions, multi-step bootstrapping).
+- **Reusability:** Business logic (e.g., `createOrganization`) can be reused across different entry points, such as REST API routes, Server Actions, or CLI scripts, without duplicating code.
+- **Testability:** Services are easier to unit test in isolation. We can mock the database client and focus on testing complex logic like slug collision handling or admin bootstrapping without spinning up a full HTTP server.
+- **Transaction Management:** Complex workflows involving multiple database operations (e.g., creating an organization AND a user AND a member relationship) are encapsulated within a single service method, ensuring atomic operations and consistent error handling.
+- **Reduced Complexity in Routes:** By offloading logic to services, API route handlers remain thin and readable, making the codebase easier to navigate and maintain as the domain grows.
 
 ## 🏥 Health Check Architecture
 
