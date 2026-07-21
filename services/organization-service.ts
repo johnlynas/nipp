@@ -62,75 +62,68 @@ export const OrganizationService = {
 
   /**
    * Creates a new organization and optionally bootstraps an admin user/member.
+   * Uses a transaction to ensure atomicity between organization and admin creation.
    */
   async createOrganization(input: CreateOrganizationInput) {
     const { name, slug, adminEmail } = input;
 
-    // 1. Check for existing organization by name
-    const existingOrgByName = await prisma.organization.findFirst({
-      where: { name: { equals: name, mode: 'insensitive' } },
-    });
+    return await prisma.$transaction(async (tx) => {
+      // 1. Check for existing organization by name
+      const existingOrgByName = await tx.organization.findFirst({
+        where: { name: { equals: name, mode: 'insensitive' } },
+      });
 
-    if (existingOrgByName) {
-      throw new Error('An organization with this name already exists');
-    }
-
-    // 2. Generate unique slug
-    let generatedSlug = slug || name.toLowerCase().replace(/\s+/g, '-');
-    let slugSuffix = 1;
-    let uniqueSlug = generatedSlug;
-
-    while (true) {
-      const existingOrg = await prisma.organization.findUnique({ where: { slug: uniqueSlug } });
-      if (!existingOrg) break;
-      uniqueSlug = `${generatedSlug}-${slugSuffix}`;
-      slugSuffix++;
-      if (slugSuffix > 100) {
-        throw new Error('Unable to generate unique slug');
+      if (existingOrgByName) {
+        throw new Error('An organization with this name already exists');
       }
-    }
 
-    // 3. Create the organization
-    const organization = await prisma.organization.create({
-      data: { name, slug: uniqueSlug },
-    });
+      // 2. Generate unique slug
+      let generatedSlug = slug || name.toLowerCase().replace(/\s+/g, '-');
+      let slugSuffix = 1;
+      let uniqueSlug = generatedSlug;
 
-    logger.info({ orgId: organization.id, method: 'Service.createOrganization' }, 'Organization created');
+      while (true) {
+        const existingOrg = await tx.organization.findUnique({ where: { slug: uniqueSlug } });
+        if (!existingOrg) break;
+        uniqueSlug = `${generatedSlug}-${slugSuffix}`;
+        slugSuffix++;
+        if (slugSuffix > 100) {
+          throw new Error('Unable to generate unique slug');
+        }
+      }
 
-    // 4. Handle Admin Bootstrap if email provided
-    if (adminEmail) {
-      try {
-        let user = await prisma.user.findUnique({ where: { email: adminEmail } });
+      // 3. Create the organization
+      const organization = await tx.organization.create({
+        data: { name, slug: uniqueSlug },
+      });
+
+      logger.info({ orgId: organization.id, method: 'Service.createOrganization' }, 'Organization created in transaction');
+
+      // 4. Handle Admin Bootstrap if email provided
+      if (adminEmail) {
+        let user = await tx.user.findUnique({ where: { email: adminEmail } });
         if (!user) {
-          user = await prisma.user.create({
+          user = await tx.user.create({
             data: { 
               email: adminEmail, 
               name: adminEmail.split('@')[0], 
               emailVerified: true 
             },
           });
-          logger.debug({ userId: user.id, method: 'Service.createOrganization' }, 'User created');
+          logger.debug({ userId: user.id, method: 'Service.createOrganization' }, 'User created in transaction');
         }
 
-        await prisma.member.create({
+        await tx.member.create({
           data: { 
             userId: user.id, 
             orgId: organization.id, 
             role: 'admin' 
           },
         });
-        logger.debug({ userId: user.id, orgId: organization.id, method: 'Service.createOrganization' }, 'Member relationship created');
-      } catch (userError) {
-        // We log the error but don't fail the whole request since the organization was successfully created
-        logger.error({ 
-          err: userError, 
-          adminEmail, 
-          orgId: organization.id, 
-          method: 'Service.createOrganization' 
-        }, 'Error creating user/member, but organization was created');
+        logger.debug({ userId: user.id, orgId: organization.id, method: 'Service.createOrganization' }, 'Member relationship created in transaction');
       }
-    }
 
-    return organization;
+      return organization;
+    });
   },
 };
