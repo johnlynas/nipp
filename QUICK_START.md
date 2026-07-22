@@ -39,6 +39,7 @@ cp .env.example .env
 - `BETTER_AUTH_SECRET`: Session encryption key (generate with `openssl rand -base64 32`)
 - `ADMIN_EMAIL`: Email for the initial super admin account (e.g., `admin@example.com`)
 - `ADMIN_PASSWORD`: Password for the initial super admin account (must be strong)
+- `PGBOUNCER_PASSWORD` : You pgbouncer password
 
 > **Note:** `ADMIN_EMAIL` and `ADMIN_PASSWORD` are required for seeding. The seed script will fail if these are not set.
 

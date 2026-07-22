@@ -17,6 +17,7 @@ The Property NI (nipp) portal is a full-stack, multi-tenant property management 
 - **API Routes:** Next.js API Routes (App Router) with explicit `nodejs` runtime for Prisma compatibility
 - **Authentication:** BetterAuth v1.6 (with Organization plugin)
 - **Database ORM:** Prisma 6 (`@prisma/client`)
+- **Connection Pooler:** PgBouncer (manages database connections between Node.js and PostgreSQL)
 - **Database:** PostgreSQL 16+
 - **Caching:** Redis (via `ioredis`) for permission caching and session cache
 
@@ -195,6 +196,28 @@ When an authorization check is performed (via `hasPermission` or `<RequirePermis
 - Explicit composite indexes on `organizationId` for tenant-scoped models (`Role`, `RolePermission`, `MemberRole`).
 - Additional indexes on `AuditLog` for `userId`, `organizationId`, `timestamp`, and `resourceType` to support Super Admin cross-tenant queries.
 - Unique constraints on `[userId, orgId]` (Member), `[roleId, permissionId]` (RolePermission), and `[memberId, roleId]` (MemberRole) to prevent duplicates.
+
+## 🔗 Connection Pooling (PgBouncer)
+
+### Overview
+The system uses **PgBouncer** as a lightweight connection pooler between the Node.js application and PostgreSQL. Instead of each Prisma client instance maintaining a direct connection to the database, PgBouncer maintains a pool of persistent connections and multiplexes them across application requests.
+
+### Why PgBouncer?
+- **Connection Overhead Reduction:** PostgreSQL connection establishment is expensive. PgBouncer keeps a fixed number of server connections open, regardless of how many client requests are made.
+- **Resource Efficiency:** Prevents connection exhaustion under high concurrency, ensuring stable performance during traffic spikes.
+- **Pool Modes:** Configured to use `transaction` or `session` pooling (depending on requirements) to balance connection reuse and transaction safety.
+
+### Architecture & Integration
+- **Client Configuration:** Prisma clients connect to PgBouncer's listening port (default `6432`) instead of the raw PostgreSQL port (`5432`).
+- **Admin Interface:** PgBouncer exposes an admin interface that accepts administrative queries (`SHOW CLIENTS`, `SHOW DATABASES`, `SHOW POOLS`, etc.).
+- **Health Monitoring:** The `/api/health` endpoint includes a dedicated PgBouncer health check. It connects to the admin interface, verifies responsiveness, and reports connection counts and pool utilization. If PgBouncer is unreachable, the system status becomes `unhealthy` (HTTP 503), as it is a critical dependency for database connectivity.
+
+### Monitoring & Observability
+- **Health Check Integration:** The `PgBouncerMonitor` utility (`lib/pgbouncer-monitor.ts`) queries the admin interface to gather metrics like active clients, idle servers, and pool utilization.
+- **System Health Card:** The admin dashboard (`components/admin/SystemHealthCard.tsx`) displays PgBouncer status, latency, and active connections alongside Database and Cache health.
+- **Alerting:** If PgBouncer goes offline or pool utilization exceeds thresholds, it triggers system logs and alerts via the health check pipeline.
+
+This ensures that connection pooling is transparent to the application while providing robust visibility into database connectivity health.
 
 ## 🧪 Testing Strategy
 
