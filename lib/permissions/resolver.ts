@@ -72,6 +72,7 @@ export async function invalidatePermissionCache(userId: string, orgId: string): 
 
 /**
  * Invalidate all permission caches for a user across all organizations.
+ * Uses SCAN instead of KEYS to avoid blocking Redis in production.
  */
 export async function invalidateUserCache(userId: string): Promise<void> {
   const { getRedis } = await import('../redis');
@@ -80,11 +81,32 @@ export async function invalidateUserCache(userId: string): Promise<void> {
   
   try {
     const pattern = `${CACHE_KEY_PREFIX}${userId}:*`;
-    const keys: string[] = await redis.keys(pattern);
-    if (keys.length > 0) {
-      await redis.del(...keys);
+    let cursor = '0';
+    const keysToDelete: string[] = [];
+
+    do {
+      // Use SCAN instead of KEYS to avoid blocking Redis event loop.
+      // SCAN returns results incrementally, allowing Redis to handle
+      // other requests between iterations (O(1) per call vs O(N) for KEYS).
+      const result = await redis.scan(cursor, 'MATCH', pattern, 'COUNT', 100);
+      cursor = String(result[0]);
+      const matchedKeys = result[1];
+      
+      if (matchedKeys.length > 0) {
+        keysToDelete.push(...matchedKeys);
+        
+        // Delete in batches to avoid memory issues with large key sets
+        if (keysToDelete.length >= 100) {
+          await redis.del(...keysToDelete.splice(0, 100));
+        }
+      }
+    } while (cursor !== '0');
+
+    // Delete any remaining keys
+    if (keysToDelete.length > 0) {
+      await redis.del(...keysToDelete);
     }
-  } catch {
-    // Silently fail
+  } catch (error) {
+    console.error('[PermissionCache] Failed to invalidate user cache:', error, { userId });
   }
 }

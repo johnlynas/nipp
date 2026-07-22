@@ -6,6 +6,7 @@ const mockRedisClient = {
   set: vi.fn(),
   del: vi.fn(),
   keys: vi.fn(),
+  scan: vi.fn(),
 };
 
 vi.mock('@/lib/redis', () => ({
@@ -82,12 +83,15 @@ describe('resolvePermissions', () => {
 describe('invalidateUserCache', () => {
   it('invalidates all permission caches for a user across orgs', async () => {
     vi.mocked(getRedis).mockReturnValue(mockRedisClient as any);
-    vi.mocked(mockRedisClient.keys).mockResolvedValue(['perm:user-1:org-1', 'perm:user-1:org-2']);
+    // Mock scan to return keys in two batches, then terminate with cursor '0'
+    mockRedisClient.scan
+      .mockResolvedValueOnce(['1', ['perm:user-1:org-1']])
+      .mockResolvedValueOnce(['0', ['perm:user-1:org-2']]);
     vi.mocked(mockRedisClient.del).mockResolvedValue(2);
 
     await invalidateUserCache('user-1');
 
-    expect(mockRedisClient.keys).toHaveBeenCalledWith('perm:user-1:*');
+    expect(mockRedisClient.scan).toHaveBeenCalledWith('0', 'MATCH', 'perm:user-1:*', 'COUNT', 100);
     expect(mockRedisClient.del).toHaveBeenCalledWith('perm:user-1:org-1', 'perm:user-1:org-2');
   });
 
