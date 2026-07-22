@@ -4,65 +4,81 @@ import { getCurrentOrgId } from './tenant-context';
 
 const TENANT_SCOPED_MODELS = ['Role', 'RolePermission', 'MemberRole', 'Member', 'Invitation', 'SentInvitation'] as const;
 
-const tenantExtension = Prisma.defineExtension({
-  name: 'tenant-isolation',
-  query: {
-    $allModels: {
-      async findUnique({ args, query, model }) {
-        if (TENANT_SCOPED_MODELS.includes(model as any)) args = injectTenantContext(args, ['where'], model);
-        return query(args);
-      },
-      async findFirst({ args, query, model }) {
-        if (TENANT_SCOPED_MODELS.includes(model as any)) args = injectTenantContext(args, ['where'], model);
-        return query(args);
-      },
-      async findMany({ args, query, model }) {
-        if (TENANT_SCOPED_MODELS.includes(model as any)) args = injectTenantContext(args, ['where'], model);
-        return query(args);
-      },
-      async update({ args, query, model }) {
-        if (TENANT_SCOPED_MODELS.includes(model as any)) args = injectTenantContext(args, ['where'], model);
-        return query(args);
-      },
-      async updateMany({ args, query, model }) {
-        if (TENANT_SCOPED_MODELS.includes(model as any)) args = injectTenantContext(args, ['where'], model);
-        return query(args);
-      },
-      async delete({ args, query, model }) {
-        if (TENANT_SCOPED_MODELS.includes(model as any)) args = injectTenantContext(args, ['where'], model);
-        return query(args);
-      },
-      async deleteMany({ args, query, model }) {
-        if (TENANT_SCOPED_MODELS.includes(model as any)) args = injectTenantContext(args, ['where'], model);
-        return query(args);
-      },
-      async create({ args, query, model }) {
-        if (TENANT_SCOPED_MODELS.includes(model as any)) args = injectTenantContext(args, ['data'], model);
-        return query(args);
-      },
-      async upsert({ args, query, model }) {
-        if (TENANT_SCOPED_MODELS.includes(model as any)) args = injectTenantContext(args, ['where', 'create', 'update'], model);
-        return query(args);
-      },
-    },
-  },
-});
-
-function injectTenantContext(args: any, paths: string[], model: string): any {
-  const orgId = getCurrentOrgId();
-  if (!orgId) throw new Error('Tenant context missing for scoped query.');
-  
-  // Handle field name inconsistency: Member uses 'orgId', others use 'organizationId'
+/**
+ * Create a tenant isolation extension for a specific model.
+ * Only these models are intercepted - non-scoped models have zero overhead.
+ */
+function createTenantExtensionForModel(model: string) {
   const orgField = model === 'Member' ? 'orgId' : 'organizationId';
 
-  for (const path of paths) {
-    if (path === 'where') { args.where = args.where || {}; args.where[orgField] = orgId; }
-    else if (path === 'data') { args.data = args.data || {}; args.data[orgField] = orgId; }
-    else if (path === 'create') { args.create = args.create || {}; args.create[orgField] = orgId; }
-    else if (path === 'update') { args.update = args.update || {}; args.update[orgField] = orgId; }
-  }
-  return args;
+  return {
+    name: `tenant-isolation-${model.toLowerCase()}`,
+    model: {
+      [model]: {
+        async findUnique({ args, query }) {
+          const orgId = getCurrentOrgId();
+          if (!orgId) throw new Error('Tenant context missing for scoped query.');
+          args.where = { ...args.where, [orgField]: orgId };
+          return query(args);
+        },
+        async findFirst({ args, query }) {
+          const orgId = getCurrentOrgId();
+          if (!orgId) throw new Error('Tenant context missing for scoped query.');
+          args.where = { ...args.where, [orgField]: orgId };
+          return query(args);
+        },
+        async findMany({ args, query }) {
+          const orgId = getCurrentOrgId();
+          if (!orgId) throw new Error('Tenant context missing for scoped query.');
+          args.where = { ...args.where, [orgField]: orgId };
+          return query(args);
+        },
+        async update({ args, query }) {
+          const orgId = getCurrentOrgId();
+          if (!orgId) throw new Error('Tenant context missing for scoped query.');
+          args.where = { ...args.where, [orgField]: orgId };
+          return query(args);
+        },
+        async updateMany({ args, query }) {
+          const orgId = getCurrentOrgId();
+          if (!orgId) throw new Error('Tenant context missing for scoped query.');
+          args.where = { ...args.where, [orgField]: orgId };
+          return query(args);
+        },
+        async delete({ args, query }) {
+          const orgId = getCurrentOrgId();
+          if (!orgId) throw new Error('Tenant context missing for scoped query.');
+          args.where = { ...args.where, [orgField]: orgId };
+          return query(args);
+        },
+        async deleteMany({ args, query }) {
+          const orgId = getCurrentOrgId();
+          if (!orgId) throw new Error('Tenant context missing for scoped query.');
+          args.where = { ...args.where, [orgField]: orgId };
+          return query(args);
+        },
+        async create({ args, query }) {
+          const orgId = getCurrentOrgId();
+          if (!orgId) throw new Error('Tenant context missing for scoped query.');
+          args.data = { ...args.data, [orgField]: orgId };
+          return query(args);
+        },
+        async upsert({ args, query }) {
+          const orgId = getCurrentOrgId();
+          if (!orgId) throw new Error('Tenant context missing for scoped query.');
+          args.where = { ...args.where, [orgField]: orgId };
+          if (args.create) args.create = { ...args.create, [orgField]: orgId };
+          if (args.update) args.update = { ...args.update, [orgField]: orgId };
+          return query(args);
+        },
+      },
+    },
+  };
 }
 
-export const tenantDb = prisma.$extends(tenantExtension);
+// Create extensions only for tenant-scoped models (zero overhead for others)
+const tenantExtensions = TENANT_SCOPED_MODELS.map(createTenantExtensionForModel);
+
+// Compose all extensions into a single tenant-aware Prisma client
+export const tenantDb = prisma.$extends(...tenantExtensions);
 export default tenantDb;
