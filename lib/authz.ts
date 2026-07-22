@@ -1,6 +1,7 @@
-import { prisma } from '@/lib/db';
+import tenantDb from '@/lib/tenant-db';
 import { env } from '@/lib/env';
 import { logger } from '@/lib/logger';
+import { runWithTenant } from './tenant-context';
 
 /**
  * Check if a user has a specific permission in an organization.
@@ -39,11 +40,14 @@ export async function verifySuperAdmin(
       return { authorized: false, error: 'Not the platform organization' };
     }
 
-    const member = await prisma.member.findFirst({
-      where: {
-        userId,
-        organization: { id: platformOrgId },
-      },
+    // Use tenantDb with explicit context for the platform org to satisfy tenant isolation rules
+    const member = await runWithTenant(platformOrgId, async () => {
+      return tenantDb.member.findFirst({
+        where: {
+          userId,
+          organization: { id: platformOrgId },
+        },
+      });
     });
 
     if (!member) {
@@ -85,7 +89,8 @@ export async function getPlatformOrgId(): Promise<string | null> {
     return env.PLATFORM_ORGANIZATION_ID;
   }
   try {
-    const org = await prisma.organization.findFirst({
+    // Organization is not tenant-scoped, so we can query it directly with tenantDb
+    const org = await tenantDb.organization.findFirst({
       where: { name: 'Platform' },
       select: { id: true },
     });

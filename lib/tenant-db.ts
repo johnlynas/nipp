@@ -80,5 +80,12 @@ function createTenantExtensionForModel(model: string) {
 const tenantExtensions = TENANT_SCOPED_MODELS.map(createTenantExtensionForModel);
 
 // Compose all extensions into a single tenant-aware Prisma client
-export const tenantDb = prisma.$extends(...tenantExtensions);
+// Defensive check for test environments where $extends might not be mocked
+let tenantDb = prisma; // Default fallback to raw client if $extends is unavailable
+
+if (typeof prisma.$extends === 'function') {
+  tenantDb = prisma.$extends(...tenantExtensions);
+}
+
+export { tenantDb };
 export default tenantDb;
