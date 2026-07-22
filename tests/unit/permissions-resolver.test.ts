@@ -45,16 +45,14 @@ describe('resolvePermissions', () => {
 
   it('fetches from DB and caches when Redis misses', async () => {
     vi.mocked(redisGet).mockResolvedValue(null);
+    // Mock the single query with nested includes (optimized approach)
     vi.mocked(prisma.member.findFirst).mockResolvedValue({
       id: 'member-1',
       createdAt: new Date(),
       updatedAt: new Date(),
       userId: 'user-1',
       orgId: 'org-1',
-      role: 'Admin',
-    });
-    vi.mocked(prisma.role.findMany).mockResolvedValue([
-      {
+      role: {
         id: 'role-1',
         name: 'Admin',
         createdAt: new Date(),
@@ -70,32 +68,14 @@ describe('resolvePermissions', () => {
           },
         ],
       },
-    ]);
-    vi.mocked(prisma.rolePermission.findMany).mockResolvedValue([
-      {
-        id: 'role-perm-1',
-        createdAt: new Date(),
-        roleId: 'role-1',
-        permissionId: 'perm-1',
-        organizationId: 'test-org-id',
-      },
-    ]);
-    vi.mocked(prisma.permission.findMany).mockResolvedValue([
-      {
-        id: 'perm-1',
-        key: 'properties:view',
-        createdAt: new Date(),
-        updatedAt: new Date(),
-        description: null,
-        action: 'view',
-        resource: 'properties',
-      },
-    ]);
+    });
 
     const result = await resolvePermissions('user-1', 'org-1');
 
     expect(result).toEqual(['properties:view']);
     expect(redisSet).toHaveBeenCalledWith('perm:user-1:org-1', JSON.stringify(['properties:view']), 300);
+    // Verify that role.findMany is NOT called (single query optimization)
+    expect(prisma.role.findMany).not.toHaveBeenCalled();
   });
 });
 

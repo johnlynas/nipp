@@ -26,46 +26,37 @@ export async function resolvePermissions(
       }
     }
 
-    // Fetch from database
-    const member = await prisma.member.findFirst({
+    // Fetch from database with optimized single query approach
+    const memberWithRole = await prisma.member.findFirst({
       where: { userId, orgId },
-      select: { role: true },
+      include: {
+        role: {
+          include: { 
+            permissions: { 
+              include: { permission: true } 
+            }
+          }
+        }
+      }
     });
 
-    if (!member) {
+    if (!memberWithRole || !memberWithRole.role) {
       return [];
     }
 
-    const roles = await prisma.role.findMany({
-      where: {
-        organizationId: orgId,
-        name: member.role,
-      },
-      select: {
-        permissions: {
-          select: {
-            permission: {
-              select: {
-                key: true,
-              },
-            },
-          },
-        },
-      },
-    });
-
-    const permissions: string[] = Array.from(
-      new Set(
-        roles.flatMap((role) =>
-          role.permissions.map((rp) => rp.permission.key)
-        )
-      )
+    // Debug: Log what we got back for troubleshooting
+    const permissions = memberWithRole.role.permissions.map(
+      (rp) => rp.permission.key
     );
 
-    await redisSet(cacheKey, JSON.stringify(permissions), PERMISSION_CACHE_TTL);
+    const uniquePermissions = Array.from(new Set(permissions));
+    
+    await redisSet(cacheKey, JSON.stringify(uniquePermissions), PERMISSION_CACHE_TTL);
 
-    return permissions;
-  } catch {
+    return uniquePermissions;
+  } catch (error) {
+    // Log error for debugging
+    console.error('Permission resolution error:', error);
     return [];
   }
 }
