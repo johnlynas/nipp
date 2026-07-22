@@ -17,6 +17,7 @@ interface HealthData {
   checks: {
     database: HealthCheck;
     cache: HealthCheck;
+    pgbouncer?: HealthCheck & { total_connections?: number };
   };
 }
 
@@ -74,7 +75,7 @@ export default function SystemHealthCard() {
         <span className="text-sm font-mono">Uptime: {formatUptime(Math.floor(health?.uptime || 0))}</span>
       </div>
       
-      <div className="grid grid-cols-2 gap-4">
+      <div className="grid grid-cols-3 gap-4">
         <div>
           <p className="text-xs font-semibold opacity-75">Database</p>
           <p className="font-medium">{health?.checks.database.status}</p>
@@ -94,6 +95,20 @@ export default function SystemHealthCard() {
           )}
           {health?.checks.cache.error && (
             <p className="text-xs text-red-600 mt-1">{health.checks.cache.error}</p>
+          )}
+        </div>
+
+        <div>
+          <p className="text-xs font-semibold opacity-75">Database Connection Pool</p>
+          <p className="font-medium">{health?.checks.pgbouncer?.status || 'skipped'}</p>
+          {health?.checks.pgbouncer?.latency_ms !== undefined && (
+            <p className="text-xs opacity-75">{health.checks.pgbouncer.latency_ms}ms</p>
+          )}
+          {health?.checks.pgbouncer?.total_connections !== undefined && (
+            <p className="text-xs opacity-75">{health.checks.pgbouncer.total_connections} conns</p>
+          )}
+          {health?.checks.pgbouncer?.error && (
+            <p className="text-xs text-red-600 mt-1">{health.checks.pgbouncer.error}</p>
           )}
         </div>
       </div>

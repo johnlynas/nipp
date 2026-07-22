@@ -17,17 +17,23 @@ const logStore: SystemLogEntry[] = [];
 let previousHealthState: {
   database: 'healthy' | 'unhealthy' | null;
   cache: 'healthy' | 'unhealthy' | null;
+  pgbouncer: 'healthy' | 'unhealthy' | null;
 } = {
   database: null,
   cache: null,
+  pgbouncer: null,
 };
 
 export function getPreviousHealthState() {
   return previousHealthState;
 }
 
-export function updateHealthState(database: 'healthy' | 'unhealthy', cache: 'healthy' | 'unhealthy') {
-  previousHealthState = { database, cache };
+export function updateHealthState(
+  database: 'healthy' | 'unhealthy',
+  cache: 'healthy' | 'unhealthy',
+  pgbouncer?: 'healthy' | 'unhealthy'
+) {
+  previousHealthState = { database, cache, pgbouncer: pgbouncer || null };
 }
 
 export function addSystemLog(entry: Omit<SystemLogEntry, 'timestamp'>) {

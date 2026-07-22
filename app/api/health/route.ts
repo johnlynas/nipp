@@ -1,6 +1,7 @@
 import { prisma } from '@/lib/db';
 import { getRedis, forceRedisReconnect } from '@/lib/redis';
 import { addSystemLog, getPreviousHealthState, updateHealthState } from '@/lib/system-logs';
+import { PgBouncerMonitor } from '@/lib/pgbouncer-monitor';
 import { NextResponse } from 'next/server';
 
 export async function GET() {
@@ -94,10 +95,52 @@ export async function GET() {
     }
   }
 
+  // PgBouncer Check (Critical)
+  try {
+    const pgbouncer = new PgBouncerMonitor({
+      host: process.env.PGBOUNCER_HOST || 'localhost',
+      port: parseInt(process.env.PGBOUNCER_PORT || '6432'),
+      user: process.env.PGBOUNCER_USER || 'pgbouncer',
+      password: process.env.PGBOUNCER_PASSWORD || '',
+    });
+
+    const pgbouncerStart = Date.now();
+    await pgbouncer.connect();
+    const health = await pgbouncer.checkHealth();
+    checks.pgbouncer = { 
+      status: health.isHealthy ? 'healthy' : 'unhealthy', 
+      latency_ms: Date.now() - pgbouncerStart,
+      total_connections: health.totalConnections,
+    };
+
+    if (prevState.pgbouncer === 'unhealthy') {
+      addSystemLog({
+        level: 'info',
+        source: 'health-check:pgbouncer',
+        message: 'PgBouncer connectivity restored',
+        details: `PgBouncer is now healthy (latency: ${checks.pgbouncer.latency_ms}ms)`,
+      });
+    }
+  } catch (error) {
+    const errorMessage = error instanceof Error ? error.message : String(error);
+    checks.pgbouncer = { status: 'unhealthy', error: 'PgBouncer connection failed' };
+    overallStatus = 'unhealthy';
+
+    if (prevState.pgbouncer !== 'unhealthy') {
+      addSystemLog({
+        level: 'error',
+        source: 'health-check:pgbouncer',
+        message: 'PgBouncer connectivity check failed',
+        details: errorMessage,
+      });
+    }
+  }
+
   // Update the tracked state
   updateHealthState(
     checks.database.status as 'healthy' | 'unhealthy',
-    checks.cache.status as 'healthy' | 'unhealthy'
+    checks.cache.status as 'healthy' | 'unhealthy',
+    checks.pgbouncer?.status as 'healthy' | 'unhealthy'
   );
 
   const statusCode = overallStatus === 'unhealthy' ? 503 : 200;
