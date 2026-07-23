@@ -30,54 +30,46 @@ The Property NI (nipp) portal is a full-stack, multi-tenant property management 
 
 ## High Level Architecture
 
-The following  diagram illustrates the core components, data flow and security boundaries of the portal
+The following diagram illustrates the core components, data flow and security boundaries of the portal
+
+## High Level Architecture
+
+The following diagram illustrates the core components, data flow, and security boundaries of the portal.
 
 ```mermaid
-graph TB
+flowchart TB
+    %% --- Clients & Entry Points ---
+    User((External Users / Super Admins)) -->|HTTPS Request| Middleware[Next.js Edge<br/>Middleware]
 
-    Client((External Users / Super Admins)) -->|HTTPS Request| Middleware[Next.js Edge Middleware]
-
+    %% --- Security & Routing Layer ---
     subgraph Security_Layer [Security Layer<br/>Edge Runtime]
-        Middleware -->|Session Validation & CSP| AuthM[Auth Guard]
+        Middleware -->|Session Validation & CSP| Authm[Auth Guard<br/>BetterAuth]
     end
 
+    %% --- Application Layer ---
     subgraph App_Layer [Application Layer<br/>Node Runtime]
-        AuthM --> API[API Routes / Server Actions]
+        Authm --> API[API Routes / Actions]
+
         subgraph Business_Logic [Business Logic]
-            API --> Services[Service Layer<br/>Business Logic]
+            API --> Services[Service Layer<br/>Core Logic]
         end
-        %% Client-Side SWR Pattern Note
-        API -.->|REST & SSE Events| ReactApp[React Client<br/>SWR / Next.js]
-        ReactApp -.->|State Management| UI[(Browser State)]
+
+        ReactApp[<b>React Client</b>] -.->|REST & SSE Events| API
+        ReactApp -.->|State Mgmt<br/>SWR/Cache Patterns| Browser[(Browser State)]
     end
 
-    subgraph Data_Persistence [Data Persistence<br/>Database]
-        Services --> DB[(PostgreSQL 16+)]
+    %% --- Data Persistence Layer ---
+    subgraph Data_Layer [Data Persistence<br/>Database]
+        Services --> Postgres[(PostgreSQL 16+<br/>Row Level Security)]
     end
 
-    subgraph Caching_Performance [Caching & Performance<br/>Redis]
-        Services --> Cache[(Redis)]
-        AuthM -.->|Session Caching| AuthCache[(Cookie Cache)]
+    %% --- Performance Caching Layer ---
+    subgraph Cache_Layer [Performance & Caching]
+        Authm -.->|Session / Token<｜><br/>Cache| Cookie[(Cookie Cache)]
     end
 
-    %% Styling (targeting only existing node IDs)
-    style Client fill:#f9f,stroke:#333,stroke-width:2px
-    style Middleware fill:#4D9BFF,color:#fff
-    style Services fill:#028a1b,color:#fff
-    style DB fill:#963D0B,color:#fff
-
-
-
-1. Request Entry: The request hits the Middleware (Edge), which performs a fast session check via encrypted cookies.
-
-2. Context Propagation: The organizationId is extracted from the session and stored in AsyncLocalStorage. This "teleports" the tenant identity through the entire execution chain without manual passing.
-
-3. Tenant-Aware Execution: When the Service Layer calls the database, the Prisma Extension intercepts the call. It reads the ID from context and injects a WHERE organizationId = ... clause.
-
-4. Defense-in-Depth: Even if the application layer fails, PostgreSQL RLS (Row Level Security) provides a final hard-coded barrier at the database engine level.
-
-5. Performance loop: High-frequency authorization checks hit Redis first, ensuring the database is only queried for permissions on cache misses.
-
+    linkStyle default interpolate spline;
+```
 
 ## 🗂️ Project Structure
 
