@@ -34,48 +34,38 @@ The following  diagram illustrates the core components, data flow and security b
 
 ```mermaid
 graph TB
-    %% User & External Interfaces
+
     Client((External Users / Super Admins)) -->|HTTPS Request| Middleware[Next.js Edge Middleware]
 
-    %% Security & Route Protection
-    subgraph "Security Layer (Edge Runtime)"
+    subgraph Security_Layer [Security Layer<br/>Edge Runtime]
         Middleware -->|Session Validation & CSP| AuthM[Auth Guard]
     end
 
-    %% Frontend & Next.js Framework Layer
-    subgraph "Application Layer (Node Runtime)"
+    subgraph App_Layer [Application Layer<br/>Node Runtime]
         AuthM --> API[API Routes / Server Actions]
-        subgraph "Business Logic"
-            API --> Services[[Service Layer<br/>(Business Logic)]]
+        subgraph Business_Logic [Business Logic]
+            API --> Services[Service Layer<br/>Business Logic]
         end
-        
         %% Client-Side SWR Pattern Note
-        API -.->|REST & SSE Events| ReactApp[React Client<br/>(SWR / Next.js)]
+        API -.->|REST & SSE Events| ReactApp[React Client<br/>SWR / Next.js]
         ReactApp -.->|State Management| UI[(Browser State)]
     end
 
-    %% Database & Caching Layer
-    subgraph "Data Persistence (Database)"
+    subgraph Data_Persistence [Data Persistence<br/>Database]
         Services --> DB[(PostgreSQL 16+)]
     end
 
-    subgraph "Caching & Performance (Redis)"
+    subgraph Caching_Performance [Caching & Performance<br/>Redis]
         Services --> Cache[(Redis)]
         AuthM -.->|Session Caching| AuthCache[(Cookie Cache)]
     end
 
-    %% Architectural Relationships (Logical)
-    
+    %% Styling (targeting only existing node IDs)
     style Client fill:#f9f,stroke:#333,stroke-width:2px
-    style Edge fill:#4D9BFF,color:#fff
-    style NodeJS fill:#028a1b,color:#fff
-    style Data fill:#963D0B,color:#fff
-    
-    classDef ClientClass stroke-dasharray: 5 5;
-    classDef DatabaseClass fill:#e8f4f8,stroke:#333,stroke-width:2px;
+    style Middleware fill:#4D9BFF,color:#fff
+    style Services fill:#028a1b,color:#fff
+    style DB fill:#963D0B,color:#fff
 
-    class Client ClientClass;
-    style DB DatabaseClass;
 
 
 1. Request Entry: The request hits the Middleware (Edge), which performs a fast session check via encrypted cookies.
