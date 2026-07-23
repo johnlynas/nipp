@@ -1,5 +1,5 @@
 /**
- * Integration test: Organization API / Database Integrity
+ * Integration test: Organization API / Update Integrity
  * Verifies that organization updates (name, slug) are correctly applied.
  */
 
@@ -10,18 +10,19 @@ describe('Organization API / Update Integrity', () => {
   let testOrgId: string;
 
   afterAll(async () => {
-    // Cleanup test orgs by slug
+    // Cleanup test orgs by slug to ensure no leakage
     await prisma.organization.deleteMany({
-      where: { slug: { in: ['test-api-update-org', 'test-api-slug-org'] } },
+      where: { slug: { in: ['test-lifecycle-org', 'test-invalid-transition', `test-api-update-${Date.now()}`, `test-api-slug-${Date.now()}`] } },
     });
   });
 
   it('should allow updating organization name and slug', async () => {
-    // 1. Setup: Create an initial organization
+    // 1. Setup: Create an initial organization with a unique slug
+    const uniqueSlug = `test-api-update-${Date.now()}`;
     const org = await prisma.organization.create({
       data: {
         name: 'Original Name',
-        slug: 'test-api-update-org',
+        slug: uniqueSlug,
         status: 'ACTIVE',
       },
     });
@@ -29,13 +30,13 @@ describe('Organization API / Update Integrity', () => {
 
     // 2. Execution: Simulate the PATCH logic
     const updatedName = 'New Improved Name';
-    const updatedSlug = 'new-improved-slug';
+    const updatedSlug = `new-improved-slug-${Date.now()}`;
 
     const updatedOrg = await prisma.organization.update({
       where: { id: testOrgId },
       data: { 
         name: updatedName,
-        slug: updatedSlug 
+        slug: updatedSlug
       },
     });
 
@@ -52,11 +53,12 @@ describe('Organization API / Update Integrity', () => {
   });
 
   it('should allow partial updates (name only)', async () => {
-    // 1. Setup: Create a second org
+    // 1. Setup: Create a second org with its own unique slug
+    const uniqueSlug = `test-api-partial-${Date.now()}`;
     const org = await prisma.organization.create({
       data: {
         name: 'Partial Update Org',
-        slug: 'test-api-slug-org',
+        slug: uniqueSlug,
         status: 'ACTIVE',
       },
     });
@@ -70,13 +72,13 @@ describe('Organization API / Update Integrity', () => {
 
     // 3. Verification: Name changed, but slug remains the same
     expect(updatedOrg.name).toBe(newName);
-    expect(updatedOrg.slug).toBe('test-api-slug-org');
+    expect(updatedOrg.slug).toBe(uniqueSlug);
   });
 
   it('should fail to update a non-existent organization', async () => {
     const fakeId = '00000000-0000-0000-0000-000000000000';
     
-    // We expect Prisma to throw a P2025 error (Record not found)
+    // We expect Prisma to throw an error for non-existent record
     await expect(
       prisma.organization.update({
         where: { id: fakeId },
