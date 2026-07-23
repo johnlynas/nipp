@@ -1,0 +1,29 @@
+import { useQuery } from '@tanstack/react-query';
+import { orgKeys } from './org.keys';
+
+interface Organization {
+  id: string;
+  name: string;
+  slug: string;
+  status: string;
+  metadata?: any;
+  createdAt: string;
+  updatedAt: string;
+}
+
+async function fetchOrgDetails(id: string): Promise<Organization> {
+  const response = await fetch(`/api/admin/organizations/${id}`);
+  if (!response.ok) {
+    throw new Error('Failed to fetch organization details');
+  }
+  return response.json();
+}
+
+export const useOrganization = (id: string) => {
+  return useQuery({
+    queryKey: orgKeys.details(id),
+    queryFn: () => fetchOrgDetails(id),
+    staleTime: 1000 * 60 * 5, // 5 minutes
+    gcTime: 1000 * 60 * 30,   // 30 minutes
+  });
+};
