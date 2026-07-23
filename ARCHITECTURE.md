@@ -27,6 +27,68 @@ The Property NI (nipp) portal is a full-stack, multi-tenant property management 
 - **Linting:** ESLint 9 (flat config via `eslint-config-next`)
 - **Formatting:** Prettier v3.4
 
+
+## High Level Architecture
+
+The following  diagram illustrates the core components, data flow and security boundaries of the portal
+
+```mermaid
+graph TB
+    %% User & External Interfaces
+    Client((External Users / Super Admins)) -->|HTTPS Request| Middleware[Next.js Edge Middleware]
+
+    %% Security & Route Protection
+    subgraph "Security Layer (Edge Runtime)"
+        Middleware -->|Session Validation & CSP| AuthM[Auth Guard]
+    end
+
+    %% Frontend & Next.js Framework Layer
+    subgraph "Application Layer (Node Runtime)"
+        AuthM --> API[API Routes / Server Actions]
+        subgraph "Business Logic"
+            API --> Services[[Service Layer<br/>(Business Logic)]]
+        end
+        
+        %% Client-Side SWR Pattern Note
+        API -.->|REST & SSE Events| ReactApp[React Client<br/>(SWR / Next.js)]
+        ReactApp -.->|State Management| UI[(Browser State)]
+    end
+
+    %% Database & Caching Layer
+    subgraph "Data Persistence (Database)"
+        Services --> DB[(PostgreSQL 16+)]
+    end
+
+    subgraph "Caching & Performance (Redis)"
+        Services --> Cache[(Redis)]
+        AuthM -.->|Session Caching| AuthCache[(Cookie Cache)]
+    end
+
+    %% Architectural Relationships (Logical)
+    
+    style Client fill:#f9f,stroke:#333,stroke-width:2px
+    style Edge fill:#4D9BFF,color:#fff
+    style NodeJS fill:#028a1b,color:#fff
+    style Data fill:#963D0B,color:#fff
+    
+    classDef ClientClass stroke-dasharray: 5 5;
+    classDef DatabaseClass fill:#e8f4f8,stroke:#333,stroke-width:2px;
+
+    class Client ClientClass;
+    style DB DatabaseClass;
+
+
+1. Request Entry: The request hits the Middleware (Edge), which performs a fast session check via encrypted cookies.
+
+2. Context Propagation: The organizationId is extracted from the session and stored in AsyncLocalStorage. This "teleports" the tenant identity through the entire execution chain without manual passing.
+
+3. Tenant-Aware Execution: When the Service Layer calls the database, the Prisma Extension intercepts the call. It reads the ID from context and injects a WHERE organizationId = ... clause.
+
+4. Defense-in-Depth: Even if the application layer fails, PostgreSQL RLS (Row Level Security) provides a final hard-coded barrier at the database engine level.
+
+5. Performance loop: High-frequency authorization checks hit Redis first, ensuring the database is only queried for permissions on cache misses.
+
+
 ## 🗂️ Project Structure
 
 ```
@@ -382,6 +444,27 @@ The `/api/health` endpoint provides standardized health monitoring for productio
 - **Uptime Monitoring:** External services can verify application availability and dependency health
 - **Alerting:** Set up alerts for HTTP 503 responses or degraded status
 
+## 📡 Real-Time & High Volatility Architecture
+
+The system handles high-frequency data (like Notifications) using a **Hybrid SSE-to-Cache Injection** pattern. This avoids the "Loading Spinner Fatigue" and heavy server load associated with standard polling or constant WebSocket connections.
+
+### The "Push-to-Cache" Pattern
+Instead of the UI components listening to a socket directly, the **React Query Cache** acts as the single source of truth.
+
+1.  **The Stream (Server):** A dedicated SSE (Server-Sent Events) endpoint (`/api/notifications/stream`) maintains a long-lived connection. It pushes lightweight JSON events to the client.
+2.  **The Bridge (Client Hook):** The `useNotifications` hook manages the lifecycle of the `EventSource`.
+3.  **The Injection (Cache):** When a new event arrives, the hook uses `queryClient.setQueryData` to **manually inject** the new item into the top of the existing list in the cache.
+4.  **The UI (Reaction):** Because the component is subscribed to the React Query key, it re-renders instantly when the cache is modified.
+
+### Intelligent Polling (The Safety Net)
+To ensure eventual consistency even if a user's internet drops momentarily and misses an SSE event, we implement **Context-Aware Polling**:
+- **Active State:** When the browser tab is in focus, we run a slow poll (e.g., 60s) as a fallback.
+- **Background State:** When the tab is blurred, polling is paused entirely to conserve battery and server bandwidth.
+- **Re-sync:** Upon returning to the tab (`window.onfocus`), a fresh fetch is triggered to reconcile any missed data.
+
+
+
+
 ## 🔮 Future Considerations
 
 ### Scalability
@@ -395,7 +478,8 @@ The `/api/health` endpoint provides standardized health monitoring for productio
 - **Multi-Region Support:** Prisma Accelerate integration for global read replicas and reduced latency.
 - **Advanced RBAC:** Dynamic permission evaluation (e.g., `properties:view:own` vs `properties:view:all`) with context-aware middleware.
 
+
 ---
 
-*Last Updated: 13/0-7/26 
+*Last Updated: 23/07/26
 *Maintained by: Property NI Development Team*

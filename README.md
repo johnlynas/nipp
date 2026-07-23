@@ -374,6 +374,14 @@ When creating a new organization-scoped table:
      USING ("organizationId"::text = current_setting('app.current_org_id', true));
    ```
 
+## ⚡ Real-Time Engine (SSE + React Query)
+Unlike traditional apps that poll the server every few seconds, Property NI uses a **Hybrid Real-Time Engine**:
+- **Zero-Latency Notifications:** Using Server-Sent Events (SSE), notifications are "pushed" from the server and injected directly into your local cache. This means new alerts appear in your UI instantly without a page refresh.
+- **Resource-Aware Polling:** Our system is "browser-aware"—it polls for updates when you are active and automatically goes to sleep when your tab is in the background, saving device battery and server CPU.
+
+
+
+
 ## Health Check Endpoint
 
 The application includes a `/api/health` endpoint for use by load balancers, container orchestrators (Docker/Kubernetes), and uptime monitoring services.
