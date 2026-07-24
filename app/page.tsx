@@ -1,66 +1,49 @@
-'use client';
+import { auth } from '@/lib/auth';
+import { headers } from 'next/headers';
+import { redirect } from 'next/navigation';
+import { prisma } from '@/lib/db';
+import { LogoutButton } from '@/components/auth/LogoutButton'; // ✅ Import the new button
 
-import { useEffect } from 'react';
-import { useRouter } from 'next/navigation';
-import { signOutUser } from '@/lib/auth-client';
-import { useIsSuperAdmin } from '@/hooks/usePermission';
+/**
+ * Root Page Server Component.
+ * Acts as a secure gatekeeper. Runs on the server BEFORE any UI is rendered.
+ */
+export default async function HomePage() {
+  // 1. SECURELY fetch the session to get the user ID and validate the cookie.
+  const session = await auth.api.getSession({
+    headers: await headers(),
+  });
 
-export default function Home() {
-  const router = useRouter();
-  const isSuperAdmin = useIsSuperAdmin();
-
-  useEffect(() => {
-    if (isSuperAdmin) {
-      router.replace('/admin/organizations');
-    }
-  }, [isSuperAdmin, router]);
-
-  if (isSuperAdmin) {
-    return null; // Redirecting to /admin/organizations
+  // 2. If no session, redirect to login.
+  if (!session) {
+    redirect('/login');
   }
 
-  return (
-    <main className="min-h-screen bg-[#f8f9fa] p-8">
-      <div className="max-w-2xl mx-auto">
-        <h1 className="text-3xl font-bold text-[#1e3a5f] mb-4">
-          Property NI Multi-Tenant Portal
-        </h1>
-        <p className="text-[#6c757d] mb-8">
-          Welcome — your session is active.
-        </p>
+  // 3. THE CRITICAL CHECK: Query the database directly for the user's role.
+  const user = await prisma.user.findUnique({
+    where: { id: session.user.id },
+    select: { role: true },
+  });
 
-        <LogoutButton />
-      </div>
-    </main>
-  );
-}
-
-function LogoutButton() {
-  async function handleLogout() {
-    const result = await signOutUser();
-
-    if (result.error) {
-      console.error('Logout failed:', result.error);
-      return;
-    }
-
-    // Force full page reload to login (bypasses Next.js routing + ensures cookies are respected)
-    window.location.replace('/login?t=' + Date.now());
+  // 4. If Super Admin, redirect immediately via HTTP 307/308.
+  if (user?.role === 'super_admin') {
+    redirect('/admin/organizations');
   }
 
+  // 5. If we reach here, the user is a standard Tenant User.
+  // Render the tenant dashboard securely.
   return (
-    <button
-      onClick={handleLogout}
-      className="px-6 py-3 rounded-pill font-semibold text-white transition cursor-pointer"
-      style={{ background: '#1e3a5f' }}
-      onMouseEnter={(e) => {
-        (e.currentTarget as HTMLButtonElement).style.background = '#152940';
-      }}
-      onMouseLeave={(e) => {
-        (e.currentTarget as HTMLButtonElement).style.background = '#1e3a5f';
-      }}
-    >
-      Logout
-    </button>
+    <div className="p-8">
+      <h1 className="text-2xl font-bold" style={{ color: '#1B2A4A' }}>
+        Welcome to your Tenant Dashboard
+      </h1>
+      <p className="mt-2 text-gray-600">
+        You are logged in as a tenant user.
+      </p>
+      
+      {/* ✅ Render the Client Component here */}
+      <LogoutButton />
+      
+    </div>
   );
 }

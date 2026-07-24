@@ -1,11 +1,9 @@
-'use client';
-
 import { useSession } from '@/lib/auth-client';
 import { useEffect, useState } from 'react';
 
 export function usePermission(permission: string): boolean {
   const { data: session } = useSession();
-  const [hasPermission, setHasPermission] = useState(false);
+  const [hasPermission, setHasPermission] = useState<boolean | null>(null);
   const [isLoading, setIsLoading] = useState(true);
 
   useEffect(() => {
@@ -33,12 +31,12 @@ export function usePermission(permission: string): boolean {
   }, [session, permission]);
 
   if (isLoading) return false;
-  return hasPermission;
+  return hasPermission ?? false; // ✅ Fixes TS error while keeping null init
 }
 
 export function useAnyPermission(permissions: string[]): boolean {
   const { data: session } = useSession();
-  const [hasPermission, setHasPermission] = useState(false);
+  const [hasPermission, setHasPermission] = useState<boolean | null>(null);
   const [isLoading, setIsLoading] = useState(true);
 
   useEffect(() => {
@@ -66,40 +64,29 @@ export function useAnyPermission(permissions: string[]): boolean {
   }, [session, permissions]);
 
   if (isLoading) return false;
-  return hasPermission;
+  return hasPermission ?? false; // ✅ Fixes TS error
 }
 
-export function useIsSuperAdmin(): boolean {
-  const { data: session } = useSession();
-  const [isSuperAdmin, setIsSuperAdmin] = useState(false);
-  const [isLoading, setIsLoading] = useState(true);
+export function useIsSuperAdmin(): boolean | null {
+  // ✅ Correctly typed to return boolean | null
+  const [isSuperAdmin, setIsSuperAdmin] = useState<boolean | null>(null);
 
   useEffect(() => {
-    if (!session) {
-      setIsLoading(false);
-      setIsSuperAdmin(false);
-      return;
+    async function checkPermissions() {
+      try {
+        const res = await fetch('/api/auth/permissions');
+        const data = await res.json();
+        setIsSuperAdmin(data.isSuperAdmin === true);
+      } catch (error) {
+        console.error('Failed to check super admin status:', error);
+        setIsSuperAdmin(false);
+      }
     }
 
-    if ((session?.user as any)?.isSuperAdmin !== undefined) {
-      setIsSuperAdmin((session.user as any).isSuperAdmin);
-      setIsLoading(false);
-    } else {
-      fetch('/api/auth/permissions')
-        .then(res => res.json())
-        .then(data => {
-          setIsSuperAdmin(data.isSuperAdmin || false);
-          setIsLoading(false);
-        })
-        .catch(() => {
-          setIsSuperAdmin(false);
-          setIsLoading(false);
-        });
-    }
-  }, [session]);
+    checkPermissions();
+  }, []);
 
-  if (isLoading) return false;
-  return isSuperAdmin;
+  return isSuperAdmin; // ✅ Returns null initially, preventing the flash
 }
 
 /**
@@ -114,10 +101,16 @@ export function useHasPermission(permission: string): boolean {
  */
 export function useAllPermissions(permissions: string[]): boolean {
   const { data: session } = useSession();
-  const [hasPermission, setHasPermission] = useState(false);
+  const [hasPermission, setHasPermission] = useState<boolean | null>(null);
   const [isLoading, setIsLoading] = useState(true);
 
   useEffect(() => {
+    if (!session) {
+      setIsLoading(false);
+      setHasPermission(false);
+      return;
+    }
+
     if ((session?.user as any)?.isSuperAdmin) {
       setHasPermission(true);
       setIsLoading(false);
@@ -127,7 +120,7 @@ export function useAllPermissions(permissions: string[]): boolean {
     if ((session?.user as any)?.permissions) {
       setHasPermission(permissions.every((p) => (session.user as any).permissions.includes(p)));
       setIsLoading(false);
-    } else if (session) {
+    } else {
       fetch('/api/auth/permissions')
         .then(res => res.json())
         .then(data => {
@@ -142,5 +135,5 @@ export function useAllPermissions(permissions: string[]): boolean {
   }, [session, permissions]);
 
   if (isLoading) return false;
-  return hasPermission;
+  return hasPermission ?? false; // ✅ Fixes TS error
 }
