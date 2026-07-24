@@ -150,9 +150,14 @@ export function requireNonPlatformOrgRoute() {
       return handler(req, ...args);
     }
 
-    // No org context — skip enforcement
+    // SECURITY (S6): No org context on a mutation — deny instead of passing through.
+    // Previously this returned handler(req) which allowed mutations to execute without
+    // any org-level authorization when the caller omitted the org context.
     if (!orgId) {
-      return handler(req, ...args);
+      return NextResponse.json(
+        { error: 'Organization context required' },
+        { status: 400 }
+      );
     }
 
     // Check if this is the Platform Organization

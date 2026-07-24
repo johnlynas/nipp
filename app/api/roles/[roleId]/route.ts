@@ -11,6 +11,8 @@ import { NextRequest, NextResponse } from 'next/server';
 import { auth } from '@/lib/auth';
 import prisma from '@/lib/db';
 import { recordAuditLog } from '@/lib/audit-log';
+import { getClientIp } from '@/lib/ip';
+import { isSameSiteRequest } from '@/lib/csrf';
 
 export const runtime = 'nodejs';
 
@@ -18,6 +20,14 @@ export async function DELETE(
   request: NextRequest,
   { params }: { params: Promise<{ roleId: string }> }
 ) {
+  // SECURITY (S8): Validate CSRF for state-changing requests
+  if (!isSameSiteRequest(request.method, request.headers)) {
+    return NextResponse.json(
+      { error: 'Forbidden: cross-site request blocked' },
+      { status: 403 }
+    );
+  }
+
   const session = await auth.api.getSession({ headers: request.headers });
 
   if (!session?.user) {
@@ -107,7 +117,7 @@ export async function DELETE(
     resourceType: 'Role',
     resourceId: roleId,
     organizationId: role.organizationId,
-    ipAddress: request.headers.get('x-forwarded-for') || 'unknown',
+    ipAddress: getClientIp(request.headers.get('x-forwarded-for')),
     userAgent: request.headers.get('user-agent') || 'unknown',
     success: true,
     metadata: { name: role.name },

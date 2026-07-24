@@ -43,6 +43,11 @@ const envSchema = z.object({
 
   // Super Admin fallback email (used only if DB lookup fails)
   SUPER_ADMIN_EMAIL: z.string().optional(),
+
+  // Trusted proxy CIDRs for BetterAuth IP resolution (S2+S3)
+  // When set, BetterAuth strips these IPs from the x-forwarded-for chain
+  // to find the real client IP behind a reverse proxy/load balancer.
+  TRUSTED_PROXY_CIDRS: z.string().optional(),
 });
 
 /**

@@ -9,10 +9,20 @@ import { NextRequest, NextResponse } from 'next/server';
 import { auth } from '@/lib/auth';
 import prisma from '@/lib/db';
 import { recordAuditLog } from '@/lib/audit-log';
+import { getClientIp } from '@/lib/ip';
+import { isSameSiteRequest } from '@/lib/csrf';
 
 export const runtime = 'nodejs';
 
 export async function POST(req: NextRequest) {
+  // SECURITY (S8): Validate CSRF for state-changing requests
+  if (!isSameSiteRequest(req.method, req.headers)) {
+    return NextResponse.json(
+      { error: 'Forbidden: cross-site request blocked' },
+      { status: 403 }
+    );
+  }
+
   const session = await auth.api.getSession({ headers: req.headers });
 
   if (!session?.user) {
@@ -91,7 +101,7 @@ export async function POST(req: NextRequest) {
     resourceType: 'Role',
     resourceId: role.id,
     organizationId,
-    ipAddress: req.headers.get('x-forwarded-for') || 'unknown',
+    ipAddress: getClientIp(req.headers.get('x-forwarded-for')),
     userAgent: req.headers.get('user-agent') || 'unknown',
     success: true,
     metadata: { name },

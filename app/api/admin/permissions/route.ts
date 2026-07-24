@@ -15,6 +15,8 @@ import { prisma } from '@/lib/db';
 import { setRLSContext } from '@/lib/rls';
 import { env } from '@/lib/env';
 import { logger } from '@/lib/logger';
+import { getClientIp } from '@/lib/ip';
+import { isSameSiteRequest } from '@/lib/csrf';
 
 export const runtime = 'nodejs';
 
@@ -67,6 +69,14 @@ export async function GET(request: NextRequest) {
 
 export async function POST(request: NextRequest) {
   try {
+    // SECURITY (S8): Validate CSRF for state-changing requests
+    if (!isSameSiteRequest(request.method, request.headers)) {
+      return NextResponse.json(
+        { error: 'Forbidden: cross-site request blocked' },
+        { status: 403 }
+      );
+    }
+
     const authResult = await requireSuperAdmin(request.headers);
     if (!authResult.authorized) {
       return NextResponse.json({ error: authResult.error || 'Unauthorized' }, { status: authResult.status });
@@ -115,6 +125,14 @@ export async function PATCH(
   { params }: { params: Promise<{ id: string }> }
 ) {
   try {
+    // SECURITY (S8): Validate CSRF for state-changing requests
+    if (!isSameSiteRequest(request.method, request.headers)) {
+      return NextResponse.json(
+        { error: 'Forbidden: cross-site request blocked' },
+        { status: 403 }
+      );
+    }
+
     const authResult = await requireSuperAdmin(request.headers);
     if (!authResult.authorized) {
       return NextResponse.json({ error: authResult.error || 'Unauthorized' }, { status: authResult.status });
@@ -149,7 +167,7 @@ export async function PATCH(
       resourceType: 'Permission',
       resourceId: permission.id,
       organizationId: null,
-      ipAddress: request.headers.get('x-forwarded-for') || 'unknown',
+      ipAddress: getClientIp(request.headers.get('x-forwarded-for')),
       userAgent: request.headers.get('user-agent') || 'unknown',
       success: true,
       metadata: { key: permission.key },
@@ -169,6 +187,14 @@ export async function DELETE(
   { params }: { params: Promise<{ id: string }> }
 ) {
   try {
+    // SECURITY (S8): Validate CSRF for state-changing requests
+    if (!isSameSiteRequest(request.method, request.headers)) {
+      return NextResponse.json(
+        { error: 'Forbidden: cross-site request blocked' },
+        { status: 403 }
+      );
+    }
+
     const authResult = await requireSuperAdmin(request.headers);
     if (!authResult.authorized) {
       return NextResponse.json({ error: authResult.error || 'Unauthorized' }, { status: authResult.status });
@@ -202,7 +228,7 @@ export async function DELETE(
       resourceType: 'Permission',
       resourceId: id,
       organizationId: null,
-      ipAddress: request.headers.get('x-forwarded-for') || 'unknown',
+      ipAddress: getClientIp(request.headers.get('x-forwarded-for')),
       userAgent: request.headers.get('user-agent') || 'unknown',
       success: true,
       metadata: { key: permission.key },

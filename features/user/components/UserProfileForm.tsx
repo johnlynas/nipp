@@ -15,7 +15,7 @@ export const UserProfileForm = ({ userId }: UserProfileFormProps) => {
   const { data: settings, isLoading: isSettingsLoading } = useUserSettings(userId);
 
   // Mutation Hooks
-  const { mutate: updateProfile, isPending: isUpdatingProfile } than useUpdateUserProfile(userId);
+  const { mutate: updateProfile, isPending: isUpdatingProfile } = useUpdateUserProfile(userId);
   const { mutate: updateSettings, isPending: isUpdatingSettings } = useUpdateUserSettings(userId);
 
   // Local Form State for Profile
@@ -127,7 +127,7 @@ export const UserProfileForm = ({ userId }: UserProfileFormProps) => {
       {/* Settings Section */}
       <section className="bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden">
         <div className="px-6 py-4 border-b border-gray-100">
-          <h2 className { "text-lg font-semibold text-gray-800" }>Preferences</h2>
+          <h2 className="text-lg font-semibold text-gray-800">Preferences</h2>
         </div>
         
         <div className="p-6 space-y-6">
