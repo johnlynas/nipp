@@ -8,8 +8,7 @@
  */
 
 import { NextRequest, NextResponse } from 'next/server';
-import globalDb from '@/lib/global-db';
-import { requireSuperAdmin } from '@/lib/require-super-admin';
+import { requireSuperAdmin, enterSuperAdminContext } from '@/lib/require-super-admin';
 import { recordAuditLog } from '@/lib/audit-log';
 import { prisma } from '@/lib/db';
 import { setRLSContext } from '@/lib/rls';
@@ -20,15 +19,29 @@ import { isSameSiteRequest } from '@/lib/csrf';
 
 export const runtime = 'nodejs';
 
+// ---------------------------------------------------------------------------
+// Helper: get the global (unscoped) Prisma client via runtime guard.
+// SECURITY (S7): This throws if called outside a super-admin context.
+// ---------------------------------------------------------------------------
+
+async function getGlobalDb() {
+  const { getGlobalDb: g } = await import('@/lib/global-db-guard');
+  return g();
+}
+
+// ---------------------------------------------------------------------------
+// GET — List all permissions (super admin)
+// ---------------------------------------------------------------------------
+
 export async function GET(request: NextRequest) {
   try {
-    const authResult = await requireSuperAdmin(request.headers);
+    const authResult = await requireSuperAdmin();
     if (!authResult.authorized) {
       return NextResponse.json({ error: authResult.error || 'Unauthorized' }, { status: authResult.status });
     }
 
-    const session = authResult.session;
-    const orgId = session.session.activeOrganizationId || env.PLATFORM_ORGANIZATION_ID!;
+    const session = authResult.session!;
+    const orgId = (session as any).session?.activeOrganizationId || env.PLATFORM_ORGANIZATION_ID!;
 
     try {
       await setRLSContext(session.user.id, orgId);
@@ -67,6 +80,10 @@ export async function GET(request: NextRequest) {
   }
 }
 
+// ---------------------------------------------------------------------------
+// POST — Create permission (super admin)
+// ---------------------------------------------------------------------------
+
 export async function POST(request: NextRequest) {
   try {
     // SECURITY (S8): Validate CSRF for state-changing requests
@@ -77,13 +94,16 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    const authResult = await requireSuperAdmin(request.headers);
+    const authResult = await requireSuperAdmin();
     if (!authResult.authorized) {
       return NextResponse.json({ error: authResult.error || 'Unauthorized' }, { status: authResult.status });
     }
 
-    const session = authResult.session;
-    const orgId = session.session.activeOrganizationId || env.PLATFORM_ORGANIZATION_ID!;
+    // SECURITY (S7): Enter super-admin context for globalDb access
+    await enterSuperAdminContext();
+
+    const session = authResult.session!;
+    const orgId = (session as any).session?.activeOrganizationId || env.PLATFORM_ORGANIZATION_ID!;
 
     try {
       await setRLSContext(session.user.id, orgId);
@@ -120,6 +140,10 @@ export async function POST(request: NextRequest) {
   }
 }
 
+// ---------------------------------------------------------------------------
+// PATCH — Update permission (super admin)
+// ---------------------------------------------------------------------------
+
 export async function PATCH(
   request: NextRequest,
   { params }: { params: Promise<{ id: string }> }
@@ -133,14 +157,17 @@ export async function PATCH(
       );
     }
 
-    const authResult = await requireSuperAdmin(request.headers);
+    const authResult = await requireSuperAdmin();
     if (!authResult.authorized) {
       return NextResponse.json({ error: authResult.error || 'Unauthorized' }, { status: authResult.status });
     }
 
-    const session = authResult.session;
+    // SECURITY (S7): Enter super-admin context for globalDb access
+    await enterSuperAdminContext();
+
+    const session = authResult.session!;
     const { id } = await params;
-    
+
     let body;
     try {
       body = await request.json();
@@ -155,14 +182,15 @@ export async function PATCH(
       return NextResponse.json({ error: 'Provide description or key to update' }, { status: 400 });
     }
 
-    const permission = await globalDb.permission.update({
+    const db = await getGlobalDb();
+    const permission = await db.permission.update({
       where: { id },
       data: { ...(description && { description }), ...(key && { key }) },
     });
 
     await recordAuditLog({
-      userId: session?.user?.id,
-      userName: session?.user?.name,
+      userId: session.user.id,
+      userName: session.user.name,
       action: 'permission.updated',
       resourceType: 'Permission',
       resourceId: permission.id,
@@ -182,6 +210,10 @@ export async function PATCH(
   }
 }
 
+// ---------------------------------------------------------------------------
+// DELETE — Delete permission (super admin)
+// ---------------------------------------------------------------------------
+
 export async function DELETE(
   request: NextRequest,
   { params }: { params: Promise<{ id: string }> }
@@ -195,20 +227,24 @@ export async function DELETE(
       );
     }
 
-    const authResult = await requireSuperAdmin(request.headers);
+    const authResult = await requireSuperAdmin();
     if (!authResult.authorized) {
       return NextResponse.json({ error: authResult.error || 'Unauthorized' }, { status: authResult.status });
     }
 
-    const session = authResult.session;
+    // SECURITY (S7): Enter super-admin context for globalDb access
+    await enterSuperAdminContext();
+
+    const session = authResult.session!;
     const { id } = await params;
 
-    const permission = await globalDb.permission.findUnique({ where: { id } });
+    const db = await getGlobalDb();
+    const permission = await db.permission.findUnique({ where: { id } });
     if (!permission) {
       return NextResponse.json({ error: 'Permission not found' }, { status: 404 });
     }
 
-    const usageCount = await globalDb.rolePermission.count({
+    const usageCount = await db.rolePermission.count({
       where: { permissionId: id },
     });
 
@@ -219,11 +255,11 @@ export async function DELETE(
       );
     }
 
-    await globalDb.permission.delete({ where: { id } });
+    await db.permission.delete({ where: { id } });
 
     await recordAuditLog({
-      userId: session?.user?.id,
-      userName: session?.user?.name,
+      userId: session.user.id,
+      userName: session.user.name,
       action: 'permission.deleted',
       resourceType: 'Permission',
       resourceId: id,

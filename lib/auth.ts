@@ -30,9 +30,15 @@ export const auth = betterAuth({
       // only when no proxies are in use).
       // trustedProxies: ['10.0.0.0/8', '172.16.0.0/12'],
     },
-    // SECURITY: Force Secure cookie attribute in all environments (including dev).
-    // Ensures cookies are never sent over plain HTTP, even during local development.
+    // SECURITY (S11): Force Secure cookie attribute + SameSite=Lax for all cookies.
+    // useSecureCookies: true ensures the Secure flag is set even in dev (localhost).
+    // defaultCookieAttributes.sameSite: 'Lax' is the CSRF-safe default — cookies are
+    // sent on top-level GET navigations (e.g., following a link) but blocked on
+    // cross-site POST/PUT/PATCH/DELETE requests.
     useSecureCookies: true,
+    defaultCookieAttributes: {
+      sameSite: 'lax',
+    },
   },
 
   emailAndPassword: {

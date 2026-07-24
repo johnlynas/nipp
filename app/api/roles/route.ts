@@ -14,6 +14,10 @@ import { isSameSiteRequest } from '@/lib/csrf';
 
 export const runtime = 'nodejs';
 
+// ---------------------------------------------------------------------------
+// POST — Create role (requires roles:create)
+// ---------------------------------------------------------------------------
+
 export async function POST(req: NextRequest) {
   // SECURITY (S8): Validate CSRF for state-changing requests
   if (!isSameSiteRequest(req.method, req.headers)) {
@@ -43,6 +47,15 @@ export async function POST(req: NextRequest) {
     );
   }
 
+  // SECURITY (S4): Validate that the role name corresponds to an existing Role
+  const { isValidRoleName } = await import('@/lib/roles/validation');
+  if (await isValidRoleName(name, organizationId)) {
+    return NextResponse.json(
+      { error: 'A role with this name already exists in this organization' },
+      { status: 409 }
+    );
+  }
+
   // Verify the user is a member of this organization and get their role name
   const membership = await prisma.member.findFirst({
     where: {
@@ -59,24 +72,13 @@ export async function POST(req: NextRequest) {
     );
   }
 
-  // Check for roles:create permission by querying the role with this name
-  const userRoles = await prisma.role.findMany({
-    where: {
-      organizationId,
-      name: membership.role, // Member.role is a string matching Role.name
-    },
-    select: {
-      permissions: {
-        select: { permission: { select: { key: true } } },
-      },
-    },
-  });
+  // PERFORMANCE (P1): Use cached resolvePermissions() instead of 3 sequential DB queries.
+  // Previously this did: (1) find member, (2) find roles by name, (3) extract permissions.
+  // Now it reuses the Redis-cached permission resolution from lib/permissions/resolver.ts.
+  const { resolvePermissions } = await import('@/lib/permissions/resolver');
+  const userPermissions = await resolvePermissions(session.user.id, organizationId);
 
-  const userPermissions = new Set(
-    userRoles.flatMap((r) => r.permissions.map((rp) => rp.permission.key))
-  );
-
-  if (!userPermissions.has('roles:create')) {
+  if (!userPermissions.includes('roles:create')) {
     return NextResponse.json(
       { error: 'Forbidden: insufficient permissions' },
       { status: 403 }

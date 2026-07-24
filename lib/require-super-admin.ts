@@ -38,3 +38,12 @@ export async function requireSuperAdmin() {
 
   return { session, authorized: true, status: 200 };
 }
+
+/**
+ * Set the super-admin context for routes that use requireSuperAdmin() and then
+ * call getGlobalDb() directly (instead of withSuperAdmin()).
+ */
+export async function enterSuperAdminContext(): Promise<void> {
+  const { setSuperAdminContext } = await import('@/lib/global-db-guard');
+  setSuperAdminContext();
+}

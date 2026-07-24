@@ -11,6 +11,10 @@ import prisma from '@/lib/db';
 
 export const runtime = 'nodejs';
 
+// ---------------------------------------------------------------------------
+// POST — Assign permissions to role (requires roles:update)
+// ---------------------------------------------------------------------------
+
 export async function POST(
   req: NextRequest,
   { params }: { params: Promise<{ roleId: string }> }
@@ -55,24 +59,11 @@ export async function POST(
     );
   }
 
-  // Check for roles:update permission by querying the role with this name
-  const userRoles = await prisma.role.findMany({
-    where: {
-      organizationId: role.organizationId,
-      name: membership.role, // Member.role is a string matching Role.name
-    },
-    select: {
-      permissions: {
-        select: { permission: { select: { key: true } } },
-      },
-    },
-  });
+  // PERFORMANCE (P1): Use cached resolvePermissions() instead of 3 sequential DB queries.
+  const { resolvePermissions } = await import('@/lib/permissions/resolver');
+  const userPermissions = await resolvePermissions(session.user.id, role.organizationId);
 
-  const userPermissions = new Set(
-    userRoles.flatMap((r) => r.permissions.map((rp) => rp.permission.key))
-  );
-
-  if (!userPermissions.has('roles:update')) {
+  if (!userPermissions.includes('roles:update')) {
     return NextResponse.json(
       { error: 'Forbidden: insufficient permissions' },
       { status: 403 }

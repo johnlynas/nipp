@@ -20,8 +20,8 @@ export function withAuth(handler: AuthMiddlewareHandler) {
   return async (request: NextRequest) => {
     try {
       // 1. Get Session
-      const session = await auth.api.getSession({ 
-        headers: await headers() 
+      const session = await auth.api.getSession({
+        headers: await headers()
       });
 
       if (!session) {
@@ -48,22 +48,27 @@ export function withAuth(handler: AuthMiddlewareHandler) {
 export function withSuperAdmin(handler: AuthMiddlewareHandler) {
   return withAuth(async (request, context) => {
     const { verifySuperAdmin } = await import('@/lib/authz');
-    
+
     const { authorized, error } = await verifySuperAdmin(context.user.id);
 
     if (!authorized) {
       const isDbError = error?.includes('Database unavailable');
       const status = isDbError ? 503 : 403;
-      
-      logger.warn({ 
-        userId: context.user.id, 
-        error, 
-        status, 
-        url: request.url 
+
+      logger.warn({
+        userId: context.user.id,
+        error,
+        status,
+        url: request.url
       }, 'Super Admin authorization failed');
 
       return NextResponse.json({ error: error || 'Super Admin access required' }, { status });
     }
+
+    // SECURITY (S7): Mark this request as super-admin context so getGlobalDb()
+    // allows access to the unscoped Prisma client.
+    const { setSuperAdminContext } = await import('@/lib/global-db-guard');
+    setSuperAdminContext();
 
     return handler(request, context);
   });

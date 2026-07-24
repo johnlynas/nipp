@@ -1,92 +1,80 @@
-import { useSession } from '@/lib/auth-client';
-import { useEffect, useState } from 'react';
+/**
+ * Client-side permission hooks — migrated from raw fetch to React Query.
+ *
+ * PERFORMANCE (P2): Previously these hooks used useEffect + raw fetch with no caching,
+ * causing unbounded network requests and duplicate calls. Now they use the existing
+ * usePermissions hook from features/permissions/api/usePermissions.ts which has:
+ *   - 30-minute staleTime (Redis-cached on server)
+ *   - 1-hour gcTime (deduplication across components)
+ *   - Proper loading/error states via React Query
+ *
+ * This eliminates the flash of incorrect content (FOIC) while removing redundant API calls.
+ */
 
+import { useSession } from '@/lib/auth-client';
+import { usePermissions } from '@/features/permissions/api/usePermissions';
+
+// ---------------------------------------------------------------------------
+// Internal: check permissions against session data or React Query cache.
+// ---------------------------------------------------------------------------
+
+/**
+ * Check if the user has a specific permission.
+ * Returns true/false immediately from session data, or null while loading from cache.
+ */
 export function usePermission(permission: string): boolean {
   const { data: session } = useSession();
-  const [hasPermission, setHasPermission] = useState<boolean | null>(null);
-  const [isLoading, setIsLoading] = useState(true);
+  const { data: permissions, isLoading } = usePermissions();
 
-  useEffect(() => {
-    if (!session) {
-      setIsLoading(false);
-      setHasPermission(false);
-      return;
-    }
+  // Fast path: session already has permissions resolved
+  if ((session?.user as any)?.permissions) {
+    return (session.user as any).permissions.includes(permission);
+  }
 
-    if ((session?.user as any)?.permissions) {
-      setHasPermission((session.user as any).permissions.includes(permission));
-      setIsLoading(false);
-    } else {
-      fetch('/api/auth/permissions')
-        .then(res => res.json())
-        .then(data => {
-          setHasPermission(data.permissions.includes(permission));
-          setIsLoading(false);
-        })
-        .catch(() => {
-          setHasPermission(false);
-          setIsLoading(false);
-        });
-    }
-  }, [session, permission]);
-
+  // Slow path: wait for React Query cache to load
   if (isLoading) return false;
-  return hasPermission ?? false; // ✅ Fixes TS error while keeping null init
+
+  const available = permissions ?? [];
+  return available.includes(permission);
 }
 
+/**
+ * Check if the user has ANY of the given permissions.
+ */
 export function useAnyPermission(permissions: string[]): boolean {
   const { data: session } = useSession();
-  const [hasPermission, setHasPermission] = useState<boolean | null>(null);
-  const [isLoading, setIsLoading] = useState(true);
+  const { data: userPermissions, isLoading } = usePermissions();
 
-  useEffect(() => {
-    if (!session) {
-      setIsLoading(false);
-      setHasPermission(false);
-      return;
-    }
+  // Fast path: session already has permissions resolved
+  if ((session?.user as any)?.permissions) {
+    return permissions.some((p) => (session.user as any).permissions.includes(p));
+  }
 
-    if ((session?.user as any)?.permissions) {
-      setHasPermission(permissions.some(p => (session.user as any).permissions.includes(p)));
-      setIsLoading(false);
-    } else {
-      fetch('/api/auth/permissions')
-        .then(res => res.json())
-        .then(data => {
-          setHasPermission(permissions.some(p => data.permissions.includes(p)));
-          setIsLoading(false);
-        })
-        .catch(() => {
-          setHasPermission(false);
-          setIsLoading(false);
-        });
-    }
-  }, [session, permissions]);
-
+  // Slow path: wait for React Query cache to load
   if (isLoading) return false;
-  return hasPermission ?? false; // ✅ Fixes TS error
+
+  const available = userPermissions ?? [];
+  return permissions.some((p) => available.includes(p));
 }
 
+/**
+ * Check if the user is a Super Admin.
+ */
 export function useIsSuperAdmin(): boolean | null {
-  // ✅ Correctly typed to return boolean | null
-  const [isSuperAdmin, setIsSuperAdmin] = useState<boolean | null>(null);
+  const { data: session } = useSession();
+  const { data: permissions, isLoading } = usePermissions();
 
-  useEffect(() => {
-    async function checkPermissions() {
-      try {
-        const res = await fetch('/api/auth/permissions');
-        const data = await res.json();
-        setIsSuperAdmin(data.isSuperAdmin === true);
-      } catch (error) {
-        console.error('Failed to check super admin status:', error);
-        setIsSuperAdmin(false);
-      }
-    }
+  // Fast path: session already has isSuperAdmin flag
+  if ((session?.user as any)?.isSuperAdmin !== undefined) {
+    return (session.user as any).isSuperAdmin;
+  }
 
-    checkPermissions();
-  }, []);
+  // Slow path: wait for React Query cache to load
+  if (isLoading) return null;
 
-  return isSuperAdmin; // ✅ Returns null initially, preventing the flash
+  // Super Admins have the wildcard permission '*' or can be inferred from permissions
+  const available = permissions ?? [];
+  return available.includes('*');
 }
 
 /**
@@ -101,39 +89,21 @@ export function useHasPermission(permission: string): boolean {
  */
 export function useAllPermissions(permissions: string[]): boolean {
   const { data: session } = useSession();
-  const [hasPermission, setHasPermission] = useState<boolean | null>(null);
-  const [isLoading, setIsLoading] = useState(true);
+  const { data: userPermissions, isLoading } = usePermissions();
 
-  useEffect(() => {
-    if (!session) {
-      setIsLoading(false);
-      setHasPermission(false);
-      return;
-    }
+  // Fast path: Super Admins have all permissions
+  if ((session?.user as any)?.isSuperAdmin) {
+    return true;
+  }
 
-    if ((session?.user as any)?.isSuperAdmin) {
-      setHasPermission(true);
-      setIsLoading(false);
-      return;
-    }
+  // Fast path: session already has permissions resolved
+  if ((session?.user as any)?.permissions) {
+    return permissions.every((p) => (session.user as any).permissions.includes(p));
+  }
 
-    if ((session?.user as any)?.permissions) {
-      setHasPermission(permissions.every((p) => (session.user as any).permissions.includes(p)));
-      setIsLoading(false);
-    } else {
-      fetch('/api/auth/permissions')
-        .then(res => res.json())
-        .then(data => {
-          setHasPermission(permissions.every((p) => data.permissions.includes(p)));
-          setIsLoading(false);
-        })
-        .catch(() => {
-          setHasPermission(false);
-          setIsLoading(false);
-        });
-    }
-  }, [session, permissions]);
-
+  // Slow path: wait for React Query cache to load
   if (isLoading) return false;
-  return hasPermission ?? false; // ✅ Fixes TS error
+
+  const available = userPermissions ?? [];
+  return permissions.every((p) => available.includes(p));
 }
