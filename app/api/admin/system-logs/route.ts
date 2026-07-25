@@ -12,7 +12,9 @@ export async function GET() {
     }
 
     logger.info({ userId: session.user.id }, 'System logs accessed by super admin');
-    // ... proceed with fetching logs ...
+    
+    // TODO: Fetch and return actual system logs
+    return NextResponse.json({ logs: [] });
   } catch (error) {
     logger.error({ err: error }, 'Unexpected error in system-logs GET');
     return NextResponse.json({ error: 'Internal server error' }, { status: 500 });

@@ -26,7 +26,7 @@ interface Pagination {
  */
 export default function OrganizationsPage() {
   const [organizations, setOrganizations] = useState<Organization[]>([]);
-  const [pagination, setPagination] = useState<Pagination>({ page: 1, pageSize: 20, total: 0, totalPages: 0 });
+  const [pagination, setPagination] = useState<Pagination>({ page: 1, pageSize: 8, total: 0, totalPages: 0 });
   const [search, setSearch] = useState('');
   const [statusFilter, setStatusFilter] = useState('');
   const [loading, setLoading] = useState(true);
@@ -48,8 +48,33 @@ export default function OrganizationsPage() {
 
       const res = await fetch(`/api/admin/organizations?${params}`);
       const data = await res.json();
+      
+      // Debug: log the raw response to verify pagination data
+      console.log('[Organizations] API Response:', {
+        organizationsCount: data.organizations?.length,
+        pagination: data.pagination,
+      });
+
       setOrganizations(data.organizations || []);
-      setPagination(data.pagination || pagination);
+      
+      // Ensure pagination state always has valid totalPages
+      const total = data.pagination?.total ?? 0;
+      const pageSizeFromApi = data.pagination?.pageSize || pagination.pageSize || 20;
+      const totalPages = Math.max(1, Math.ceil(total / pageSizeFromApi));
+      
+      console.log('[Organizations] Calculated pagination:', {
+        total,
+        pageSizeFromApi,
+        totalPages,
+        currentPage: pagination.page,
+      });
+      
+      setPagination({
+        page: data.pagination?.page ?? pagination.page,
+        pageSize: pageSizeFromApi,
+        total,
+        totalPages,
+      });
     } catch (error) {
       console.error('Failed to fetch organizations:', error);
     } finally {
@@ -96,13 +121,13 @@ export default function OrganizationsPage() {
               placeholder="Search organizations..."
               value={search}
               onChange={(e) => setSearch(e.target.value)}
-              className="rounded border px-3 py-2 text-sm"
+              className="rounded border px-3 py-2 text-sm bg-white hover:bg-gray-100 text-gray-700 font-medium transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
               aria-label="Search organizations"
             />
             <select
               value={statusFilter}
               onChange={(e) => setStatusFilter(e.target.value)}
-              className="rounded border px-3 py-2 text-sm"
+              className="rounded border px-3 py-2 text-sm bg-white hover:bg-gray-100 text-gray-700 font-medium transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
               aria-label="Filter by status"
             >
               <option value="">All Statuses</option>
@@ -134,7 +159,7 @@ export default function OrganizationsPage() {
                     <button
                       disabled={pagination.page <= 1}
                       onClick={() => setPagination((p) => ({ ...p, page: p.page - 1 }))}
-                      className="rounded border px-3 py-1 text-sm disabled:opacity-50"
+                      className="rounded border px-3 py-1 text-sm disabled:opacity-50 disabled:cursor-not-allowed bg-white hover:bg-gray-100 text-gray-700 font-medium transition-colors"
                       aria-label="Previous page"
                     >
                       Previous
@@ -142,7 +167,7 @@ export default function OrganizationsPage() {
                     <button
                       disabled={pagination.page >= pagination.totalPages}
                       onClick={() => setPagination((p) => ({ ...p, page: p.page + 1 }))}
-                      className="rounded border px-3 py-1 text-sm disabled:opacity-50"
+                      className="rounded border px-3 py-1 text-sm disabled:opacity-50 disabled:cursor-not-allowed bg-white hover:bg-gray-100 text-gray-700 font-medium transition-colors"
                       aria-label="Next page"
                     >
                       Next

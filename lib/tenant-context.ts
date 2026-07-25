@@ -1,13 +1,20 @@
 import { AsyncLocalStorage } from 'node:async_hooks';
 
 /**
+ * Factory to create a new AsyncLocalStorage instance.
+ */
+export function createStorage<T>(): AsyncLocalStorage<T> {
+  return new AsyncLocalStorage<T>();
+}
+
+/**
  * AsyncLocalStorage-based tenant context.
  *
  * Propagates the current organization ID through the request lifecycle,
  * making it available to all downstream operations without explicit parameter passing.
  */
 
-const tenantContextStorage = new AsyncLocalStorage<Record<string, string>>();
+const tenantContextStorage = createStorage<Record<string, string>>();
 
 /**
  * Execute a function within a tenant context.

@@ -7,6 +7,7 @@
 
 import { NextResponse } from 'next/server';
 import { auth } from '@/lib/auth';
+import { getPlatformOrgId, isSuperAdmin } from '@/lib/authz';
 
 export const runtime = 'nodejs';
 
@@ -18,9 +19,34 @@ export async function GET(request: Request) {
       return NextResponse.json([], { status: 200 });
     }
 
-    // Return the permissions array from session.user.permissions
     const user = session.user as any;
-    return NextResponse.json(user.permissions || []);
+
+    // Fast path: permissions already resolved in session
+    if (user.permissions && Array.isArray(user.permissions)) {
+      return NextResponse.json(user.permissions);
+    }
+
+    // Slow path: resolve permissions on-demand
+    try {
+      const platformOrgId = await getPlatformOrgId();
+      if (platformOrgId) {
+        const isAdmin = await isSuperAdmin(user.id, platformOrgId);
+        if (isAdmin) {
+          return NextResponse.json(['*']);
+        }
+      }
+
+      // Fall back to org-specific permissions if active org is set
+      const { resolvePermissions } = await import('@/lib/permissions/resolver');
+      if (session.activeOrganizationId) {
+        const permissions = await resolvePermissions(user.id, session.activeOrganizationId);
+        return NextResponse.json(permissions);
+      }
+    } catch (error) {
+      console.error('[Permissions API] Failed to resolve permissions:', error);
+    }
+
+    return NextResponse.json([], { status: 200 });
   } catch (_error) {
     // Return empty array on error — React Query will retry with exponential backoff
     return NextResponse.json([], { status: 200 });

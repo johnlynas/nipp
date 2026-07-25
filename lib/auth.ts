@@ -88,23 +88,34 @@ export const auth = betterAuth({
       // In Node.js runtime, resolve permissions
       try {
         const { resolvePermissions } = await import('@/lib/permissions/resolver');
-        const { getPlatformOrgId } = await import('@/lib/authz');
+        const { getPlatformOrgId, isSuperAdmin: checkIsSuperAdmin } = await import('@/lib/authz');
 
-        const orgId = session.activeOrganizationId;
-        if (orgId) {
-          const permissions = await resolvePermissions(user.id, orgId);
-          const platformOrgId = await getPlatformOrgId();
-          const isSuperAdmin = orgId === platformOrgId;
+        const platformOrgId = await getPlatformOrgId();
+        let isSuperAdmin = false;
+        let permissions: string[] = [];
 
-          return {
-            ...session,
-            user: {
-              ...session.user,
-              permissions,
-              isSuperAdmin,
-            },
-          } as ExtendedSession;
+        if (platformOrgId) {
+          // Check if user is a super admin (member of platform org)
+          isSuperAdmin = await checkIsSuperAdmin(user.id, platformOrgId);
+
+          if (isSuperAdmin) {
+            // Super admins get wildcard permission
+            permissions = ['*'];
+          } else if (session.activeOrganizationId) {
+            // Non-super admins get org-specific permissions
+            const orgId = session.activeOrganizationId;
+            permissions = await resolvePermissions(user.id, orgId);
+          }
         }
+
+        return {
+          ...session,
+          user: {
+            ...session.user,
+            permissions,
+            isSuperAdmin,
+          },
+        } as ExtendedSession;
       } catch (error) {
         console.error('[Auth] Failed to resolve permissions:', error);
       }
