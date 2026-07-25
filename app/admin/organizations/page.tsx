@@ -1,6 +1,7 @@
 'use client';
 
 import { useState, useEffect } from 'react';
+import Link from 'next/link';
 import { RequireSuperAdmin } from '@/components/auth/RequireSuperAdmin';
 import { OrgTable } from '@/components/admin/OrgTable';
 import { ConfirmDialog } from '@/components/admin/ConfirmDialog';
@@ -105,13 +106,13 @@ export default function OrganizationsPage() {
               <h2 className="text-2xl font-bold" style={{ color: '#1B2A4A' }}>Organizations</h2>
               <p className="text-sm text-gray-500">Manage tenant organizations</p>
             </div>
-            <a
+            <Link
               href="/admin/organizations/create"
               className="rounded px-4 py-2 text-sm font-medium text-white transition hover:opacity-90"
               style={{ backgroundColor: '#F5A623' }}
             >
               + Create Organization
-            </a>
+            </Link>
           </div>
 
           {/* Filters */}

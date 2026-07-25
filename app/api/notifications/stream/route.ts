@@ -8,6 +8,13 @@ import { NextRequest } from 'next/server';
 export const runtime = 'edge'; // SSE works best on Edge/Node runtimes
 
 export async function GET(req: NextRequest) {
+  // DEV ONLY: Mock SSE simulation. 
+  // For production, replace with Redis Pub/Sub or a message queue (e.g., BullMQ) 
+  // to broadcast real-time notifications to connected clients.
+  if (process.env.NODE_ENV === 'production') {
+    return new Response('SSE streaming is disabled in production. Use Redis Pub/Sub.', { status: 501 });
+  }
+
   const responseStream = new TransformStream();
   const writer = responseStream.writable.getWriter();
   const encoder = new TextEncoder();

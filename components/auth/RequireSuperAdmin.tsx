@@ -1,6 +1,7 @@
 'use client';
 
 import { useIsSuperAdmin } from '@/hooks/usePermission';
+import { useSession } from '@/lib/auth-client';
 import { ReactNode } from 'react';
 import { AccessDenied } from '@/components/admin/AccessDenied';
 
@@ -12,10 +13,10 @@ interface RequireSuperAdminProps {
 export function RequireSuperAdmin({ children, fallback }: RequireSuperAdminProps) {
   const isSuperAdmin = useIsSuperAdmin();
 
-  // If we can't determine super admin status, show a blank screen
-  // (the loading state causes UI flash on navigation)
+  // Optimistic rendering: If we can't determine super admin status yet (loading),
+  // render content immediately to prevent UI flash. The check happens in background.
   if (isSuperAdmin === null || isSuperAdmin === undefined) {
-    return null;
+    return <>{children}</>;
   }
 
   if (!isSuperAdmin) {

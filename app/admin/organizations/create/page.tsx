@@ -7,7 +7,6 @@ export default function CreateOrganizationPage() {
   const router = useRouter();
   const [formData, setFormData] = useState({
     name: '',
-    slug: '',
     adminEmail: '',
   });
 
@@ -54,22 +53,6 @@ export default function CreateOrganizationPage() {
                   value={formData.name}
                   onChange={(e) => setFormData({ ...formData, name: e.target.value })}
                   required
-                  className="w-full px-4 py-3 border border-gray-300 rounded-md text-gray-900 font-medium text-base focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                  style={{ width: '100%', minWidth: '0' }}
-                />
-              </div>
-
-              {/* Slug */}
-              <div>
-                <label htmlFor="slug" className="block text-sm font-semibold text-gray-900 mb-2">
-                  Slug
-                  <span className="text-gray-500 font-normal ml-2">(optional, auto-generated)</span>
-                </label>
-                <input
-                  type="text"
-                  id="slug"
-                  value={formData.slug}
-                  onChange={(e) => setFormData({ ...formData, slug: e.target.value })}
                   className="w-full px-4 py-3 border border-gray-300 rounded-md text-gray-900 font-medium text-base focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
                   style={{ width: '100%', minWidth: '0' }}
                 />

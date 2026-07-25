@@ -29,18 +29,18 @@ export async function resolvePermissions(
     // Fetch from database with optimized single query approach
     const memberWithRole = await prisma.member.findFirst({
       where: { userId, orgId },
-      include: {
+      select: {
         role: {
-          include: { 
+          select: { 
             permissions: { 
-              include: { permission: true } 
+              select: { permission: { select: { key: true } } }
             }
           }
         }
       }
     });
 
-    if (!memberWithRole || !memberWithRole.role) {
+    if (!memberWithRole?.role) {
       return [];
     }
 

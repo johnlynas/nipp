@@ -202,6 +202,16 @@ It is critical to distinguish between global identity and organizational authori
 - **`MemberRole` (Assignment):** A junction table linking a `Member` to one or more `Roles`. This allows a single user to hold multiple roles within one organization.
 - **`RolePermission` (Capability):** Maps `Roles` to atomic `Permissions`.
 
+#### Dual-Authorization Model Clarification (`User.role` vs `MemberRole`)
+To prevent authorization confusion, the system explicitly separates global routing gates from org-scoped permissions:
+
+| Field | Scope | Purpose | Usage |
+|-------|-------|---------|-------|
+| `User.role` | Global | Server-side routing & access gates (e.g., `/admin/*` vs tenant dashboard) | Used exclusively in middleware, server components, and API route guards to determine *where* a user can go. |
+| `MemberRole` | Org-Scoped | Fine-grained permission checks within an organization (e.g., `properties:view`, `tenants:create`) | Used by `<RequirePermission>`, `hasPermission()`, and service-layer authorization checks to determine *what* a user can do. |
+
+**Important:** `User.role` does **not** grant org-scoped permissions. A `super_admin` bypasses org-scoped checks entirely, but a standard `member` must be assigned `MemberRole`s to perform actions. This dual-model ensures clean separation between platform administration and tenant operations.
+
 #### 2. The Logical Permission Flow
 When an authorization check is performed (via `hasPermission` or `<RequirePermission>`):
 

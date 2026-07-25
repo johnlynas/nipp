@@ -12,7 +12,6 @@ type Tab = 'overview' | 'members' | 'roles' | 'audit';
 interface OrganizationDetail {
   id: string;
   name: string;
-  slug: string | null;
   status: 'PENDING' | 'ACTIVE' | 'SUSPENDED' | 'ARCHIVED';
   metadata: Record<string, unknown> | null;
   createdAt: string;
@@ -102,7 +101,6 @@ export default function OrganizationDetailPage() {
           <div className="mb-6 flex items-start justify-between">
             <div>
               <h2 className="text-2xl font-bold" style={{ color: '#1B2A4A' }}>{org.name}</h2>
-              <p className="text-sm text-gray-500">{org.slug || 'No slug'}</p>
             </div>
             <OrgStatusBadge status={org.status} />
           </div>

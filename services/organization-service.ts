@@ -77,25 +77,32 @@ export const OrganizationService = {
         throw new Error('An organization with this name already exists');
       }
 
-      // 2. Generate unique slug
+      // 2. Generate unique slug (Unique constraint + catch pattern)
       let generatedSlug = slug || name.toLowerCase().replace(/\s+/g, '-');
-      let slugSuffix = 1;
-      let uniqueSlug = generatedSlug;
-
-      while (true) {
-        const existingOrg = await tx.organization.findUnique({ where: { slug: uniqueSlug } });
-        if (!existingOrg) break;
-        uniqueSlug = `${generatedSlug}-${slugSuffix}`;
-        slugSuffix++;
-        if (slugSuffix > 100) {
+      
+      try {
+        const organization = await tx.organization.create({
+          data: { name, slug: generatedSlug },
+        });
+        return organization;
+      } catch (error: any) {
+        if (error.code === 'P2002') { // Unique constraint failed on slug
+          let suffix = 1;
+          while (suffix <= 100) {
+            const candidateSlug = `${generatedSlug}-${suffix}`;
+            try {
+              return await tx.organization.create({
+                data: { name, slug: candidateSlug },
+              });
+            } catch (err: any) {
+              if (err.code !== 'P2002') throw err; // Re-throw non-unique errors
+              suffix++;
+            }
+          }
           throw new Error('Unable to generate unique slug');
         }
+        throw error; // Re-throw other errors
       }
-
-      // 3. Create the organization
-      const organization = await tx.organization.create({
-        data: { name, slug: uniqueSlug },
-      });
 
       logger.info({ orgId: organization.id, method: 'Service.createOrganization' }, 'Organization created in transaction');
 
