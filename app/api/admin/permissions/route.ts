@@ -8,6 +8,7 @@
  */
 
 import { NextRequest, NextResponse } from 'next/server';
+import { revalidateTag } from 'next/cache';
 import { requireSuperAdmin, enterSuperAdminContext } from '@/lib/require-super-admin';
 import { recordAuditLog } from '@/lib/audit-log';
 import { prisma } from '@/lib/db';
@@ -18,6 +19,9 @@ import { getClientIp } from '@/lib/ip';
 import { isSameSiteRequest } from '@/lib/csrf';
 
 export const runtime = 'nodejs';
+
+// Cache permission catalog for 60 seconds (P7 - server-side caching)
+export const revalidate = 60;
 
 // ---------------------------------------------------------------------------
 // Helper: get the global (unscoped) Prisma client via runtime guard.
@@ -132,6 +136,8 @@ export async function POST(request: NextRequest) {
     });
 
     logger.info({ userId: session.user.id, permissionId: permission.id }, '[Permissions API] Permission created');
+    // P7: Invalidate cached permissions
+    revalidateTag('permission');
     return NextResponse.json({ permission }, { status: 201 });
   } catch (error) {
     const isDbError = error instanceof Error && error.message.includes('Can\'t reach database server');
@@ -202,6 +208,8 @@ export async function PATCH(
     });
 
     logger.info({ userId: session.user.id, permissionId: id }, '[Permissions API] Permission updated');
+    // P7: Invalidate cached permissions
+    revalidateTag('permission');
     return NextResponse.json({ permission });
   } catch (error) {
     const isDbError = error instanceof Error && error.message.includes('Can\'t reach database server');
@@ -271,6 +279,8 @@ export async function DELETE(
     });
 
     logger.info({ userId: session.user.id, permissionId: id }, '[Permissions API] Permission deleted');
+    // P7: Invalidate cached permissions
+    revalidateTag('permission');
     return NextResponse.json({ success: true, message: 'Permission deleted' });
   } catch (error) {
     const isDbError = error instanceof Error && error.message.includes('Can\'t reach database server');

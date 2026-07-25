@@ -60,10 +60,19 @@ export default function OrganizationDetailPage() {
       });
 
       if (res.ok) {
-        fetchOrganization();
+        // Force a fresh fetch to bypass any stale cache
+        const freshRes = await fetch(`/api/admin/organizations/${orgId}`, {
+          cache: 'no-store',
+        });
+        if (freshRes.ok) {
+          const data = await freshRes.json();
+          setOrg(data);
+        }
       } else {
         const data = await res.json();
         alert(data.error || 'Failed to change status');
+        // Refresh the org data to sync UI with server state
+        fetchOrganization();
       }
     } catch (error) {
       console.error('Failed to change status:', error);

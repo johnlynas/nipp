@@ -3,6 +3,9 @@ import { requireSuperAdmin } from '@/lib/require-super-admin';
 import { NextResponse } from 'next/server';
 import { logger } from '@/lib/logger';
 
+// Cache system logs for 10 seconds (P7 - server-side caching)
+export const revalidate = 10;
+
 export async function GET() {
   try {
     const { authorized, error, status, session } = await requireSuperAdmin();

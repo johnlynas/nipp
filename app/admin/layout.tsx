@@ -39,9 +39,9 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
 
   return (
     <RequireSuperAdmin>
-      <div className="min-h-screen bg-gray-50 flex">
+      <div className="min-h-screen bg-gray-50 flex overflow-hidden">
         {/* Sidebar - Property NI Navy */}
-        <aside className="w-64 bg-[#1B2A4A] text-white flex-shrink-0">
+        <aside className="w-64 bg-[#1B2A4A] text-white flex-shrink-0 overflow-hidden">
           <div className="p-6">
             <h2 className="text-2xl font-bold text-[#F5A623]">Admin Panel</h2>
           </div>

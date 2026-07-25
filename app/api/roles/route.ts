@@ -6,6 +6,7 @@
  */
 
 import { NextRequest, NextResponse } from 'next/server';
+import { revalidateTag } from 'next/cache';
 import { auth } from '@/lib/auth';
 import prisma from '@/lib/db';
 import { recordAuditLog } from '@/lib/audit-log';
@@ -108,6 +109,9 @@ export async function POST(req: NextRequest) {
     success: true,
     metadata: { name },
   });
+
+  // P7: Invalidate cached org details (roles are part of org data)
+  revalidateTag('org');
 
   return NextResponse.json({ role }, { status: 201 });
 }

@@ -8,6 +8,9 @@ import { verifySuperAdmin, getPlatformOrgId } from '@/lib/authz';
 // NOTE: Uncomment and adjust this import to match your actual permissions resolver
 // import { resolvePermissions } from '@/lib/permissions/resolver';
 
+// User-specific permissions must never be cached (P7 - dynamic data)
+export const revalidate = 0;
+
 export async function GET() {
   try {
     const session = await auth.api.getSession({ headers: await headers() });

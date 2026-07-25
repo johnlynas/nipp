@@ -10,6 +10,9 @@ import prisma from '@/lib/db';
 
 export const runtime = 'nodejs';
 
+// Cache permission catalog for 60 seconds (P7 - server-side caching)
+export const revalidate = 60;
+
 export async function GET(req: NextRequest) {
   const session = await auth.api.getSession({ headers: req.headers });
 

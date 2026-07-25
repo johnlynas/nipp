@@ -12,8 +12,6 @@ import { useState, type FormEvent } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { signInEmail } from '@/lib/auth-client';
 
-const pillRadius = '26px';
-
 export default function LoginPage() {
   const router = useRouter();
   const searchParams = useSearchParams();
@@ -43,58 +41,21 @@ export default function LoginPage() {
     }
   }
 
-  const inputStyle: React.CSSProperties = {
-    width: '100%',
-    height: '48px',
-    paddingLeft: '20px',
-    paddingRight: '20px',
-    borderRadius: pillRadius,
-    border: '1px solid #dee2e6',
-    backgroundColor: '#ffffff',
-    color: '#1e3a5f',
-    fontSize: '16px',
-    outline: 'none',
-    boxSizing: 'border-box',
-  };
-
-  const inputFocusStyle: React.CSSProperties = {
-    ...inputStyle,
-    borderColor: '#1e3a5f',
-    boxShadow: '0 0 0 3px rgba(30, 58, 95, 0.1)',
-  };
-
-  const buttonStyle: React.CSSProperties = {
-    width: '100%',
-    height: '48px',
-    borderRadius: pillRadius,
-    background: '#f4a261',
-    color: '#ffffff',
-    fontSize: '16px',
-    fontWeight: 600,
-    border: 'none',
-    cursor: loading ? 'not-allowed' : 'pointer',
-    boxShadow: '0 4px 12px rgba(244, 162, 97, 0.3)',
-    opacity: loading ? 0.6 : 1,
-  };
-
   return (
-    <div style={{ minHeight: '100vh', display: 'flex' }}>
+    <div className="min-h-screen flex">
       {/* ── Left panel: Branding (Navy) ─────────────────────────── */}
-      <div
-        className="hidden lg:flex lg:w-1/2 bg-[#1e3a5f] items-center justify-center p-12"
-        style={{ flexDirection: 'column' }}
-      >
-        <h1 style={{ fontSize: '36px', fontWeight: 700, color: '#ffffff', marginBottom: '16px' }}>
+      <div className="hidden lg:flex lg:w-1/2 bg-[#1e3a5f] items-center justify-center p-12 flex-col">
+        <h1 className="text-[36px] font-bold text-white mb-4">
           Property NI
         </h1>
-        <p style={{ fontSize: '20px', color: 'rgba(255,255,255,0.7)', lineHeight: 1.6 }}>
+        <p className="text-[20px] text-white/70 leading-relaxed">
           Multi-Tenant Property Management Portal
         </p>
       </div>
 
       {/* ── Right panel: Login form ─────────────────────────────── */}
-      <div className="w-full lg:w-1/2 flex items-center justify-center p-8" style={{ backgroundColor: '#f8f9fa' }}>
-        <div style={{ width: '100%', maxWidth: '320px' }}>
+      <div className="w-full lg:w-1/2 flex items-center justify-center p-8 bg-[#f8f9fa]">
+        <div className="w-full max-w-[320px]">
           {/* Mobile-only heading */}
           <h1 className="text-2xl font-bold text-[#1e3a5f] mb-8 lg:hidden">
             Property NI — Login
@@ -104,16 +65,7 @@ export default function LoginPage() {
           {error && (
             <div
               role="alert"
-              style={{
-                marginBottom: '24px',
-                padding: '16px',
-                borderRadius: pillRadius,
-                fontSize: '14px',
-                fontWeight: 500,
-                backgroundColor: 'rgba(220,53,69,0.1)',
-                color: '#dc3545',
-                border: '1px solid rgba(220,53,69,0.2)',
-              }}
+              className="mb-6 p-4 rounded-[26px] text-sm font-medium bg-red-500/10 text-red-600 border border-red-500/20"
             >
               {error}
             </div>
@@ -121,10 +73,10 @@ export default function LoginPage() {
 
           <form onSubmit={handleSubmit}>
             {/* User ID (email) input */}
-            <div style={{ marginBottom: '20px' }}>
+            <div className="mb-5">
               <label
                 htmlFor="email"
-                style={{ display: 'block', fontSize: '14px', fontWeight: 500, color: '#1e3a5f', marginBottom: '8px' }}
+                className="block text-sm font-medium text-[#1e3a5f] mb-2"
               >
                 User ID (Email)
               </label>
@@ -136,17 +88,15 @@ export default function LoginPage() {
                 value={email}
                 onChange={(e) => setEmail(e.target.value)}
                 placeholder="you@organisation.gov.uk"
-                style={inputStyle}
-                onFocus={(e) => { Object.assign(e.currentTarget.style, inputFocusStyle); }}
-                onBlur={(e) => { Object.assign(e.currentTarget.style, inputStyle); }}
+                className="w-full h-12 px-5 rounded-[26px] border border-gray-300 bg-white text-[#1e3a5f] text-base outline-none focus:border-[#1e3a5f] focus:ring-2 focus:ring-[#1e3a5f]/10 box-border"
               />
             </div>
 
             {/* Password input */}
-            <div style={{ marginBottom: '24px' }}>
+            <div className="mb-6">
               <label
                 htmlFor="password"
-                style={{ display: 'block', fontSize: '14px', fontWeight: 500, color: '#1e3a5f', marginBottom: '8px' }}
+                className="block text-sm font-medium text-[#1e3a5f] mb-2"
               >
                 Password
               </label>
@@ -158,9 +108,7 @@ export default function LoginPage() {
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}
                 placeholder="Enter your password"
-                style={inputStyle}
-                onFocus={(e) => { Object.assign(e.currentTarget.style, inputFocusStyle); }}
-                onBlur={(e) => { Object.assign(e.currentTarget.style, inputStyle); }}
+                className="w-full h-12 px-5 rounded-[26px] border border-gray-300 bg-white text-[#1e3a5f] text-base outline-none focus:border-[#1e3a5f] focus:ring-2 focus:ring-[#1e3a5f]/10 box-border"
               />
             </div>
 
@@ -168,13 +116,9 @@ export default function LoginPage() {
             <button
               type="submit"
               disabled={loading}
-              style={buttonStyle}
-              onMouseEnter={(e) => {
-                if (!loading) e.currentTarget.style.background = '#e76f51';
-              }}
-              onMouseLeave={(e) => {
-                if (!loading) e.currentTarget.style.background = '#f4a261';
-              }}
+              className={`w-full h-12 rounded-[26px] bg-[#f4a261] text-white text-base font-semibold border-none cursor-pointer shadow-lg shadow-orange-300/30 ${
+                loading ? 'opacity-60 cursor-not-allowed' : 'hover:bg-[#e76f51]'
+              }`}
             >
               {loading ? 'Signing in…' : 'Login'}
             </button>

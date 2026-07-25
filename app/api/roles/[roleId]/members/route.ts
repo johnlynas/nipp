@@ -6,6 +6,7 @@
  */
 
 import { NextRequest, NextResponse } from 'next/server';
+import { revalidateTag } from 'next/cache';
 import { auth } from '@/lib/auth';
 import prisma from '@/lib/db';
 
@@ -91,6 +92,9 @@ export async function POST(
   // Invalidate permission cache for the target user
   const { invalidateUserCache } = await import('@/lib/permissions/resolver');
   await invalidateUserCache(userId);
+
+  // P7: Invalidate cached org details (member roles changed)
+  revalidateTag('org');
 
   return NextResponse.json({ success: true });
 }

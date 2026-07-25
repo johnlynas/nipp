@@ -11,6 +11,9 @@ import { getPlatformOrgId, isSuperAdmin } from '@/lib/authz';
 
 export const runtime = 'nodejs';
 
+// User-specific permissions must never be cached (P7 - dynamic data)
+export const revalidate = 0;
+
 export async function GET(request: Request) {
   try {
     const session = await auth.api.getSession({ headers: request.headers });

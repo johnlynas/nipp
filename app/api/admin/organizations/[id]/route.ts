@@ -1,10 +1,26 @@
 import { NextRequest, NextResponse } from 'next/server';
+import { unstable_cache, revalidateTag } from 'next/cache';
 import { auth } from '@/lib/auth';
 import globalDb from '@/lib/global-db';
 import { verifySuperAdmin } from '@/lib/authz';
 import { logger } from '@/lib/logger';
 
 export const runtime = 'nodejs';
+
+// P7: Cache dynamic org details with static tag (invalidated via revalidateTag('org') on mutations)
+const getOrgDetails = unstable_cache(
+  async (id: string) => {
+    return globalDb.organization.findUnique({
+      where: { id },
+      include: {
+        members: { select: { id: true, userId: true, role: true, user: { select: { name: true, email: true } } } },
+        roles: { where: { isDefault: false }, select: { id: true, name: true } },
+      },
+    });
+  },
+  ['org'],
+  { revalidate: 30 }
+);
 
 async function checkSuperAdmin(headersList: Headers): Promise<{ session: any; isSuperAdmin: boolean; error?: string }> {
   const session = await auth.api.getSession({ headers: headersList });
@@ -30,13 +46,8 @@ export async function GET(_request: NextRequest, { params }: { params: Promise<{
     }
     
     const { id } = await params;
-    const organization = await globalDb.organization.findUnique({
-      where: { id },
-      include: {
-        members: { select: { id: true, userId: true, role: true, user: { select: { name: true, email: true } } } },
-        roles: { where: { isDefault: false }, select: { id: true, name: true } },
-      },
-    });
+    // P7: Use cached query with tags for targeted invalidation
+    const organization = await getOrgDetails(id);
     
     if (!organization) {
       logger.warn({ orgId: id, method: 'GET' }, 'Organization not found');
@@ -112,11 +123,15 @@ export async function DELETE(request: NextRequest, { params }: { params: Promise
       if (org.status === 'PENDING') {
         await globalDb.organization.delete({ where: { id } });
         logger.info({ orgId: id, method: 'DELETE' }, 'Pending organization hard deleted');
+        // P7: Invalidate cached org details
+        revalidateTag('org');
         return NextResponse.json({ success: true, message: 'Organization deleted' });
       }
       
       await globalDb.organization.update({ where: { id }, data: { status: 'ARCHIVED' } });
       logger.info({ orgId: id, method: 'DELETE' }, 'Organization archived');
+      // P7: Invalidate cached org details
+      revalidateTag('org');
       return NextResponse.json({ success: true, message: 'Organization archived' });
     } catch (error) {
       logger.error({ err: error, orgId: id, method: 'DELETE' }, 'Failed to archive organization');

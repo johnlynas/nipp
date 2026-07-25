@@ -38,6 +38,11 @@ type RequirePermissionProps = {
  *   <SettingsPanel />
  * </RequirePermission>
  */
+/**
+ * NOTE: All hooks are called unconditionally at the top level to comply
+ * with React's rules of hooks. Conditional logic is applied to results,
+ * not to hook invocation.
+ */
 export function RequirePermission({
   permission,
   mode = 'all',
@@ -46,7 +51,12 @@ export function RequirePermission({
   children,
 }: RequirePermissionProps) {
   const isSuperAdmin = useIsSuperAdmin();
-  
+
+  // Always call hooks unconditionally (React rules of hooks)
+  const hasPermission = useHasPermission(typeof permission === 'string' ? permission : '');
+  const anyPermissionResult = useAnyPermission(Array.isArray(permission) ? permission : []);
+  const allPermissionsResult = useAllPermissions(Array.isArray(permission) ? permission : []);
+
   // Super Admins bypass all permission checks
   if (isSuperAdmin) {
     return <>{children}</>;
@@ -58,15 +68,12 @@ export function RequirePermission({
     if (permission.length === 0) {
       hasAccess = true;
     } else if (mode === 'any') {
-      const anyPermissionResult = useAnyPermission(permission);
       hasAccess = anyPermissionResult;
     } else {
-      const allPermissionsResult = useAllPermissions(permission);
       hasAccess = allPermissionsResult;
     }
   } else {
-    const hasPermissionResult = useHasPermission(permission);
-    hasAccess = hasPermissionResult;
+    hasAccess = hasPermission;
   }
 
   if (!hasAccess) {

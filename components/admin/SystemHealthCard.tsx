@@ -17,7 +17,7 @@ interface HealthData {
   checks: {
     database: HealthCheck;
     cache: HealthCheck;
-    pgbouncer?: HealthCheck & { total_connections?: number };
+    "connection-pool"?: HealthCheck & { total_connections?: number };
   };
 }
 
@@ -100,15 +100,15 @@ export default function SystemHealthCard() {
 
         <div>
           <p className="text-xs font-semibold opacity-75">Database Connection Pool</p>
-          <p className="font-medium">{health?.checks.pgbouncer?.status || 'skipped'}</p>
-          {health?.checks.pgbouncer?.latency_ms !== undefined && (
-            <p className="text-xs opacity-75">{health.checks.pgbouncer.latency_ms}ms</p>
+          <p className="font-medium">{health?.checks["connection-pool"]?.status || 'skipped'}</p>
+          {health?.checks["connection-pool"]?.latency_ms !== undefined && (
+            <p className="text-xs opacity-75">{health.checks["connection-pool"].latency_ms}ms</p>
           )}
-          {health?.checks.pgbouncer?.total_connections !== undefined && (
-            <p className="text-xs opacity-75">{health.checks.pgbouncer.total_connections} conns</p>
+          {health?.checks["connection-pool"]?.total_connections !== undefined && (
+            <p className="text-xs opacity-75">{health.checks["connection-pool"].total_connections} conns</p>
           )}
-          {health?.checks.pgbouncer?.error && (
-            <p className="text-xs text-red-600 mt-1">{health.checks.pgbouncer.error}</p>
+          {health?.checks["connection-pool"]?.error && (
+            <p className="text-xs text-red-600 mt-1">{health.checks["connection-pool"].error}</p>
           )}
         </div>
       </div>

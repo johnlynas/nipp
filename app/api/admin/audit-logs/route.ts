@@ -6,6 +6,9 @@ import { verifySuperAdmin } from '@/lib/authz';
 import { logger } from '@/lib/logger';
 import { setRLSContext } from '@/lib/rls'; // Adjust import as needed
 
+// Cache audit logs for 10 seconds (P7 - server-side caching)
+export const revalidate = 10;
+
 export async function GET(request: Request) {
   try {
     const session = await auth.api.getSession({ headers: await headers() });

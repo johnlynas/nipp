@@ -35,7 +35,7 @@ export async function middleware(request: NextRequest) {
   const cspHeader = `
     default-src 'self';
     script-src ${scriptSrcDirective};
-    style-src 'self' 'unsafe-inline';
+    style-src 'self' 'unsafe-inline'; // NOTE: React/Next.js dynamically apply inline styles at runtime (layout, transitions) that cannot be given nonces. This is a known trade-off.
     img-src 'self' data: blob:;
     font-src 'self' data:;
     connect-src 'self';

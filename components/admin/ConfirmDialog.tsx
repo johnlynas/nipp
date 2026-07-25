@@ -35,7 +35,7 @@ export function ConfirmDialog({
 
       {/* Dialog */}
       <div className="relative z-10 w-full max-w-md rounded-lg bg-white p-6 shadow-xl">
-        <h2 id="confirm-title" className="mb-2 text-lg font-semibold" style={{ color: '#1B2A4A' }}>
+        <h2 id="confirm-title" className="mb-2 text-lg font-semibold text-[#1B2A4A]">
           {title}
         </h2>
         <p className="mb-6 text-sm text-gray-600">{message}</p>
@@ -49,9 +49,8 @@ export function ConfirmDialog({
           <button
             onClick={onConfirm}
             className={`rounded px-4 py-2 text-sm font-medium text-white transition ${
-              danger ? 'bg-red-600 hover:bg-red-700' : ''
+              danger ? 'bg-red-600 hover:bg-red-700' : 'bg-[#F5A623]'
             }`}
-            style={!danger ? { backgroundColor: '#F5A623' } : undefined}
             aria-label={confirmLabel}
           >
             {confirmLabel}

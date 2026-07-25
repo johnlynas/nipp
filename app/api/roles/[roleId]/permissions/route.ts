@@ -6,6 +6,7 @@
  */
 
 import { NextRequest, NextResponse } from 'next/server';
+import { revalidateTag } from 'next/cache';
 import { auth } from '@/lib/auth';
 import prisma from '@/lib/db';
 
@@ -113,6 +114,9 @@ export async function POST(
   for (const member of members) {
     await invalidateUserCache(member.userId);
   }
+
+  // P7: Invalidate cached org details (role permissions changed)
+  revalidateTag('org');
 
   return NextResponse.json({ success: true });
 }

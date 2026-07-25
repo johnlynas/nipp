@@ -3,6 +3,9 @@ import { withSuperAdmin } from '@/lib/middleware/auth';
 import { OrganizationService } from '@/services/organization-service';
 import { logger } from '@/lib/logger';
 
+// Cache organization list for 30 seconds (P7 - server-side caching)
+export const revalidate = 30;
+
 export const GET = withSuperAdmin(async (request, context) => {
   try {
     logger.info({ route: '/api/admin/organizations', method: 'GET' }, 'Request received');

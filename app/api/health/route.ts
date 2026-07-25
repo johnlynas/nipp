@@ -107,30 +107,30 @@ export async function GET() {
     const pgbouncerStart = Date.now();
     await pgbouncer.connect();
     const health = await pgbouncer.checkHealth();
-    checks.pgbouncer = { 
+    checks["connection-pool"] = { 
       status: health.isHealthy ? 'healthy' : 'unhealthy', 
       latency_ms: Date.now() - pgbouncerStart,
       total_connections: health.totalConnections,
     };
 
-    if (prevState.pgbouncer === 'unhealthy') {
+    if (prevState["connection-pool"] === 'unhealthy') {
       addSystemLog({
         level: 'info',
         source: 'health-check:pgbouncer',
-        message: 'PgBouncer connectivity restored',
-        details: `PgBouncer is now healthy (latency: ${checks.pgbouncer.latency_ms}ms)`,
+        message: 'Connection pool connectivity restored',
+        details: `Connection pool is now healthy (latency: ${checks["connection-pool"].latency_ms}ms)`,
       });
     }
   } catch (error) {
     const errorMessage = error instanceof Error ? error.message : String(error);
-    checks.pgbouncer = { status: 'unhealthy', error: 'PgBouncer connection failed' };
+    checks["connection-pool"] = { status: 'unhealthy', error: 'Connection pool connection failed' };
     overallStatus = 'unhealthy';
 
-    if (prevState.pgbouncer !== 'unhealthy') {
+    if (prevState["connection-pool"] !== 'unhealthy') {
       addSystemLog({
         level: 'error',
         source: 'health-check:pgbouncer',
-        message: 'PgBouncer connectivity check failed',
+        message: 'Connection pool connectivity check failed',
         details: errorMessage,
       });
     }
@@ -140,7 +140,7 @@ export async function GET() {
   updateHealthState(
     checks.database.status as 'healthy' | 'unhealthy',
     checks.cache.status as 'healthy' | 'unhealthy',
-    checks.pgbouncer?.status as 'healthy' | 'unhealthy'
+    (checks["connection-pool"]?.status) as 'healthy' | 'unhealthy'
   );
 
   const statusCode = overallStatus === 'unhealthy' ? 503 : 200;
@@ -156,8 +156,7 @@ export async function GET() {
     {
       status: overallStatus,
       timestamp: new Date().toISOString(),
-      version: process.env.npm_package_version || '0.1.0',
-      uptime: Math.floor(process.uptime()), // Server uptime in seconds
+      uptime: Math.floor(process.uptime()), // Server uptime in seconds (useful for admins)
       checks,
     },
     { status: statusCode }

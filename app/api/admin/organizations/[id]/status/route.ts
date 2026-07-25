@@ -7,6 +7,7 @@
  */
 
 import { NextRequest, NextResponse } from 'next/server';
+import { revalidateTag } from 'next/cache';
 import { auth } from '@/lib/auth';
 import globalDb from '@/lib/global-db';
 import { verifySuperAdmin } from '@/lib/authz';
@@ -115,6 +116,9 @@ export async function PATCH(
         await invalidateOrgSessions(id);
       }
 
+      // P7: Invalidate cached org details on status change
+      revalidateTag('org');
+
       logger.info('[ORG_STATUS_API] Organization status updated', { id, newStatus });
 
       return NextResponse.json({ organization: updated });
@@ -133,6 +137,7 @@ export async function PATCH(
 
 /**
  * Invalidate all sessions for members of an organization.
+ * Uses batch Redis DEL (O(1)) instead of sequential deletes (O(n)).
  */
 async function invalidateOrgSessions(orgId: string) {
   try {
@@ -143,13 +148,11 @@ async function invalidateOrgSessions(orgId: string) {
 
     const sessionIds = members.map((m) => `session:${m.userId}`);
 
-    // Invalidate in Redis cache
+    // Invalidate in Redis cache using batch DEL (O(1) instead of O(n))
     const { getRedis } = await import('@/lib/redis');
     const redis = getRedis();
-    if (redis) {
-      for (const key of sessionIds) {
-        await redis.del(key);
-      }
+    if (redis && sessionIds.length > 0) {
+      await redis.del(...sessionIds);
     }
 
     // Invalidate database sessions
