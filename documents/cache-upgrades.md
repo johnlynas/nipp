@@ -890,76 +890,34 @@ Thinking Process:
     *   Add a note about "Edge Runtime" limitations if relevant (though the user is likely targeting Node for L1).
 6.  **Construct the Response**: Present the updated diagram clearly, explaining the flow and benefits compared to the previous version.
 
-*Self-Correction during drafting*: The user specifically asked for an "L1 in mem LRU cache". I need to make sure the diagram explicitly labels it as such and shows the "LRU" aspect (eviction).
 
-*Plan*:
-1.  Present the updated ASCII diagram.
-2.  Explain the data flow (Read path).
-3.  Highlight the key architectural changes (Instance isolation, Coherency).
+*Caching flow diagram*:
 
-*Drafting the Diagram*:
 ```mermaid
-graph TD
-    Client[Browser / Client] --&gt; NextJS[Next.js App Router (Node Runtime)]
+flowchart TD
+    Client[Browser / Client] --> NextJS["Next.js App Router (Node Runtime)"]
     
     subgraph "Request Lifecycle"
-        NextJS --&gt; L1[L1: In-Memory LRU Cache]
+        NextJS --> L1["L1: In-Memory LRU Cache"]
         
-        L1 -- "HIT" --&gt; Response[Return Data]
+        L1 -- "HIT" --> Response[Return Data]
         
-        L1 -- "MISS" --&gt; RedisL2[L2: Redis Cluster/Server]
+        L1 -- "MISS" --> RedisL2["L2: Redis Cluster/Server"]
         
-        RedisL2 -- "HIT" --&gt; L1[Populate L1]
-        RedisL2 -- "MISS" --&gt; DB[(PostgreSQL)]
+        RedisL2 -- "HIT" --> L1
+        RedisL2 -- "MISS" --> DB[(PostgreSQL)]
         
-        DB --&gt; L1[Populate L1]
-        DB --&gt; RedisL2[Write to L2]
+        DB --> L1
+        DB --> RedisL2
     end
     
     subgraph "Cross-Instance Coherency"
-        RedisL2 -- Pub/Sub --&gt; L1_Inst2[L1: In-Memory Cache (Instance 2)]
+        RedisL2 -- "Pub/Sub" --> L1_Inst2["L1: In-Memory Cache (Instance 2)"]
     end
     
     style L1 fill:#e1f5fe,stroke:#01579b
     style RedisL2 fill:#fff3e0,stroke:#ff6f00
 ```
-
-*Refining for Text Output*: Since I can't render Mermaid directly in all interfaces, I will provide a clean ASCII version and a description.
-
-*ASCII Draft*:
-```text
-┌─────────────┐     ┌──────────────────────────────────────────┐
-│   Browser    │────▶│  Next.js App Router (Node Runtime)       │
-└─────────────┘     └──────────────────────────────────────────┘
-                            │
-                            ▼
-                    ┌───────────────┐
-                    │   L1 Cache    │ ◄── In-Memory (LRU)
-                    │  (Instance   │     Isolated per server
-                    │    Local)    │
-                    └───────┬───────┘
-                            │
-               ┌────────────┴────────────┐
-               │                         │
-           [HIT]                     [MISS]
-               │                         ▼
-               │                 ┌───────────────┐
-               │                 │   L2 Cache    │ ◄── Redis (Distributed)
-               │                 └───────┬───────┘
-               │                         │
-          ┌────┴────┐              ┌────┴────┐
-          │  HIT    │              │  MISS   │
-          └────┬────┘              └────┬────┘
-               │                         ▼
-               │                 ┌───────────────┐
-               │                 │  PostgreSQL   │ ◄── Source of Truth
-               │                 └───────────────┘
-```
-
-This looks good. It clearly separates the layers and shows the flow. I will also add a section on "Why this matters" for the specific project context (permissions).
-
-*Final Polish*: Ensure the distinction between "Warm Cache" and "Cold Cache" is clear in the explanation. Mention that L1 requires `serverExternalPackages` or similar handling if using specific libraries, but standard Map/LRU is fine.
-
 
 Here is the updated architecture diagram reflecting the **L1 (In-Memory LRU) + Redis (L2)** strategy.
 
@@ -971,27 +929,27 @@ graph TD
         Browser[Browser / SPA]
     end
 
-    subgraph Next.js Runtime (Node)
-        Middleware[Middleware / API Route] --&gt; L1[L1: In-Memory LRU Cache]
+    subgraph NextJSRuntime ["Next.js Runtime (Node)"]
+        Middleware[Middleware / API Route] --> L1["L1: In-Memory LRU Cache"]
         
-        subgraph "Cache Hierarchy"
-            L1 -- HIT --&gt; Response[Return Data]
+        subgraph CacheHierarchy ["Cache Hierarchy"]
+            L1 -- "HIT" --> Response[Return Data]
             
-            L1 -- MISS --&gt; RedisL2[L2: Redis Cluster]
+            L1 -- "MISS" --> RedisL2["L2: Redis Cluster"]
             
-            RedisL2 -- HIT --&gt; L1[Populate L1]
-            RedisL2 -- MISS --&gt; DB[(PostgreSQL)]
+            RedisL2 -- "HIT" --> L1
+            RedisL2 -- "MISS" --> DB[(PostgreSQL)]
             
-            DB -- Write --&gt; L1[Populate L1]
-            DB -- Write --&gt; RedisL2[Write to L2]
+            DB -- "Write" --> L1
+            DB -- "Write" --> RedisL2
         end
         
-        subgraph "Cross-Instance Coherency"
-            RedisL2 -- Pub/Sub --&gt; L1_Inst[L1: In-Memory Cache (Other Instances)]
+        subgraph CrossInstance ["Cross-Instance Coherency"]
+            RedisL2 -- "Pub/Sub" --> L1_Inst["L1: In-Memory Cache (Other Instances)"]
         end
     end
 
-    Browser --&gt; Next.js Runtime (Node)
+    Browser --> NextJSRuntime
     
     style L1 fill:#e3f2fd,stroke:#1565c0,stroke-width:4px
     style RedisL2 fill:#fff3e0,stroke:#ef6c00,stroke-width:4px
