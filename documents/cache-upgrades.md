@@ -890,38 +890,9 @@ Thinking Process:
     *   Add a note about "Edge Runtime" limitations if relevant (though the user is likely targeting Node for L1).
 6.  **Construct the Response**: Present the updated diagram clearly, explaining the flow and benefits compared to the previous version.
 
-
-*Caching flow diagram*:
-
-```mermaid
-flowchart TD
-    Client[Browser / Client] --> NextJS["Next.js App Router (Node Runtime)"]
-    
-    subgraph "Request Lifecycle"
-        NextJS --> L1["L1: In-Memory LRU Cache"]
-        
-        L1 -- "HIT" --> Response[Return Data]
-        
-        L1 -- "MISS" --> RedisL2["L2: Redis Cluster/Server"]
-        
-        RedisL2 -- "HIT" --> L1
-        RedisL2 -- "MISS" --> DB[(PostgreSQL)]
-        
-        DB --> L1
-        DB --> RedisL2
-    end
-    
-    subgraph "Cross-Instance Coherency"
-        RedisL2 -- "Pub/Sub" --> L1_Inst2["L1: In-Memory Cache (Instance 2)"]
-    end
-    
-    style L1 fill:#e1f5fe,stroke:#01579b
-    style RedisL2 fill:#fff3e0,stroke:#ff6f00
-```
+### Updated Architecture Diagram
 
 Here is the updated architecture diagram reflecting the **L1 (In-Memory LRU) + Redis (L2)** strategy.
-
-### Updated Architecture Diagram
 
 ```mermaid
 graph TD
