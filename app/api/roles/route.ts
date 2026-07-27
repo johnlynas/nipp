@@ -8,7 +8,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { revalidateTag } from 'next/cache';
 import { auth } from '@/lib/auth';
-import prisma from '@/lib/db';
+import tenantDb from '@/lib/tenant-db';
 import { recordAuditLog } from '@/lib/audit-log';
 import { getClientIp } from '@/lib/ip';
 import { isSameSiteRequest } from '@/lib/csrf';
@@ -58,7 +58,7 @@ export async function POST(req: NextRequest) {
   }
 
   // Verify the user is a member of this organization and get their role name
-  const membership = await prisma.member.findFirst({
+  const membership = await tenantDb.member.findFirst({
     where: {
       userId: session.user.id,
       orgId: organizationId,
@@ -87,7 +87,7 @@ export async function POST(req: NextRequest) {
   }
 
   // Create the custom role (isDefault: false)
-  const role = await prisma.role.create({
+  const role = await tenantDb.role.create({
     data: {
       name,
       description,

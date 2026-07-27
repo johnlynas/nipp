@@ -5,7 +5,7 @@
  * assigned to a member corresponds to an existing Role in the organization.
  */
 
-import prisma from '@/lib/db';
+import tenantDb from '../tenant-db';
 
 /**
  * Validate that a role name exists in the given organization.
@@ -17,7 +17,7 @@ import prisma from '@/lib/db';
 export async function isValidRoleName(roleName: string, orgId: string): Promise<boolean> {
   if (!roleName || !orgId) return false;
 
-  const role = await prisma.role.findFirst({
+  const role = await tenantDb.role.findFirst({
     where: { name: roleName, organizationId: orgId },
     select: { id: true },
   });
@@ -30,7 +30,7 @@ export async function isValidRoleName(roleName: string, orgId: string): Promise<
  * Useful for populating dropdowns and validating bulk assignments.
  */
 export async function getValidRoleNames(orgId: string): Promise<string[]> {
-  const roles = await prisma.role.findMany({
+  const roles = await tenantDb.role.findMany({
     where: { organizationId: orgId },
     select: { name: true },
   });

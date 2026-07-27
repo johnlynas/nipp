@@ -32,7 +32,7 @@ export default function SystemHealthCard() {
         const data = await res.json();
         setHealth(data);
         setStatus(data.status);
-      } catch (error) {
+      } catch {
         setStatus('unhealthy');
       }
     };

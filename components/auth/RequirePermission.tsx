@@ -46,7 +46,7 @@ type RequirePermissionProps = {
 export function RequirePermission({
   permission,
   mode = 'all',
-  orgId,
+  _orgId,
   fallback = null,
   children,
 }: RequirePermissionProps) {

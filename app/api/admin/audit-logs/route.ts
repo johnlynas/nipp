@@ -1,7 +1,7 @@
 import { NextResponse } from 'next/server';
 import { auth } from '@/lib/auth';
 import { headers } from 'next/headers';
-import { prisma } from '@/lib/db';
+import tenantDb from '@/lib/tenant-db';
 import { verifySuperAdmin } from '@/lib/authz';
 import { logger } from '@/lib/logger';
 import { setRLSContext } from '@/lib/rls'; // Adjust import as needed

@@ -8,7 +8,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { revalidateTag } from 'next/cache';
 import { auth } from '@/lib/auth';
-import prisma from '@/lib/db';
+import tenantDb from '@/lib/tenant-db';
 
 export const runtime = 'nodejs';
 
@@ -38,7 +38,7 @@ export async function POST(
   }
 
   // Get the role and verify it belongs to an org the user is part of
-  const role = await prisma.role.findFirst({
+  const role = await tenantDb.role.findFirst({
     where: { id: roleId },
     include: { organization: true },
   });
@@ -48,7 +48,7 @@ export async function POST(
   }
 
   // Verify membership and get role name
-  const membership = await prisma.member.findFirst({
+  const membership = await tenantDb.member.findFirst({
     where: { userId: session.user.id, orgId: role.organizationId },
     select: { role: true },
   });
@@ -72,7 +72,7 @@ export async function POST(
   }
 
   // Validate all permission keys exist in the catalog
-  const existingPermissions = await prisma.permission.findMany({
+  const existingPermissions = await tenantDb.permission.findMany({
     where: { key: { in: permissionKeys } },
     select: { id: true, key: true },
   });
@@ -95,7 +95,7 @@ export async function POST(
   }));
 
   for (const permObj of validPermissionObjects) {
-    await prisma.rolePermission.upsert({
+    await tenantDb.rolePermission.upsert({
       where: {
         roleId_permissionId: { roleId, permissionId: permObj.permissionId },
       },
@@ -106,7 +106,7 @@ export async function POST(
 
   // Invalidate cache for all members in the org
   const { invalidateUserCache } = await import('@/lib/permissions/resolver');
-  const members = await prisma.member.findMany({
+  const members = await tenantDb.member.findMany({
     where: { orgId: role.organizationId },
     select: { userId: true },
   });

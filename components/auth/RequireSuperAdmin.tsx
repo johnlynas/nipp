@@ -1,7 +1,6 @@
 'use client';
 
 import { useIsSuperAdmin } from '@/hooks/usePermission';
-import { useSession } from '@/lib/auth-client';
 import { ReactNode } from 'react';
 import { AccessDenied } from '@/components/admin/AccessDenied';
 

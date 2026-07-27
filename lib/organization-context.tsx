@@ -25,6 +25,7 @@ const OrganizationContext = createContext<OrganizationContextType | null>(null);
 
 export function OrganizationProvider({ children }: { children: React.ReactNode }) {
   const [currentOrg, setCurrentOrg] = useState<Organization | null>(null);
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
   const [organizations, setOrganizations] = useState<Organization[]>([]);
 
   const handleSetCurrentOrg = useCallback((org: Organization) => {

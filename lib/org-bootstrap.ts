@@ -1,8 +1,5 @@
-import { prisma } from '@/lib/db';
+import tenantDb from './tenant-db';
 import { getRedis } from '@/lib/redis';
-
-// Add PERMISSIONS_CACHE_TTL here since it's not exported in constants.ts
-const PERMISSIONS_CACHE_TTL = 300;
 
 /**
  * Bootstraps default roles and permissions for a newly created organization.
@@ -22,7 +19,7 @@ export async function bootstrapOrganizationRoles(organizationId: string, creator
     ];
 
     // Create all default roles in one batch
-    await prisma.role.createMany({
+    await tenantDb.role.createMany({
       data: defaultRoles.map((name) => ({
         name,
         organizationId: organizationId,
@@ -31,12 +28,12 @@ export async function bootstrapOrganizationRoles(organizationId: string, creator
     });
 
     // Fetch the created roles
-    const roles = await prisma.role.findMany({
+    const roles = await tenantDb.role.findMany({
       where: { organizationId, isDefault: true },
     });
 
     // Fetch all permissions from the catalog
-    const permissions = await prisma.permission.findMany();
+    const permissions = await tenantDb.permission.findMany();
 
     // Define permission mappings for each role
     const rolePermissionMap: Record<string, string[]> = {
@@ -119,7 +116,7 @@ export async function bootstrapOrganizationRoles(organizationId: string, creator
     });
 
     if (rolePermissionData.length > 0) {
-      await prisma.rolePermission.createMany({
+      await tenantDb.rolePermission.createMany({
         data: rolePermissionData,
       });
     }
@@ -128,7 +125,7 @@ export async function bootstrapOrganizationRoles(organizationId: string, creator
     const orgAdminRole = roles.find((r) => r.name === 'Organization Admin');
     if (orgAdminRole) {
       // Find or create member record for the creator
-      let member = await prisma.member.findFirst({
+      let member = await tenantDb.member.findFirst({
         where: {
           userId: creatorUserId,
           organization: { id: organizationId }, // Use relation syntax
@@ -136,7 +133,7 @@ export async function bootstrapOrganizationRoles(organizationId: string, creator
       });
 
       if (!member) {
-        member = await prisma.member.create({
+        member = await tenantDb.member.create({
           data: {
             userId: creatorUserId,
             orgId: organizationId, // <-- Changed from organizationId to orgId
@@ -145,7 +142,7 @@ export async function bootstrapOrganizationRoles(organizationId: string, creator
       }
 
       // Create member-role association
-      await prisma.memberRole.create({
+      await tenantDb.memberRole.create({
         data: {
           memberId: member.id,
           roleId: orgAdminRole.id,
@@ -170,7 +167,7 @@ export async function bootstrapOrganizationRoles(organizationId: string, creator
  */
 export async function handleCreateOrganization(req: Request) {
   // Read body ONCE before forwarding
-  let body: any = null;
+  let body: { name?: string } | null = null;
   try {
     body = await req.clone().json();
   } catch {
@@ -204,7 +201,7 @@ export async function handleCreateOrganization(req: Request) {
 
       if (!orgId && body?.name) {
         // Fallback: If ID not found in response, look up by name
-        const org = await prisma.organization.findFirst({
+        const org = await tenantDb.organization.findFirst({
           where: { name: body.name },
           orderBy: { createdAt: 'desc' },
         });
@@ -237,7 +234,7 @@ export async function handleCreateOrganization(req: Request) {
  */
 async function invalidateOrgPermissionCache(organizationId: string) {
   try {
-    const members = await prisma.member.findMany({
+    const members = await tenantDb.member.findMany({
       where: { organization: { id: organizationId } }, // Use relation syntax
       select: { userId: true },
     });

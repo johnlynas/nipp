@@ -1,11 +1,11 @@
-import { prisma } from '@/lib/db';
+import tenantDb from '@/lib/tenant-db';
 import { getRedis, forceRedisReconnect } from '@/lib/redis';
 import { addSystemLog, getPreviousHealthState, updateHealthState } from '@/lib/system-logs';
 import { PgBouncerMonitor } from '@/lib/pgbouncer-monitor';
 import { NextResponse } from 'next/server';
 
 export async function GET() {
-  const checks: Record<string, any> = {};
+  const checks: Record<string, { status: string; latency_ms?: number; error?: string; total_connections?: number }> = {};
   let overallStatus = 'healthy';
 
   // Get previous state
@@ -14,7 +14,7 @@ export async function GET() {
   // Database Check (Critical)
   try {
     const dbStart = Date.now();
-    await prisma.$queryRaw`SELECT 1`;
+    await tenantDb.$queryRaw`SELECT 1`;
     checks.database = { status: 'healthy', latency_ms: Date.now() - dbStart };
     
     // Log recovery if it was previously down

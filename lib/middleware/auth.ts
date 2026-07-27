@@ -4,8 +4,8 @@ import { headers } from 'next/headers';
 import { logger } from '@/lib/logger';
 
 export type AuthContext = {
-  user: any;
-  session: any;
+  user: { id: string; name?: string; email?: string };
+  session: unknown;
 };
 
 export type AuthMiddlewareHandler = (

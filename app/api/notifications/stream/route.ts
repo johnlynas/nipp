@@ -20,7 +20,7 @@ export async function GET(req: NextRequest) {
   const encoder = new TextEncoder();
 
   // Function to send a formatted SSE message
-  const sendEvent = async (data: any) => {
+  const sendEvent = async (data: unknown) => {
     const message = `data: ${JSON.stringify(data)}\n\n`;
     await writer.write(encoder.encode(message));
   };

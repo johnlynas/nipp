@@ -1,5 +1,7 @@
 'use client';
 
+import Link from 'next/link';
+
 /**
  * Fallback UI for unauthorized access attempts.
  */
@@ -13,13 +15,13 @@ export function AccessDenied() {
         <p className="mb-4 text-gray-600">
           You do not have permission to access this page.
         </p>
-        <a
+        <Link
           href="/"
           className="inline-block rounded px-4 py-2 text-sm font-medium text-white transition"
           style={{ backgroundColor: '#F5A623' }}
         >
           Go to Home
-        </a>
+        </Link>
       </div>
     </div>
   );

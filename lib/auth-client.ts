@@ -11,7 +11,7 @@ export const authClient = createAuthClient();
  * Stable empty session object used as the server snapshot for useSyncExternalStore.
  * Must be a module-level constant so Object.is comparison never sees a "change".
  */
-const EMPTY_SERVER_SNAPSHOT = { data: null, error: null, isPending: true } as any;
+const EMPTY_SERVER_SNAPSHOT = { data: null, error: null, isPending: true } as { data: unknown; error: unknown; isPending: boolean };
 
 /**
  * React hook to get the current session.

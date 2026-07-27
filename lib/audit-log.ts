@@ -27,7 +27,6 @@ export interface AuditLogPayload {
  */
 export async function recordAuditLog(payload: AuditLogPayload): Promise<void> {
   try {
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     await globalDb.auditLog.create({
       data: {
         userId: payload.userId,
@@ -39,8 +38,7 @@ export async function recordAuditLog(payload: AuditLogPayload): Promise<void> {
         ipAddress: payload.ipAddress,
         userAgent: payload.userAgent,
         success: payload.success,
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        metadata: payload.metadata as any,
+        metadata: payload.metadata,
       },
     });
   } catch (error) {

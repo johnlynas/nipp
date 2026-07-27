@@ -27,7 +27,7 @@ vi.mock('@/lib/db', () => {
       create: vi.fn(),
     },
   };
-  return { prisma: mockPrisma };
+  return { default: mockPrisma, prisma: mockPrisma };
 });
 
 // Mock Redis getter

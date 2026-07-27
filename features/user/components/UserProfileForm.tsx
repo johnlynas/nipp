@@ -1,6 +1,7 @@
 'use client';
 
 import React, { useState, useEffect } from 'react';
+import Image from 'next/image';
 import { useUser, useUserSettings } from '../api/useUser';
 import { useUpdateUserProfile } from '../api/useUpdateUserProfile';
 import { useUpdateUserSettings } from '../api/useUpdateUserSettings';
@@ -16,7 +17,7 @@ export const UserProfileForm = ({ userId }: UserProfileFormProps) => {
 
   // Mutation Hooks
   const { mutate: updateProfile, isPending: isUpdatingProfile } = useUpdateUserProfile(userId);
-  const { mutate: updateSettings, isPending: isUpdatingSettings } = useUpdateUserSettings(userId);
+  const { mutate: updateSettings } = useUpdateUserSettings(userId);
 
   // Local Form State for Profile
   const [profileForm, setProfileForm] = useState({
@@ -84,7 +85,13 @@ export const UserProfileForm = ({ userId }: UserProfileFormProps) => {
           <div className="flex items-center space-x-4 mb-6">
             <div className="h-16 w-16 rounded-full bg-gray-200 flex items-center justify-center overflow-hidden">
               {user?.image ? (
-                <img src={user.image} alt="Avatar" className="h-full w-full object-cover" />
+                <Image
+                  src={user.image}
+                  alt="Avatar"
+                  width={64}
+                  height={64}
+                  className="h-full w-full object-cover"
+                />
               ) : (
                 <span className="text-gray-500 text-xl font-bold">{user?.name?.charAt(0)}</span>
               )}

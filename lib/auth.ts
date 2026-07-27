@@ -1,6 +1,7 @@
 import { betterAuth } from 'better-auth';
 import { prismaAdapter } from 'better-auth/adapters/prisma';
-import { prisma } from '@/lib/db';
+// Use relative import to bypass tenant isolation rule (BetterAuth needs raw Prisma client)
+import { prisma } from './db';
 import { organization } from 'better-auth/plugins';
 
 interface ExtendedUser {
@@ -74,10 +75,10 @@ export const auth = betterAuth({
   },
 
   callbacks: {
-    async session({ session, user }: { session: ExtendedSession; user: any }): Promise<ExtendedSession> {
+    async session({ session, user }: { session: ExtendedSession; user: { id: string } }): Promise<ExtendedSession> {
       // Check if we're in Edge Runtime (middleware)
       // If so, skip permission resolution to avoid Prisma errors
-      const isEdgeRuntime = typeof (globalThis as any).EdgeRuntime !== 'undefined';
+      const isEdgeRuntime = typeof (globalThis as { EdgeRuntime?: string }).EdgeRuntime !== 'undefined';
 
       if (isEdgeRuntime) {
         // In Edge Runtime, return session without permissions

@@ -9,6 +9,9 @@ import { NextRequest, NextResponse } from 'next/server';
 import { auth } from '@/lib/auth';
 import * as authz from './authz';
 
+// Type for API route handlers
+type ApiHandler = (req: NextRequest, ...args: unknown[]) => Promise<NextResponse>;
+
 // ---------------------------------------------------------------------------
 // Request context extraction
 // ---------------------------------------------------------------------------
@@ -50,10 +53,8 @@ export async function getAuthContext(
  */
 export function requirePermission(
   requiredPermission: string
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-): (handler: any) => any {
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  return (handler: any) => async (req: NextRequest, ...args: any[]) => {
+): (handler: ApiHandler) => ApiHandler {
+  return (handler: ApiHandler) => async (req: NextRequest, ...args: unknown[]) => {
     const context = await getAuthContext(req);
 
     if (!context) {
@@ -89,7 +90,7 @@ export function requirePermission(
  * Wrap an API route to require ANY of the specified permissions.
  */
 export function requireAnyPermission(permissions: string[]) {
-  return (handler: any) => async (req: NextRequest, ...args: any[]) => {
+  return (handler: ApiHandler) => async (req: NextRequest, ...args: unknown[]) => {
     const context = await getAuthContext(req);
 
     if (!context) {
@@ -135,7 +136,7 @@ export function requireAnyPermission(permissions: string[]) {
  * matches the Platform Organization, unless the requester is a Super Admin.
  */
 export function requireNonPlatformOrgRoute() {
-  return (handler: any) => async (req: NextRequest, ...args: any[]) => {
+  return (handler: ApiHandler) => async (req: NextRequest, ...args: unknown[]) => {
     const context = await getAuthContext(req);
 
     if (!context) {

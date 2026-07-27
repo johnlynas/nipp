@@ -22,7 +22,7 @@ export async function GET(request: Request) {
       return NextResponse.json([], { status: 200 });
     }
 
-    const user = session.user as any;
+    const user = session.user as { permissions?: string[] };
 
     // Fast path: permissions already resolved in session
     if (user.permissions && Array.isArray(user.permissions)) {

@@ -28,7 +28,7 @@ const VALID_TRANSITIONS: Record<string, string[]> = {
 /**
  * Helper function to check if user is Super Admin
  */
-async function checkSuperAdmin(headersList: Headers): Promise<{ session: any; isSuperAdmin: boolean }> {
+async function checkSuperAdmin(headersList: Headers): Promise<{ session: ReturnType<typeof auth.api.getSession> | null; isSuperAdmin: boolean }> {
   const session = await auth.api.getSession({ headers: headersList });
   
   if (!session) {
@@ -107,7 +107,7 @@ export async function PATCH(
 
       const updated = await globalDb.organization.update({
         where: { id },
-        data: { status: newStatus as any },
+        data: { status: newStatus as 'PENDING' | 'ACTIVE' | 'SUSPENDED' | 'ARCHIVED' },
         select: { id: true, name: true, status: true },
       });
 

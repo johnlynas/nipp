@@ -4,7 +4,7 @@ import tseslint from 'typescript-eslint';
 
 export default tseslint.config(
   // Ignore generated and node_modules directories
-  { ignores: ['node_modules/', '.next/', 'dist/'] },
+  { ignores: ['node_modules/', '.next/', 'dist/', 'next-env.d.ts'] },
 
   // Base JavaScript rules
   js.configs.recommended,

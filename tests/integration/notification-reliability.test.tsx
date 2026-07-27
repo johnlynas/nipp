@@ -19,12 +19,12 @@ class MockEventSource {
   removeEventListener = vi.fn();
 
   constructor(url: string) {
-    // @ts-ignore
+    // @ts-expect-error - Mock setup for JSDOM
     globalThis.currentEventSourceUrl = url;
   }
 }
 
-// @ts-ignore
+// @ts-expect-error - Mock setup for JSDOM
 globalThis.EventSource = MockEventSource;
 
 // Wrapper to provide React Query context to the hook

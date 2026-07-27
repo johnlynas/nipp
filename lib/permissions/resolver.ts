@@ -1,4 +1,4 @@
-import prisma from '@/lib/db';
+import tenantDb from '@/lib/tenant-db';
 
 const PERMISSION_CACHE_TTL = 5 * 60; // 5 minutes
 const CACHE_KEY_PREFIX = 'perm:';
@@ -27,7 +27,7 @@ export async function resolvePermissions(
     }
 
     // Fetch from database with optimized single query approach
-    const memberWithRole = await prisma.member.findFirst({
+    const memberWithRole = await tenantDb.member.findFirst({
       where: { userId, orgId },
       select: {
         role: {

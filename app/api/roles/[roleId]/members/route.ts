@@ -8,7 +8,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { revalidateTag } from 'next/cache';
 import { auth } from '@/lib/auth';
-import prisma from '@/lib/db';
+import tenantDb from '@/lib/tenant-db';
 
 export const runtime = 'nodejs';
 
@@ -38,7 +38,7 @@ export async function POST(
   }
 
   // Get the role and verify it belongs to an org the requester is part of
-  const role = await prisma.role.findFirst({
+  const role = await tenantDb.role.findFirst({
     where: { id: roleId },
     include: { organization: true },
   });
@@ -48,7 +48,7 @@ export async function POST(
   }
 
   // Verify requester membership and get their role name
-  const requesterMembership = await prisma.member.findFirst({
+  const requesterMembership = await tenantDb.member.findFirst({
     where: { userId: session.user.id, orgId: role.organizationId },
     select: { role: true },
   });
@@ -72,7 +72,7 @@ export async function POST(
   }
 
   // Verify the target user is a member of this organization
-  const targetMembership = await prisma.member.findFirst({
+  const targetMembership = await tenantDb.member.findFirst({
     where: { userId, orgId: role.organizationId },
   });
 
@@ -84,7 +84,7 @@ export async function POST(
   }
 
   // Update the member's role (store custom role name in the string field)
-  await prisma.member.update({
+  await tenantDb.member.update({
     where: { id: targetMembership.id },
     data: { role: role.name },
   });

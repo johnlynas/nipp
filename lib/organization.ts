@@ -1,5 +1,3 @@
-import { auth } from './auth';
-
 /**
  * Organization plugin configuration boilerplate and helper functions.
  *
@@ -13,7 +11,7 @@ import { auth } from './auth';
  * Get the active organization for a given session/user.
  * In production, this would read from the user's session or cookie.
  */
-export async function getCurrentOrganization(userId: string) {
+export async function getCurrentOrganization(_userId: string) {
   // Placeholder — implement when organization switching UI is built
   return null;
 }

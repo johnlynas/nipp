@@ -9,7 +9,7 @@
 
 import { NextRequest, NextResponse } from 'next/server';
 import { auth } from '@/lib/auth';
-import prisma from '@/lib/db';
+import tenantDb from '@/lib/tenant-db';
 import { recordAuditLog } from '@/lib/audit-log';
 import { getClientIp } from '@/lib/ip';
 import { isSameSiteRequest } from '@/lib/csrf';
@@ -41,7 +41,7 @@ export async function DELETE(
   const { roleId } = await params;
 
   // Get the role with organization info
-  const role = await prisma.role.findUnique({
+  const role = await tenantDb.role.findUnique({
     where: { id: roleId },
     include: { organization: true },
   });
@@ -51,7 +51,7 @@ export async function DELETE(
   }
 
   // Verify requester is a member of this organization
-  const membership = await prisma.member.findFirst({
+  const membership = await tenantDb.member.findFirst({
     where: { userId: session.user.id, orgId: role.organizationId },
     select: { role: true },
   });
@@ -83,7 +83,7 @@ export async function DELETE(
   }
 
   // Safety check: count assigned members
-  const memberCount = await prisma.memberRole.count({
+  const memberCount = await tenantDb.memberRole.count({
     where: { roleId },
   });
 
@@ -98,7 +98,7 @@ export async function DELETE(
   }
 
   // Delete the role (cascades to RolePermission)
-  await prisma.role.delete({ where: { id: roleId } });
+  await tenantDb.role.delete({ where: { id: roleId } });
 
   // Audit log
   await recordAuditLog({

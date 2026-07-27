@@ -5,8 +5,6 @@
  * our custom permissions and role fields.
  */
 
-import type { BetterAuthOptions, DefaultSession } from 'better-auth';
-
 declare module 'better-auth' {
   interface Session {
     /**

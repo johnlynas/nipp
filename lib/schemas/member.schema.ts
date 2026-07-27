@@ -14,17 +14,7 @@ import { z } from 'zod';
 export const memberRoleSchema = z.object({
   role: z.string()
     .min(1, 'Role is required')
-    .max(255, 'Role name must be 255 characters or less')
-    .refine(
-      async (roleName, ctx) => {
-        // Runtime check: role name must exist in the organization's Role table
-        const { isValidRoleName } = await import('@/lib/roles/validation');
-        // orgId is passed via the calling context; this refine runs after
-        // superRefine where we have access to the full object.
-        return true; // placeholder — validated in superRefine below
-      },
-      { message: 'Role name is invalid' }
-    ),
+    .max(255, 'Role name must be 255 characters or less'),
 });
 
 /**

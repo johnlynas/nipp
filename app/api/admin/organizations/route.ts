@@ -58,10 +58,11 @@ export const POST = withSuperAdmin(async (request, context) => {
         organization 
       }, { status: 201 });
 
-    } catch (serviceError: any) {
+    } catch (serviceError: unknown) {
       // Handle business logic errors thrown by the service
-      if (serviceError.message === 'An organization with this name already exists' || 
-          serviceError.message === 'Unable to generate unique slug') {
+      if (serviceError instanceof Error && 
+          (serviceError.message === 'An organization with this name already exists' || 
+           serviceError.message === 'Unable to generate unique slug')) {
         return NextResponse.json({ error: serviceError.message }, { status: 400 });
       }
       throw serviceError; // Re-throw unknown errors to the outer catch block

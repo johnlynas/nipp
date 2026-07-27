@@ -6,7 +6,7 @@ interface Organization {
   name: string;
   slug: string;
   status: string;
-  metadata?: any;
+  metadata?: Record<string, unknown>;
   createdAt: string;
   updatedAt: string;
 }

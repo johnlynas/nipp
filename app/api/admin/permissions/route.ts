@@ -11,8 +11,9 @@ import { NextRequest, NextResponse } from 'next/server';
 import { revalidateTag } from 'next/cache';
 import { requireSuperAdmin, enterSuperAdminContext } from '@/lib/require-super-admin';
 import { recordAuditLog } from '@/lib/audit-log';
-import { prisma } from '@/lib/db';
+// Admin routes use globalDb for super-admin operations
 import { setRLSContext } from '@/lib/rls';
+import globalDb from '@/lib/global-db';
 import { env } from '@/lib/env';
 import { logger } from '@/lib/logger';
 import { getClientIp } from '@/lib/ip';
@@ -45,7 +46,7 @@ export async function GET(request: NextRequest) {
     }
 
     const session = authResult.session!;
-    const orgId = (session as any).session?.activeOrganizationId || env.PLATFORM_ORGANIZATION_ID!;
+    const orgId = (session as { session?: { activeOrganizationId?: string } }).session?.activeOrganizationId || env.PLATFORM_ORGANIZATION_ID!;
 
     try {
       await setRLSContext(session.user.id, orgId);
@@ -59,7 +60,7 @@ export async function GET(request: NextRequest) {
     const resource = searchParams.get('resource');
     const search = searchParams.get('search') || '';
 
-    const where: any = {};
+    const where: { resource?: string; OR?: Array<{ key: { contains: string; mode: 'insensitive' } }, { description: { contains: string; mode: 'insensitive' } }> } = {};
     if (resource) {
       where.resource = resource;
     }
@@ -70,7 +71,7 @@ export async function GET(request: NextRequest) {
       ];
     }
 
-    const permissions = await prisma.permission.findMany({
+    const permissions = await globalDb.permission.findMany({
       where,
       orderBy: [{ resource: 'asc' }, { action: 'asc' }],
     });
@@ -107,7 +108,7 @@ export async function POST(request: NextRequest) {
     await enterSuperAdminContext();
 
     const session = authResult.session!;
-    const orgId = (session as any).session?.activeOrganizationId || env.PLATFORM_ORGANIZATION_ID!;
+    const orgId = (session as { session?: { activeOrganizationId?: string } }).session?.activeOrganizationId || env.PLATFORM_ORGANIZATION_ID!;
 
     try {
       await setRLSContext(session.user.id, orgId);
@@ -131,7 +132,7 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: 'Key, resource, and action are required' }, { status: 400 });
     }
 
-    const permission = await prisma.permission.create({
+    const permission = await globalDb.permission.create({
       data: { key, resource, action, description },
     });
 

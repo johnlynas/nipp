@@ -59,15 +59,12 @@ export function validateEnv() {
   const result = envSchema.safeParse(process.env);
 
   if (!result.success) {
-    // eslint-disable-next-line no-console
     console.error('❌ Environment validation failed:');
     // Zod v4 uses 'issues' instead of 'errors'
-    const issues = (result.error as any).issues || [];
+    const issues = (result.error as { issues?: Array<{ path: string[]; message: string }> }).issues || [];
     issues.forEach((err: { path: string[]; message: string }) => {
-      // eslint-disable-next-line no-console
       console.error(`   - ${err.path.join('.')}: ${err.message}`);
     });
-    // eslint-disable-next-line no-console
     console.error('\n📝 Copy .env.example to .env and fill in the required values.');
     
     // Only exit the process if we are NOT in a testing environment
@@ -82,5 +79,5 @@ export function validateEnv() {
 // Validate immediately on import (fail-fast)
 // In test mode, we skip immediate validation to allow tests to run without a full .env
 export const env = process.env.NODE_ENV === 'test' 
-  ? (process.env as any) 
+  ? (process.env as Record<string, string | undefined>) 
   : validateEnv();

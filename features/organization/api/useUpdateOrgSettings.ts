@@ -6,7 +6,7 @@ interface UpdateOrgSettingsPayload {
   slug?: string;
 }
 
-async function updateOrgSettings(id: string, payload: UpdateOrgSettingsPayload): Promise<{ organization: any }> {
+async function updateOrgSettings(id: string, payload: UpdateOrgSettingsPayload): Promise<{ organization: { id: string; name: string; slug: string; status: string } }> {
   const response = await fetch(`/api/admin/organizations/${id}`, {
     method: 'PATCH',
     headers: {
@@ -38,7 +38,7 @@ export const useUpdateOrgSettings = (id: string) => {
       const previousSettings = queryClient.getQueryData(orgKeys.details(id));
 
       // Optimistically update to the new value
-      queryClient.setQueryData(orgKeys.details(id), (old: any) => {
+      queryClient.setQueryData(orgKeys.details(id), (old: { id: string; name?: string; slug?: string } | undefined) => {
         if (!old) return old;
         return {
           ...old,

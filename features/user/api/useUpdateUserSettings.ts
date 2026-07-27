@@ -7,7 +7,7 @@ interface UpdateUserSettingsPayload {
   language?: string;
 }
 
-async function updateUserSettings(userId: string, payload: UpdateUserSettingsPayload): Promise<{ settings: any }> {
+async function updateUserSettings(userId: string, payload: UpdateUserSettingsPayload): Promise<{ settings: { theme?: 'light' | 'dark' | 'system'; notificationsEnabled?: boolean; language?: string } }> {
   const response = await fetch(`/api/user/${userId}/settings`, {
     method: 'PATCH',
     headers: {
@@ -38,7 +38,7 @@ export const useUpdateUserSettings = (userId: string) => {
       const previousSettings = queryClient.getQueryData(userKeys.settings(userId));
 
       // Optimistically update the cache
-      queryClient.setQueryData(userKeys.settings(userId), (old: any) => {
+      queryClient.setQueryData(userKeys.settings(userId), (old: { theme?: 'light' | 'dark' | 'system'; notificationsEnabled?: boolean; language?: string } | undefined) => {
         if (!old) return old;
         return {
           ...old,

@@ -424,7 +424,7 @@ export class PgBouncerMonitor {
    */
   async checkHealth(): Promise<PgBouncerHealthStatus> {
     try {
-      const version = await this.getVersion();
+      await this.getVersion();
       const clients = await this.getClients();
       const pools = await this.getPools();
 
@@ -443,7 +443,7 @@ export class PgBouncerMonitor {
         activePools: pools.filter((p) => p.pool_size > 0).length,
         timestamp: new Date(),
       };
-    } catch (error) {
+    } catch {
       return {
         isHealthy: false,
         uptimeSeconds: 0,
@@ -736,7 +736,7 @@ export class PgBouncerMonitor {
    * Get a human-readable summary of PgBouncer status
    */
   async getSummary(): Promise<string> {
-    const [version, databases, clients, servers, pools, stats] =
+    const [version, databases, clients, servers, , stats] =
       await Promise.all([
         this.getVersion(),
         this.getDatabases(),

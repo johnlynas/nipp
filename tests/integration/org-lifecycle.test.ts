@@ -86,6 +86,6 @@ describe('Organization Lifecycle Integration', () => {
     expect(allowed).not.toContain('SUSPENDED');
 
     // Cleanup temp org
-    await prisma.organization.delete({ where: { id: tempOrg.id } });
+    await prisma.organization.deleteMany({ where: { slug: 'test-invalid-transition' } });
   });
 });

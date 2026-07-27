@@ -2,11 +2,8 @@
 
 import React, { useState, useRef, useEffect } from 'react';
 import { useNotifications } from '../api/useNotifications';
-import { Notification } from '../api/useNotifications';
 
-interface NotificationDropdownProps {}
-
-export const NotificationDropdown = ({}: NotificationDropdownProps) => {
+export const NotificationDropdown = () => {
   const [isOpen, setIsOpen] = useState(false);
   const dropdownRef = useRef<HTMLDivElement>(null);
   
@@ -27,7 +24,7 @@ export const NotificationDropdown = ({}: NotificationDropdownProps) => {
     return () => document.removeEventListener('mousedown', handleClickOutside);
   }, []);
 
-  const hasNotifications = notifications.length > 0;
+
 
   return (
     <div className="relative" ref={dropdownRef}>

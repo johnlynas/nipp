@@ -1,4 +1,4 @@
-import { prisma } from '@/lib/db';
+import tenantDb from './tenant-db';
 
 /**
  * Sets PostgreSQL session variables for Row Level Security (RLS).
@@ -14,7 +14,7 @@ export async function setRLSContext(userId: string, orgId: string) {
   
   // 2. Fallback: If not in env, fetch it directly from the database
   if (!platformOrgId) {
-    const platformOrg = await prisma.organization.findFirst({
+    const platformOrg = await tenantDb.organization.findFirst({
       where: { slug: 'platform' },
       select: { id: true },
     });
@@ -29,7 +29,7 @@ export async function setRLSContext(userId: string, orgId: string) {
   }
 
   // 3. Set the Postgres session variables for this request
-  await prisma.$executeRaw`
+  await tenantDb.$executeRaw`
     SELECT set_config('app.current_user_id', ${userId}, true),
            set_config('app.current_org_id', ${orgId}, true),
            set_config('app.platform_org_id', ${platformOrgId}, true)

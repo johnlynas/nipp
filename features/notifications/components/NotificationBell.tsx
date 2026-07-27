@@ -3,9 +3,7 @@
 import React from 'react';
 import { useNotifications } from '../api/useNotifications';
 
-interface NotificationBellProps {}
-
-export const NotificationBell = ({}: NotificationBellProps) => {
+export const NotificationBell = () => {
   const { unreadCount, isLoading } = useNotifications();
 
   return (

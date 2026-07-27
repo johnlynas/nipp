@@ -6,7 +6,7 @@ interface UpdateUserProfilePayload {
   image?: string;
 }
 
-async function updateUserProfile(userId: string, payload: UpdateUserProfilePayload): Promise<{ user: any }> {
+async function updateUserProfile(userId: string, payload: UpdateUserProfilePayload): Promise<{ user: { id: string; name?: string; image?: string } }> {
   const response = await fetch(`/api/user/${userId}/profile`, {
     method: 'PATCH',
     headers: {
@@ -34,7 +34,7 @@ export const useUpdateUserProfile = (userId: string) => {
 
       const previousUser = queryClient.getQueryData(userKeys.profile(userId));
 
-      queryClient.setQueryData(userKeys.profile(userId), (old: any) => {
+      queryClient.setQueryData(userKeys.profile(userId), (old: { id: string; name?: string; image?: string } | undefined) => {
         if (!old) return old;
         return {
           ...old,

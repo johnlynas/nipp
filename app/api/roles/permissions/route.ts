@@ -6,7 +6,7 @@
 
 import { NextRequest, NextResponse } from 'next/server';
 import { auth } from '@/lib/auth';
-import prisma from '@/lib/db';
+import tenantDb from '@/lib/tenant-db';
 
 export const runtime = 'nodejs';
 
@@ -20,7 +20,7 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
   }
 
-  const permissions = await prisma.permission.findMany({
+  const permissions = await tenantDb.permission.findMany({
     select: { key: true, resource: true, action: true, description: true },
     orderBy: { resource: 'asc' },
   });

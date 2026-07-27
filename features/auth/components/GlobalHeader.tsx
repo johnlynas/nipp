@@ -6,7 +6,6 @@ import Image from 'next/image';
 
 // --- Architecture Imports (The integrated pieces) ---
 import { useUser } from '@/features/user/api/useUser'; // Identity Data
-import { useNotifications } from '@/features/notifications/api/useNotifications'; // Real-time SSE
 import { RequiredPermissions } from '@/features/permissions/components/RequiredPermissions'; // RBAC Shield
 import { NotificationDropdown } from '@/features/notifications/components/NotificationDropdown'; // Real-time UI
 
@@ -84,7 +83,13 @@ export const GlobalHeader = () => {
             >
               <div className="h-8 w-8 rounded-full bg-blue-100 flex items-center justify-center ring-2 ring-white group-hover:ring-blue-200 transition-all">
                 {user?.image ? (
-                  <img src={user.image} alt="Avatar" className="h-full w-full rounded-full object-cover" />
+                  <Image
+                    src={user.image}
+                    alt="Avatar"
+                    width={32}
+                    height={32}
+                    className="h-full w-full rounded-full object-cover"
+                  />
                 ) : (
                   <span className="text-blue-600 font-semibold text-sm">
                     {user?.name ? user.name.charAt(0).toUpperCase() : 'U'}

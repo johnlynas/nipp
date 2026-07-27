@@ -14,6 +14,11 @@
 import { useSession } from '@/lib/auth-client';
 import { usePermissions } from '@/features/permissions/api/usePermissions';
 
+interface SessionUser {
+  permissions?: string[];
+  isSuperAdmin?: boolean;
+}
+
 // ---------------------------------------------------------------------------
 // Internal: check permissions against session data or React Query cache.
 // ---------------------------------------------------------------------------
@@ -27,8 +32,9 @@ export function usePermission(permission: string): boolean {
   const { data: permissions, isLoading } = usePermissions();
 
   // Fast path: session already has permissions resolved
-  if ((session?.user as any)?.permissions) {
-    return (session.user as any).permissions.includes(permission);
+  const user = session?.user as SessionUser | undefined;
+  if (user?.permissions) {
+    return user.permissions.includes(permission);
   }
 
   // Slow path: wait for React Query cache to load
@@ -46,8 +52,9 @@ export function useAnyPermission(permissions: string[]): boolean {
   const { data: userPermissions, isLoading } = usePermissions();
 
   // Fast path: session already has permissions resolved
-  if ((session?.user as any)?.permissions) {
-    return permissions.some((p) => (session.user as any).permissions.includes(p));
+  const user = session?.user as SessionUser | undefined;
+  if (user?.permissions) {
+    return permissions.some((p) => user.permissions!.includes(p));
   }
 
   // Slow path: wait for React Query cache to load
@@ -65,8 +72,9 @@ export function useIsSuperAdmin(): boolean | null {
   const { data: permissions, isLoading } = usePermissions();
 
   // Fast path: session already has isSuperAdmin flag
-  if ((session?.user as any)?.isSuperAdmin !== undefined) {
-    return (session.user as any).isSuperAdmin;
+  const user = session?.user as SessionUser | undefined;
+  if (user?.isSuperAdmin !== undefined) {
+    return user.isSuperAdmin;
   }
 
   // Slow path: wait for React Query cache to load
@@ -92,13 +100,14 @@ export function useAllPermissions(permissions: string[]): boolean {
   const { data: userPermissions, isLoading } = usePermissions();
 
   // Fast path: Super Admins have all permissions
-  if ((session?.user as any)?.isSuperAdmin) {
+  const user = session?.user as SessionUser | undefined;
+  if (user?.isSuperAdmin) {
     return true;
   }
 
   // Fast path: session already has permissions resolved
-  if ((session?.user as any)?.permissions) {
-    return permissions.every((p) => (session.user as any).permissions.includes(p));
+  if (user?.permissions) {
+    return permissions.every((p) => user.permissions!.includes(p));
   }
 
   // Slow path: wait for React Query cache to load

@@ -16,19 +16,16 @@ vi.mock('@/lib/redis', () => ({
   redisDel: vi.fn(),
 }));
 
-vi.mock('@/lib/db', () => {
-  const mockPrisma = {
+vi.mock('@/lib/tenant-db', () => {
+  const mockTenantDb = {
     member: { findFirst: vi.fn() },
-    role: { findMany: vi.fn() },
-    rolePermission: { findMany: vi.fn() },
-    permission: { findMany: vi.fn() },
   };
-  return { default: mockPrisma, prisma: mockPrisma };
+  return { default: mockTenantDb, tenantDb: mockTenantDb };
 });
 
 import { resolvePermissions, invalidateUserCache } from '@/lib/permissions/resolver';
 import { redisGet, redisSet, getRedis } from '@/lib/redis';
-import prisma from '@/lib/db';
+import tenantDb from '@/lib/tenant-db';
 
 describe('resolvePermissions', () => {
   beforeEach(() => {
@@ -47,7 +44,7 @@ describe('resolvePermissions', () => {
   it('fetches from DB and caches when Redis misses', async () => {
     vi.mocked(redisGet).mockResolvedValue(null);
     // Mock the single query with nested includes (optimized approach)
-    vi.mocked(prisma.member.findFirst).mockResolvedValue({
+    vi.mocked(tenantDb.member.findFirst).mockResolvedValue({
       id: 'member-1',
       createdAt: new Date(),
       updatedAt: new Date(),
@@ -75,8 +72,10 @@ describe('resolvePermissions', () => {
 
     expect(result).toEqual(['properties:view']);
     expect(redisSet).toHaveBeenCalledWith('perm:user-1:org-1', JSON.stringify(['properties:view']), 300);
-    // Verify that role.findMany is NOT called (single query optimization)
-    expect(prisma.role.findMany).not.toHaveBeenCalled();
+    expect(tenantDb.member.findFirst).toHaveBeenCalledWith({
+      where: { userId: 'user-1', orgId: 'org-1' },
+      select: expect.any(Object),
+    });
   });
 });
 

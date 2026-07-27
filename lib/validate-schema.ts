@@ -26,7 +26,6 @@ export function validateSchema(): void {
   const schemaPath = path.join(process.cwd(), 'prisma', 'schema.prisma');
 
   if (!fs.existsSync(schemaPath)) {
-    // eslint-disable-next-line no-console
     console.error('CRITICAL: prisma/schema.prisma not found. Tenant isolation cannot be validated.');
     process.exit(1);
   }
@@ -41,7 +40,6 @@ export function validateSchema(): void {
 
     const hasOrgId = modelHasOrganizationId(schema, modelName);
     if (!hasOrgId) {
-      // eslint-disable-next-line no-console
       console.error(
         `CRITICAL: Model "${modelName}" is missing the required organizationId field. ` +
           'All organization-scoped models MUST include: ' +
@@ -52,12 +50,10 @@ export function validateSchema(): void {
   }
 
   if (hasErrors) {
-    // eslint-disable-next-line no-console
     console.error('\nTenant isolation is BROKEN. Add organizationId to the affected models.');
     process.exit(1);
   }
 
-  // eslint-disable-next-line no-console
   console.log('Schema validation passed: all non-exempt models have organizationId.');
 }
 

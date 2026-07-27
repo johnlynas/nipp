@@ -1,4 +1,3 @@
-import { Prisma } from '@prisma/client';
 import prisma from './db';
 import { getCurrentOrgId } from './tenant-context';
 

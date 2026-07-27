@@ -1,7 +1,7 @@
 import { auth } from '@/lib/auth';
 import { headers } from 'next/headers';
 import { redirect } from 'next/navigation';
-import { prisma } from '@/lib/db';
+import tenantDb from '@/lib/tenant-db';
 import { LogoutButton } from '@/components/auth/LogoutButton'; // ✅ Import the new button
 
 /**
@@ -20,7 +20,7 @@ export default async function HomePage() {
   }
 
   // 3. THE CRITICAL CHECK: Query the database directly for the user's role.
-  const user = await prisma.user.findUnique({
+  const user = await tenantDb.user.findUnique({
     where: { id: session.user.id },
     select: { role: true },
   });

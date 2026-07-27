@@ -1,4 +1,4 @@
-import { prisma } from '@/lib/db';
+import tenantDb from '@/lib/tenant-db';
 import { logger } from '@/lib/logger';
 
 export interface CreateOrganizationInput {
@@ -40,13 +40,13 @@ export const OrganizationService = {
     const skip = (page - 1) * pageSize;
 
     const [organizations, total] = await Promise.all([
-      prisma.organization.findMany({
+      tenantDb.organization.findMany({
         skip,
         take: pageSize,
         orderBy: { createdAt: 'desc' },
         include: { _count: { select: { members: true } } },
       }),
-      prisma.organization.count(),
+      tenantDb.organization.count(),
     ]);
 
     return {
@@ -67,7 +67,7 @@ export const OrganizationService = {
   async createOrganization(input: CreateOrganizationInput) {
     const { name, slug, adminEmail } = input;
 
-    return await prisma.$transaction(async (tx) => {
+    return await tenantDb.$transaction(async (tx) => {
       // 1. Check for existing organization by name
       const existingOrgByName = await tx.organization.findFirst({
         where: { name: { equals: name, mode: 'insensitive' } },
@@ -78,15 +78,15 @@ export const OrganizationService = {
       }
 
       // 2. Generate unique slug (Unique constraint + catch pattern)
-      let generatedSlug = slug || name.toLowerCase().replace(/\s+/g, '-');
+      const generatedSlug = slug || name.toLowerCase().replace(/\s+/g, '-');
       
       try {
         const organization = await tx.organization.create({
           data: { name, slug: generatedSlug },
         });
         return organization;
-      } catch (error: any) {
-        if (error.code === 'P2002') { // Unique constraint failed on slug
+      } catch (error: unknown) {
+        if ((error as { code?: string }).code === 'P2002') { // Unique constraint failed on slug
           let suffix = 1;
           while (suffix <= 100) {
             const candidateSlug = `${generatedSlug}-${suffix}`;
@@ -94,8 +94,8 @@ export const OrganizationService = {
               return await tx.organization.create({
                 data: { name, slug: candidateSlug },
               });
-            } catch (err: any) {
-              if (err.code !== 'P2002') throw err; // Re-throw non-unique errors
+            } catch (err: unknown) {
+              if ((err as { code?: string }).code !== 'P2002') throw err; // Re-throw non-unique errors
               suffix++;
             }
           }

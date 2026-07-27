@@ -1,7 +1,7 @@
 import { NextResponse } from 'next/server';
 import { auth } from '@/lib/auth';
 import { headers } from 'next/headers';
-import { prisma } from '@/lib/db';
+import tenantDb from '@/lib/tenant-db';
 import { logger } from '@/lib/logger';
 import { verifySuperAdmin, getPlatformOrgId } from '@/lib/authz';
 
@@ -29,7 +29,7 @@ export async function GET() {
 
     try {
       // 1. Fetch user's active organization
-      const user = await prisma.user.findUnique({
+      const user = await tenantDb.user.findUnique({
         where: { id: userId },
         select: { activeOrganizationId: true },
       });
