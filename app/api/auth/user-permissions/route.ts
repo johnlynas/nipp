@@ -22,7 +22,7 @@ export async function GET(request: Request) {
       return NextResponse.json([], { status: 200 });
     }
 
-    const user = session.user as { permissions?: string[] };
+    const user = session.user as { id: string; permissions?: string[] };
 
     // Fast path: permissions already resolved in session
     if (user.permissions && Array.isArray(user.permissions)) {
@@ -41,8 +41,8 @@ export async function GET(request: Request) {
 
       // Fall back to org-specific permissions if active org is set
       const { resolvePermissions } = await import('@/lib/permissions/resolver');
-      if (session.activeOrganizationId) {
-        const permissions = await resolvePermissions(user.id, session.activeOrganizationId);
+      if (session.session.activeOrganizationId) {
+        const permissions = await resolvePermissions(user.id, session.session.activeOrganizationId);
         return NextResponse.json(permissions);
       }
     } catch (error) {

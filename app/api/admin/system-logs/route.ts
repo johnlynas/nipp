@@ -10,7 +10,7 @@ export async function GET() {
   try {
     const { authorized, error, status, session } = await requireSuperAdmin();
     
-    if (!authorized) {
+    if (!authorized || !session) {
       return NextResponse.json({ error }, { status });
     }
 

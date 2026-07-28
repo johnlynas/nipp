@@ -1,4 +1,4 @@
-import { betterAuth } from 'better-auth';
+import { betterAuth } from 'better-auth/minimal';
 import { prismaAdapter } from 'better-auth/adapters/prisma';
 // Use relative import to bypass tenant isolation rule (BetterAuth needs raw Prisma client)
 import { prisma } from './db';

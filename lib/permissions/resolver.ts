@@ -26,27 +26,33 @@ export async function resolvePermissions(
       }
     }
 
-    // Fetch from database with optimized single query approach
-    const memberWithRole = await tenantDb.member.findFirst({
+    // Fetch from database — traverse MemberRole join table to reach Role → RolePermission → Permission
+    const memberWithRoles = await tenantDb.member.findFirst({
       where: { userId, orgId },
       select: {
-        role: {
-          select: { 
-            permissions: { 
-              select: { permission: { select: { key: true } } }
-            }
-          }
-        }
-      }
+        memberRoles: {                              // ← join table relation (verify name in schema)
+          select: {
+            role: {
+              select: {
+                permissions: {
+                  select: {
+                    permission: { select: { key: true } },
+                  },
+                },
+              },
+            },
+          },
+        },
+      },
     });
 
-    if (!memberWithRole?.role) {
+    if (!memberWithRoles?.memberRoles) {
       return [];
     }
 
-    // Debug: Log what we got back for troubleshooting
-    const permissions = memberWithRole.role.permissions.map(
-      (rp) => rp.permission.key
+    // Flatten: MemberRole[] → Role[] → RolePermission[] → Permission.key
+    const permissions: string[] = memberWithRoles.memberRoles.flatMap(
+      (mr) => mr.role.permissions.map((rp) => rp.permission.key)
     );
 
     const uniquePermissions = Array.from(new Set(permissions));

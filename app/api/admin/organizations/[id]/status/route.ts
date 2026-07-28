@@ -28,7 +28,7 @@ const VALID_TRANSITIONS: Record<string, string[]> = {
 /**
  * Helper function to check if user is Super Admin
  */
-async function checkSuperAdmin(headersList: Headers): Promise<{ session: ReturnType<typeof auth.api.getSession> | null; isSuperAdmin: boolean }> {
+async function checkSuperAdmin(headersList: Headers): Promise<{ session: Awaited<ReturnType<typeof auth.api.getSession>> | null; isSuperAdmin: boolean }> {
   const session = await auth.api.getSession({ headers: headersList });
   
   if (!session) {
@@ -38,7 +38,6 @@ async function checkSuperAdmin(headersList: Headers): Promise<{ session: ReturnT
   const { authorized, error } = await verifySuperAdmin(session.user.id);
   
   if (!authorized) {
-    // Log warning for normal access denial
     console.warn(`[AUTH] Super admin verification failed for user ${session.user.id}: ${error}`);
     return { session, isSuperAdmin: false };
   }
@@ -68,7 +67,7 @@ export async function PATCH(
       return NextResponse.json({ error: 'Super Admin access required' }, { status: 403 });
     }
     
-    logger.info('[ORG_STATUS_API] Session found for user', { userId: session.user.id });
+    logger.info({ userId: session.user.id }, '[ORG_STATUS_API] Session found for user');
 
     const { id } = await params;
     const body = await request.json();
@@ -88,7 +87,7 @@ export async function PATCH(
       });
 
       if (!org) {
-        logger.warn('[ORG_STATUS_API] Organization not found', { id });
+        logger.warn({ id }, '[ORG_STATUS_API] Organization not found');
         return NextResponse.json({ error: 'Organization not found' }, { status: 404 });
       }
 
@@ -119,18 +118,18 @@ export async function PATCH(
       // P7: Invalidate cached org details on status change
       revalidateTag('org');
 
-      logger.info('[ORG_STATUS_API] Organization status updated', { id, newStatus });
+      logger.info({ id, newStatus }, '[ORG_STATUS_API] Organization status updated');
 
       return NextResponse.json({ organization: updated });
     } catch (error) {
-      logger.error('[ORG_STATUS_API] Failed to update status', { error });
+      logger.error({ err: error }, '[ORG_STATUS_API] Failed to update status');
       return NextResponse.json(
         { error: 'Failed to update organization status' },
         { status: 500 }
       );
     }
   } catch (error) {
-    logger.error('[ORG_STATUS_API] PATCH error', { error });
+    logger.error({ err: error }, '[ORG_STATUS_API] PATCH error');
     return NextResponse.json({ error: 'Internal server error' }, { status: 500 });
   }
 }
@@ -165,7 +164,7 @@ async function invalidateOrgSessions(orgId: string) {
 
     logger.info(`[ORG_STATUS_API] Invalidated sessions for ${members.length} members of org ${orgId}`);
   } catch (error) {
-    logger.error('[ORG_STATUS_API] Failed to invalidate sessions', { error });
+    logger.error({ err: error }, '[ORG_STATUS_API] Failed to invalidate sessions');
     // Don't fail the status change if session invalidation fails
   }
 }

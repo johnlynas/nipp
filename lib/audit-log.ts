@@ -5,6 +5,7 @@
  */
 
 import globalDb from '@/lib/global-db';
+import { Prisma } from '@prisma/client';
 
 /**
  * Audit log entry payload.
@@ -38,7 +39,7 @@ export async function recordAuditLog(payload: AuditLogPayload): Promise<void> {
         ipAddress: payload.ipAddress,
         userAgent: payload.userAgent,
         success: payload.success,
-        metadata: payload.metadata,
+        metadata: payload.metadata as Prisma.InputJsonValue | undefined
       },
     });
   } catch (error) {

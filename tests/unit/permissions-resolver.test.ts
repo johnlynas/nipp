@@ -43,30 +43,22 @@ describe('resolvePermissions', () => {
 
   it('fetches from DB and caches when Redis misses', async () => {
     vi.mocked(redisGet).mockResolvedValue(null);
-    // Mock the single query with nested includes (optimized approach)
+    // Mock the memberRoles join table query (matches resolver's select shape)
     vi.mocked(tenantDb.member.findFirst).mockResolvedValue({
-      id: 'member-1',
-      createdAt: new Date(),
-      updatedAt: new Date(),
-      userId: 'user-1',
-      orgId: 'org-1',
-      role: {
-        id: 'role-1',
-        name: 'Admin',
-        createdAt: new Date(),
-        updatedAt: new Date(),
-        organizationId: 'org-1',
-        description: null,
-        isDefault: false,
-        permissions: [
-          {
-            permission: {
-              key: 'properties:view',
-            },
+      memberRoles: [
+        {
+          role: {
+            permissions: [
+              {
+                permission: {
+                  key: 'properties:view',
+                },
+              },
+            ],
           },
-        ],
-      },
-    });
+        },
+      ],
+    } as any);
 
     const result = await resolvePermissions('user-1', 'org-1');
 
@@ -96,9 +88,9 @@ describe('invalidateUserCache', () => {
 
   it('does nothing if getRedis returns null', async () => {
     vi.mocked(getRedis).mockReturnValue(null);
-    
+
     await invalidateUserCache('user-1');
-    
+
     // Should not throw
   });
 });

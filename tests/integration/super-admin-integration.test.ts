@@ -3,6 +3,7 @@
  */
 
 import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { NextRequest } from 'next/server';
 import { auth } from '@/lib/auth';
 import { verifySuperAdmin } from '@/lib/authz';
 import { testClient } from '../utils/test-client';
@@ -34,6 +35,14 @@ vi.mock('@/lib/global-db', () => ({
   },
 }));
 
+/** Wrap a standard Request into a NextRequest for route handler compatibility. */
+function toNextRequest(request: Request): NextRequest {
+  return new NextRequest(request.url, {
+    method: request.method,
+    headers: request.headers,
+  });
+}
+
 describe('Super Admin vs Tenant Access (Integration)', () => {
   beforeEach(() => {
     vi.clearAllMocks();
@@ -55,7 +64,7 @@ describe('Super Admin vs Tenant Access (Integration)', () => {
       });
 
       const { GET } = await import('@/app/api/admin/organizations/route');
-      const request = await testClient.get('/api/admin/organizations');
+      const request = toNextRequest(await testClient.get('/api/admin/organizations'));
       const response = await GET(request);
 
       expect(response.status).toBe(200);
@@ -68,7 +77,7 @@ describe('Super Admin vs Tenant Access (Integration)', () => {
       vi.mocked(auth.api.getSession).mockResolvedValue(null);
 
       const { GET } = await import('@/app/api/admin/organizations/route');
-      const request = await testClient.get('/api/admin/organizations');
+      const request = toNextRequest(await testClient.get('/api/admin/organizations'));
       const response = await GET(request);
 
       expect(response.status).toBe(401);
@@ -90,7 +99,7 @@ describe('Super Admin vs Tenant Access (Integration)', () => {
       });
 
       const { GET } = await import('@/app/api/admin/organizations/route');
-      const request = await testClient.get('/api/admin/organizations');
+      const request = toNextRequest(await testClient.get('/api/admin/organizations'));
       const response = await GET(request);
 
       expect(response.status).toBe(403);
@@ -111,7 +120,7 @@ describe('Super Admin vs Tenant Access (Integration)', () => {
       });
 
       const { GET } = await import('@/app/api/admin/organizations/route');
-      const request = await testClient.get('/api/admin/organizations');
+      const request = toNextRequest(await testClient.get('/api/admin/organizations'));
       const response = await GET(request);
 
       expect(response.status).toBe(503);

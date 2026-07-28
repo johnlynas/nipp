@@ -22,7 +22,7 @@ const getOrgDetails = unstable_cache(
   { revalidate: 30 }
 );
 
-async function checkSuperAdmin(headersList: Headers): Promise<{ session: ReturnType<typeof auth.api.getSession> | null; isSuperAdmin: boolean; error?: string }> {
+async function checkSuperAdmin(headersList: Headers): Promise<{ session: Awaited<ReturnType<typeof auth.api.getSession>> | null; isSuperAdmin: boolean; error?: string }> {
   const session = await auth.api.getSession({ headers: headersList });
   if (!session) return { session: null, isSuperAdmin: false };
   

@@ -15,8 +15,10 @@ interface UserSettings {
   language: string;
 }
 
-async function fetchUserProfile(userId: string): Promise<UserProfile> {
-  const response = await fetch(`/api/user/${userId}/profile`);
+async function fetchUserProfile(userId?: string): Promise<UserProfile> {
+  // When no userId provided, resolve from the authenticated session cookie
+  const url = userId ? `/api/user/${userId}/profile` : '/api/user/profile';
+  const response = await fetch(url);
   if (!response.ok) {
     throw new Error('Failed to fetch user profile');
   }
@@ -31,9 +33,9 @@ async function fetchUserSettings(userId: string): Promise<UserSettings> {
   return response.json();
 }
 
-export const useUser = (userId: string) => {
+export const useUser = (userId?: string) => {
   return useQuery({
-    queryKey: userKeys.profile(userId),
+    queryKey: userKeys.profile(userId ?? 'current'),
     queryFn: () => fetchUserProfile(userId),
     staleTime: 1000 * 60 * 15, // 15 minutes (Identity is stable)
     gcTime: 1000 * 60 * 60,    // 1 hour

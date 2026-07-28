@@ -19,6 +19,11 @@ interface SessionUser {
   isSuperAdmin?: boolean;
 }
 
+/** Shape of the better-auth session returned by useSession(). */
+interface AuthSession {
+  user: SessionUser;
+}
+
 // ---------------------------------------------------------------------------
 // Internal: check permissions against session data or React Query cache.
 // ---------------------------------------------------------------------------
@@ -32,7 +37,7 @@ export function usePermission(permission: string): boolean {
   const { data: permissions, isLoading } = usePermissions();
 
   // Fast path: session already has permissions resolved
-  const user = session?.user as SessionUser | undefined;
+  const user = (session as AuthSession | null)?.user;
   if (user?.permissions) {
     return user.permissions.includes(permission);
   }
@@ -52,7 +57,7 @@ export function useAnyPermission(permissions: string[]): boolean {
   const { data: userPermissions, isLoading } = usePermissions();
 
   // Fast path: session already has permissions resolved
-  const user = session?.user as SessionUser | undefined;
+  const user = (session as AuthSession | null)?.user;
   if (user?.permissions) {
     return permissions.some((p) => user.permissions!.includes(p));
   }
@@ -72,7 +77,7 @@ export function useIsSuperAdmin(): boolean | null {
   const { data: permissions, isLoading } = usePermissions();
 
   // Fast path: session already has isSuperAdmin flag
-  const user = session?.user as SessionUser | undefined;
+  const user = (session as AuthSession | null)?.user;
   if (user?.isSuperAdmin !== undefined) {
     return user.isSuperAdmin;
   }
@@ -100,7 +105,7 @@ export function useAllPermissions(permissions: string[]): boolean {
   const { data: userPermissions, isLoading } = usePermissions();
 
   // Fast path: Super Admins have all permissions
-  const user = session?.user as SessionUser | undefined;
+  const user = (session as AuthSession | null)?.user;
   if (user?.isSuperAdmin) {
     return true;
   }

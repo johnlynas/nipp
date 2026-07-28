@@ -19,9 +19,9 @@ export const GlobalHeader = () => {
   // We handle local state to prevent FOUC (Flash of Unauthorized Content) on logout/login.
   const [isUserMenuOpen, setIsUserMenuOpen] = useState(false);
   
-  // Using `null` as the userId makes `useUser` attempt to resolve it from the authenticated cookie automatically.
+  // Using `undefined` as the userId makes `useUser` attempt to resolve it from the authenticated cookie automatically.
   // It will return `undefined` if no valid session is found.
-  const { data: user, isLoading } = useUser(null);
+  const { data: user, isLoading } = useUser();
 
   // ========================================================================
   
@@ -37,7 +37,7 @@ export const GlobalHeader = () => {
   // If a user is logged in, render the fully authenticated dashboard header.
   return (
     <>
-      <auth-nav>
+      <nav className="bg-white shadow-sm border-b border-gray-200 h-16 flex items-center justify-between px-8">
         {/* --- LEFT: Branding & Main Nav Links --- */}
         <div className="flex items-center space-x-8">
           <Link href="/" className="text-xl font-bold tracking-tight text-gray-900 hover:text-blue-600 transition-colors">
@@ -118,7 +118,7 @@ export const GlobalHeader = () => {
           </div>
 
         </div>
-      </auth-nav>
+      </nav>
     </>
   );
 };

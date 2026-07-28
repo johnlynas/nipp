@@ -25,10 +25,13 @@ export async function GET(request: Request) {
     const url = new URL(request.url);
     const page = parseInt(url.searchParams.get('page') || '1', 10);
     const pageSize = parseInt(url.searchParams.get('pageSize') || '50', 10);
-    
+      
+    // Wrap RLS context setting in try/catch to catch DB outages cleanly
     try {
-      // Wrap RLS context setting in try/catch to catch DB outages cleanly
-      await setRLSContext(session.user.id, session.user.activeOrganizationId, process.env.PLATFORM_ORG_ID);
+      const orgId = session.session.activeOrganizationId;
+      if (orgId) {
+         await setRLSContext(session.user.id, orgId);
+      }
     } catch (rlsError) {
       const isDbError = rlsError instanceof Error && rlsError.message.includes('Can\'t reach database server');
       logger.error({ userId: session.user.id, err: rlsError }, isDbError ? '[Audit Logs API] Database unavailable setting RLS context' : '[Audit Logs API] Error setting RLS context');

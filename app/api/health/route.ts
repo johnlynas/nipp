@@ -5,7 +5,7 @@ import { PgBouncerMonitor } from '@/lib/pgbouncer-monitor';
 import { NextResponse } from 'next/server';
 
 export async function GET() {
-  const checks: Record<string, { status: string; latency_ms?: number; error?: string; total_connections?: number }> = {};
+  const checks: Record<string, { status: string; latency_ms?: number; error?: string; message?: string; total_connections?: number }> = {};
   let overallStatus = 'healthy';
 
   // Get previous state
@@ -47,7 +47,7 @@ export async function GET() {
     const redisClient = getRedis();
     if (redisClient) {
       // If connection is closed, try to reconnect
-      if (redisClient.status === 'end' || redisClient.status === 'closed') {
+      if (redisClient.status === 'end' || redisClient.status === 'close') {
         console.log('[Redis] Connection closed, attempting reconnect...');
         redisClient.connect().catch(() => {});
         throw new Error('Redis client was closed, attempting reconnect');
@@ -113,7 +113,7 @@ export async function GET() {
       total_connections: health.totalConnections,
     };
 
-    if (prevState["connection-pool"] === 'unhealthy') {
+    if (prevState.pgbouncer === 'unhealthy') {
       addSystemLog({
         level: 'info',
         source: 'health-check:pgbouncer',
@@ -126,7 +126,7 @@ export async function GET() {
     checks["connection-pool"] = { status: 'unhealthy', error: 'Connection pool connection failed' };
     overallStatus = 'unhealthy';
 
-    if (prevState["connection-pool"] !== 'unhealthy') {
+    if (prevState.pgbouncer !== 'unhealthy') {
       addSystemLog({
         level: 'error',
         source: 'health-check:pgbouncer',

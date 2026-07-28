@@ -1,3 +1,4 @@
+import { Prisma } from '@prisma/client';
 import tenantDb from '@/lib/tenant-db';
 import { logger } from '@/lib/logger';
 
@@ -10,7 +11,7 @@ export interface CreateOrganizationInput {
 export interface OrganizationWithCount {
   id: string;
   name: string;
-  slug: string;
+  slug: string | null; // ← Prisma schema allows null
   createdAt: Date;
   updatedAt: Date;
   _count: {
@@ -26,6 +27,37 @@ export interface PaginatedOrganizations {
     total: number;
     totalPages: number;
   };
+}
+
+/**
+ * Attempt to create an organization, retrying with a numeric suffix
+ * on slug uniqueness collisions (P2002).
+ */
+async function createWithUniqueSlug(
+  tx: Prisma.TransactionClient,
+  name: string,
+  baseSlug: string,
+) {
+  try {
+    return await tx.organization.create({
+      data: { name, slug: baseSlug },
+    });
+  } catch (error: unknown) {
+    if ((error as { code?: string }).code !== 'P2002') throw error;
+  }
+
+  // Slug collision — retry with suffix
+  for (let suffix = 1; suffix <= 100; suffix++) {
+    try {
+      return await tx.organization.create({
+        data: { name, slug: `${baseSlug}-${suffix}` },
+      });
+    } catch (err: unknown) {
+      if ((err as { code?: string }).code !== 'P2002') throw err;
+    }
+  }
+
+  throw new Error('Unable to generate unique slug');
 }
 
 /**
@@ -77,59 +109,47 @@ export const OrganizationService = {
         throw new Error('An organization with this name already exists');
       }
 
-      // 2. Generate unique slug (Unique constraint + catch pattern)
+      // 2. Create organization with unique slug (retry on collision)
       const generatedSlug = slug || name.toLowerCase().replace(/\s+/g, '-');
-      
-      try {
-        const organization = await tx.organization.create({
-          data: { name, slug: generatedSlug },
-        });
-        return organization;
-      } catch (error: unknown) {
-        if ((error as { code?: string }).code === 'P2002') { // Unique constraint failed on slug
-          let suffix = 1;
-          while (suffix <= 100) {
-            const candidateSlug = `${generatedSlug}-${suffix}`;
-            try {
-              return await tx.organization.create({
-                data: { name, slug: candidateSlug },
-              });
-            } catch (err: unknown) {
-              if ((err as { code?: string }).code !== 'P2002') throw err; // Re-throw non-unique errors
-              suffix++;
-            }
-          }
-          throw new Error('Unable to generate unique slug');
-        }
-        throw error; // Re-throw other errors
-      }
+      const organization = await createWithUniqueSlug(tx, name, generatedSlug);
 
-      logger.info({ orgId: organization.id, method: 'Service.createOrganization' }, 'Organization created in transaction');
+      logger.info(
+        { orgId: organization.id, method: 'Service.createOrganization' },
+        'Organization created in transaction',
+      );
 
-      // 4. Handle Admin Bootstrap if email provided
+      // 3. Handle Admin Bootstrap if email provided
       if (adminEmail) {
         let user = await tx.user.findUnique({ where: { email: adminEmail } });
+
         if (!user) {
           user = await tx.user.create({
-            data: { 
-              email: adminEmail, 
-              name: adminEmail.split('@')[0], 
-              emailVerified: true 
+            data: {
+              email: adminEmail,
+              name: adminEmail.split('@')[0],
+              emailVerified: true,
             },
           });
-          logger.debug({ userId: user.id, method: 'Service.createOrganization' }, 'User created in transaction');
+          logger.debug(
+            { userId: user.id, method: 'Service.createOrganization' },
+            'User created in transaction',
+          );
         }
 
         await tx.member.create({
-          data: { 
-            userId: user.id, 
-            orgId: organization.id, 
-            role: 'admin' 
+          data: {
+            userId: user.id,
+            orgId: organization.id,
+            role: 'admin',
           },
         });
-        logger.debug({ userId: user.id, orgId: organization.id, method: 'Service.createOrganization' }, 'Member relationship created in transaction');
+        logger.debug(
+          { userId: user.id, orgId: organization.id, method: 'Service.createOrganization' },
+          'Member relationship created in transaction',
+        );
       }
 
+      // 4. Return the created organization
       return organization;
     });
   },

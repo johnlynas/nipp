@@ -32,7 +32,7 @@ export const NotificationDropdown = () => {
       <button 
         onClick={() => setIsOpen(!isOpen)}
         className="relative p-2 text-gray-600 hover:bg-gray-100 rounded-full transition-colors focus:outline-none"
-        aria_label="Notifications"
+        aria-label="Notifications"
       >
         <svg 
           xmlns="http://www.w3.org/2000/svg" 
