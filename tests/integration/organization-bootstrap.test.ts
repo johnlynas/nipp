@@ -8,6 +8,7 @@ const mockRedisClient = {
 // Mock Prisma
 vi.mock('@/lib/db', () => {
   const mockPrisma = {
+    $extends: vi.fn().mockReturnThis(),
     role: {
       createMany: vi.fn(),
       findMany: vi.fn(),

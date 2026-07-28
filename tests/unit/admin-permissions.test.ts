@@ -17,13 +17,18 @@ describe('GET /api/admin/permissions', () => {
   it('should support CRUD operations', async () => {
     const fs = await import('fs');
     const path = await import('path');
+
+    // GET and POST live in the base route
     const routePath = path.join(process.cwd(), 'app/api/admin/permissions/route.ts');
     const content = fs.readFileSync(routePath, 'utf-8');
-
     expect(content).toContain('export async function GET');
     expect(content).toContain('export async function POST');
-    expect(content).toContain('export async function PATCH');
-    expect(content).toContain('export async function DELETE');
+
+    // PATCH and DELETE live in the [id] route
+    const idRoutePath = path.join(process.cwd(), 'app/api/admin/permissions/[id]/route.ts');
+    const idContent = fs.readFileSync(idRoutePath, 'utf-8');
+    expect(idContent).toContain('export async function PATCH');
+    expect(idContent).toContain('export async function DELETE');
   });
 
   it('should validate resource and action parameters', async () => {
