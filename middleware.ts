@@ -1,6 +1,5 @@
 import { NextResponse } from 'next/server';
 import type { NextRequest } from 'next/server';
-import { generateNonce } from '@/lib/csp-nonce';
 import { env } from '@/lib/env';
 
 const PUBLIC_PATTERNS = [
@@ -10,7 +9,7 @@ const PUBLIC_PATTERNS = [
 ];
 
 function isPublicRoute(pathname: string): boolean {
-  return PUBLIC_PATTERNS.some((pattern) => 
+  return PUBLIC_PATTERNS.some((pattern) =>
     pathname === pattern || pathname.startsWith(`${pattern}/`)
   );
 }
@@ -18,45 +17,46 @@ function isPublicRoute(pathname: string): boolean {
 export async function middleware(request: NextRequest) {
   const { pathname } = request.nextUrl;
 
-  // Generate CSP nonce for every request (Edge Runtime compatible)
-  const nonce = generateNonce();
-  
-  // Set the nonce header for App Router components to consume
-  request.headers.set('x-csp-nonce', nonce);
-
-  // Allow 'unsafe-eval' ONLY in development for Next.js Fast Refresh (HMR)
-  // In Edge runtime, NODE_ENV might not be strictly 'development', so we check if it's NOT production
   const isDev = env.NODE_ENV !== 'production';
-  const scriptSrcDirective = isDev 
-    ? `'self' 'unsafe-eval' 'nonce-${nonce}'` 
-    : `'self' 'nonce-${nonce}'`;
 
-  // Construct the strict CSP string
-  const cspHeader = `
-    default-src 'self';
-    script-src ${scriptSrcDirective};
-    style-src 'self' 'unsafe-inline'; // NOTE: React/Next.js dynamically apply inline styles at runtime (layout, transitions) that cannot be given nonces. This is a known trade-off.
-    img-src 'self' data: blob:;
-    font-src 'self' data:;
-    connect-src 'self';
-    frame-ancestors 'none';
-    base-uri 'self';
-    form-action 'self';
-  `.replace(/\s{2,}/g, ' ').trim();
+  // Dev: Next.js HMR/Fast Refresh requires unsafe-inline + unsafe-eval.
+  // Prod: unsafe-inline for script-src is required because Next.js generates
+  // inline scripts (hydration, RSC payload) that cannot be given nonces.
+  // Nonce-based CSP is not fully supported in Next.js App Router without
+  // a custom server. See: https://github.com/vercel/next.js/issues/54850
+  const scriptSrcDirective = isDev
+    ? `'self' 'unsafe-inline' 'unsafe-eval'`
+    : `'self' 'unsafe-inline'`;
 
-  // Create response early so CSP header is attached to all responses
+  // NOTE: React/Next.js dynamically apply inline styles at runtime
+  // (layout, transitions) that cannot be given nonces — hence unsafe-inline.
+  const cspHeader = [
+    `default-src 'self'`,
+    `script-src ${scriptSrcDirective}`,
+    `style-src 'self' 'unsafe-inline'`,
+    `img-src 'self' data: blob:`,
+    `font-src 'self' data:`,
+    `connect-src 'self'`,
+    `frame-ancestors 'none'`,
+    `base-uri 'self'`,
+    `form-action 'self'`,
+  ].join('; ');
+
   const response = NextResponse.next();
 
-  // Set to Content-Security-Policy-Report-Only , to detect and log  CSP issues developer console
-  // Set to Content-Security-Policy , to activate CSP checks
-  response.headers.set('Content-Security-Policy', cspHeader);
+  // Use Report-Only in dev to log violations without blocking.
+  // Switch to Content-Security-Policy in production to enforce.
+  if (isDev) {
+    response.headers.set('Content-Security-Policy-Report-Only', cspHeader);
+  } else {
+    response.headers.set('Content-Security-Policy', cspHeader);
+  }
 
-  // Skip middleware for public routes (but CSP headers are already set)
+  // Skip auth checks for public routes (CSP headers already set)
   if (isPublicRoute(pathname)) {
     return response;
   }
 
-  // SECURE COOKIE CHECK: 
   const sessionCookie =
     request.cookies.get('__Secure-better-auth.session_token')?.value ||
     request.cookies.get('better-auth.session_token')?.value ||
@@ -69,7 +69,6 @@ export async function middleware(request: NextRequest) {
     return NextResponse.redirect(loginUrl);
   }
 
-  // Prevent caching of protected pages
   response.headers.set('Cache-Control', 'no-store, max-age=0');
   response.headers.set('Surrogate-Control', 'no-store');
   response.headers.set('Pragma', 'no-cache');

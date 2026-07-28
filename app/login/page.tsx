@@ -8,11 +8,11 @@
  *   Right — Login form (Amber accent button, rounded inputs)
  */
 
-import { useState, type FormEvent } from 'react';
+import { Suspense, useState, type FormEvent } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { signInEmail } from '@/lib/auth-client';
 
-export default function LoginPage() {
+function LoginForm() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const [email, setEmail] = useState('');
@@ -30,7 +30,6 @@ export default function LoginPage() {
       if (result.error) {
         setError(result.error);
       } else {
-        // Redirect to callback URL or home page
         const callbackUrl = searchParams.get('callbackUrl') || '/';
         router.push(callbackUrl);
       }
@@ -126,5 +125,13 @@ export default function LoginPage() {
         </div>
       </div>
     </div>
+  );
+}
+
+export default function LoginPage() {
+  return (
+    <Suspense>
+      <LoginForm />
+    </Suspense>
   );
 }
