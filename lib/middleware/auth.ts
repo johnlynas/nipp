@@ -65,11 +65,11 @@ export function withSuperAdmin(handler: AuthMiddlewareHandler) {
       return NextResponse.json({ error: error || 'Super Admin access required' }, { status });
     }
 
-    // SECURITY (S7): Mark this request as super-admin context so getGlobalDb()
-    // allows access to the unscoped Prisma client.
-    const { setSuperAdminContext } = await import('@/lib/global-db-guard');
-    setSuperAdminContext();
+    // SECURITY (S7): Scope getGlobalDb() access to this async operation only.
+    // Using run() instead of enterWith() prevents context leaking across requests
+    // in connection-pooled Node.js environments.
+    const { superAdminStorage } = await import('@/lib/global-db-guard');
 
-    return handler(request, context);
+    return superAdminStorage.run(true, () => handler(request, context));
   });
 }

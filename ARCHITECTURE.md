@@ -148,26 +148,36 @@ The application enforces a strict Content Security Policy via Edge Runtime middl
 ### Architecture & Flow
 1. **Nonce Generation:** On every request, a cryptographically secure random nonce is generated using `@/lib/csp-nonce`.
 2. **Header Propagation:** The nonce is passed to the client via a custom `x-csp-nonce` header, allowing React components and scripts to dynamically inject the nonce into `<script>` tags.
-3. **Directive Enforcement:** The middleware constructs a strict CSP string applied to the `Content-Security-Policy-Report-Only` header.
+3. **Directive Enforcement:** The middleware constructs a CSP string applied to the `Content-Security-Policy-Report-Only` (dev) or `Content-Security-Policy` (prod) header.
+
+**NOTE:** The `script-src` directive uses `'unsafe-inline'` rather than nonce-based enforcement. See the **Nonce Limitation** section below for details.
 
 ### Policy Directives
 | Directive | Value | Rationale |
 |-----------|-------|-----------|
 | `default-src` | `'self'` | Blocks all resources not explicitly allowed. |
-| `script-src` | `'self' 'nonce-${nonce}'` (+ `'unsafe-eval'` in dev) | Strict nonce-based execution. `unsafe-eval` is only allowed in development for Next.js Fast Refresh (HMR). |
-| `style-src` | `'self' 'unsafe-inline'` | Next.js internal runtime injects inline styles. Browsers ignore `'unsafe-inline'` if a nonce is present in the same directive, so we omit the nonce here. |
+| `script-src` | `'self' 'unsafe-inline'` (+ `'unsafe-eval'` in dev) | See **Nonce Limitation** below. `unsafe-eval` is only allowed in development for Next.js Fast Refresh (HMR). |
+| `style-src` | `'self' 'unsafe-inline'` | Next.js internal runtime injects inline styles at hydration time. |
 | `img-src` | `'self' data: blob:` | Allows standard images, inline base64 data URIs, and blob URLs. |
 | `font-src` | `'self' data:` | Allows standard fonts and base64-encoded font files. |
 | `connect-src` | `'self'` | Restricts AJAX/Fetch/WebSocket connections to the same origin. |
 | `frame-ancestors` | `'none'` | Prevents clickjacking by disallowing the app from being embedded in iframes. |
 | `base-uri` / `form-action` | `'self'` | Prevents base tag hijacking and restricts form submissions to the same origin. |
 
+### Nonce Limitation (Known Trade-Off)
+The `x-csp-nonce` header is generated and available for application-level inline scripts (see Component Integration below), but it is **not** used in the `script-src` CSP directive. This is because Next.js App Router injects its own inline scripts for RSC hydration payloads and Fast Refresh that cannot be given nonces — there is no supported mechanism to inject a nonce into these internal scripts without a custom server.
+
+This means `script-src` must use `'unsafe-inline'` in both development and production. This is the industry-standard compromise for Next.js App Router (see [vercel/next.js#54850](https://github.com/vercel/next.js/issues/54850)). While `'unsafe-inline'` weakens CSP compared to a strict nonce-only policy, the risk is mitigated by:
+- **Report-Only mode in development** — violations are logged but not enforced, allowing safe iteration.
+- **Strict enforcement of all other directives** — `default-src 'self'`, `connect-src 'self'`, `frame-ancestors 'none'` still block the vast majority of XSS attack vectors.
+- **Application-level nonce availability** — any inline scripts you add in your own components can (and should) use the `x-csp-nonce` header, which browsers will honor alongside `'unsafe-inline'`.
+
 ### Development vs Production
 - **Development:** `script-src` includes `'unsafe-eval'` to support Next.js Hot Module Replacement (Fast Refresh). All other directives remain strict.
-- **Production:** `script-src` strictly uses the nonce only. No `'unsafe-inline'` or `'unsafe-eval'` is permitted for scripts, ensuring maximum XSS protection.
+- **Production:** `script-src` uses `'self' 'unsafe-inline'`. No `'unsafe-eval'` is permitted. The nonce infrastructure (`x-csp-nonce`) remains available for application-level scripts.
 
 ### Component Integration
-React components consume the nonce via the `x-csp-nonce` header:
+React components consume the nonce via the `x-csp-nonce` header for any inline scripts you add (the nonce is not applied to Next.js internal hydration scripts):
 ```tsx
 import { headers } from 'next/headers';
 
@@ -180,7 +190,7 @@ export default function MyComponent() {
 ```
 
 ### Safe Rollout Strategy
-CSP is currently set via `Content-Security-Policy-Report-Only`. This logs violations to the browser console without blocking resources. Once validated, it can be switched to `Content-Security-Policy` for strict enforcement.
+CSP is set via `Content-Security-Policy-Report-Only` in development (logs violations without blocking) and `Content-Security-Policy` in production (strict enforcement). The nonce infrastructure (`x-csp-nonce`) is available in both modes for application-level scripts.
 
 
 ## 🔐 Authentication & Authorization

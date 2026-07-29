@@ -18,6 +18,8 @@
  *   3. NEVER use in middleware, client components, or Edge Runtime code.
  *   4. ALWAYS ensure the route is guarded by `withSuperAdmin()` or
  *      `requireSuperAdmin()` before calling getGlobalDb().
+ *   5. Wrap any code that calls getGlobalDb() in superAdminStorage.run(true, ...)
+ *      to scope the context to that async operation only.
  *
  * If you are unsure whether you should use this client, the answer is NO.
  * Use `@/lib/db` with tenant isolation instead.
@@ -48,16 +50,18 @@ import { createStorage } from '@/lib/tenant-context';
  * AsyncLocalStorage that tracks whether the current request is in a
  * super-admin context. Set by `withSuperAdmin()` middleware after verifying
  * privileges; checked by getGlobalDb() to enforce runtime safety.
+ *
+ * IMPORTANT: Always use superAdminStorage.run(true, callback) to scope the
+ * context to a specific async operation. Never use enterWith() — it leaks
+ * across requests in connection-pooled environments.
  */
 const superAdminStorage = createStorage<boolean>();
 
 /**
- * Mark the current request as a super-admin context.
- * Called by `withSuperAdmin()` middleware after verifying privileges.
+ * Export for callers that need to wrap code in super-admin context.
+ * Usage: superAdminStorage.run(true, () => { use getGlobalDb() here });
  */
-export function setSuperAdminContext(): void {
-  superAdminStorage.enterWith(true);
-}
+export { superAdminStorage };
 
 /**
  * Get the global (unscoped) Prisma client.
