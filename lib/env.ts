@@ -40,21 +40,14 @@ function validateEnv(): Env {
 
   if (!result.success) {
     console.error('❌ Environment validation failed:');
-    const issues = (result.error as { issues?: Array<{ path: string[]; message: string }> }).issues || [];
-    issues.forEach((err: { path: string[]; message: string }) => {
+    const issues = result.error.issues || [];
+    issues.forEach((err) => {
       console.error(`   - ${err.path.join('.')}: ${err.message}`);
     });
     console.error('\n📝 Copy .env.example to .env and fill in the required values.');
 
-    if (process.env.NODE_ENV !== 'test') {
-      // Safely exit only in Node.js environments (prevents Edge Runtime warnings)
-      if (typeof process !== 'undefined' && typeof process.exit === 'function') {
-        process.exit(1);
-      } else {
-        throw new Error('Environment validation failed');
-      }
-    }
-
+    // Unconditionally throw to halt the build and satisfy TypeScript.
+    // (This function is only called when NODE_ENV !== 'test' anyway)
     throw new Error('Environment validation failed');
   }
 
