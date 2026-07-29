@@ -416,6 +416,36 @@ curl http://localhost:3000/api/health
 - Cache (Redis) check is non-critical and gracefully degrades if Redis is not configured
 - No sensitive information is exposed in the response (security best practice)
 
+## Pre-Commit & Pre-Push Checklist
+
+Before committing and pushing changes to the `nipp` GitHub repository, **all four checks below must pass**. Do not push until every item is green.
+
+### 1. Unit Tests
+```bash
+npm test
+```
+All unit tests must pass with zero failures.
+
+### 2. Integration Tests
+```bash
+npm run test:integration
+```
+All integration and isolation tests must pass. Requires PostgreSQL and Redis running.
+
+### 3. Linter
+```bash
+npx eslint . --max-warnings=0
+```
+Resolve all lint errors and warnings. Zero warnings are allowed.
+
+### 4. Type Check
+```bash
+npx tsc --noEmit
+```
+Resolve all TypeScript errors. The project is configured with `strict: true`.
+
+> **Rule:** Only after all four checks pass should you commit and push. Failing any check means your change is not ready for the shared branch.
+
 ## Deferred Items
 
 See the [Deferred Items Registry](openspec/changes/project-initialization/proposal.md) for actively tracked future features.

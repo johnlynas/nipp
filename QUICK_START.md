@@ -70,6 +70,37 @@ Open [http://localhost:3000](http://localhost:3000) in your browser.
 
 - **Login:** Use the `ADMIN_EMAIL` and `ADMIN_PASSWORD` you configured to log in.
 - **Full Documentation:** Refer to [README.md](./README.md) for advanced configuration, testing, and deployment instructions.
+
+## Pre-Commit & Pre-Push Checklist
+
+Before committing and pushing changes to the `nipp` GitHub repository, **all four checks below must pass**. Do not push until every item is green.
+
+### 1. Unit Tests
+```bash
+npm test
+```
+All unit tests must pass with zero failures.
+
+### 2. Integration Tests
+```bash
+npm run test:integration
+```
+All integration and isolation tests must pass. Requires PostgreSQL and Redis running.
+
+### 3. Linter
+```bash
+npx eslint . --max-warnings=0
+```
+Resolve all lint errors and warnings. Zero warnings are allowed.
+
+### 4. Type Check
+```bash
+npx tsc --noEmit
+```
+Resolve all TypeScript errors. The project is configured with `strict: true`.
+
+> **Rule:** Only after all four checks pass should you commit and push. Failing any check means your change is not ready for the shared branch.
+
 ## Troubleshooting: Next.js 15 Worker Thread Issue
 
 During development, you may encounter repeated errors in the terminal:
