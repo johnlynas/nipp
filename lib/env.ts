@@ -47,7 +47,12 @@ function validateEnv(): Env {
     console.error('\n📝 Copy .env.example to .env and fill in the required values.');
 
     if (process.env.NODE_ENV !== 'test') {
-      process.exit(1);
+      // Safely exit only in Node.js environments (prevents Edge Runtime warnings)
+      if (typeof process !== 'undefined' && typeof process.exit === 'function') {
+        process.exit(1);
+      } else {
+        throw new Error('Environment validation failed');
+      }
     }
 
     throw new Error('Environment validation failed');
