@@ -1,47 +1,47 @@
-name: Deploy
+# name: Deploy
 
-on:
-  push:
-    branches: [main]
+# on:
+#   push:
+#     branches: [main]
 
-# Prevent concurrent deployments
-concurrency:
-  group: deploy
-  cancel-in-progress: true
+# # Prevent concurrent deployments
+# concurrency:
+#   group: deploy
+#   cancel-in-progress: true
 
-jobs:
-  deploy:
-    runs-on: ubuntu-latest
+# jobs:
+#   deploy:
+#     runs-on: ubuntu-latest
 
-    environment: production
+#     environment: production
 
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
+#     steps:
+#       - name: Checkout code
+#         uses: actions/checkout@v4
 
-      - name: Setup Node.js
-        uses: actions/setup-node@v4
-        with:
-          node-version: '22'
-          cache: 'npm'
+#       - name: Setup Node.js
+#         uses: actions/setup-node@v4
+#         with:
+#           node-version: '22'
+#           cache: 'npm'
 
-      - name: Install dependencies
-        run: npm ci --legacy-peer-deps
+#       - name: Install dependencies
+#         run: npm ci --legacy-peer-deps
 
-      - name: Run database migrations
-        run: npx prisma migrate deploy
-        env:
-          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+#       - name: Run database migrations
+#         run: npx prisma migrate deploy
+#         env:
+#           DATABASE_URL: ${{ secrets.DATABASE_URL }}
 
-      - name: Build application
-        run: npm run build
-        env:
-          DATABASE_URL: ${{ secrets.DATABASE_URL }}
-          PGBOUNCER_PASSWORD: ${{ secrets.PGBOUNCER_PASSWORD }}
-          BETTER_AUTH_SECRET: ${{ secrets.BETTER_AUTH_SECRET }}
-          GOOGLE_CLIENT_ID: ${{ secrets.GOOGLE_CLIENT_ID }}
-          GOOGLE_CLIENT_SECRET: ${{ secrets.GOOGLE_CLIENT_SECRET }}
-          PII_ENCRYPTION_KEY: ${{ secrets.PII_ENCRYPTION_KEY }}
+#       - name: Build application
+#         run: npm run build
+#         env:
+#           DATABASE_URL: ${{ secrets.DATABASE_URL }}
+#           PGBOUNCER_PASSWORD: ${{ secrets.PGBOUNCER_PASSWORD }}
+#           BETTER_AUTH_SECRET: ${{ secrets.BETTER_AUTH_SECRET }}
+#           GOOGLE_CLIENT_ID: ${{ secrets.GOOGLE_CLIENT_ID }}
+#           GOOGLE_CLIENT_SECRET: ${{ secrets.GOOGLE_CLIENT_SECRET }}
+#           PII_ENCRYPTION_KEY: ${{ secrets.PII_ENCRYPTION_KEY }}
 
       # - name: Deploy to cloud platform
       #   run: npm run deploy:cloud
