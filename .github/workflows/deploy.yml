@@ -42,11 +42,11 @@ jobs:
           GOOGLE_CLIENT_SECRET: ${{ secrets.GOOGLE_CLIENT_SECRET }}
           PII_ENCRYPTION_KEY: ${{ secrets.PII_ENCRYPTION_KEY }}
 
-      - name: Deploy to cloud platform
-        run: npm run deploy:cloud
-        env:
-          DATABASE_URL: ${{ secrets.DATABASE_URL }}
-          BETTER_AUTH_SECRET: ${{ secrets.BETTER_AUTH_SECRET }}
-          GOOGLE_CLIENT_ID: ${{ secrets.GOOGLE_CLIENT_ID }}
-          GOOGLE_CLIENT_SECRET: ${{ secrets.GOOGLE_CLIENT_SECRET }}
-          PII_ENCRYPTION_KEY: ${{ secrets.PII_ENCRYPTION_KEY }}
+      # - name: Deploy to cloud platform
+      #   run: npm run deploy:cloud
+      #   env:
+      #     DATABASE_URL: ${{ secrets.DATABASE_URL }}
+      #     BETTER_AUTH_SECRET: ${{ secrets.BETTER_AUTH_SECRET }}
+      #     GOOGLE_CLIENT_ID: ${{ secrets.GOOGLE_CLIENT_ID }}
+      #     GOOGLE_CLIENT_SECRET: ${{ secrets.GOOGLE_CLIENT_SECRET }}
+      #     PII_ENCRYPTION_KEY: ${{ secrets.PII_ENCRYPTION_KEY }}
