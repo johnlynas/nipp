@@ -30,9 +30,9 @@ async function checkSuperAdmin(headersList: Headers): Promise<{ session: Awaited
   return { session, isSuperAdmin: authorized, error };
 }
 
-export async function GET(_request: NextRequest, { params }: { params: Promise<{ id: string }> }) {
+export async function GET(_request: NextRequest, { params }: { params: Promise<{ orgId: string }> }) {
   try {
-    logger.info({ route: '/api/admin/organizations/[id]', method: 'GET' }, 'Request received');
+    logger.info({ route: '/api/admin/organizations/[orgId]', method: 'GET' }, 'Request received');
     const { session, isSuperAdmin, error } = await checkSuperAdmin(_request.headers);
     
     if (!session) {
@@ -45,12 +45,12 @@ export async function GET(_request: NextRequest, { params }: { params: Promise<{
       return NextResponse.json({ error: error || 'Super Admin access required' }, { status });
     }
     
-    const { id } = await params;
+    const { orgId } = await params;
     // P7: Use cached query with tags for targeted invalidation
-    const organization = await getOrgDetails(id);
+    const organization = await getOrgDetails(orgId);
     
     if (!organization) {
-      logger.warn({ orgId: id, method: 'GET' }, 'Organization not found');
+      logger.warn({ orgId, method: 'GET' }, 'Organization not found');
       return NextResponse.json({ error: 'Organization not found' }, { status: 404 });
     }
     
@@ -67,9 +67,9 @@ export async function GET(_request: NextRequest, { params }: { params: Promise<{
   }
 }
 
-export async function PATCH(request: NextRequest, { params }: { params: Promise<{ id: string }> }) {
+export async function PATCH(request: NextRequest, { params }: { params: Promise<{ orgId: string }> }) {
   try {
-    logger.info({ route: '/api/admin/organizations/[id]', method: 'PATCH' }, 'Request received');
+    logger.info({ route: '/api/admin/organizations/[orgId]', method: 'PATCH' }, 'Request received');
     const { session, isSuperAdmin, error } = await checkSuperAdmin(request.headers);
     
     if (!session) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
@@ -78,7 +78,7 @@ export async function PATCH(request: NextRequest, { params }: { params: Promise<
       return NextResponse.json({ error: error || 'Super Admin access required' }, { status });
     }
     
-    const { id } = await params;
+    const { orgId } = await params;
     const body = await request.json();
     const { name, slug } = body as { name?: string; slug?: string };
     
@@ -86,11 +86,11 @@ export async function PATCH(request: NextRequest, { params }: { params: Promise<
     
     try {
       const organization = await globalDb.organization.update({
-        where: { id }, data: { ...(name && { name }), ...(slug && { slug }) },
+        where: { id: orgId }, data: { ...(name && { name }), ...(slug && { slug }) },
       });
       return NextResponse.json({ organization });
     } catch (error) {
-      logger.error({ err: error, orgId: id, method: 'PATCH' }, 'Failed to update organization');
+      logger.error({ err: error, orgId, method: 'PATCH' }, 'Failed to update organization');
       return NextResponse.json({ error: 'Failed to update organization' }, { status: 500 });
     }
   } catch (error) {
@@ -99,9 +99,9 @@ export async function PATCH(request: NextRequest, { params }: { params: Promise<
   }
 }
 
-export async function DELETE(request: NextRequest, { params }: { params: Promise<{ id: string }> }) {
+export async function DELETE(request: NextRequest, { params }: { params: Promise<{ orgId: string }> }) {
   try {
-    logger.info({ route: '/api/admin/organizations/[id]', method: 'DELETE' }, 'Request received');
+    logger.info({ route: '/api/admin/organizations/[orgId]', method: 'DELETE' }, 'Request received');
     const { session, isSuperAdmin, error } = await checkSuperAdmin(request.headers);
     
     if (!session) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
@@ -110,31 +110,31 @@ export async function DELETE(request: NextRequest, { params }: { params: Promise
       return NextResponse.json({ error: error || 'Super Admin access required' }, { status });
     }
     
-    const { id } = await params;
+    const { orgId } = await params;
     try {
-      const org = await globalDb.organization.findUnique({ where: { id }, select: { status: true, name: true } });
+      const org = await globalDb.organization.findUnique({ where: { id: orgId }, select: { status: true, name: true } });
       if (!org) {
-        logger.warn({ orgId: id, method: 'DELETE' }, 'Organization not found');
+        logger.warn({ orgId, method: 'DELETE' }, 'Organization not found');
         return NextResponse.json({ error: 'Organization not found' }, { status: 404 });
       }
       if (org.status === 'ARCHIVED') {
         return NextResponse.json({ error: 'Organization is already archived (terminal state)' }, { status: 400 });
       }
       if (org.status === 'PENDING') {
-        await globalDb.organization.delete({ where: { id } });
-        logger.info({ orgId: id, method: 'DELETE' }, 'Pending organization hard deleted');
+        await globalDb.organization.delete({ where: { id: orgId } });
+        logger.info({ orgId, method: 'DELETE' }, 'Pending organization hard deleted');
         // P7: Invalidate cached org details
         revalidateTag('org');
         return NextResponse.json({ success: true, message: 'Organization deleted' });
       }
       
-      await globalDb.organization.update({ where: { id }, data: { status: 'ARCHIVED' } });
-      logger.info({ orgId: id, method: 'DELETE' }, 'Organization archived');
+      await globalDb.organization.update({ where: { id: orgId }, data: { status: 'ARCHIVED' } });
+      logger.info({ orgId, method: 'DELETE' }, 'Organization archived');
       // P7: Invalidate cached org details
       revalidateTag('org');
       return NextResponse.json({ success: true, message: 'Organization archived' });
     } catch (error) {
-      logger.error({ err: error, orgId: id, method: 'DELETE' }, 'Failed to archive organization');
+      logger.error({ err: error, orgId, method: 'DELETE' }, 'Failed to archive organization');
       return NextResponse.json({ error: 'Failed to archive organization' }, { status: 500 });
     }
   } catch (error) {

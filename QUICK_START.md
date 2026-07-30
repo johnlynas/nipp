@@ -71,6 +71,71 @@ Open [http://localhost:3000](http://localhost:3000) in your browser.
 - **Login:** Use the `ADMIN_EMAIL` and `ADMIN_PASSWORD` you configured to log in.
 - **Full Documentation:** Refer to [README.md](./README.md) for advanced configuration, testing, and deployment instructions.
 
+## Test Environment Setup
+
+The project supports isolation testing with a dedicated test database (`nipp_test`), separate from the development database.
+
+### Prerequisites
+- **Docker + Docker Compose** — For running PostgreSQL and pgbouncer containers
+- **Playwright browsers** — `npx playwright install`
+
+### 1. Configure Test Environment Variables
+
+Copy the test environment template and fill in your local values:
+
+```bash
+cp .env.test.example .env.test
+```
+
+**Required Variables:**
+- `TEST_ADMIN_EMAIL` / `TEST_ADMIN_PASSWORD` — Super admin credentials for testing
+- `TEST_TENANT_A_EMAIL` / `TEST_TENANT_A_PASSWORD` — OrgA tenant user credentials
+- `TEST_TENANT_B_EMAIL` / `TEST_TENANT_B_PASSWORD` — OrgB tenant user credentials
+- `DB_USER` / `DB_PASS` — PostgreSQL connection credentials for setup scripts
+
+> **Note:** `.env.test` is in `.gitignore`. Only `.env.test.example` (with placeholder values) is committed.
+
+### 2. Start Test Infrastructure
+
+```bash
+docker compose -f docker-compose.test.yml up -d
+```
+
+This starts PostgreSQL and pgbouncer containers for the test environment.
+
+### 3. Create and Seed Test Database
+
+```bash
+# Full setup (creates DB, runs Prisma generate/push/seed)
+npm run test:isolation:setup
+```
+
+This creates the `nipp_test` database, generates the Prisma client, pushes the schema, and seeds it with:
+- Platform Organization (Super Admin)
+- OrgA — Acme Properties Ltd
+- OrgB — Belfast Rentals
+- Test users for each organization
+
+### 4. Run Tests
+
+```bash
+# One-command full run (setup → tests → teardown)
+npm run test:isolation
+
+# Or granular control:
+npm test -- tests/isolation/application/    # Vitest app-layer tests only
+npx playwright test                          # Playwright E2E tests only
+```
+
+### 5. Clean Up
+
+```bash
+npm run test:isolation:teardown
+docker compose -f docker-compose.test.yml down
+```
+
+For detailed strategy, patterns, and troubleshooting, see [ISOLATION_TEST_STRATEGY.md](./ISOLATION_TEST_STRATEGY.md).
+
 ## Pre-Commit & Pre-Push Checklist
 
 Before committing and pushing changes to the `nipp` GitHub repository, **all four checks below must pass**. Do not push until every item is green.

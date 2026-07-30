@@ -50,7 +50,7 @@ async function checkSuperAdmin(headersList: Headers): Promise<{ session: Awaited
  */
 export async function PATCH(
   request: NextRequest,
-  { params }: { params: Promise<{ id: string }> }
+  { params }: { params: Promise<{ orgId: string }> }
 ) {
   try {
     logger.info('[ORG_STATUS_API] PATCH request received');
@@ -69,7 +69,7 @@ export async function PATCH(
     
     logger.info({ userId: session.user.id }, '[ORG_STATUS_API] Session found for user');
 
-    const { id } = await params;
+    const { orgId } = await params;
     const body = await request.json();
     const { status: newStatus } = body as { status: string };
 
@@ -82,12 +82,12 @@ export async function PATCH(
 
     try {
       const org = await globalDb.organization.findUnique({
-        where: { id },
+        where: { id: orgId },
         select: { status: true, name: true },
       });
 
       if (!org) {
-        logger.warn({ id }, '[ORG_STATUS_API] Organization not found');
+        logger.warn({ orgId }, '[ORG_STATUS_API] Organization not found');
         return NextResponse.json({ error: 'Organization not found' }, { status: 404 });
       }
 
@@ -105,20 +105,20 @@ export async function PATCH(
       }
 
       const updated = await globalDb.organization.update({
-        where: { id },
+        where: { id: orgId },
         data: { status: newStatus as 'PENDING' | 'ACTIVE' | 'SUSPENDED' | 'ARCHIVED' },
         select: { id: true, name: true, status: true },
       });
 
       // Invalidate sessions if suspending
       if (newStatus === 'SUSPENDED') {
-        await invalidateOrgSessions(id);
+        await invalidateOrgSessions(orgId);
       }
 
       // P7: Invalidate cached org details on status change
       revalidateTag('org');
 
-      logger.info({ id, newStatus }, '[ORG_STATUS_API] Organization status updated');
+      logger.info({ orgId, newStatus }, '[ORG_STATUS_API] Organization status updated');
 
       return NextResponse.json({ organization: updated });
     } catch (error) {

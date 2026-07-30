@@ -25,7 +25,7 @@ interface OrganizationDetail {
  */
 export default function OrganizationDetailPage() {
   const params = useParams();
-  const orgId = params.id as string;
+  const orgId = params.orgId as string;
 
   const [activeTab, setActiveTab] = useState<Tab>('overview');
   const [org, setOrg] = useState<OrganizationDetail | null>(null);
@@ -83,6 +83,13 @@ export default function OrganizationDetailPage() {
     { key: 'members', label: 'Members' },
     { key: 'roles', label: 'Roles' },
     { key: 'audit', label: 'Audit' },
+  ];
+
+  const externalTabs = [
+    { href: `/admin/organizations/${orgId}/members`, label: 'Manage Members' },
+    { href: `/admin/organizations/${orgId}/roles`, label: 'Manage Roles' },
+    { href: `/admin/organizations/${orgId}/permissions`, label: 'Manage Permissions' },
+    { href: `/admin/organizations/${orgId}/settings`, label: 'Settings' },
   ];
 
   if (loading) return <div className="p-6">Loading...</div>;
@@ -193,6 +200,23 @@ export default function OrganizationDetailPage() {
             {activeTab === 'audit' && (
               <AuditLogViewer entries={[]} isLoading={false} />
             )}
+          </div>
+
+          {/* Quick Links to Dedicated Management Pages */}
+          <div className="mt-8 border-t pt-6" style={{ borderColor: '#E5E7EB' }}>
+            <h3 className="mb-3 text-sm font-semibold" style={{ color: '#1B2A4A' }}>Quick Links</h3>
+            <div className="flex flex-wrap gap-2">
+              {externalTabs.map((tab) => (
+                <a
+                  key={tab.label}
+                  href={tab.href}
+                  className="rounded px-3 py-1.5 text-sm font-medium text-white transition hover:opacity-90"
+                  style={{ backgroundColor: '#F5A623' }}
+                >
+                  {tab.label}
+                </a>
+              ))}
+            </div>
           </div>
         </main>
       </div>

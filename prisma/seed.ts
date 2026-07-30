@@ -286,7 +286,142 @@ async function main() {
   }
 
   // =========================================================================
-  // 8. FINAL OUTPUT & INSTRUCTIONS
+  // 8. TENANT ORGANIZATIONS (OrgA & OrgB)
+  // =========================================================================
+  // Always create two tenant organizations for super admin tenant management
+  // testing. In test mode (TEST_ADMIN_EMAIL set), also create dedicated
+  // tenant users with configurable credentials. In dev mode, use defaults.
+  const testMode = !!process.env.TEST_ADMIN_EMAIL?.trim();
+
+  // Tenant credentials — use env vars in test mode, defaults in dev mode
+  const tenantAEmail = process.env.TEST_TENANT_A_EMAIL || 'orga-tenant@example.com';
+  const tenantAPassword = process.env.TEST_TENANT_A_PASSWORD || 'TenantA123!';
+  const tenantBEmail = process.env.TEST_TENANT_B_EMAIL || 'orgb-tenant@example.com';
+  const tenantBPassword = process.env.TEST_TENANT_B_PASSWORD || 'TenantB123!';
+
+  const modeLabel = testMode ? 'TEST' : 'DEV';
+  console.log(`\n📦 Seeding tenant organizations (${modeLabel} mode)...`);
+
+  // --- OrgA: Acme Properties Ltd ---
+  let orgA = await prisma.organization.findFirst({ where: { slug: 'acme-properties-ltd' } });
+  if (!orgA) {
+    orgA = await prisma.organization.create({
+      data: { name: 'Acme Properties Ltd', slug: 'acme-properties-ltd', status: 'ACTIVE' },
+    });
+    console.log(`✅ Created OrgA: ${orgA.id}`);
+  } else {
+    await prisma.organization.update({ where: { id: orgA.id }, data: { name: 'Acme Properties Ltd', slug: 'acme-properties-ltd', status: 'ACTIVE' } });
+    console.log(`✅ Updated OrgA: ${orgA.id}`);
+  }
+
+  // Create or update OrgA tenant user
+  const orgATenantPasswordHash = await hashPassword(tenantAPassword);
+  const orgATenantUser = await prisma.user.upsert({
+    where: { email: tenantAEmail },
+    update: { passwordHash: orgATenantPasswordHash, emailVerified: true, activeOrganizationId: orgA.id },
+    create: {
+      name: 'OrgA Tenant',
+      email: tenantAEmail,
+      passwordHash: orgATenantPasswordHash,
+      emailVerified: true,
+      activeOrganizationId: orgA.id,
+    },
+  });
+
+  // Create credential account for OrgA tenant user
+  const orgATenantAccount = await prisma.account.findFirst({ where: { userId: orgATenantUser.id, providerId: 'credential' } });
+  if (!orgATenantAccount) {
+    await prisma.account.create({ data: { id: orgATenantUser.id, accountId: orgATenantUser.id, providerId: 'credential', password: orgATenantPasswordHash, userId: orgATenantUser.id } });
+  }
+
+  // Add OrgA tenant user as member of OrgA with default roles
+  let orgAMemberId: string;
+  const existingOrgAMember = await prisma.member.findFirst({ where: { userId: orgATenantUser.id, orgId: orgA.id } });
+  if (existingOrgAMember) {
+    orgAMemberId = existingOrgAMember.id;
+  } else {
+    const newOrgAMember = await prisma.member.create({ data: { userId: orgATenantUser.id, orgId: orgA.id, role: 'member' } });
+    orgAMemberId = newOrgAMember.id;
+    console.log(`✅ Added OrgA tenant user as member of OrgA`);
+  }
+
+  // Assign default roles to OrgA tenant user (member, property-manager, viewer)
+  const orgARoles = await prisma.role.findMany({ where: { organizationId: orgA.id, isDefault: true } });
+  for (const role of orgARoles) {
+    const roleId = role.id;
+    const existingMemberRole = await prisma.memberRole.findFirst({ where: { memberId: orgAMemberId, roleId } });
+    if (!existingMemberRole) {
+      await prisma.memberRole.create({
+        data: {
+          member: { connect: { id: orgAMemberId } },
+          role: { connect: { id: roleId } },
+          organization: { connect: { id: orgA.id } },
+        },
+      });
+    }
+  }
+
+  // --- OrgB: Belfast Rentals ---
+  let orgB = await prisma.organization.findFirst({ where: { slug: 'belfast-rentals' } });
+  if (!orgB) {
+    orgB = await prisma.organization.create({ data: { name: 'Belfast Rentals', slug: 'belfast-rentals', status: 'ACTIVE' } });
+    console.log(`✅ Created OrgB: ${orgB.id}`);
+  } else {
+    await prisma.organization.update({ where: { id: orgB.id }, data: { name: 'Belfast Rentals', slug: 'belfast-rentals', status: 'ACTIVE' } });
+    console.log(`✅ Updated OrgB: ${orgB.id}`);
+  }
+
+  // Create or update OrgB tenant user
+  const orgBTenantPasswordHash = await hashPassword(tenantBPassword);
+  const orgBTenantUser = await prisma.user.upsert({
+    where: { email: tenantBEmail },
+    update: { passwordHash: orgBTenantPasswordHash, emailVerified: true, activeOrganizationId: orgB.id },
+    create: {
+      name: 'OrgB Tenant',
+      email: tenantBEmail,
+      passwordHash: orgBTenantPasswordHash,
+      emailVerified: true,
+      activeOrganizationId: orgB.id,
+    },
+  });
+
+  // Create credential account for OrgB tenant user
+  const orgBTenantAccount = await prisma.account.findFirst({ where: { userId: orgBTenantUser.id, providerId: 'credential' } });
+  if (!orgBTenantAccount) {
+    await prisma.account.create({ data: { id: orgBTenantUser.id, accountId: orgBTenantUser.id, providerId: 'credential', password: orgBTenantPasswordHash, userId: orgBTenantUser.id } });
+  }
+
+  // Add OrgB tenant user as member of OrgB with default roles
+  let orgBMemberId: string;
+  const existingOrgBMember = await prisma.member.findFirst({ where: { userId: orgBTenantUser.id, orgId: orgB.id } });
+  if (existingOrgBMember) {
+    orgBMemberId = existingOrgBMember.id;
+  } else {
+    const newOrgBMember = await prisma.member.create({ data: { userId: orgBTenantUser.id, orgId: orgB.id, role: 'member' } });
+    orgBMemberId = newOrgBMember.id;
+    console.log(`✅ Added OrgB tenant user as member of OrgB`);
+  }
+
+  // Assign default roles to OrgB tenant user (member, property-manager, viewer)
+  const orgBRoles = await prisma.role.findMany({ where: { organizationId: orgB.id, isDefault: true } });
+  for (const role of orgBRoles) {
+    const roleId = role.id;
+    const existingMemberRole = await prisma.memberRole.findFirst({ where: { memberId: orgBMemberId, roleId } });
+    if (!existingMemberRole) {
+      await prisma.memberRole.create({
+        data: {
+          member: { connect: { id: orgBMemberId } },
+          role: { connect: { id: roleId } },
+          organization: { connect: { id: orgB.id } },
+        },
+      });
+    }
+  }
+
+  console.log(`✅ Tenant organizations seeded: OrgA (${tenantAEmail}), OrgB (${tenantBEmail})`);
+
+  // =========================================================================
+  // 9. FINAL OUTPUT & INSTRUCTIONS
   // =========================================================================
   console.log('\n✅ Seed completed successfully! Database overwritten with latest script values.');
   console.log('\n📝 NEXT STEPS:');

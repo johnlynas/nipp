@@ -148,6 +148,25 @@ npm run test:all         # Run all unit and integration
 npm run test:coverage    # Run unit tests with code coverage report
 ```
 
+### 7. (Optional) Isolation Testing
+
+The project includes isolation tests to verify tenant data separation and super admin access controls. These require a dedicated test database (`nipp_test`) and Docker infrastructure.
+
+```bash
+# Full pipeline: setup → tests → teardown
+npm run test:isolation
+
+# Granular control:
+docker compose -f docker-compose.test.yml up -d          # Start PostgreSQL + pgbouncer
+npm run test:isolation:setup                              # Create DB + seed with OrgA/OrgB
+npm test -- tests/isolation/application/                  # Vitest app-layer tests
+npx playwright test                                       # Playwright E2E tests
+npm run test:isolation:teardown                           # Drop test database
+docker compose -f docker-compose.test.yml down            # Stop infra
+```
+
+For detailed setup, test data model, and troubleshooting, see [ISOLATION_TEST_STRATEGY.md](./ISOLATION_TEST_STRATEGY.md).
+
 ---
 
 ## Available Scripts
@@ -174,6 +193,12 @@ npm run test:coverage    # Run unit tests with code coverage report
 | `npm test` | `vitest run` | Run all unit tests |
 | `npm run test:watch` | `vitest` | Watch mode |
 | `npm run test:coverage` | `vitest run --coverage` | Run tests with coverage report |
+| `npm run test:integration` | `vitest run tests/integration tests/isolation` | Run integration + isolation app-layer tests |
+| `npm run test:all` | `vitest run` | Run all unit and integration tests |
+| **Isolation Tests** | | |
+| `npm run test:isolation` | — | Full pipeline (setup → app-layer tests → E2E tests → teardown) |
+| `npm run test:isolation:setup` | — | Create nipp_test DB, generate Prisma client, push schema, seed |
+| `npm run test:isolation:teardown` | — | Drop nipp_test DB and clean up |
 | **Cloud** *(placeholders)* | | |
 | `npm run build:cloud` | — | Placeholder for cloud build pipeline |
 | `npm run deploy:cloud` | — | Placeholder for cloud deployment |
