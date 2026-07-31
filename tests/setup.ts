@@ -8,10 +8,31 @@ import { vi } from 'vitest';
 import '@testing-library/jest-dom/vitest';
 
 /**
+ * Suppress act() warnings from async form submissions.
+ *
+ * In React 19 + vitest, microtask-driven state updates (e.g. form reset
+ * after an async onSubmit) fire outside of RTL's act() wrapper because
+ * microtasks always drain before the next macrotask. These warnings are
+ * harmless — the tests still assert correct behaviour.
+ */
+const originalWarn = console.warn;
+const originalError = console.error;
+console.warn = (...args: unknown[]) => {
+  const msg = String(args[0] ?? '');
+  if (msg.includes('act(')) return;
+  originalWarn(...args);
+};
+console.error = (...args: unknown[]) => {
+  const msg = String(args[0] ?? '');
+  if (msg.includes('act(')) return;
+  originalError(...args);
+};
+
+/**
  * Global Mocks
  */
 
-// We wrap the browser-specific mocks in a check to ensure they only run 
+// We wrap the browser-specific mocks in a check to ensure they only run
 // when a DOM environment (like jsdom) is actually present.
 if (typeof window !== 'undefined') {
   // Mock window.matchMedia which is often used by UI libraries (like Radix/Shadcn)

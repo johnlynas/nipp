@@ -43,7 +43,9 @@ describe('TenantMemberForm', () => {
     });
     fireEvent.click(screen.getByRole('button', { name: /add member/i }));
 
-    expect(onSubmit).toHaveBeenCalledWith({ email: 'user@example.com', role: 'member' });
+    await waitFor(() => {
+      expect(onSubmit).toHaveBeenCalledWith({ email: 'user@example.com', role: 'member' });
+    });
   });
 
   it('trims whitespace from email before submitting', async () => {
@@ -55,7 +57,9 @@ describe('TenantMemberForm', () => {
     });
     fireEvent.click(screen.getByRole('button', { name: /add member/i }));
 
-    expect(onSubmit).toHaveBeenCalledWith({ email: 'user@example.com', role: 'member' });
+    await waitFor(() => {
+      expect(onSubmit).toHaveBeenCalledWith({ email: 'user@example.com', role: 'member' });
+    });
   });
 
   it('does not call onSubmit when email is empty', async () => {
@@ -97,7 +101,9 @@ describe('TenantMemberForm', () => {
     fireEvent.click(screen.getByRole('button', { name: /add member/i }));
 
     // Button should be disabled during submission
-    expect(screen.getByRole('button', { name: /adding\.\.\./i })).toBeDisabled();
+    await waitFor(() => {
+      expect(screen.getByRole('button', { name: /adding\.\.\./i })).toBeDisabled();
+    });
   });
 
   it('re-enables submit button after submission completes', async () => {

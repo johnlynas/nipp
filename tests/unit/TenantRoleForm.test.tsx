@@ -45,9 +45,11 @@ describe('TenantRoleForm', () => {
     });
     fireEvent.click(screen.getByRole('button', { name: /create role/i }));
 
-    expect(onSubmit).toHaveBeenCalledWith({
-      name: 'Custom Role',
-      description: 'A custom role',
+    await waitFor(() => {
+      expect(onSubmit).toHaveBeenCalledWith({
+        name: 'Custom Role',
+        description: 'A custom role',
+      });
     });
   });
 
@@ -176,9 +178,11 @@ describe('TenantRoleForm', () => {
     });
     fireEvent.click(screen.getByRole('button', { name: /create role/i }));
 
-    expect(onSubmit).toHaveBeenCalledWith({
-      name: 'Custom Role',
-      description: '',
+    await waitFor(() => {
+      expect(onSubmit).toHaveBeenCalledWith({
+        name: 'Custom Role',
+        description: '',
+      });
     });
   });
 
