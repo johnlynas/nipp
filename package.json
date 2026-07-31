@@ -23,7 +23,12 @@
     "test:integration": "vitest run tests/integration tests/isolation",
     "test:all": "vitest run",
     "test:watch": "vitest tests/unit",
-    "test:coverage": "vitest run tests/unit --coverage"
+    "test:coverage": "vitest run tests/unit --coverage",
+    "test:isolation": "bash -c 'npm run test:isolation:setup && npm run test:isolation:app && npm run test:isolation:e2e && npm run test:isolation:teardown'",
+    "test:isolation:setup": "bash scripts/setup-test-env.sh",
+    "test:isolation:teardown": "bash scripts/teardown-test-env.sh",
+    "test:isolation:app": "vitest run tests/isolation/application/",
+    "test:isolation:e2e": "playwright test tests/isolation/e2e/ --config=tests/isolation/playwright.config.ts"
   },
   "dependencies": {
     "@prisma/client": "^6.19.3",
@@ -43,6 +48,7 @@
   "devDependencies": {
     "@better-auth/test-utils": "^1.6.23",
     "@eslint/js": "^9.21.0",
+    "@playwright/test": "^1.62.1",
     "@tailwindcss/postcss": "^4.0.0",
     "@tailwindcss/typography": "^0.5.15",
     "@testing-library/jest-dom": "^6.9.1",

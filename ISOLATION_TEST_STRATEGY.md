@@ -92,8 +92,8 @@ npm run test:isolation:teardown
 Create a `.env.test` file in the project root with the following variables:
 
 ```bash
-# Test database connection (points to pgbouncer or direct PostgreSQL)
-DATABASE_URL=postgresql://nipp:nipp_test_pass@localhost:6432/nipp_test
+# Test database connection (points to pgbouncer on port 6433)
+DATABASE_URL=postgresql://nipp:nipp_test_pass@localhost:6433/nipp_test?pgbouncer=true
 
 # Test super admin credentials
 TEST_ADMIN_EMAIL=superadmin@example.com
@@ -207,7 +207,9 @@ These tests connect directly to the test database and do not require a running N
 ### E2E Tests Only (Playwright)
 
 ```bash
-npx playwright test --project=isolation
+npm run test:isolation:e2e
+# or
+npx playwright test tests/isolation/e2e/
 ```
 
 These tests require a running Next.js server, PostgreSQL, and pgbouncer. They are slower (~2-5 minutes).
@@ -216,9 +218,13 @@ These tests require a running Next.js server, PostgreSQL, and pgbouncer. They ar
 
 ```bash
 # Vitest
-npm test -- tests/isolation/application/tenant-db.test.ts
+npm run test:isolation:app -- tests/isolation/application/tenant-db.test.ts
+# or
+npx vitest run tests/isolation/application/tenant-db.test.ts
 
 # Playwright
+npm run test:isolation:e2e -- tests/isolation/e2e/super-admin-exclusivity.spec.ts
+# or
 npx playwright test tests/isolation/e2e/super-admin-exclusivity.spec.ts
 ```
 

@@ -1,0 +1,13 @@
+FROM postgres:16-alpine
+
+# Install pgbouncer and its dependencies
+RUN apk add --no-cache pgbouncer
+
+# Create run directory for PostgreSQL socket
+RUN mkdir -p /run/postgresql && chown postgres:postgres /run/postgresql
+
+# Copy pgbouncer config and entrypoint
+COPY docker-entrypoint.sh /docker-entrypoint.sh
+RUN chmod +x /docker-entrypoint.sh
+
+ENTRYPOINT ["/docker-entrypoint.sh"]

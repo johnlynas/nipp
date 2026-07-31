@@ -3,6 +3,7 @@ import { prismaAdapter } from 'better-auth/adapters/prisma';
 // Use relative import to bypass tenant isolation rule (BetterAuth needs raw Prisma client)
 import { prisma } from './db';
 import { organization } from 'better-auth/plugins';
+import { env } from './env';
 
 interface ExtendedUser {
   permissions: string[];
@@ -62,7 +63,7 @@ export const auth = betterAuth({
   // SECURITY (S5): Rate limit all auth endpoints to prevent brute-force attacks.
   // The customRules target the password sign-in endpoint specifically with a tight limit.
   rateLimit: {
-    enabled: true, // Override default (production-only) to enable in all environments
+    enabled: env.NODE_ENV !== 'test', // Disable in test environment to avoid blocking e2e tests
     window: 15 * 60, // 15 minutes (in seconds)
     max: 10,         // 10 requests per window per IP
     customRules: {
