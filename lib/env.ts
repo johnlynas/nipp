@@ -20,6 +20,11 @@ const envSchema = z.object({
 
   REDIS_URL: z.string().url('REDIS_URL must be a valid Redis connection string').optional().default('redis://localhost:6379'),
 
+  // L1 Cache Configuration
+  ENABLE_L1_CACHE: z.enum(['true', 'false']).default('true'),
+  L1_CACHE_MAX_ENTRIES: z.string().regex(/^\d+$/).optional(),
+  L1_CACHE_TTL_MS: z.string().regex(/^\d+$/).optional(),
+
   PLATFORM_ORGANIZATION_ID: z.string().cuid().optional(),
 
   SMTP_HOST: z.string().default('localhost'),

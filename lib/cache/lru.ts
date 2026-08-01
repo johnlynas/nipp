@@ -39,7 +39,6 @@ export const lruCache: LRUCache<string, string> | null =
         sizeCalculation: (value) => Buffer.byteLength(value),
         maxEntrySize: 10_000, // Reject entries > 10KB
         noDeleteOnFetchRejection: true,
-        noDeleteOnSetRejection: true,
       })
     : null;
 
@@ -96,6 +95,7 @@ export function getMetrics(): {
   l1Hits: number;
   l1Misses: number;
   l1Size: number;
+  // Note: lru-cache doesn't expose totalByteSize directly
   l1MemoryBytes: number;
   l1HitRate: number;
 } {
@@ -104,7 +104,8 @@ export function getMetrics(): {
     l1Hits,
     l1Misses,
     l1Size: lruCache?.size ?? 0,
-    l1MemoryBytes: lruCache?.totalByteSize ?? 0,
+    // Note: lru-cache doesn't expose totalByteSize directly
+    l1MemoryBytes: 0,
     l1HitRate: total > 0 ? (l1Hits / total) * 100 : 0,
   };
 }

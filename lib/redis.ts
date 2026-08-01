@@ -36,6 +36,9 @@ export function getRedis(): Redis | null {
       if (lastKnownState !== 'connected') {
         console.log('[Redis] Ready');
         lastKnownState = 'connected';
+
+        // Start Pub/Sub subscriber for cross-instance cache invalidation
+        startInvalidationSubscriber();
       }
     });
 
@@ -55,6 +58,42 @@ export function getRedis(): Redis | null {
   }
 
   return redisInstance;
+}
+
+/**
+ * Start the Pub/Sub subscriber for cross-instance cache invalidation.
+ * Listens on 'cache:invalidations' channel and evicts keys from L1 cache.
+ */
+function startInvalidationSubscriber(): void {
+  if (!redisInstance) return;
+
+  const subscriber = redisInstance.duplicate();
+
+  subscriber.on('message', async (_channel, message) => {
+    try {
+      const { key } = JSON.parse(message);
+      if (key) {
+        // Evict the key from L1 cache on this instance
+        const { invalidate } = await import('./cache/lru');
+        invalidate(key);
+      }
+    } catch {
+      // Malformed message — ignore silently
+    }
+  });
+
+  subscriber.on('error', (err) => {
+    console.error('[Redis] Pub/Sub subscriber error:', err.message);
+  });
+
+  // Subscribe to the invalidation channel
+  subscriber.subscribe('cache:invalidations', (err) => {
+    if (err) {
+      console.error('[Redis] Failed to subscribe to cache:invalidations:', err.message);
+    } else {
+      console.log('[Redis] Subscribed to cache:invalidations channel');
+    }
+  });
 }
 
 /**

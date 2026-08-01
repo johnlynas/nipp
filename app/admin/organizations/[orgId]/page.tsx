@@ -98,11 +98,6 @@ export default function OrganizationDetailPage() {
   return (
     <RequireSuperAdmin>
       <div className="min-h-screen">
-        {/* Navy Header */}
-        <header className="px-6 py-4" style={{ backgroundColor: '#1B2A4A' }}>
-          <h1 className="text-xl font-semibold text-white">Property NI Admin</h1>
-        </header>
-
         <main className="p-6">
           {/* Org Header */}
           <div className="mb-6 flex items-start justify-between">

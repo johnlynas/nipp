@@ -28,6 +28,7 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
   const navLinks = [
     { href: '/admin/organizations', label: 'Organizations' },
     { href: '/admin/permissions', label: 'Permissions' },
+    { href: '/admin/cache-metrics', label: 'Cache Metrics' },
     { href: '/admin/audit-logs', label: 'Security Audit Logs' },
     { href: '/admin/system-health', label: 'System Health' },
     { href: '/admin/system-logs', label: 'System Logs' },
