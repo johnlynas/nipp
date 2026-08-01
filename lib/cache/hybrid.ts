@@ -9,6 +9,7 @@
 import { getLruCache, recordL1Hit, recordL1Miss } from './lru';
 import { getOrSet } from './stampede';
 import { redisGet, redisSet, redisDel } from '../redis';
+import { recordL2Hit, recordL2Miss } from './health';
 
 // ---------------------------------------------------------------------------
 // Configuration
@@ -88,10 +89,14 @@ export async function cacheGet<T>(
         const parsed = JSON.parse(redisVal) as T;
         // Populate L1 on L2 hit
         lru.set(key, redisVal);
+        recordL2Hit();
         return parsed;
       } catch {
-        // Corrupted Redis value — fall through to resolver
+        // Corrupted Redis value — fall through to resolver (do NOT record miss)
       }
+    } else {
+      // Redis had no value — this is an L2 miss
+      recordL2Miss();
     }
 
     // 3. L2 miss — call the resolver (DB query, etc.)

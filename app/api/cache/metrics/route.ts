@@ -5,11 +5,12 @@
  * Includes L1 hit/miss rates, entry counts, memory usage, and Redis status.
  */
 
-import { NextResponse } from 'next/server';
+import { NextRequest, NextResponse } from 'next/server';
+import { withSuperAdmin } from '@/lib/middleware/auth';
 import { getCacheMetrics } from '@/lib/cache/health';
 import { getLruCache } from '@/lib/cache/lru';
 
-export async function GET() {
+export const GET = withSuperAdmin(async (request, context) => {
   try {
     const metrics = getCacheMetrics();
     const lru = getLruCache();
@@ -29,6 +30,7 @@ export async function GET() {
         timestamp: new Date().toISOString(),
       },
     });
+
   } catch (error) {
     console.error('[Cache Metrics API] Failed to fetch metrics:', error);
     return NextResponse.json(
@@ -36,4 +38,4 @@ export async function GET() {
       { status: 500 }
     );
   }
-}
+});

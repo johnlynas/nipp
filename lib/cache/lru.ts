@@ -4,6 +4,8 @@
  * Provides a high-performance in-memory cache for frequently accessed data.
  * Only active on Node.js runtime (disabled on Edge where state is per-request).
  *
+ * Uses globalThis to ensure a single instance across all Next.js route bundles.
+ *
  * Configuration:
  * - L1_CACHE_MAX_ENTRIES: max cache entries (default 1000)
  * - L1_CACHE_TTL_MS: max TTL in milliseconds (default 60000)
@@ -11,6 +13,7 @@
  */
 
 import { LRUCache } from 'lru-cache';
+import { incL1Hit, incL1Miss, getL1Counters } from './metrics';
 
 // ---------------------------------------------------------------------------
 // Configuration
@@ -26,42 +29,19 @@ const ENABLED = process.env.ENABLE_L1_CACHE !== 'false';
 
 const isEdge = process.env.NEXT_RUNTIME === 'edge';
 
-/**
- * LRU cache instance — null on Edge runtime or when disabled via feature flag.
- */
-export const lruCache: LRUCache<string, string> | null =
-  ENABLED && !isEdge
-    ? new LRUCache<string, string>({
+// Singleton stored on globalThis — guaranteed single instance across all bundles
+const lruCacheInstance = (globalThis as unknown as { __lruCache?: LRUCache<string, string> }).__lruCache
+  ?? (ENABLED && !isEdge
+    ? ((globalThis as unknown as { __lruCache: LRUCache<string, string> }).__lruCache = new LRUCache<string, string>({
         max: MAX_ENTRIES,
         ttl: TTL_MS,
-        ttlResolution: 1000, // Check TTL every second
+        ttlResolution: 1000,
         allowStale: false,
         sizeCalculation: (value) => Buffer.byteLength(value),
-        maxEntrySize: 10_000, // Reject entries > 10KB
+        maxEntrySize: 10_000,
         noDeleteOnFetchRejection: true,
-      })
-    : null;
-
-// ---------------------------------------------------------------------------
-// Metrics Counters (module-level, updated by hybrid layer)
-// ---------------------------------------------------------------------------
-
-let l1Hits = 0;
-let l1Misses = 0;
-
-/**
- * Increment L1 hit counter. Called by hybrid layer on cache hits.
- */
-export function recordL1Hit(): void {
-  l1Hits++;
-}
-
-/**
- * Increment L1 miss counter. Called by hybrid layer on cache misses.
- */
-export function recordL1Miss(): void {
-  l1Misses++;
-}
+      }))
+    : null);
 
 // ---------------------------------------------------------------------------
 // Public API
@@ -71,21 +51,35 @@ export function recordL1Miss(): void {
  * Get the LRU cache singleton. Returns null on Edge runtime or when disabled.
  */
 export function getLruCache(): LRUCache<string, string> | null {
-  return lruCache;
+  return lruCacheInstance;
+}
+
+/**
+ * Increment L1 hit counter. Called by hybrid layer on cache hits.
+ */
+export function recordL1Hit(): void {
+  incL1Hit();
+}
+
+/**
+ * Increment L1 miss counter. Called by hybrid layer on cache misses.
+ */
+export function recordL1Miss(): void {
+  incL1Miss();
 }
 
 /**
  * Invalidate a single key from the L1 cache.
  */
 export function invalidate(key: string): void {
-  lruCache?.delete(key);
+  lruCacheInstance?.delete(key);
 }
 
 /**
  * Clear all entries from the L1 cache.
  */
 export function clear(): void {
-  lruCache?.clear();
+  lruCacheInstance?.clear();
 }
 
 /**
@@ -95,17 +89,23 @@ export function getMetrics(): {
   l1Hits: number;
   l1Misses: number;
   l1Size: number;
-  // Note: lru-cache doesn't expose totalByteSize directly
+  /**
+   * Approximate memory usage. lru-cache v12 does not expose totalByteSize
+   * publicly, so we estimate from entry count × average size.
+   */
   l1MemoryBytes: number;
   l1HitRate: number;
 } {
-  const total = l1Hits + l1Misses;
+  const counters = getL1Counters();
+  const total = counters.l1Hits + counters.l1Misses;
+  const size = lruCacheInstance?.size ?? 0;
+  // Estimate: each entry is a JSON string ~200 bytes average (key + value overhead)
+  const estimatedBytes = size * 200;
   return {
-    l1Hits,
-    l1Misses,
-    l1Size: lruCache?.size ?? 0,
-    // Note: lru-cache doesn't expose totalByteSize directly
-    l1MemoryBytes: 0,
-    l1HitRate: total > 0 ? (l1Hits / total) * 100 : 0,
+    l1Hits: counters.l1Hits,
+    l1Misses: counters.l1Misses,
+    l1Size: size,
+    l1MemoryBytes: estimatedBytes,
+    l1HitRate: total > 0 ? (counters.l1Hits / total) * 100 : 0,
   };
 }

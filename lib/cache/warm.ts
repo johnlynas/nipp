@@ -3,10 +3,10 @@
  *
  * When the application starts, this module pre-populates the L1 in-memory cache
  * with frequently accessed data from the database:
- * - Organizations (all)
- * - Users (all)
- * - Roles (all, per organization)
- * - Permissions (master catalog)
+ * - Organizations (all) — both entity keys and search result aggregation keys
+ * - Users (all) — both entity keys and search result aggregation keys
+ * - Roles (all, per organization) — both entity keys and search result aggregation keys
+ * - Permissions (master catalog) — both entity keys and search result aggregation keys
  *
  * These entries are marked as "permanent" — they have no TTL and will only be
  * evicted if explicitly deleted (e.g., when an org/user/role is removed).
@@ -30,6 +30,7 @@ interface WarmEntry {
 
 /**
  * Warm the L1 cache with all organizations.
+ * Pre-populates both entity keys (org:{id}) and search result aggregation keys (search:org:{name}).
  */
 async function warmOrganizations(): Promise<WarmEntry[]> {
   const entries: WarmEntry[] = [];
@@ -44,11 +45,20 @@ async function warmOrganizations(): Promise<WarmEntry[]> {
     });
 
     for (const org of organizations) {
-      const key = `org:${org.id}`;
-      entries.push({ key, value: org });
+      // Entity key — used by detail endpoints
+      const entityKey = `org:${org.id}`;
+      entries.push({ key: entityKey, value: org });
+
+      // Search result aggregation key — used by search endpoint
+      const normalizedName = org.name.toLowerCase();
+      const searchKey = `search:org:${normalizedName}`;
+      entries.push({
+        key: searchKey,
+        value: { results: [{ id: org.id, name: org.name, slug: org.slug }], total: 1 },
+      });
 
       // Also cache the list entry for search
-      const listKey = `org:list:${org.name.toLowerCase()}`;
+      const listKey = `org:list:${normalizedName}`;
       entries.push({ key: listKey, value: { id: org.id, name: org.name, slug: org.slug } });
     }
 
@@ -62,6 +72,7 @@ async function warmOrganizations(): Promise<WarmEntry[]> {
 
 /**
  * Warm the L1 cache with all users.
+ * Pre-populates both entity keys (user:{id}) and search result aggregation keys (search:user:{name}).
  */
 async function warmUsers(): Promise<WarmEntry[]> {
   const entries: WarmEntry[] = [];
@@ -76,14 +87,30 @@ async function warmUsers(): Promise<WarmEntry[]> {
     });
 
     for (const user of users) {
-      const key = `user:${user.id}`;
-      entries.push({ key, value: user });
+      // Entity key — used by detail endpoints
+      const entityKey = `user:${user.id}`;
+      entries.push({ key: entityKey, value: user });
+
+      // Search result aggregation keys — used by search endpoint (by name and email)
+      const normalizedName = user.name.toLowerCase();
+      const searchNameKey = `search:user:${normalizedName}`;
+      entries.push({
+        key: searchNameKey,
+        value: { results: [{ id: user.id, name: user.name, email: user.email }], total: 1 },
+      });
+
+      const normalizedEmail = user.email.toLowerCase();
+      const searchEmailKey = `search:user:${normalizedEmail}`;
+      entries.push({
+        key: searchEmailKey,
+        value: { results: [{ id: user.id, name: user.name, email: user.email }], total: 1 },
+      });
 
       // Also cache the list entry for search
-      const nameKey = `user:list:${user.name.toLowerCase()}`;
+      const nameKey = `user:list:${normalizedName}`;
       entries.push({ key: nameKey, value: { id: user.id, name: user.name, email: user.email } });
 
-      const emailKey = `user:list:${user.email.toLowerCase()}`;
+      const emailKey = `user:list:${normalizedEmail}`;
       entries.push({ key: emailKey, value: { id: user.id, name: user.name, email: user.email } });
     }
 
@@ -97,6 +124,7 @@ async function warmUsers(): Promise<WarmEntry[]> {
 
 /**
  * Warm the L1 cache with all roles (per organization).
+ * Pre-populates both entity keys and search result aggregation keys.
  */
 async function warmRoles(): Promise<WarmEntry[]> {
   const entries: WarmEntry[] = [];
@@ -118,11 +146,20 @@ async function warmRoles(): Promise<WarmEntry[]> {
       });
 
       for (const role of roles) {
-        const key = `role:${org.id}:${role.id}`;
-        entries.push({ key, value: role });
+        // Entity key — used by detail endpoints
+        const entityKey = `role:${org.id}:${role.id}`;
+        entries.push({ key: entityKey, value: role });
+
+        // Search result aggregation key — used by search endpoint
+        const normalizedName = role.name.toLowerCase();
+        const searchKey = `search:role:${org.id}:${normalizedName}`;
+        entries.push({
+          key: searchKey,
+          value: { results: [{ id: role.id, name: role.name, description: role.description }], total: 1 },
+        });
 
         // Also cache the list entry for search
-        const listKey = `role:list:${org.id}:${role.name.toLowerCase()}`;
+        const listKey = `role:list:${org.id}:${normalizedName}`;
         entries.push({ key: listKey, value: { id: role.id, name: role.name, description: role.description } });
       }
 
@@ -137,6 +174,7 @@ async function warmRoles(): Promise<WarmEntry[]> {
 
 /**
  * Warm the L1 cache with all permissions (master catalog).
+ * Pre-populates both entity keys and search result aggregation keys.
  */
 async function warmPermissions(): Promise<WarmEntry[]> {
   const entries: WarmEntry[] = [];
@@ -153,8 +191,17 @@ async function warmPermissions(): Promise<WarmEntry[]> {
     });
 
     for (const perm of permissions) {
-      const key = `perm:catalog:${perm.key}`;
-      entries.push({ key, value: perm });
+      // Entity key — used by detail endpoints
+      const entityKey = `perm:catalog:${perm.key}`;
+      entries.push({ key: entityKey, value: perm });
+
+      // Search result aggregation key — used by search endpoint
+      const normalizedKey = perm.key.toLowerCase();
+      const searchKey = `search:perm:${normalizedKey}`;
+      entries.push({
+        key: searchKey,
+        value: { results: [{ id: perm.id, key: perm.key, resource: perm.resource, action: perm.action, description: perm.description }], total: 1 },
+      });
 
       // Also cache by resource for grouped display
       const resourceKey = `perm:resource:${perm.resource}`;

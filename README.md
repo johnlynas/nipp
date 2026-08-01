@@ -471,6 +471,60 @@ Resolve all TypeScript errors. The project is configured with `strict: true`.
 
 > **Rule:** Only after all four checks pass should you commit and push. Failing any check means your change is not ready for the shared branch.
 
+## Cache Performance Profiling
+
+The project includes a comprehensive cache profiling script to measure the real-world performance impact of L1 (in-memory) and L2 (Redis) caching.
+
+### Running the Profiler
+
+```bash
+# Requires DATABASE_URL in .env (Redis is optional)
+npx tsx scripts/cache-benchmark.ts
+```
+
+### What It Measures
+
+The script benchmarks **8 scenarios** using real data from your database:
+
+| Scenario | Path Tested | Expected (Local) |
+|----------|-------------|------------------|
+| **A** | Direct DB Query (Baseline) | 15–40ms |
+| **B** | Redis L2 Cache (Warm Hit) | 1–5ms |
+| **C** | L1 In-Memory Hit | 0.01–0.1ms |
+| **D** | L1 Miss → L2 Hit | 5–8ms |
+| **E** | Search Endpoint (Cache Miss) | 10–30ms |
+| **F** | Search Endpoint (L1 Hit) | 0.01–0.1ms |
+| **G** | Permission Resolution (via cacheGet) | Varies |
+| **H** | Full Hybrid Flow (L1 Miss → L2 Hit) | Varies |
+
+### Interpreting Results
+
+- **If Scenario A (DB) > 20ms**: L1+L2 caching will reduce average latency by **50–70%**
+- **If L1 Hit Rate < 50%**: Consider increasing `L1_CACHE_MAX_ENTRIES` or adjusting TTLs
+- **If Scenario B (Redis) > 10ms**: Fix Redis connection/network before adding L1 complexity
+- **If Scenario A < 5ms**: Database is already fast; L1 may be over-engineering
+
+### How It Works
+
+The script uses **real database data** (not random UUIDs) and tests against the actual cache implementation:
+- `lib/cache/lru.ts` — L1 in-memory cache singleton
+- `lib/redis.ts` — Redis client wrapper (L2)
+- `lib/cache/hybrid.ts` — L1+L2 orchestration layer
+- `lib/cache/health.ts` — Hit/miss tracking and metrics
+
+It runs a warmup phase (10 iterations) before each benchmark to stabilize measurements, then executes the configured number of iterations (default: 100). Results include average latency, total time, and throughput in ops/sec.
+
+### When to Run It
+
+- **Before enabling L1**: Establish a baseline (Scenario A only) to quantify expected improvement
+- **After cache warming is active**: Compare L1 hit rates against the metrics dashboard at `/admin/cache-metrics`
+- **After infrastructure changes**: Re-run to verify Redis latency hasn't degraded
+- **Periodically**: Track cache performance trends over time
+
+### Full Documentation
+
+See [scripts/README.md](scripts/README.md) for detailed usage, configuration options, and troubleshooting.
+
 ## Deferred Items
 
 See the [Deferred Items Registry](openspec/changes/project-initialization/proposal.md) for actively tracked future features.

@@ -29,6 +29,13 @@ export interface PaginatedOrganizations {
   };
 }
 
+export interface PaginatedOrganizationsInput {
+  page: number;
+  pageSize: number;
+  status?: 'PENDING' | 'ACTIVE' | 'SUSPENDED' | 'ARCHIVED';
+  search?: string;
+}
+
 /**
  * Attempt to create an organization, retrying with a numeric suffix
  * on slug uniqueness collisions (P2002).
@@ -66,19 +73,26 @@ async function createWithUniqueSlug(
  */
 export const OrganizationService = {
   /**
-   * Fetches a paginated list of organizations.
+   * Fetches a paginated list of organizations with optional status and name filtering.
    */
-  async getPaginatedOrganizations(page: number, pageSize: number): Promise<PaginatedOrganizations> {
+  async getPaginatedOrganizations(input: PaginatedOrganizationsInput): Promise<PaginatedOrganizations> {
+    const { page, pageSize, status, search } = input;
     const skip = (page - 1) * pageSize;
+
+    // Build where clause for optional filters
+    const where: Prisma.OrganizationWhereInput = {};
+    if (status) where.status = status as 'PENDING' | 'ACTIVE' | 'SUSPENDED' | 'ARCHIVED';
+    if (search) where.name = { contains: search, mode: 'insensitive' };
 
     const [organizations, total] = await Promise.all([
       tenantDb.organization.findMany({
+        where,
         skip,
         take: pageSize,
         orderBy: { createdAt: 'desc' },
         include: { _count: { select: { members: true } } },
       }),
-      tenantDb.organization.count(),
+      tenantDb.organization.count({ where }),
     ]);
 
     return {

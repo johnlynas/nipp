@@ -3,8 +3,9 @@ import { withSuperAdmin } from '@/lib/middleware/auth';
 import { OrganizationService } from '@/services/organization-service';
 import { logger } from '@/lib/logger';
 
-// Cache organization list for 30 seconds (P7 - server-side caching)
-export const revalidate = 30;
+// Disable Next.js ISR caching — this is a dynamic admin API with query params
+export const dynamic = 'force-dynamic';
+export const revalidate = 0;
 
 export const GET = withSuperAdmin(async (request, context) => {
   try {
@@ -14,12 +15,18 @@ export const GET = withSuperAdmin(async (request, context) => {
     const url = new URL(request.url);
     const page = parseInt(url.searchParams.get('page') || '1', 10);
     const pageSize = parseInt(url.searchParams.get('pageSize') || '20', 10);
+    const statusRaw = url.searchParams.get('status');
+    const validStatuses = ['PENDING', 'ACTIVE', 'SUSPENDED', 'ARCHIVED'];
+    const status = (statusRaw && validStatuses.includes(statusRaw)) ? statusRaw as 'PENDING' | 'ACTIVE' | 'SUSPENDED' | 'ARCHIVED' : undefined;
+    const search = url.searchParams.get('search') || undefined;
     
-    const data = await OrganizationService.getPaginatedOrganizations(page, pageSize);
+    const data = await OrganizationService.getPaginatedOrganizations({ page, pageSize, status, search });
     
-    logger.info({ count: data.organizations.length, total: data.pagination.total, method: 'GET' }, 'Found organizations');
+    logger.info({ count: data.organizations.length, total: data.pagination.total, method: 'GET', statusFilter: status || 'all' }, 'Found organizations');
     
-    return NextResponse.json(data);
+    return NextResponse.json(data, {
+      headers: { 'Cache-Control': 'no-store, no-cache, must-revalidate' },
+    });
   } catch (error) {
     logger.error({ err: error, route: '/api/admin/organizations', method: 'GET' }, 'Unexpected error in GET handler');
     return NextResponse.json({ error: 'Internal server error' }, { status: 500 });

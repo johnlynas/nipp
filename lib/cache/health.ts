@@ -8,6 +8,7 @@
 
 import { getMetrics as getLruMetrics } from './lru';
 import { getRedis } from '../redis';
+import { incL2Hit, incL2Miss, getL2Counters, resetL2Counters } from './metrics';
 
 // ---------------------------------------------------------------------------
 // Types
@@ -33,29 +34,22 @@ export interface CacheMetrics {
 }
 
 // ---------------------------------------------------------------------------
-// Metrics Counters (module-level, updated by hybrid layer)
+// Public API
 // ---------------------------------------------------------------------------
-
-let l2Hits = 0;
-let l2Misses = 0;
 
 /**
  * Increment L2 (Redis) hit counter. Called by hybrid layer on Redis hits.
  */
 export function recordL2Hit(): void {
-  l2Hits++;
+  incL2Hit();
 }
 
 /**
  * Increment L2 (Redis) miss counter. Called by hybrid layer on Redis misses.
  */
 export function recordL2Miss(): void {
-  l2Misses++;
+  incL2Miss();
 }
-
-// ---------------------------------------------------------------------------
-// Public API
-// ---------------------------------------------------------------------------
 
 /**
  * Get comprehensive cache metrics for monitoring.
@@ -63,16 +57,17 @@ export function recordL2Miss(): void {
 export function getCacheMetrics(): CacheMetrics {
   const lru = getLruMetrics();
   const redis = getRedis();
+  const l2Counters = getL2Counters();
 
   return {
     l1Hits: lru.l1Hits,
     l1Misses: lru.l1Misses,
-    l2Hits,
-    l2Misses,
+    l2Hits: l2Counters.hits,
+    l2Misses: l2Counters.misses,
     l1Size: lru.l1Size,
     l1MemoryBytes: lru.l1MemoryBytes,
     l1HitRate: lru.l1HitRate,
-    redisConnected: redis?.status === 'ready' || redis?.status === 'connect',
+    redisConnected: !!redis && !['error', 'close', 'end'].includes(redis.status),
   };
 }
 
@@ -80,6 +75,5 @@ export function getCacheMetrics(): CacheMetrics {
  * Reset all metrics counters (useful for testing or periodic resets).
  */
 export function resetMetrics(): void {
-  l2Hits = 0;
-  l2Misses = 0;
+  resetL2Counters();
 }

@@ -213,6 +213,8 @@ model Role {
 
   permissions        RolePermission[]
   memberRoles        MemberRole[]
+
+  @@index([name]) // B-tree index for prefix search (search-autocomplete)
 }
 
 /**
