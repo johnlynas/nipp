@@ -1,0 +1,13 @@
+schema: spec-driven
+
+change: l1-cache-layer
+title: "L1 In-Memory Cache Layer"
+status: proposed
+created: 2026-08-01
+updated: 2026-08-01
+
+artifacts:
+  - proposal.md
+  - design.md
+  - tasks.md
+  - specs/cache/spec.md

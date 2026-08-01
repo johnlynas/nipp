@@ -1,0 +1,13 @@
+schema: spec-driven
+
+change: search-autocomplete
+title: "Search-as-you-Type Autocomplete APIs"
+status: proposed
+created: 2026-08-01
+updated: 2026-08-01
+
+artifacts:
+  - proposal.md
+  - design.md
+  - tasks.md
+  - specs/search/spec.md
