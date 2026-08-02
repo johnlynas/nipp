@@ -1,37 +1,42 @@
 # Tasks
 
-## 1. Environment Variable & Schema
-- [ ] 1.1 Add `INACTIVITY_TIMEOUT_MINS` to the Zod env schema in `lib/env.ts` (type: `z.enum(['true', 'false']).default('15')` — actually a string regex for digits, default `"15"`).
-- [ ] 1.2 Add `INACTIVITY_TIMEOUT_MINS=15` to `.env.example`.
-- [ ] 1.3 Add `INACTIVITY_TIMEOUT_MINS=15` to `.env.test.example` (for test environment).
+## Phase 1: Environment Variable & Schema
+- [ ] **Task 1.1:** Add `INACTIVITY_TIMEOUT_MINS` to the Zod env schema in `lib/env.ts` (type: `z.string().regex(/^\d+$/).default('15').transform(Number)`).
+- [ ] **Task 1.2:** Add `INACTIVITY_TIMEOUT_MINS=15` to `.env.example`.
+- [ ] **Task 1.3:** Add `INACTIVITY_TIMEOUT_MINS=15` to `.env.local-prod.example`.
+- [ ] **Task 1.4:** Add `INACTIVITY_TIMEOUT_MINS=15` to `.env.test.example`.
 
-## 2. Server-Side Session Tightening
-- [ ] 2.1 Read `INACTIVITY_TIMEOUT_MINS` from env in `lib/auth.ts`.
-- [ ] 2.2 Convert minutes to seconds and set `session.expiresIn` in the BetterAuth config to match.
-- [ ] 2.3 Verify that `session.updateAge` is also set appropriately (keep existing or tighten — discuss).
+## Phase 2: Server-Side Session Configuration
+- [ ] **Task 2.1:** Set `session.expiresIn` to `60 * 60` (1 hour absolute maximum) in `lib/auth.ts`.
+- [ ] **Task 2.2:** Set `session.updateAge` to `60 * 15` (15-minute renewal threshold) in `lib/auth.ts`.
+- [ ] **Task 2.3:** Verify that `signOutUser()` in `lib/auth-client.ts` calls the BetterAuth sign-out API (server-side session deletion), not just local cookie clearing.
+- [ ] **Task 2.4:** Document decision in `design.md`: server-side expiry is a tight 1-hour backstop with active renewal, independent of the client-side inactivity timeout.
 
-## 3. Toast Library
-- [ ] 3.1 Install `sonner` via npm.
-- [ ] 3.2 Add `<Toaster />` component to `app/providers.tsx` (or root layout) so toasts are available globally.
+## Phase 3: Toast Library & Context Provider
+- [ ] **Task 3.1:** Install `sonner` via npm (`npm install sonner`).
+- [ ] **Task 3.2:** Add `<Toaster position="top-right" richColors />` to `app/providers.tsx` (unconditional placement to prevent unmounting).
+- [ ] **Task 3.3:** Create `components/providers/InactivityTimeoutConfig.tsx` with React Context and `useInactivityTimeoutConfig()` hook.
+- [ ] **Task 3.4:** Update `app/layout.tsx` to read `env.INACTIVITY_TIMEOUT_MINS` (Server Component) and wrap children in `<InactivityTimeoutProvider timeoutMins={...}>`.
 
-## 4. Client-Side Inactivity Hook
-- [ ] 4.1 Create `hooks/useInactivityTimeout.ts`:
-      - Listen for `mousemove`, `click`, and `keydown` events.
-      - Start a countdown timer on mount using the configured timeout from env (passed as prop or read via `process.env.NEXT_PUBLIC_INACTIVITY_TIMEOUT_MINS` — note: env vars must be prefixed `NEXT_PUBLIC_` to be available client-side).
-      - Fire a warning toast via `sonner` at `timeout - 30s`.
-      - Fire logout via `signOutUser()` from `lib/auth-client.ts` at timeout.
-      - Any tracked event resets the timer and dismisses pending warning.
-- [ ] 4.2 Decide on env var exposure: Since BetterAuth server config reads from `process.env`, but the client hook needs the value too, we may need a `NEXT_PUBLIC_INACTIVITY_TIMEOUT_MINS` var (or read from a shared constant).
+## Phase 4: Client-Side Inactivity Hook
+- [ ] **Task 4.1:** Create `hooks/useInactivityTimeout.ts`.
+- [ ] **Task 4.2:** Implement `useRef` to store `timeoutMins` and `performLogout` for stable function identities.
+- [ ] **Task 4.3:** Implement `useEffect` to listen for `mousemove`, `click`, `keydown`, `scroll`, and `touchstart` events.
+- [ ] **Task 4.4:** Implement countdown timer: fire warning toast via `sonner` at `timeout - 30s`, fire logout at timeout.
+- [ ] **Task 4.5:** Ensure any tracked event resets the timer and dismisses pending warning.
+- [ ] **Task 4.6:** Add `// eslint-disable-next-line react-hooks/exhaustive-deps` to document intentional dependency array omission.
+- [ ] **Task 4.7:** Implement `performLogout()`: call `signOutUser()` (server-side session invalidation), then `window.location.href = '/login'` (hard redirect).
 
-## 5. Layout Integration
-- [ ] 5.1 Place the `useInactivityTimeout` hook in a layout that covers all authenticated routes:
-      - Option A: `app/providers.tsx` (runs for every client-side rendered page).
-      - Option B: A new `app/(authenticated)/layout.tsx` wrapper.
-      - Recommendation: Use Option A (`providers.tsx`) since it already wraps all client components.
-- [ ] 5.2 Ensure the hook only runs for authenticated users (check session before starting timer).
+## Phase 5: Layout Integration
+- [ ] **Task 5.1:** Place the `useInactivityTimeout()` hook invocation in `app/providers.tsx` (ensures it runs for every client-side rendered page).
+- [ ] **Task 5.2:** Verify the hook runs for all authenticated routes (admin dashboard, tenant pages).
 
-## 6. Testing
-- [ ] 6.1 Unit test: `useInactivityTimeout` hook — verify timer resets on events, warning fires at correct time, logout fires at timeout.
-- [ ] 6.2 Integration test: Verify that active user sessions are not prematurely invalidated (interact within timeout, session persists).
-- [ ] 6.3 Integration test: Verify that idle sessions are logged out and redirected to `/login`.
-- [ ] 6.4 Verify env var validation rejects non-numeric values for `INACTIVITY_TIMEOUT_MINS`.
+## Phase 6: Testing & Validation
+- [ ] **Task 6.1:** Run full test suite: verify all existing tests pass.
+- [ ] **Task 6.2:** Run type checking: verify zero TypeScript errors (`npx tsc --noEmit`).
+- [ ] **Task 6.3:** Run linter: verify zero ESLint warnings (`npx eslint . --max-warnings=0`).
+- [ ] **Task 6.4:** Manual test: verify active user sessions are renewed server-side and not prematurely invalidated.
+- [ ] **Task 6.5:** Manual test: verify idle sessions are logged out (server-side session deleted) and redirected to `/login`.
+- [ ] **Task 6.6:** Manual test: verify stale sessions beyond 1 hour are rejected server-side.
+- [ ] **Task 6.7:** Manual test: verify warning toast displays and dismisses on activity.
+- [ ] **Task 6.8:** Manual test: verify env var validation rejects non-numeric values for `INACTIVITY_TIMEOUT_MINS`.
