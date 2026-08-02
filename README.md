@@ -2,6 +2,20 @@
 
 A full-stack property management portal for Northern Ireland, built with Next.js 15, BetterAuth, Prisma, and PostgreSQL.
 
+Property NI provides a secure, multi-tenant platform for managing property portfolios across multiple organizations. Each tenant operates in complete isolation — their properties, members, roles, and permissions are scoped and never visible to other organizations.
+
+**Key features:**
+- **Multi-tenant architecture** with defense-in-depth isolation (Prisma extension + PostgreSQL Row Level Security)
+- **Super Admin dashboard** for managing organizations, roles, permissions, and cross-tenant audit logs
+- **Granular RBAC** with organization-scoped roles, member-role assignments, and a catalog of ~50 atomic permissions
+- **Secure authentication** via BetterAuth with Google OIDC and email/password, tight session expiry (1-hour absolute max), and auto-logout on inactivity
+- **Hybrid caching** (L1 in-memory + L2 Redis) for permission resolution and search, with automatic cache warming
+- **Real-time notifications** via Server-Sent Events (SSE) with browser-aware polling that sleeps when tabs are backgrounded
+- **Strict Content Security Policy** with nonce-based script execution in Report-Only mode
+- **Comprehensive audit logging** tracking all tenant and platform actions
+- **PII encryption** using AES-256-GCM for sensitive data at rest
+- **Full test coverage** with unit, integration, and isolation tests verifying tenant data separation
+
 ## Super Admin Dashboard
 
 The application includes a Super Admin dashboard for managing tenant organizations, roles, permissions, and audit logs.
