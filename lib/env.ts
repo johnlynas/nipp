@@ -36,6 +36,8 @@ const envSchema = z.object({
   SUPER_ADMIN_EMAIL: z.string().optional(),
 
   TRUSTED_PROXY_CIDRS: z.string().optional(),
+
+  INACTIVITY_TIMEOUT_MINS: z.string().regex(/^\d+$/).default('15').transform(Number),
 });
 
 export type Env = z.infer<typeof envSchema>;

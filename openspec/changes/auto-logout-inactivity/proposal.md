@@ -1,6 +1,6 @@
 # Proposal: Auto-Logout on Inactivity
 
-**Status:** Proposed
+**Status:** Implemented
 **Author:** John Lynas
 **Created:** 2026-08-03
 **Last Updated:** 2026-08-03

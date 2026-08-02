@@ -2,6 +2,8 @@ import type { Metadata } from 'next';
 import { Inter } from 'next/font/google';
 import './globals.css';
 import { Providers } from './providers';
+import { InactivityTimeoutProvider } from '@/components/providers/InactivityTimeoutConfig';
+import { env } from '@/lib/env';
 
 const inter = Inter({
   subsets: ['latin'],
@@ -22,7 +24,9 @@ export default function RootLayout({
   return (
     <html lang="en" className={inter.variable}>
       <body className="antialiased">
-        <Providers>{children}</Providers>
+        <InactivityTimeoutProvider timeoutMins={env.INACTIVITY_TIMEOUT_MINS}>
+          <Providers>{children}</Providers>
+        </InactivityTimeoutProvider>
       </body>
     </html>
   );

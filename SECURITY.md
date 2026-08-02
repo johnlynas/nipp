@@ -23,6 +23,52 @@ Authentication is handled by [BetterAuth](https://www.better-auth.com/), configu
 - **Session Cookies:** Sessions are managed via secure, HTTP-only cookies (`better-auth.session_token`).
 - **Edge-Safe Middleware:** `middleware.ts` performs a fast, Edge-runtime-safe check for the presence of the session cookie. This avoids Prisma Edge Runtime crashes while ensuring unauthenticated users are instantly redirected to `/login`.
 - **Cross-Tab Session Invalidation:** To prevent session bypasses across browser tabs, the logout handler (`authClient.signOut()`) forcefully revokes the session in the database, manually expires all BetterAuth cookies via `document.cookie`, and performs a hard `window.location.href` redirect to bust all client-side React/SWR caches.
+- **Auto-Logout on Inactivity:** See the [dedicated section](#-auto-logout-on-inactivity) below for details on automatic session termination after configurable idle periods.
+
+## 🕒 Auto-Logout on Inactivity
+
+The application automatically terminates sessions after a configurable period of user inactivity, protecting unattended devices from unauthorized access.
+
+### How It Works
+1. **Client-Side Detection:** A React hook (`hooks/useInactivityTimeout.ts`) listens for `mousemove`, `click`, `keydown`, `scroll`, and `touchstart` events on the window.
+2. **Configurable Timeout:** The timeout duration is read from `INACTIVITY_TIMEOUT_MINS` (default: 15 minutes) via a server-side environment variable passed through React Context — no `NEXT_PUBLIC_` duplication.
+3. **Warning Toast:** At `timeout - 30s`, a warning toast appears in the top-right corner, giving the user advance notice.
+4. **Session Invalidation:** At timeout expiry, `signOutUser()` is called to delete the session from the database (BetterAuth), clear cookies, and perform a hard `window.location.href` redirect to `/login`.
+5. **Activity Resets Timer:** Any tracked user interaction during the warning period dismisses the toast and restarts the countdown.
+6. **Auth-Gated:** The timer only runs when a user has an active session — it returns early on unauthenticated pages (e.g., `/login`).
+
+### Server-Side Session Backstop
+Client-side detection is complemented by tight server-side session expiry:
+| Setting | Value | Purpose |
+|---|---|---|
+| `session.expiresIn` | 1 hour (3600s) | Absolute maximum session lifetime |
+| `session.updateAge` | 15 minutes (900s) | Sessions renew on any request when remaining time drops below this |
+
+Active users making at least one server request per 45 minutes never hit the absolute expiry. If client-side detection is bypassed (JavaScript disabled, browser crash), the server rejects stale sessions after 1 hour maximum.
+
+### Uniform Behavior
+The inactivity timeout applies identically to all authenticated users — Super Admins (Platform Organization members) and tenant users alike. Each browser tab tracks inactivity independently.
+
+### Configuration
+| Variable | Default | Validation |
+|---|---|---|
+| `INACTIVITY_TIMEOUT_MINS` | `15` | Digits-only string, transformed to `number` via Zod schema |
+
+### Files
+| File | Role |
+|---|---|
+| `hooks/useInactivityTimeout.ts` | Client-side inactivity tracking hook with ref-stabilized event listeners |
+| `components/providers/InactivityTimeoutConfig.tsx` | React Context provider bridging server env config to the client |
+| `app/providers.tsx` | Unconditional `<Toaster />` and hook invocation |
+| `app/layout.tsx` | Server component reads env var, wraps children in provider |
+| `lib/auth.ts` | Tight session expiry configuration (1h absolute, 15m renewal) |
+| `lib/env.ts` | Zod schema validation for `INACTIVITY_TIMEOUT_MINS` |
+
+### Testing
+- **Unit tests:** `tests/unit/useInactivityTimeout.test.tsx` (8 tests) — timer behavior, toast timing, cleanup on unmount.
+- **Env schema tests:** `tests/unit/env-inactivity-timeout.test.ts` (15 tests) — validation, defaults, type transformation.
+
+---
 
 ## 👥 Role-Based Access Control (RBAC)
 

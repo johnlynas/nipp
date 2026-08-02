@@ -52,8 +52,8 @@ export const auth = betterAuth({
   plugins: [organization()],
 
   session: {
-    expiresIn: 60 * 60 * 24 * 7,
-    updateAge: 60 * 60 * 24,
+    expiresIn: 60 * 60, // 1 hour absolute maximum (tight backstop for inactivity policy)
+    updateAge: 60 * 15, // 15-minute renewal threshold for active sessions
     cookieCache: {
       enabled: true,
       maxAge: 60 * 60, // 1 hour (prevents DB hits during short outages)

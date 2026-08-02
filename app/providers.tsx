@@ -2,8 +2,13 @@
 
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { useState } from 'react';
+import { Toaster } from 'sonner';
+import { useInactivityTimeout } from '@/hooks/useInactivityTimeout';
 
 export function Providers({ children }: { children: React.ReactNode }) {
+  // Inactivity timeout runs unconditionally — signOutUser() is a safe no-op if no session exists.
+  useInactivityTimeout();
+
   const [queryClient] = useState(
     () =>
       new QueryClient({
@@ -16,5 +21,10 @@ export function Providers({ children }: { children: React.ReactNode }) {
       })
   );
 
-  return <QueryClientProvider client={queryClient}>{children}</QueryClientProvider>;
+  return (
+    <>
+      <Toaster position="top-right" richColors />
+      <QueryClientProvider client={queryClient}>{children}</QueryClientProvider>
+    </>
+  );
 }

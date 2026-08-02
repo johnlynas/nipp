@@ -107,6 +107,7 @@ Edit `.env` and set:
 | `REDIS_URL` | Redis connection string | `redis://localhost:6379` (optional — app works without it) |
 | `LOG_LEVEL` | Logging verbosity | `debug`, `info`, `warn`, or `error` (default: `debug`) |
 | `FRONTEND_URL` / `NEXT_PUBLIC_API_URL` | App URLs | `http://localhost:3000` (default) |
+| `INACTIVITY_TIMEOUT_MINS` | Auto-logout timeout in minutes | Positive integer (default: `15`) — see [Auto-Logout on Inactivity](#auto-logout-on-inactivity) |
 | `ADMIN_EMAIL` | Admin user email for seeding | e.g. `admin@example.com` (Required for `npm run db:seed`) |
 | `ADMIN_PASSWORD` | Admin user password for seeding | Strong password (Required for `npm run db:seed`) |
 
@@ -148,7 +149,39 @@ npm run test:all         # Run all unit and integration
 npm run test:coverage    # Run unit tests with code coverage report
 ```
 
-### 7. (Optional) Isolation Testing
+### 7. Auto-Logout on Inactivity
+
+The application automatically logs out users after a configurable period of inactivity to protect unattended devices.
+
+**How it works:**
+1. A client-side timer tracks user activity (`mousemove`, `click`, `keydown`, `scroll`, `touchstart`).
+2. After the configured timeout (default: 15 minutes), a **warning toast** appears in the top-right corner with 30 seconds remaining.
+3. If no activity occurs within those 30 seconds, the user is logged out — the session is invalidated server-side (deleted from the database) and cookies are cleared.
+4. A hard redirect to `/login` follows immediately, bypassing the Next.js client-side router.
+
+**Configuration:**
+| Variable | Default | Description |
+|---|---|---|
+| `INACTIVITY_TIMEOUT_MINS` | `15` | Minutes of inactivity before auto-logout. Must be a positive integer (digits only). |
+
+**Server-side session backstop:**
+- `session.expiresIn`: **1 hour** — absolute maximum session lifetime.
+- `session.updateAge`: **15 minutes** — sessions are renewed on any server request when remaining time drops below this threshold.
+- Active users making at least one request per 45 minutes never hit the absolute expiry.
+- If client-side detection is bypassed (JS disabled, browser crash), the server rejects stale sessions after 1 hour.
+
+**Behavior:**
+- Applies uniformly to all authenticated users (Super Admins and tenant users).
+- Each browser tab tracks inactivity independently.
+- The timer resets on any tracked activity, including during the warning period (any interaction dismisses the toast and restarts the countdown).
+- The inactivity timer only runs when a user has an active session — it does not fire on the `/login` page or other unauthenticated routes.
+
+**Files:**
+- `hooks/useInactivityTimeout.ts` — Client-side hook with ref-stabilized event listeners.
+- `components/providers/InactivityTimeoutConfig.tsx` — React Context provider bridging server env config to the client.
+- `app/providers.tsx` — Unconditional `<Toaster />` and hook invocation.
+
+### 8. (Optional) Isolation Testing
 
 The project includes isolation tests to verify tenant data separation and super admin access controls. These require a dedicated test database (`nipp_test`) and Docker infrastructure.
 
@@ -166,6 +199,40 @@ docker compose -f docker-compose.test.yml down            # Stop infra
 ```
 
 For detailed setup, test data model, and troubleshooting, see [ISOLATION_TEST_STRATEGY.md](./ISOLATION_TEST_STRATEGY.md).
+
+---
+
+## Auto-Logout on Inactivity (Architecture)
+
+The auto-logout feature uses a **defense-in-depth** approach combining client-side detection with server-side session expiry.
+
+### Client-Side Detection (`hooks/useInactivityTimeout.ts`)
+- Listens for `mousemove`, `click`, `keydown`, `scroll`, and `touchstart` events on `window`.
+- Uses `useRef` to stabilize function identities, preventing event listener thrashing on every React render.
+- At `timeout - 30s`: displays a warning toast via [sonner](https://github.com/emilkowalski/sonner).
+- At `timeout`: calls `signOutUser()` (server-side session deletion) then `window.location.href = '/login'` (hard redirect).
+- Any tracked activity during the warning period dismisses the toast and resets the timer.
+- Only runs when a user has an active session — returns early on unauthenticated pages.
+
+### Server-Side Backstop (`lib/auth.ts`)
+- `session.expiresIn = 3600s` (1 hour absolute maximum).
+- `session.updateAge = 900s` (15 minutes — sessions renew on any request when remaining time drops below this).
+- `signOutUser()` deletes the session from the database, not just local cookies.
+
+### Data Flow
+```
+User loads page → layout.tsx reads env.INACTIVITY_TIMEOUT_MINS (number)
+  → InactivityTimeoutProvider passes value via React Context
+    → useInactivityTimeout() attaches event listeners, starts timer
+      → Activity detected → timer resets (toast dismissed)
+      → No activity for T-30s → warning toast appears
+        → Still no activity for 30s → signOutUser() + hard redirect to /login
+          → Middleware allows /login for unauthenticated users
+```
+
+### Testing
+- **Unit tests:** `tests/unit/useInactivityTimeout.test.tsx` (8 tests) — timer behavior, toast timing, cleanup.
+- **Env schema tests:** `tests/unit/env-inactivity-timeout.test.ts` (15 tests) — validation, defaults, type transformation.
 
 ---
 
