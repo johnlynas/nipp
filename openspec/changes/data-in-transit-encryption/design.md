@@ -2,461 +2,603 @@
 
 ## Architecture Overview
 
-This design adds application-layer payload encryption on top of the existing TLS transport layer. The core idea is to derive a per-session AES-256-GCM key from the BetterAuth session token using HKDF-SHA-256, then use that key to encrypt request bodies and response bodies for routes handling sensitive PII.
+This design adds application-layer payload encryption for selected PII-bearing API routes. It operates on top of TLS and is intended as defense-in-depth.
 
-The architecture has three layers:
-1. **Key Derivation Layer** — deterministic session key derivation on both client and server.
-2. **Encryption Layer** — AES-256-GCM encrypt/decrypt operations (client-side via Web Crypto API, server-side via Node.js `node:crypto`).
-3. **Interception Layer** — middleware that intercepts requests/responses for affected routes, performing decryption before route handlers and encryption after.
+The revised design is based on four layers:
+
+1. Payload Key Layer  
+   The client obtains a short-lived AES-256-GCM key from an authenticated server endpoint. The BetterAuth session cookie can remain HTTP-only.
+
+2. Encryption Layer  
+   AES-256-GCM encrypts and decrypts JSON payloads. Each operation uses a fresh random 12-byte nonce.
+
+3. Binding Layer  
+   AES-GCM Additional Authenticated Data binds the ciphertext to the HTTP method, pathname, key ID, session ID, timestamp, and request nonce.
+
+4. Interception Layer  
+   Route-level wrappers decrypt incoming PII requests before business logic and encrypt successful PII responses before they are returned.
+
+This is not end-to-end encryption. The server decrypts payloads during normal request processing.
+
+## Trust Boundaries
+
+### Protected
+
+This design helps reduce exposure of PII payloads in:
+
+- application logs
+- proxy logs
+- debug middleware
+- accidental plaintext serialization
+- some internal network paths
+- replay or cross-route payload reuse
+- certain TLS-termination scenarios where payload keys are not exposed
+
+### Not Protected
+
+This design does not protect against:
+
+- malicious code executing inside the server request handler
+- malicious code executing inside the browser page
+- session theft
+- XSS that can call application APIs
+- PII in URLs, query strings, headers, or file uploads
+- authorized user actions performed through the legitimate UI
 
 ## Data Flow
 
-### Request Encryption (Client → Server)
-```
-┌──────────────┐     ┌───────────────┐     ┌──────────────┐
-│  React App   │────▶│ Encrypted     │────▶│ TLS (HTTPS)  │
-│              │ JSON│ Fetch Wrapper │     │              │
-└──────────────┘     └───────────────┘     └──────────────┘
-                              │                    │
-                         Encrypt AES-256-GCM    Encrypted bytes
-                              │                    │
-                              ▼                    ▼
-┌──────────────┐     ┌───────────────┐     ┌──────────────┐
-│  Route       │◀────│ Decryption    │◀────│ TLS (HTTPS)  │
-│  Handler     │ JSON│ Middleware    │     │              │
-└──────────────┘     └───────────────┘     └──────────────┘
-                              ▲                    ▲
-                         Decrypt AES-256-GCM    Encrypted bytes
-                              │                    │
-┌──────────────┐     ┌───────────────┐     ┌──────────────┐
-│  BetterAuth  │────▶│ Key           │     │  Browser     │
-│  Session     │     │ Derivation    │     │              │
-└──────────────┘     └───────────────┘     └──────────────┘
-```
+### Payload Key Issuance
 
-### Response Encryption (Server → Client)
-```
-┌──────────────┐     ┌───────────────┐     ┌──────────────┐
-│  Route       │────▶│ Encryption    │────▶│ TLS (HTTPS)  │
-│  Handler     │ JSON│ Middleware    │     │              │
-└──────────────┘     └───────────────┘     └──────────────┘
-                              │                    │
-                         Encrypt AES-256-GCM    Encrypted bytes
-                              │                    │
-                              ▼                    ▼
-┌──────────────┐     ┌───────────────┐     ┌──────────────┐
-│  React App   │◀────│ Decrypted     │◀────│ TLS (HTTPS)  │
-│              │ JSON│ Fetch Wrapper │     │              │
-└──────────────┘     └───────────────┘     └──────────────┘
-```
+1. Browser sends POST /api/security/payload-key with the BetterAuth session cookie.
+2. Server validates the BetterAuth session.
+3. Server generates or derives a 32-byte payload key.
+4. Server stores or binds the key to a keyId and session.
+5. Server returns keyId, algorithm, expiresAt, and base64url key material.
+6. Client imports the key as a non-extractable Web Crypto AES-GCM CryptoKey.
+7. Client stores the key only in memory.
 
-## Technical Decisions
+### Encrypted Request Flow
 
-### 1. Key Derivation: HKDF from Session Token
-Instead of implementing a full ECDH key exchange, we derive the payload encryption key deterministically from the existing BetterAuth session token. This avoids:
-- Additional round-trips during login
-- New key storage or rotation logic
-- Key exchange attack surface
+1. React component calls encryptedFetch with pii: true.
+2. Payload key manager gets or refreshes the payload key.
+3. Client serializes JSON body.
+4. Client generates a 12-byte AES-GCM nonce.
+5. Client builds request AAD.
+6. Client encrypts the JSON body with AES-256-GCM.
+7. Client sends raw binary body with required payload encryption headers.
+8. Server authenticates the session.
+9. Server validates feature flag, headers, payload size, timestamp, and replay nonce.
+10. Server retrieves the payload key by keyId.
+11. Server decrypts the payload using request AAD.
+12. Server parses and validates JSON.
+13. Route handler receives plaintext JSON.
 
-```typescript
-// lib/payload-key.ts (new)
-import { hkdfSync } from 'node:crypto';
+### Encrypted Response Flow
 
-export function derivePayloadKey(sessionToken: string, sessionId: string): Buffer {
-  const salt = 'nipp-payload-encryption';
-  const info = `session:${sessionId}`;
-  
-  return hkdfSync(
-    'sha256',
-    sessionToken,       // input key material (IKM)
-    Buffer.from(salt),  // salt
-    Buffer.from(info),  // info (context)
-    32                  // desired key length (AES-256)
-  );
-}
+1. Route handler returns JSON-serializable data.
+2. Server wrapper builds response AAD.
+3. Server encrypts the response with AES-256-GCM.
+4. Server returns raw binary body with Content-Type: application/octet-stream.
+5. Server includes Cache-Control: no-store.
+6. Client decrypts the response using the same payload key.
+7. Client returns decrypted JSON to the application layer.
 
-// Client-side equivalent using Web Crypto API:
-export async function derivePayloadKeyClient(sessionToken: string, sessionId: string): Promise<CryptoKey> {
-  const rawKey = await crypto.subtle.importKey(
-    'raw',
-    new TextEncoder().encode(sessionToken),
-    'HKDF-SHA-256',
-    false,
-    ['deriveBits']
-  );
-  
-  const bits = await crypto.subtle.deriveBits(
-    {
-      name: 'HKDF-SHA-256',
-      salt: new TextEncoder().encode('nipp-payload-encryption'),
-      info: new TextEncoder().encode(`session:${sessionId}`),
-    },
-    rawKey,
-    256 // 32 bytes = AES-256
-  );
-  
-  return crypto.subtle.importKey(
-    'raw',
-    bits,
-    'AES-GCM',
-    false,
-    ['encrypt', 'decrypt']
-  );
-}
-```
+## Technical Decision 1: Payload Key Bootstrap
 
-**Why this works:** The session token is already exchanged over TLS during login. Deriving a secondary key from it adds encryption without introducing new key material in transit.
+### Problem
 
-### 2. Dual Crypto Implementation (Node.js + Web Crypto API)
-The existing `lib/crypto.ts` uses Node.js `node:crypto`, which works on the server but not in the browser or Edge runtime. We need two implementations:
+The original design derived the encryption key in the browser from the BetterAuth session token. This fails if the session cookie is HTTP-only. Making the session cookie JavaScript-readable would increase XSS impact and is not recommended.
 
-**Server-side (`lib/crypto-server.ts`)** — extends existing `lib/crypto.ts`:
-```typescript
-import { createCipheriv, createDecipheriv } from 'node:crypto';
+### Revised Decision
 
-export async function encryptPayload(plaintext: string, key: Buffer): Promise<string> {
-  const nonce = randomBytes(12);
-  const cipher = createCipheriv('aes-256-gcm', key, nonce);
-  let encrypted = cipher.update(plaintext, 'utf8', 'hex');
-  encrypted += cipher.final('hex');
-  const authTag = cipher.getAuthTag().toString('hex');
-  return nonce.toString('hex') + encrypted + authTag;
-}
+Use a server-issued payload key.
 
-export async function decryptPayload(ciphertext: string, key: Buffer): Promise<string> {
-  const nonce = Buffer.from(ciphertext.slice(0, 24), 'hex');
-  const authTag = Buffer.from(ciphertext.slice(-32), 'hex');
-  const encrypted = ciphertext.slice(24, -32);
-  
-  const decipher = createDecipheriv('aes-256-gcm', key, nonce);
-  decipher.setAuthTag(authTag);
-  let decrypted = decipher.update(encrypted, 'hex', 'utf8');
-  decrypted += decipher.final('utf8');
-  return decrypted;
-}
-```
+The client calls:
 
-**Client-side (`lib/crypto-client.ts`)** — new file using Web Crypto API:
-```typescript
-export async function encryptPayload(plaintext: string, key: CryptoKey): Promise<string> {
-  const nonce = crypto.getRandomValues(new Uint8Array(12));
-  const encoder = new TextEncoder();
-  
-  const encrypted = await crypto.subtle.encrypt(
-    { name: 'AES-GCM', iv: nonce },
-    key,
-    encoder.encode(plaintext)
-  );
-  
-  const authTag = encrypted.slice(-16);
-  const ciphertext = encrypted.slice(0, -16);
-  
-  return arrayBufferToHex(nonce) + arrayBufferToHex(ciphertext) + arrayBufferToHex(authTag);
-}
+POST /api/security/payload-key
 
-export async function decryptPayload(ciphertext: string, key: CryptoKey): Promise<string> {
-  const nonce = hexToArrayBuffer(ciphertext.slice(0, 24));
-  const authTag = hexToArrayBuffer(ciphertext.slice(-32));
-  const encryptedData = hexToArrayBuffer(ciphertext.slice(24, -32));
-  
-  const fullCiphertext = new Uint8Array(encryptedData.byteLength + 16);
-  fullCiphertext.set(encryptedData, 0);
-  fullCiphertext.set(new Uint8Array(authTag), encryptedData.byteLength);
-  
-  const decrypted = await crypto.subtle.decrypt(
-    { name: 'AES-GCM', iv: nonce },
-    key,
-    fullCiphertext
-  );
-  
-  return new TextDecoder().decode(decrypted);
-}
-```
+The server:
 
-### 3. Server-Side Decryption Middleware
-A Next.js middleware or route-level interceptor that decrypts incoming payloads for PII routes:
+1. Validates the BetterAuth session.
+2. Generates or derives a 32-byte AES-256-GCM key.
+3. Associates the key with a keyId and session.
+4. Returns the key over TLS with Cache-Control: no-store.
 
-```typescript
-// lib/payload-middleware.ts (new)
-import { derivePayloadKey } from './payload-key';
+The client imports the key as non-extractable where supported.
 
-export async function decryptPIIPayload(req: Request, sessionToken: string): Promise<Record<string, unknown>> {
-  const encryptedBody = await req.arrayBuffer();
-  const ciphertext = Buffer.from(encryptedBody).toString('hex');
-  
-  // Derive key from session token (session ID extracted from BetterAuth cookie)
-  const sessionId = extractSessionId(req);
-  const key = derivePayloadKey(sessionToken, sessionId);
-  
-  // Decrypt
-  const plaintext = await decryptPayload(ciphertext, key);
-  
-  return JSON.parse(plaintext);
-}
+### Rejected Alternative: JavaScript-Readable Session Cookie
 
-export async function encryptPIIResponse(data: Record<string, unknown>, sessionToken: string): Promise<Uint8Array> {
-  const sessionId = extractSessionIdFromResponse();
-  const key = derivePayloadKey(sessionToken, sessionId);
-  
-  const plaintext = JSON.stringify(data);
-  const encrypted = await encryptPayload(plaintext, key);
-  
-  return new TextEncoder().encode(encrypted);
-}
-```
+Making the BetterAuth session cookie accessible to JavaScript is rejected because it exposes the full session credential to XSS.
 
-**Integration point:** This middleware is applied selectively to PII routes. Two approaches:
-- **Route-level wrapper:** Each affected API route wraps its body parsing in `decryptPIIPayload()`.
-- **Middleware-level:** A Next.js middleware checks the route path against a PII routes list and intercepts the request/response.
+### Optional Server-Side HKDF
 
-The route-level approach is preferred because it's explicit, easier to audit, and doesn't add overhead to non-PII routes.
+If payload keys are derived instead of randomly generated, the server may use HKDF.
 
-### 4. Client-Side Fetch Wrapper
-A transparent encrypted fetch wrapper for React components:
+Corrections from the original design:
 
-```typescript
-// lib/api-client.ts (new)
-import { derivePayloadKeyClient, encryptPayload, decryptPayload } from './crypto-client';
+- Node.js hkdfSync returns an ArrayBuffer; wrap it with Buffer.from.
+- If Web Crypto HKDF is ever used, the algorithm name is HKDF, not HKDF-SHA-256.
+- The hash is specified in deriveBits as SHA-256.
 
-interface EncryptedFetchOptions extends RequestInit {
-  pii?: boolean; // flag to enable payload encryption for this request
-}
+## Technical Decision 2: Key Lifecycle
 
-export async function encryptedFetch(url: string, options: EncryptedFetchOptions = {}): Promise<Response> {
-  const isPII = options.pii ?? false;
-  
-  if (isPII && options.body) {
-    const sessionToken = getSessionToken(); // from BetterAuth cookie
-    const sessionId = extractSessionIdFromCookie(sessionToken);
-    const key = await derivePayloadKeyClient(sessionToken, sessionId);
-    
-    const plaintext = JSON.stringify(options.body);
-    const encrypted = await encryptPayload(plaintext, key);
-    
-    options.body = new TextEncoder().encode(encrypted);
-    options.headers = { ...options.headers, 'Content-Type': 'application/octet-stream' };
-  }
-  
-  const response = await fetch(url, options);
-  
-  if (isPII && response.ok) {
-    const encryptedBody = await response.arrayBuffer();
-    const ciphertext = Buffer.from(encryptedBody).toString('hex');
-    
-    const sessionToken = getSessionToken();
-    const sessionId = extractSessionIdFromCookie(sessionToken);
-    const key = await derivePayloadKeyClient(sessionToken, sessionId);
-    
-    const plaintext = await decryptPayload(ciphertext, key);
-    
-    // Return a new Response with decrypted body
-    return new Response(plaintext, {
-      status: response.status,
-      statusText: response.statusText,
-      headers: response.headers,
-    });
-  }
-  
-  return response;
-}
-```
+Payload keys must have explicit lifecycle management.
 
-### 5. Route Configuration for PII Endpoints
-A simple configuration to mark which routes handle sensitive PII:
+### Key Properties
 
-```typescript
-// lib/pii-routes.ts (new)
-export const PII_ROUTES = [
-  '/api/passports',
-  '/api/personal-details',
-  // Add routes as needed
-] as const;
+Each payload key has:
 
-export function isPIIRoute(pathname: string): boolean {
-  return PII_ROUTES.some(route => pathname.startsWith(route));
-}
-```
+- keyId
+- sessionId
+- expiresAt
+- algorithm
+- revocation status
 
-## File Changes Summary
+### Client Behavior
+
+The client payload key manager:
+
+- fetches a key when none exists
+- refreshes a key before expiry
+- refreshes once when the server reports a stale or invalid key
+- clears the key on logout
+- does not persist the key
+- does not expose raw key material to application components
+
+### Server Behavior
+
+The server:
+
+- validates X-Payload-Key-Id
+- rejects expired keys
+- rejects keys not associated with the current session
+- supports multiple active keys for multiple tabs/devices
+- supports session token rotation
+- revokes keys on logout
+
+### Error Contract
+
+Suggested error codes:
+
+| Condition | HTTP Status | Error Code |
+|---|---:|---|
+| Missing or invalid session | 401 | unauthorized |
+| Missing payload key header | 400 | missing_payload_key_id |
+| Unknown key ID | 401 | payload_key_unknown |
+| Expired key | 401 | payload_key_expired |
+| Invalid encrypted payload | 400 | invalid_encrypted_payload |
+| Unsupported version | 400 | unsupported_payload_version |
+| Payload too large | 413 | payload_too_large |
+| Wrong content type | 415 | unsupported_media_type |
+
+The client may retry once after refreshing the key when receiving payload_key_expired or payload_key_unknown.
+
+## Technical Decision 3: Binary Wire Format
+
+The original design mixed hex-text and binary body handling. That would not work.
+
+The revised protocol uses raw binary bodies.
+
+### Encrypted Payload Layout
+
+The payload layout is:
+
+- 12-byte nonce
+- ciphertext
+- 16-byte GCM authentication tag
+
+Web Crypto AES-GCM returns ciphertext and tag concatenated. Node.js crypto exposes the tag separately, so the server implementation must concatenate them.
+
+### Shared Constants
+
+- PAYLOAD_ENCRYPTION_VERSION = v1
+- NONCE_BYTES = 12
+- AUTH_TAG_BYTES = 16
+- MIN_ENCRYPTED_BYTES = NONCE_BYTES + AUTH_TAG_BYTES
+
+### Browser Implementation Rules
+
+Browser code must not use Node.js Buffer.
+
+Browser code must use:
+
+- crypto.subtle
+- crypto.getRandomValues
+- TextEncoder
+- TextDecoder
+- Uint8Array
+
+## Technical Decision 4: AAD and Replay Protection
+
+AES-GCM protects confidentiality and integrity of the payload, but it does not by itself prevent replay or cross-route reuse.
+
+### Required Request Headers
+
+For encrypted PII requests:
+
+- X-Payload-Encryption: v1
+- X-Payload-Key-Id: key identifier
+- X-Payload-Timestamp: unix timestamp
+- X-Payload-Nonce: base64url random value
+
+The request nonce is separate from the AES-GCM nonce in the payload body.
+
+### Request AAD
+
+Request AAD must include:
+
+- v1
+- request
+- HTTP method
+- pathname
+- keyId
+- sessionId
+- timestamp
+- request nonce
+
+### Response AAD
+
+Response AAD must include:
+
+- v1
+- response
+- HTTP method
+- pathname
+- keyId
+- sessionId
+- request nonce
+
+### Replay Validation
+
+The server must:
+
+1. Reject requests with missing headers.
+2. Reject timestamps outside the configured window.
+3. Reject request nonces already seen for the same session/key within the window.
+4. Store used nonces in a short-TTL cache, for example Redis or an in-memory store.
+
+## Technical Decision 5: Route Matching
+
+The original prefix matcher could overmatch. For example, /api/passports could incorrectly match /api/passports-public.
+
+The revised route matcher must support:
+
+- exact paths
+- path parameters
+- trailing slash normalization
+- query-string stripping
+- case-sensitive matching
+
+Example route patterns:
+
+- /api/passports
+- /api/passports/:id
+- /api/personal-details
+- /api/personal-details/:id
+
+## Technical Decision 6: Server Route Wrapper
+
+A route-level wrapper is preferred over global middleware.
+
+Responsibilities:
+
+1. Authenticate the BetterAuth session.
+2. Check feature flag.
+3. Validate payload encryption mode.
+4. Validate HTTP method and content type.
+5. Enforce payload size limits.
+6. Read raw body once.
+7. Validate payload headers.
+8. Retrieve payload key.
+9. Validate timestamp and replay nonce.
+10. Decrypt request body using request AAD.
+11. Parse and validate JSON.
+12. Call the business handler.
+13. Encrypt successful responses using response AAD.
+14. Return unencrypted safe error responses.
+
+### Error Precedence
+
+The wrapper should process errors in this order:
+
+1. Session missing or invalid → 401.
+2. Feature flag disabled → route-specific fallback behavior.
+3. Payload version unsupported → 400.
+4. Payload key missing/unknown/expired → 401.
+5. Payload too large → 413.
+6. Content type invalid → 415.
+7. Payload format invalid → 400.
+8. Timestamp invalid → 400.
+9. Replay detected → 400 or 409.
+10. GCM authentication failure → 400.
+11. JSON parse failure → 400.
+12. Schema validation failure → 400 or 422.
+
+Error responses must not contain:
+
+- ciphertext
+- plaintext request bodies
+- plaintext response bodies
+- session tokens
+- payload keys
+- stack traces
+
+## Technical Decision 7: Client Key Manager
+
+The client key manager is responsible for obtaining and caching the payload key.
+
+Rules:
+
+- store only in module-scoped memory
+- refresh before expiry
+- clear on logout
+- do not persist
+- do not expose raw key bytes to UI components
+- do not write to localStorage, sessionStorage, IndexedDB, cookies, or Cache Storage
+
+## Technical Decision 8: Encrypted Fetch Wrapper
+
+The client wrapper must support:
+
+- POST/PUT/PATCH with encrypted request bodies
+- GET/DELETE with encrypted response bodies
+- empty bodies
+- 204 No Content
+- unencrypted error responses
+- one retry after payload-key refresh
+- explicit pii: true opt-in
+
+Rules:
+
+- If pii is false or absent, use normal fetch.
+- If pii is true, validate that the route is known PII.
+- If a request body exists, it must be JSON-serializable.
+- FormData, Blob, ReadableStream, URLSearchParams, and ArrayBuffer bodies are unsupported in v1.
+- For encrypted request bodies, set Content-Type: application/octet-stream.
+- For encrypted successful responses, return a synthetic JSON response.
+- Override synthetic decrypted response Content-Type to application/json.
+- Remove or recalculate misleading Content-Length headers.
+- Do not decrypt non-2xx responses unless explicitly specified.
+- Do not decrypt 204 No Content.
+
+## Technical Decision 9: Caching
+
+Encrypted PII responses must include:
+
+- Cache-Control: no-store
+- Pragma: no-cache
+
+The payload key endpoint must also include:
+
+- Cache-Control: no-store
+
+Additional requirements:
+
+- CDN caching must be disabled for PII routes.
+- Service workers must not cache encrypted PII responses.
+- React Query/SWR persistence must not persist encrypted payloads.
+- If decrypted data is persisted, it must follow existing PII storage policies.
+
+## Technical Decision 10: Observability
+
+Metrics should include:
+
+- encrypted request count
+- encrypted response count
+- decryption success/failure
+- invalid version count
+- expired key count
+- unknown key count
+- replay detected count
+- payload-too-large count
+- content-type rejection count
+- latency by route
+
+Logs may include:
+
+- route
+- method
+- status
+- request ID
+- error code
+- payload size
+- user/session identifier only if allowed by logging policy
+
+Logs must not include:
+
+- ciphertext
+- plaintext request bodies
+- plaintext response bodies
+- payload keys
+- session tokens
+- PII fields
+
+## Runtime Considerations
+
+### Browser
+
+- Requires secure context: HTTPS or localhost.
+- Uses Web Crypto.
+- Must not use Node.js Buffer.
+- Key stored only in memory.
+
+### Next.js Server
+
+PII route handlers should run in the Node.js runtime when using node:crypto.
+
+If a route runs in the Edge runtime, it must use Web Crypto-compatible utilities only.
+
+### Server Components / Server Actions
+
+If PII is accessed through Next.js Server Actions or server components instead of HTTP APIs, this design does not automatically apply. Those paths must be audited separately.
+
+### Server-to-Server Calls
+
+Internal service-to-service calls that carry PII must not send plaintext merely because they are internal. They must either:
+
+- use the same payload encryption protocol,
+- use mTLS or another approved transport control,
+- or be explicitly approved as an accepted risk.
+
+## File Changes
 
 ### New Files
+
 | File | Purpose |
 |---|---|
-| `lib/payload-key.ts` | HKDF-based session key derivation (server-side) |
-| `lib/crypto-client.ts` | AES-256-GCM encrypt/decrypt using Web Crypto API (client-side) |
-| `lib/api-client.ts` | Transparent encrypted fetch wrapper for React components |
-| `lib/pii-routes.ts` | Configuration of which routes handle sensitive PII |
+| lib/payload-format.ts | Shared constants, binary helpers, validation. |
+| lib/crypto-server.ts | Server AES-256-GCM with AAD and binary output. |
+| lib/crypto-client.ts | Browser AES-256-GCM with AAD and binary output. |
+| lib/payload-key-server.ts | Server payload key generation/derivation and validation. |
+| lib/payload-key-manager.ts | Client payload key fetching/caching. |
+| lib/api-client.ts | Encrypted fetch wrapper. |
+| lib/pii-routes.ts | PII route configuration and matcher. |
+| lib/payload-middleware.ts | Server route wrapper/helpers. |
+| app/api/security/payload-key/route.ts | Authenticated payload key issuance endpoint. |
 
 ### Modified Files
+
 | File | Change |
 |---|---|
-| `lib/crypto.ts` | No changes needed — existing at-rest encryption is separate. May add a shared utility for hex encoding/decoding if needed by both client and server implementations. |
-| `middleware.ts` | No changes — payload decryption is handled at the route level, not globally. |
-| `lib/auth.ts` | No changes — session token is already available via BetterAuth. |
-| API routes handling PII | Wrap request body parsing with `decryptPIIPayload()` and response serialization with `encryptPIIResponse()`. |
-| Client components making PII API calls | Replace `fetch()` with `encryptedFetch()` from `lib/api-client.ts`. |
-| `.env.local-prod.example` | Add `PAYLOAD_ENCRYPTION_SALT` and `PAYLOAD_ENCRYPTION_INFO_PREFIX` env vars (optional, for configurability). |
+| PII API routes | Use payload encryption wrapper. |
+| Client PII callers | Use encryptedFetch with pii: true. |
+| Logger | Redact payload bodies and PII. |
+| Monitoring | Add payload encryption metrics. |
+| .env examples | Add payload encryption configuration. |
+| SECURITY.md | Document threat model and limitations. |
+| ARCHITECTURE.md | Add payload encryption architecture. |
+
+## Relationship to Existing lib/crypto.ts
+
+The existing at-rest encryption in lib/crypto.ts should not be assumed compatible with transit encryption.
+
+Transit encryption should use a separate, versioned protocol. Shared low-level helpers may be extracted only after verifying format, nonce, tag, and encoding compatibility.
 
 ## Security Considerations
 
-### Key Derivation Security
-- The HKDF salt is static (`"nipp-payload-encryption"`), which is acceptable because the session token provides entropy.
-- The info parameter includes the session ID, ensuring different sessions derive different keys even with the same salt.
-- The derived key is never transmitted — it's computed independently on both client and server from the session token.
+### Session Token Compromise
 
-### Encryption Security
-- AES-256-GCM provides both confidentiality and integrity (authenticated encryption).
-- A fresh random nonce is generated for every encryption operation, preventing nonce reuse attacks.
-- The auth tag is verified during decryption — tampered payloads are rejected automatically by GCM.
+If the BetterAuth session is compromised, the attacker may be able to obtain a payload key or use the application as the user. Payload encryption does not solve session theft.
 
-### Threat Model
-This encryption protects against:
-- Server-side log leakage (request/response bodies in application logs)
-- Compromised server memory (payloads are encrypted in transit, decrypted only briefly during processing)
-- Insider threats (server operators cannot read raw PII from network captures)
+### XSS
 
-This does NOT protect against:
-- Legitimate server-side processing (the server must decrypt to process the data)
-- Client-side compromise (if the browser is compromised, the attacker has access to decrypted payloads)
-- TLS termination point compromise (the cloud provider's edge still sees encrypted application data, but the server itself also only sees decrypted data during processing)
+If XSS exists, an attacker may be able to call APIs using the authenticated session and read decrypted responses through the application context.
+
+Payload keys should be memory-only and short-lived, but this is not a complete XSS mitigation.
+
+### CSRF
+
+Payload encryption does not replace CSRF protection.
+
+PII mutating routes must continue to use:
+
+- SameSite cookies
+- CORS restrictions
+- CSRF tokens where applicable
+- content-type restrictions
+- origin checks
+
+### Nonce Management
+
+AES-GCM nonces must never be reused with the same key.
+
+Use:
+
+- crypto.getRandomValues in browsers
+- randomBytes in Node.js
+
+Do not implement custom RNG.
+
+### Payload Size
+
+Decrypting large payloads is expensive. Enforce size limits before decryption.
+
+Suggested default:
+
+PAYLOAD_ENCRYPTION_MAX_BYTES = 262144
+
+Adjust based on product requirements.
 
 ## Testing Strategy
 
-A layered testing approach is used: unit tests verify crypto primitives in isolation (no server needed), integration tests verify the full client→server encrypted round-trip with a real HTTP server, and security tests verify resistance to common attacks.
+### Unit Tests
 
-### Test File Layout
-```
-tests/
-  unit/
-    payload-key.test.ts          # HKDF key derivation consistency & uniqueness
-    crypto-client.test.ts        # Web Crypto API encrypt/decrypt round-trip
-    crypto-server.test.ts        # Node.js crypto encrypt/decrypt round-trip
-    api-client.test.ts           # Encrypted fetch wrapper behavior
-  integration/
-    pii-payload-encryption.test.ts   # Full E2E encrypted request/response cycle
-    non-pii-routes.test.ts           # Non-PII routes are unaffected
-  security/
-    payload-encryption-security.test.ts  # Attack resistance verification
-```
+Cover:
 
-### Layer 1: Unit Tests — Crypto Correctness (Fast, No Server)
+- binary format validation
+- server encrypt/decrypt round-trip
+- client encrypt/decrypt round-trip
+- AAD mismatch rejection
+- wrong key rejection
+- tamper rejection
+- truncation rejection
+- empty plaintext round-trip
+- Unicode round-trip
+- payload size validation
+- route matcher behavior
+- key manager refresh/expiry behavior
+- API client fallback behavior
 
-These tests verify the core crypto primitives work correctly in isolation. They run in milliseconds and do not require a running server.
+### Interoperability Tests
 
-#### `tests/unit/payload-key.test.ts` — Key Derivation Consistency
-Verifies that HKDF-SHA-256 produces deterministic, unique keys:
-- Same inputs → same key (deterministic)
-- Different session IDs → different keys
-- Different session tokens → different keys
-- Output is always exactly 32 bytes (AES-256)
-- Handles edge cases: empty token, special characters, unicode
-- No zero-filled keys produced
+Cover:
 
-#### `tests/unit/crypto-client.test.ts` — Client-Side Encrypt/Decrypt Round-Trip
-Verifies Web Crypto API (`crypto.subtle`) encrypt/decrypt behavior:
-- Simple string round-trip: `encrypt → decrypt` returns original
-- JSON object round-trip: preserves structure and values
-- Nonce randomization: same plaintext produces different ciphertext each time
-- Tamper detection: flipping a byte in ciphertext causes decryption failure
-- Truncation detection: removing the auth tag causes decryption failure
-- Wrong key rejection: ciphertext encrypted with one key cannot be decrypted with another
-- Empty string handling
-- Large payload handling (1MB)
-- Output format validation: hex-encoded, correct nonce (24 chars) + ciphertext + auth tag (32 chars)
-- Statistical nonce uniqueness: 100 sequential encryptions produce 100 unique nonces
+- server encrypts, client decrypts
+- client encrypts, server decrypts
+- Node and Web Crypto produce compatible results
+- HKDF outputs match if HKDF is used
+- binary format round-trips across runtimes
 
-#### `tests/unit/crypto-server.test.ts` — Server-Side Encrypt/Decrypt Round-Trip
-Verifies Node.js `node:crypto` encrypt/decrypt behavior:
-- Same test matrix as client-side tests (round-trip, tamper, truncation, wrong key, empty string, large payload)
-- Format compatibility: server output format matches client input format (same hex encoding scheme)
-- Unicode handling: emoji, CJK characters round-trip correctly
-- Statistical nonce uniqueness: 100 sequential encryptions produce 100 unique nonces
+### Integration Tests
 
-#### `tests/unit/api-client.test.ts` — Encrypted Fetch Wrapper
-Verifies the transparent fetch wrapper:
-- Encrypts request body when `pii: true` flag is set
-- Sends as `application/octet-stream`, not `application/json`
-- Decrypts response body for PII routes
-- Falls back to standard `fetch` when `pii: false` or not set
-- Handles response status codes correctly (preserves 4xx/5xx)
+Cover:
 
-### Layer 2: Integration Tests — End-to-End Flow (Requires Test Server)
+- authenticated payload key issuance
+- encrypted POST request and response
+- encrypted GET response
+- 204 no-content handling
+- plaintext rejection in enforce mode
+- tampered payload rejection
+- expired key handling
+- stale key refresh retry
+- replay rejection
+- wrong route rejection
+- wrong method rejection
+- oversized payload rejection
+- wrong content type rejection
+- non-PII route bypass
+- OPTIONS preflight bypass
+- cache-control headers
+- log redaction
 
-These tests spin up a real Next.js test server and verify the full encrypted request/response cycle over HTTP.
+### Browser Tests
 
-#### `tests/integration/pii-payload-encryption.test.ts` — Full E2E Cycle
-Tests the complete client→server encrypted flow:
-- **Encrypted request → decrypted processing:** Client derives key from session token, encrypts JSON body with AES-GCM, sends as `application/octet-stream`. Server derives same key from session cookie, decrypts, passes plaintext JSON to route handler. Route handler processes normally.
-- **Encrypted response → decrypted consumption:** Server encrypts JSON response with AES-GCM. Client derives same key, decrypts, parses JSON.
-- **Plaintext rejection:** Sending `application/json` to a PII route returns `400 Bad Request` — the server cannot decrypt plaintext as ciphertext.
-- **Tamper rejection:** Flipping bits in the encrypted body causes GCM auth tag verification to fail → `400 Bad Request`.
-- **Non-PII bypass:** A non-PII route (e.g., `/api/health`) returns standard JSON with `Content-Type: application/json` — no encryption overhead.
-- **Large payload performance:** 100KB encrypted payload processes within timeout (10s limit).
+Use Playwright or equivalent to verify real browser behavior:
 
-#### `tests/integration/non-pii-routes.test.ts` — Non-PII Route Isolation
-Verifies that non-PII routes are completely unaffected:
-- Standard `fetch()` calls work without encryption
-- Response is standard JSON, not encrypted bytes
-- No performance regression on non-PII endpoints
-- Middleware does not intercept non-matching routes
+- Web Crypto availability
+- payload key import
+- encrypted fetch round-trip
+- logout clears key
+- secure-context behavior
 
-### Layer 3: Security Tests — Attack Surface Verification
+### Performance Tests
 
-These tests verify the encryption resists common cryptographic attacks.
+Benchmark:
 
-#### `tests/security/payload-encryption-security.test.ts` — Attack Resistance
-- **Missing auth tag:** Removing the last 32 hex chars (16-byte GCM tag) causes decryption failure
-- **Missing nonce:** Removing the first 24 hex chars (12-byte nonce) causes decryption failure
-- **Empty ciphertext:** Rejects `""` input gracefully
-- **Non-hex input:** Rejects malformed hex strings (e.g., `"not-valid-hex!!!"`)
-- **Statistical nonce uniqueness:** 10,000 sequential encryptions produce 10,000 unique nonces (birthday paradox: ~10^9 encryptions needed for 50% collision probability with 96-bit nonce)
-- **Ciphertext indistinguishability:** Short and long plaintexts produce ciphertexts of proportional length only — no structural information leaked
-- **Single-bit flip detection:** Flipping one hex character in ciphertext causes full decryption failure (GCM integrity guarantee)
-- **Deterministic key derivation:** Same inputs produce same keys across multiple import calls
-- **Timing resistance:** Valid and invalid ciphertext decryption times are within 10x of each other (not a strict requirement, but flags obvious timing leaks)
+- 1KB payload
+- 10KB payload
+- 100KB payload
+- maximum allowed payload
+- concurrent encrypted requests
+- client-side key import overhead
+- server-side decryption overhead
 
-### Test Execution in CI
+Define a performance budget before rollout.
 
-All test layers are integrated into the GitHub Actions CI pipeline:
+## Known Limitations
 
-```yaml
-- name: Run payload encryption unit tests
-  run: npx vitest run \
-    tests/unit/payload-key.test.ts \
-    tests/unit/crypto-client.test.ts \
-    tests/unit/crypto-server.test.ts
-
-- name: Run encrypted fetch wrapper unit test
-  run: npx vitest run tests/unit/api-client.test.ts
-
-- name: Run integration encryption tests (requires server)
-  run: npx vitest run \
-    tests/integration/pii-payload-encryption.test.ts \
-    tests/integration/non-pii-routes.test.ts \
-    --test-timeout=30000
-
-- name: Run security tests
-  run: npx vitest run tests/security/payload-encryption-security.test.ts
-```
-
-### Test Coverage Goals
-| Layer | Target Coverage | Notes |
-|---|---|---|
-| Unit (crypto primitives) | 100% of encrypt/decrypt paths | Every branch in crypto functions tested |
-| Unit (key derivation) | 100% of edge cases | Empty, unicode, special chars all covered |
-| Integration (E2E) | All PII routes + non-PII bypass | Every marked route tested with encrypted payload |
-| Security (attack surface) | All attack vectors listed above | Tamper, truncation, wrong key, timing |
-| Integration (non-PII) | All non-PII routes sampled | At least one representative route per path prefix |
-
-### Test Data
-All tests use synthetic test data — no real PII, no production secrets:
-- Test session tokens: `"test-session-token-abc"`, `"session-token-def"`
-- Test session IDs: `"sess-test-001"`, `"sess-002"`
-- Test passport numbers: `"AB1234567"` (synthetic format)
-- Test keys: `Buffer.alloc(32, 0x42)` or derived from test HKDF inputs
-- Large payloads: programmatically generated (`'x'.repeat(N)`)
-
-### Known Test Limitations
-- **Timing tests are best-effort:** Node.js GC and OS scheduling introduce noise; the 10x ratio is a warning threshold, not a pass/fail criterion.
-- **Integration tests require a running server:** The test harness spawns `next dev` on a random port and waits for readiness. This adds ~2-3 seconds per test file but provides the highest confidence.
-- **Client-side crypto tests run in Node.js:** Vitest's default environment is Node.js, which has a built-in `crypto` global that implements the Web Crypto API. This means client-side crypto tests run in Node.js, not a real browser. For full browser compatibility verification, consider adding Playwright tests that run in Chromium (see Phase 6 rollout).
+- Timing tests are noisy and should be advisory, not hard CI gates.
+- Browser tests cannot guarantee all user browsers; they verify representative Web Crypto behavior.
+- Replay cache introduces state and needs a backend decision.
+- The key endpoint returns key material over TLS and must be carefully protected and redacted in logs.
+- This protocol does not protect PII placed outside encrypted bodies.
