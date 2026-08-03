@@ -1,0 +1,7 @@
+schema: spec-driven
+change: data-in-transit-encryption
+status: proposed
+artifacts:
+  - proposal.md
+  - design.md
+  - tasks.md
