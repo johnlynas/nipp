@@ -3,6 +3,7 @@
  * DELETE /api/admin/organizations/[orgId]/members/[memberId]
  *
  * Super Admin only — update or remove a member from any tenant organization.
+ * Wrapped with payload encryption middleware for defense-in-depth.
  */
 
 import { NextRequest, NextResponse } from 'next/server';
@@ -12,6 +13,7 @@ import tenantDb from '@/lib/tenant-db';
 import { runWithTenant } from '@/lib/tenant-context';
 import { recordAuditLog } from '@/lib/audit-log';
 import { logger } from '@/lib/logger';
+import { wrapPiiRoute, PiiRouteParams } from '@/lib/payload-middleware';
 
 export const runtime = 'nodejs';
 
@@ -19,23 +21,35 @@ export const runtime = 'nodejs';
 // PATCH — Update a member's role in a tenant organization (super admin)
 // ---------------------------------------------------------------------------
 
-export async function PATCH(
-  request: NextRequest,
-  { params }: { params: Promise<{ orgId: string; memberId: string }> }
-) {
-  const authResult = await requireSuperAdmin();
+export const PATCH = wrapPiiRoute(async (request, decryptedBody, params) => {
+  const authResult = await requireSuperAdmin(request.headers);
   if (!authResult.authorized) {
     return NextResponse.json({ error: authResult.error || 'Unauthorized' }, { status: authResult.status });
   }
 
   const session = authResult.session!;
-  const { orgId, memberId } = await params;
 
+  // Extract orgId and memberId from route params (provided by wrapPiiRoute)
+  const urlOrgId = params?.orgId;
+  const urlMemberId = params?.memberId;
+
+  if (!urlOrgId) {
+    return NextResponse.json({ error: 'Organization ID is required' }, { status: 400 });
+  }
+  if (!urlMemberId) {
+    return NextResponse.json({ error: 'Member ID is required' }, { status: 400 });
+  }
+
+  // Use decryptedBody (already parsed JSON) or fall back to request.json()
   let body: { role?: string };
-  try {
-    body = await request.json();
-  } catch {
-    return NextResponse.json({ error: 'Invalid request body' }, { status: 400 });
+  if (decryptedBody && typeof decryptedBody === 'object') {
+    body = decryptedBody as { role?: string };
+  } else {
+    try {
+      body = await request.json();
+    } catch {
+      return NextResponse.json({ error: 'Invalid request body' }, { status: 400 });
+    }
   }
 
   const { role } = body;
@@ -45,14 +59,14 @@ export async function PATCH(
 
   try {
     // Verify target org exists (globalDb)
-    const org = await globalDb.organization.findUnique({ where: { id: orgId } });
+    const org = await globalDb.organization.findUnique({ where: { id: urlOrgId } });
     if (!org) {
       return NextResponse.json({ error: 'Organization not found' }, { status: 404 });
     }
 
     // Verify member exists and belongs to this org (globalDb)
     const existingMember = await globalDb.member.findFirst({
-      where: { id: memberId, orgId },
+      where: { id: urlMemberId, orgId: urlOrgId },
       include: { user: { select: { name: true, email: true } } },
     });
     if (!existingMember) {
@@ -60,9 +74,9 @@ export async function PATCH(
     }
 
     // Update member role within tenant context (tenantDb)
-    const updatedMember = await runWithTenant(orgId, async () => {
+    const updatedMember = await runWithTenant(urlOrgId, async () => {
       return tenantDb.member.update({
-        where: { id: memberId },
+        where: { id: urlMemberId },
         data: { role },
         include: { user: { select: { name: true, email: true } } },
       });
@@ -75,46 +89,54 @@ export async function PATCH(
       action: 'member.role_updated',
       success: true,
       resourceType: 'Organization.Member',
-      resourceId: memberId,
-      organizationId: orgId,
+      resourceId: urlMemberId,
+      organizationId: urlOrgId,
       metadata: { newRole: role },
     });
 
-    logger.info({ userId: session.user.id, orgId, memberId, role }, 'Updated member role in tenant organization');
+    logger.info({ userId: session.user.id, orgId: urlOrgId, memberId: urlMemberId, role }, 'Updated member role in tenant organization');
     return NextResponse.json({ message: 'Member role updated', member: updatedMember });
   } catch (error) {
     const isDbError = error instanceof Error && error.message.includes('Can\'t reach database server');
-    logger.error({ err: error, orgId, memberId }, isDbError ? 'Database unavailable updating member' : 'Unexpected error updating member');
+    logger.error({ err: error, orgId: urlOrgId, memberId: urlMemberId }, isDbError ? 'Database unavailable updating member' : 'Unexpected error updating member');
     return NextResponse.json({ error: isDbError ? 'Database unavailable' : 'Internal Server Error' }, { status: isDbError ? 503 : 500 });
   }
-}
+});
 
 // ---------------------------------------------------------------------------
 // DELETE — Remove a member from a tenant organization (super admin)
 // ---------------------------------------------------------------------------
 
-export async function DELETE(
-  request: NextRequest,
-  { params }: { params: Promise<{ orgId: string; memberId: string }> }
-) {
-  const authResult = await requireSuperAdmin();
+export const DELETE = wrapPiiRoute(async (request, _decryptedBody, params) => {
+  // decryptedBody is null for DELETE requests
+  const authResult = await requireSuperAdmin(request.headers);
   if (!authResult.authorized) {
     return NextResponse.json({ error: authResult.error || 'Unauthorized' }, { status: authResult.status });
   }
 
   const session = authResult.session!;
-  const { orgId, memberId } = await params;
+
+  // Extract orgId and memberId from route params (provided by wrapPiiRoute)
+  const urlOrgId = params?.orgId;
+  const urlMemberId = params?.memberId;
+
+  if (!urlOrgId) {
+    return NextResponse.json({ error: 'Organization ID is required' }, { status: 400 });
+  }
+  if (!urlMemberId) {
+    return NextResponse.json({ error: 'Member ID is required' }, { status: 400 });
+  }
 
   try {
     // Verify target org exists (globalDb)
-    const org = await globalDb.organization.findUnique({ where: { id: orgId } });
+    const org = await globalDb.organization.findUnique({ where: { id: urlOrgId } });
     if (!org) {
       return NextResponse.json({ error: 'Organization not found' }, { status: 404 });
     }
 
     // Verify member exists and belongs to this org (globalDb)
     const existingMember = await globalDb.member.findFirst({
-      where: { id: memberId, orgId },
+      where: { id: urlMemberId, orgId: urlOrgId },
       include: { user: { select: { name: true, email: true } } },
     });
     if (!existingMember) {
@@ -122,8 +144,8 @@ export async function DELETE(
     }
 
     // Remove member within tenant context (tenantDb)
-    await runWithTenant(orgId, async () => {
-      return tenantDb.member.delete({ where: { id: memberId } });
+    await runWithTenant(urlOrgId, async () => {
+      return tenantDb.member.delete({ where: { id: urlMemberId } });
     });
 
     // Audit log (globalDb)
@@ -133,15 +155,15 @@ export async function DELETE(
       action: 'member.deleted',
       success: true,
       resourceType: 'Organization.Member',
-      resourceId: memberId,
-      organizationId: orgId,
+      resourceId: urlMemberId,
+      organizationId: urlOrgId,
     });
 
-    logger.info({ userId: session.user.id, orgId, memberId }, 'Removed member from tenant organization');
+    logger.info({ userId: session.user.id, orgId: urlOrgId, memberId: urlMemberId }, 'Removed member from tenant organization');
     return NextResponse.json({ message: 'Member removed successfully' });
   } catch (error) {
     const isDbError = error instanceof Error && error.message.includes('Can\'t reach database server');
-    logger.error({ err: error, orgId, memberId }, isDbError ? 'Database unavailable removing member' : 'Unexpected error removing member');
+    logger.error({ err: error, orgId: urlOrgId, memberId: urlMemberId }, isDbError ? 'Database unavailable removing member' : 'Unexpected error removing member');
     return NextResponse.json({ error: isDbError ? 'Database unavailable' : 'Internal Server Error' }, { status: isDbError ? 503 : 500 });
   }
-}
+});

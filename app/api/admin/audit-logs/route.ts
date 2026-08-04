@@ -1,48 +1,70 @@
 import { NextResponse } from 'next/server';
-import { auth } from '@/lib/auth';
-import { headers } from 'next/headers';
-import tenantDb from '@/lib/tenant-db';
-import { verifySuperAdmin } from '@/lib/authz';
+import globalDb from '@/lib/global-db';
+import { requireSuperAdmin } from '@/lib/require-super-admin';
 import { logger } from '@/lib/logger';
-import { setRLSContext } from '@/lib/rls'; // Adjust import as needed
+import { wrapPiiRoute } from '@/lib/payload-middleware';
 
-// Cache audit logs for 10 seconds (P7 - server-side caching)
-export const revalidate = 10;
+// PII data — do not cache
+export const revalidate = 0;
+export const dynamic = 'force-dynamic';
 
-export async function GET(request: Request) {
+export const GET = wrapPiiRoute(async (request) => {
   try {
-    const session = await auth.api.getSession({ headers: await headers() });
-    if (!session) {
-      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+    const authResult = await requireSuperAdmin(request.headers);
+    if (!authResult.authorized) {
+      return NextResponse.json({ error: authResult.error || 'Unauthorized' }, { status: authResult.status });
     }
 
-    const { authorized, error } = await verifySuperAdmin(session.user.id, undefined);
-    if (!authorized) {
-      const status = error?.includes('Database unavailable') ? 503 : 403;
-      return NextResponse.json({ error: error || 'Super Admin access required' }, { status });
-    }
+    const session = authResult.session!;
 
     const url = new URL(request.url);
     const page = parseInt(url.searchParams.get('page') || '1', 10);
     const pageSize = parseInt(url.searchParams.get('pageSize') || '50', 10);
-      
-    // Wrap RLS context setting in try/catch to catch DB outages cleanly
-    try {
-      const orgId = session.session.activeOrganizationId;
-      if (orgId) {
-         await setRLSContext(session.user.id, orgId);
-      }
-    } catch (rlsError) {
-      const isDbError = rlsError instanceof Error && rlsError.message.includes('Can\'t reach database server');
-      logger.error({ userId: session.user.id, err: rlsError }, isDbError ? '[Audit Logs API] Database unavailable setting RLS context' : '[Audit Logs API] Error setting RLS context');
-      return NextResponse.json({ error: 'Database unavailable, cannot fetch audit logs' }, { status: 503 });
+    const resourceType = url.searchParams.get('resourceType') || undefined;
+
+    // Build where clause
+    const where: Record<string, unknown> = {};
+    if (resourceType) {
+      where.resourceType = resourceType;
     }
 
-    // ... rest of your audit log fetching logic ...
-    
-    return NextResponse.json({ logs: [], pagination: { page, pageSize } }); // Replace with actual data
+    const [logs, total] = await Promise.all([
+      globalDb.auditLog.findMany({
+        where,
+        orderBy: { timestamp: 'desc' },
+        skip: (page - 1) * pageSize,
+        take: pageSize,
+        select: {
+          id: true,
+          timestamp: true,
+          userId: true,
+          userName: true,
+          action: true,
+          resourceType: true,
+          resourceId: true,
+          organizationId: true,
+          success: true,
+        },
+      }),
+      globalDb.auditLog.count({ where }),
+    ]);
+
+    return NextResponse.json({
+      auditLogs: logs.map((log) => ({
+        id: log.id,
+        timestamp: log.timestamp.toISOString(),
+        userId: log.userId ?? undefined,
+        userName: log.userName ?? undefined,
+        action: log.action,
+        resourceType: log.resourceType,
+        resourceId: log.resourceId ?? undefined,
+        organizationId: log.organizationId ?? undefined,
+        success: log.success,
+      })),
+      pagination: { page, pageSize, total },
+    });
   } catch (error) {
     logger.error({ err: error }, '[Audit Logs API] Unexpected error');
     return NextResponse.json({ error: 'Internal server error' }, { status: 500 });
   }
-}
+});

@@ -3,6 +3,7 @@
  * POST /api/admin/organizations/[orgId]/members
  *
  * Super Admin only — manage members of any tenant organization.
+ * Wrapped with payload encryption middleware for defense-in-depth.
  */
 
 import { NextRequest, NextResponse } from 'next/server';
@@ -12,6 +13,7 @@ import tenantDb from '@/lib/tenant-db';
 import { runWithTenant } from '@/lib/tenant-context';
 import { recordAuditLog } from '@/lib/audit-log';
 import { logger } from '@/lib/logger';
+import { wrapPiiRoute, PiiRouteParams } from '@/lib/payload-middleware';
 
 export const runtime = 'nodejs';
 
@@ -19,30 +21,33 @@ export const runtime = 'nodejs';
 // GET — List all members of a tenant organization (super admin)
 // ---------------------------------------------------------------------------
 
-export async function GET(
-  request: NextRequest,
-  { params }: { params: Promise<{ orgId: string }> }
-) {
-  const authResult = await requireSuperAdmin();
+export const GET = wrapPiiRoute(async (request, _decryptedBody, params) => {
+  // decryptedBody is null for GET requests
+  const authResult = await requireSuperAdmin(request.headers);
   if (!authResult.authorized) {
     return NextResponse.json({ error: authResult.error || 'Unauthorized' }, { status: authResult.status });
   }
 
   const session = authResult.session!;
-  const { orgId } = await params;
+
+  // Extract orgId from route params (provided by wrapPiiRoute)
+  const urlOrgId = params?.orgId;
+  if (!urlOrgId) {
+    return NextResponse.json({ error: 'Organization ID is required' }, { status: 400 });
+  }
 
   try {
     // Verify target org exists (globalDb — cross-org lookup)
-    const org = await globalDb.organization.findUnique({ where: { id: orgId } });
+    const org = await globalDb.organization.findUnique({ where: { id: urlOrgId } });
     if (!org) {
-      logger.warn({ userId: session.user.id, orgId }, 'Tenant organization not found');
+      logger.warn({ userId: session.user.id, orgId: urlOrgId }, 'Tenant organization not found');
       return NextResponse.json({ error: 'Organization not found' }, { status: 404 });
     }
 
     // Fetch members within tenant context (tenantDb — scoped to orgId)
-    const members = await runWithTenant(orgId, async () => {
+    const members = await runWithTenant(urlOrgId, async () => {
       return tenantDb.member.findMany({
-        where: { organization: { id: orgId } },
+        where: { organization: { id: urlOrgId } },
         include: {
           user: { select: { id: true, name: true, email: true } },
           memberRoles: { include: { role: { select: { name: true, isDefault: true } } } },
@@ -51,36 +56,43 @@ export async function GET(
       });
     });
 
-    logger.info({ userId: session.user.id, orgId, count: members.length }, 'Fetched tenant members');
+    logger.info({ userId: session.user.id, orgId: urlOrgId, count: members.length }, 'Fetched tenant members');
     return NextResponse.json({ members });
   } catch (error) {
     const isDbError = error instanceof Error && error.message.includes('Can\'t reach database server');
-    logger.error({ err: error, orgId }, isDbError ? 'Database unavailable fetching members' : 'Unexpected error fetching members');
+    logger.error({ err: error, orgId: urlOrgId }, isDbError ? 'Database unavailable fetching members' : 'Unexpected error fetching members');
     return NextResponse.json({ error: isDbError ? 'Database unavailable' : 'Internal Server Error' }, { status: isDbError ? 503 : 500 });
   }
-}
+});
 
 // ---------------------------------------------------------------------------
 // POST — Add a member to a tenant organization (super admin)
 // ---------------------------------------------------------------------------
 
-export async function POST(
-  request: NextRequest,
-  { params }: { params: Promise<{ orgId: string }> }
-) {
-  const authResult = await requireSuperAdmin();
+export const POST = wrapPiiRoute(async (request, decryptedBody, params) => {
+  const authResult = await requireSuperAdmin(request.headers);
   if (!authResult.authorized) {
     return NextResponse.json({ error: authResult.error || 'Unauthorized' }, { status: authResult.status });
   }
 
   const session = authResult.session!;
-  const { orgId } = await params;
 
+  // Extract orgId from route params (provided by wrapPiiRoute)
+  const urlOrgId = params?.orgId;
+  if (!urlOrgId) {
+    return NextResponse.json({ error: 'Organization ID is required' }, { status: 400 });
+  }
+
+  // Use decryptedBody (already parsed JSON) or fall back to request.json()
   let body: { email?: string; role?: string };
-  try {
-    body = await request.json();
-  } catch {
-    return NextResponse.json({ error: 'Invalid request body' }, { status: 400 });
+  if (decryptedBody && typeof decryptedBody === 'object') {
+    body = decryptedBody as { email?: string; role?: string };
+  } else {
+    try {
+      body = await request.json();
+    } catch {
+      return NextResponse.json({ error: 'Invalid request body' }, { status: 400 });
+    }
   }
 
   const { email, role } = body;
@@ -90,7 +102,7 @@ export async function POST(
 
   try {
     // Verify target org exists (globalDb)
-    const org = await globalDb.organization.findUnique({ where: { id: orgId } });
+    const org = await globalDb.organization.findUnique({ where: { id: urlOrgId } });
     if (!org) {
       return NextResponse.json({ error: 'Organization not found' }, { status: 404 });
     }
@@ -113,16 +125,16 @@ export async function POST(
 
     // Check if already a member (globalDb — Member is global)
     const existingMember = await globalDb.member.findFirst({
-      where: { userId: user.id, orgId },
+      where: { userId: user.id, orgId: urlOrgId },
     });
     if (existingMember) {
       return NextResponse.json({ error: 'User is already a member of this organization' }, { status: 409 });
     }
 
     // Add member within tenant context (tenantDb)
-    const member = await runWithTenant(orgId, async () => {
+    const member = await runWithTenant(urlOrgId, async () => {
       return tenantDb.member.create({
-        data: { userId: user.id, orgId, role: role || 'member' },
+        data: { userId: user.id, orgId: urlOrgId, role: role || 'member' },
         include: { user: { select: { name: true, email: true } } },
       });
     });
@@ -135,14 +147,14 @@ export async function POST(
       success: true,
       resourceType: 'Organization.Member',
       resourceId: member.id,
-      organizationId: orgId,
+      organizationId: urlOrgId,
     });
 
-    logger.info({ userId: session.user.id, orgId, memberId: member.id }, 'Added member to tenant organization');
+    logger.info({ userId: session.user.id, orgId: urlOrgId, memberId: member.id }, 'Added member to tenant organization');
     return NextResponse.json({ message: 'Member added successfully', member }, { status: 201 });
   } catch (error) {
     const isDbError = error instanceof Error && error.message.includes('Can\'t reach database server');
-    logger.error({ err: error, orgId }, isDbError ? 'Database unavailable adding member' : 'Unexpected error adding member');
+    logger.error({ err: error, orgId: urlOrgId }, isDbError ? 'Database unavailable adding member' : 'Unexpected error adding member');
     return NextResponse.json({ error: isDbError ? 'Database unavailable' : 'Internal Server Error' }, { status: isDbError ? 503 : 500 });
   }
-}
+});

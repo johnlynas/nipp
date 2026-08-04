@@ -1,20 +1,21 @@
-// Example usage in system-logs/route.ts
 import { requireSuperAdmin } from '@/lib/require-super-admin';
 import { NextResponse } from 'next/server';
 import { logger } from '@/lib/logger';
+import { wrapPiiRoute } from '@/lib/payload-middleware';
 
-// Cache system logs for 10 seconds (P7 - server-side caching)
-export const revalidate = 10;
+// PII data — do not cache
+export const revalidate = 0;
+export const dynamic = 'force-dynamic';
 
-export async function GET() {
+export const GET = wrapPiiRoute(async (request) => {
   try {
-    const { authorized, error, status, session } = await requireSuperAdmin();
+    const authResult = await requireSuperAdmin(request.headers);
     
-    if (!authorized || !session) {
-      return NextResponse.json({ error }, { status });
+    if (!authResult.authorized || !authResult.session) {
+      return NextResponse.json({ error: authResult.error || 'Unauthorized' }, { status: authResult.status });
     }
 
-    logger.info({ userId: session.user.id }, 'System logs accessed by super admin');
+    logger.info({ userId: authResult.session.user.id }, 'System logs accessed by super admin');
     
     // TODO: Fetch and return actual system logs
     return NextResponse.json({ logs: [] });
@@ -22,4 +23,4 @@ export async function GET() {
     logger.error({ err: error }, 'Unexpected error in system-logs GET');
     return NextResponse.json({ error: 'Internal server error' }, { status: 500 });
   }
-}
+});

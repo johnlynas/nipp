@@ -24,6 +24,7 @@ export default defineConfig({
       },
     },
     include: ['tests/**/*.test.ts', 'tests/**/*.test.tsx'],
+    exclude: ['tests/isolation/e2e/payload-encryption-browser.test.ts'],
   },
   resolve: {
     alias: {

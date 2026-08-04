@@ -144,6 +144,195 @@ export default function MyComponent() {
 ### Safe Rollout Strategy
 CSP is currently set via `Content-Security-Policy-Report-Only`. This logs violations to the browser console without blocking resources. Once validated, it can be switched to `Content-Security-Policy` for strict enforcement.
 
+## 🔒 Data-in-Transit Payload Encryption
+
+**Status: Infrastructure complete — route-by-route migration in progress.**
+
+Payload encryption is gated by `PAYLOAD_ENCRYPTION_MODE=disabled` (default). When enabled, selected PII-bearing API routes encrypt request and response bodies at the application layer using AES-256-GCM, on top of TLS transport encryption.
+
+### Implementation Status (Phase 2)
+
+| Component | Status |
+|---|---|
+| Environment variables (`lib/env.ts`) | ✅ Implemented |
+| Logger PII redaction fields | ✅ Implemented |
+| Payload format module (`lib/payload-format.ts`) | ✅ Implemented |
+| Server crypto (`lib/crypto-server.ts`) | ✅ Implemented |
+| Client crypto (`lib/crypto-client.ts`) | ✅ Implemented |
+| Payload key store & issuance (`lib/payload-key-server.ts`) | ✅ Implemented |
+| Key endpoint (`app/api/security/payload-key/route.ts`) | ✅ Implemented |
+| PII route matcher (`lib/pii-routes.ts`) | ✅ Implemented — 11 patterns |
+| Server middleware/wrapper (`lib/payload-middleware.ts`) | ✅ Implemented |
+| Client key manager (`lib/payload-key-manager.ts`) | ✅ Implemented |
+| Encrypted fetch wrapper (`lib/api-client.ts`) | ✅ Implemented |
+| Unit tests (111 tests) | ✅ Passing |
+| PII routes wrapped with `wrapPiiRoute()` | 🔄 In progress — 11 of ~20 PII routes wrapped |
+| Client calls migrated to `encryptedFetch` | 🔄 In progress — 10 of ~20 client pages migrated |
+| Integration tests | ❌ Planned |
+| Browser/Playwright tests | ❌ Planned |
+
+### Architecture Overview
+
+| Layer | Component | File |
+|---|---|---|
+| Payload Key | Server-issued short-lived AES-256-GCM keys | `lib/payload-key-server.ts`, `app/api/security/payload-key/route.ts` |
+| Encryption | AES-256-GCM with AAD (server) | `lib/crypto-server.ts` |
+| Encryption | AES-256-GCM with AAD (browser, Web Crypto) | `lib/crypto-client.ts` |
+| Format | Shared constants, binary helpers, validation | `lib/payload-format.ts` |
+| Route Matching | PII route configuration and matcher | `lib/pii-routes.ts` |
+| Middleware | Server route wrapper / helpers | `lib/payload-middleware.ts` |
+| Client Key Manager | In-memory key fetching and caching | `lib/payload-key-manager.ts` |
+| API Client | Encrypted fetch wrapper for PII calls | `lib/api-client.ts` |
+
+### Key Bootstrap
+
+The client obtains a short-lived payload encryption key from an authenticated server endpoint:
+
+```
+POST /api/security/payload-key
+```
+
+The server validates the BetterAuth session and returns:
+- `keyId` — unique key identifier
+- `algorithm` — always `aes-256-gcm`
+- `expiresAt` — Unix timestamp (seconds) when the key expires
+- `key` — base64url-encoded 32-byte key material
+
+The client imports the key as a non-extractable AES-256-GCM `CryptoKey` and stores it only in memory. This preserves HTTP-only BetterAuth session cookies.
+
+**Note:** The client key manager (`lib/payload-key-manager.ts`) is implemented and wired into API callers via `encryptedFetch`. React component integration continues in Phase 2.
+
+### Payload Format
+
+Encrypted payloads use a versioned binary format:
+- 12-byte random nonce
+- ciphertext (AES-GCM)
+- 16-byte GCM authentication tag
+
+HTTP headers for encrypted requests:
+| Header | Value |
+|---|---|
+| `X-Payload-Encryption` | `v1` |
+| `X-Payload-Key-Id` | key identifier |
+| `X-Payload-Timestamp` | Unix timestamp (seconds) |
+| `X-Payload-Nonce` | base64url random value |
+
+### Request Context Binding (AAD)
+
+Each encrypted payload is bound to the request context via AES-GCM Additional Authenticated Data, preventing replay and cross-route reuse. AAD includes:
+- Protocol version (`v1`)
+- Purpose (`request` or `response`)
+- HTTP method
+- URL pathname
+- Key ID
+- Session ID
+- Timestamp / nonce
+
+### Replay Protection
+
+The server rejects requests with:
+- Missing or unsupported payload versions
+- Expired timestamps (outside configured window)
+- Replayed request nonces (within replay window)
+- Payloads sent to a different route or with a different HTTP method
+- Invalid or expired payload keys
+
+Replay nonces are validated server-side using a Redis-backed cache with TTL-based expiry. The replay protection logic is implemented in `lib/payload-middleware.ts` (`checkReplayProtection`, `checkReplayProtectionStrict`).
+
+**Fail-closed behavior in enforce mode:** When `PAYLOAD_ENCRYPTION_REQUIRE_REPLAY_CACHE=true` and the replay cache is unavailable, enforce-mode requests return HTTP 503 (`replay_cache_unavailable`) instead of proceeding without replay protection. This is the recommended configuration for production enforce mode.
+
+**Multi-instance limitation:** The in-memory payload key store (`lib/payload-key-server.ts`) is single-instance only. Memory-only replay cache (`PAYLOAD_ENCRYPTION_REPLAY_CACHE=memory`) is also single-instance. For multi-instance deployments, both must be backed by Redis. Enforce mode **must not** be enabled on multi-instance deployments with in-memory stores.
+
+### Feature Flag Modes
+
+| Mode | Behavior |
+|---|---|
+| `disabled` (default) | No payload encryption is required or applied |
+| `permissive` | Server accepts encrypted payloads; emits metrics for plaintext PII (migration-only) |
+| `enforce` | Server requires encrypted payloads for configured PII routes |
+
+**Note:** The feature flag enforcement logic is implemented in `lib/payload-middleware.ts`. Currently 11 routes are wrapped with `wrapPiiRoute()`, so enabling the flag will activate encryption for those routes. Additional routes are being assessed and migrated in Phase 2.
+
+### Configuration
+
+| Variable | Default | Description |
+|---|---|---|
+| `PAYLOAD_ENCRYPTION_MODE` | `disabled` | Feature flag mode (`disabled`, `permissive`, `enforce`) |
+| `PAYLOAD_ENCRYPTION_MAX_BYTES` | `65536` | Maximum encrypted payload size |
+| `PAYLOAD_ENCRYPTION_KEY_TTL_SECONDS` | `300` | Payload key lifetime |
+| `PAYLOAD_ENCRYPTION_REPLAY_WINDOW_SECONDS` | `30` | Replay protection window |
+| `PAYLOAD_ENCRYPTION_NONCE_TTL_SECONDS` | `60` | Replay nonce cache TTL |
+| `PAYLOAD_ENCRYPTION_REPLAY_CACHE` | `redis` | Replay cache backend (`memory`, `redis`) |
+| `PAYLOAD_ENCRYPTION_REQUIRE_REPLAY_CACHE` | `false` | Fail closed if replay cache unavailable (set to `true` for production enforce mode) |
+
+**Production enforce mode requirements:**
+- Set `PAYLOAD_ENCRYPTION_MODE=enforce`
+- Set `PAYLOAD_ENCRYPTION_REQUIRE_REPLAY_CACHE=true`
+- Use Redis-backed replay cache (`PAYLOAD_ENCRYPTION_REPLAY_CACHE=redis`)
+- Do not enable on multi-instance deployments until payload key store is shared (Redis or database-backed)
+- Integration and browser/Playwright tests must pass first
+
+### Trust Boundaries
+
+**Protected:** PII exposure in application logs, proxy logs, debug middleware, accidental plaintext serialization.
+
+**Not Protected:** Malicious server-side code, malicious browser code (XSS), session theft, PII in URLs/query strings/headers.
+
+### CSRF Protection
+
+Payload encryption does **not** replace CSRF protection. PII mutating routes must continue to enforce:
+- SameSite cookie attributes
+- CORS restrictions
+- CSRF tokens where applicable
+- Content-type restrictions
+- Origin checks
+
+### Error Contract
+
+| Condition | HTTP Status | Error Code |
+|---|---:|---|
+| Missing/invalid session | 401 | `unauthorized` |
+| Missing payload key header | 400 | `missing_payload_key_id` |
+| Unknown key ID | 401 | `payload_key_unknown` |
+| Expired key | 401 | `payload_key_expired` |
+| Invalid encrypted payload | 400 | `invalid_encrypted_payload` |
+| Unsupported version | 400 | `unsupported_payload_version` |
+| Payload too large | 413 | `payload_too_large` |
+| Wrong content type | 415 | `unsupported_media_type` |
+
+### Logging Policy
+
+The logger (`lib/logger.ts`) redacts the following fields via Pino's `redact` configuration:
+
+**Authentication & session:**
+- `password`, `passwordHash`, `sessionToken`, `betterAuthSessionToken`
+- `cookie`, `cookies`, `authorization`
+
+**Personal data:**
+- `email`, `phone`, `ssn`, `passportNumber`, `creditCard`
+
+**API keys & secrets:**
+- `apiKey`, `secret`, `token`
+
+**Payload encryption (never log these):**
+- `keyMaterial`, `payloadKey`
+- `ciphertext`, `plaintext`
+
+**Request/response bodies (never log full payloads):**
+- `requestBody`, `responseBody`, `body`
+
+Logs MUST NOT contain:
+- Ciphertext or encrypted payloads
+- Plaintext request/response bodies
+- Payload keys, session tokens, or key material
+- PII fields (redacted at the logger level)
+
+Logs MAY contain: route, method, status, request ID, error code, payload size.
+
+**Note:** Logger redaction uses Pino's `redact.paths` with wildcard matching (`*.field`). Nested PII in request/response bodies is redacted at the top level. Full redaction testing (including nested objects and error serialization) is planned.
+
+---
+
 ## 🐛 Reporting a Vulnerability
 
 If you discover a security vulnerability within this project, please do not open a public GitHub issue. 

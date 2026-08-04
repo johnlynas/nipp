@@ -2,6 +2,7 @@
 
 import { useState } from 'react';
 import { useRouter } from 'next/navigation';
+import { encryptedFetch } from '@/lib/api-client';
 
 export default function CreateOrganizationPage() {
   const router = useRouter();
@@ -12,19 +13,19 @@ export default function CreateOrganizationPage() {
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    
+
     try {
-      const response = await fetch('/api/admin/organizations', {
+      const response = await encryptedFetch('/api/admin/organizations', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        pii: true,
         body: JSON.stringify(formData),
       });
-      
+
       if (!response.ok) {
         const errorData = await response.json();
         throw new Error(errorData.message || 'Failed to create organization');
       }
-      
+
       // Success - redirect to organizations list
       router.push('/admin/organizations');
       router.refresh();

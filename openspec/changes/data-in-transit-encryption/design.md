@@ -1,10 +1,11 @@
+<!-- design.md -->
 # Design: Data-in-Transit Payload Encryption
 
 ## Architecture Overview
 
 This design adds application-layer payload encryption for selected PII-bearing API routes. It operates on top of TLS and is intended as defense-in-depth.
 
-The revised design is based on four layers:
+The revised design is based on five layers:
 
 1. Payload Key Layer  
    The client obtains a short-lived AES-256-GCM key from an authenticated server endpoint. The BetterAuth session cookie can remain HTTP-only.
@@ -17,6 +18,9 @@ The revised design is based on four layers:
 
 4. Interception Layer  
    Route-level wrappers decrypt incoming PII requests before business logic and encrypt successful PII responses before they are returned.
+
+5. Operational Safety Layer  
+   Feature flags, payload limits, replay-cache availability checks, cache prevention, and redacted observability protect rollout and production operation.
 
 This is not end-to-end encryption. The server decrypts payloads during normal request processing.
 
@@ -170,10 +174,45 @@ Suggested error codes:
 | Unsupported version | 400 | unsupported_payload_version |
 | Payload too large | 413 | payload_too_large |
 | Wrong content type | 415 | unsupported_media_type |
+| Replay cache unavailable in enforce mode | 503 | replay_cache_unavailable |
 
 The client may retry once after refreshing the key when receiving payload_key_expired or payload_key_unknown.
 
-## Technical Decision 3: Binary Wire Format
+## Technical Decision 3: Payload Key Store and Replay Cache Backends
+
+The payload key store and replay cache must be explicit about deployment topology.
+
+### In-Memory Backend
+
+The default in-memory payload key store is acceptable only for:
+
+- local development
+- single-instance deployments
+- disabled or permissive testing where accepted
+
+It is not acceptable for production enforce mode on multi-instance deployments.
+
+### Redis Backend
+
+Redis is the recommended backend for:
+
+- replay nonce deduplication
+- shared payload key storage, if stateful keys are used
+
+The replay cache should use TTL-based expiry.
+
+### Availability Checks
+
+The system should use a Redis health check, such as redisPing, before relying on replay protection.
+
+When PAYLOAD_ENCRYPTION_REQUIRE_REPLAY_CACHE=true:
+
+- enforce mode must fail closed if the replay cache is unavailable
+- the server should return HTTP 503 with error code replay_cache_unavailable
+- permissive mode may warn and continue
+- disabled mode does not require replay protection
+
+## Technical Decision 4: Binary Wire Format
 
 The original design mixed hex-text and binary body handling. That would not work.
 
@@ -208,7 +247,7 @@ Browser code must use:
 - TextDecoder
 - Uint8Array
 
-## Technical Decision 4: AAD and Replay Protection
+## Technical Decision 5: AAD and Replay Protection
 
 AES-GCM protects confidentiality and integrity of the payload, but it does not by itself prevent replay or cross-route reuse.
 
@@ -256,8 +295,9 @@ The server must:
 2. Reject timestamps outside the configured window.
 3. Reject request nonces already seen for the same session/key within the window.
 4. Store used nonces in a short-TTL cache, for example Redis or an in-memory store.
+5. Fail closed in enforce mode when replay cache is required and unavailable.
 
-## Technical Decision 5: Route Matching
+## Technical Decision 6: Route Matching
 
 The original prefix matcher could overmatch. For example, /api/passports could incorrectly match /api/passports-public.
 
@@ -271,18 +311,37 @@ The revised route matcher must support:
 
 Example route patterns:
 
-- /api/passports
-- /api/passports/:id
-- /api/personal-details
-- /api/personal-details/:id
+- /api/admin/organizations
+- /api/admin/organizations/:orgId
+- /api/admin/organizations/:orgId/members
+- /api/admin/organizations/:orgId/members/:memberId
+- /api/admin/organizations/:orgId/status
+- /api/admin/organizations/:orgId/settings
+- /api/admin/organizations/search
+- /api/admin/users/search
+- /api/auth/user-permissions
+- /api/admin/audit-logs
+- /api/admin/system-logs
 
-## Technical Decision 6: Server Route Wrapper
+## Technical Decision 7: Server Route Wrapper
 
 A route-level wrapper is preferred over global middleware.
 
-Responsibilities:
+The wrapper is exposed as:
 
-1. Authenticate the BetterAuth session.
+wrapPiiRoute(handler, options)
+
+The handler receives:
+
+- request
+- decryptedBody
+- params
+
+The params argument is supplied by the wrapper and must be used for dynamic route values such as orgId and memberId.
+
+### Wrapper Responsibilities
+
+1. Authenticate or allow handler-level authentication.
 2. Check feature flag.
 3. Validate payload encryption mode.
 4. Validate HTTP method and content type.
@@ -292,10 +351,16 @@ Responsibilities:
 8. Retrieve payload key.
 9. Validate timestamp and replay nonce.
 10. Decrypt request body using request AAD.
-11. Parse and validate JSON.
-12. Call the business handler.
+11. Parse JSON.
+12. Call the business handler with decrypted body and params.
 13. Encrypt successful responses using response AAD.
 14. Return unencrypted safe error responses.
+
+### Wrapper Options
+
+The wrapper should support:
+
+- skipEncryptionForUnauthenticated: useful for routes that return empty non-sensitive responses when no session exists.
 
 ### Error Precedence
 
@@ -310,9 +375,10 @@ The wrapper should process errors in this order:
 7. Payload format invalid → 400.
 8. Timestamp invalid → 400.
 9. Replay detected → 400 or 409.
-10. GCM authentication failure → 400.
-11. JSON parse failure → 400.
-12. Schema validation failure → 400 or 422.
+10. Replay cache unavailable in enforce mode with required cache → 503.
+11. GCM authentication failure → 400.
+12. JSON parse failure → 400.
+13. Schema validation failure → 400 or 422.
 
 Error responses must not contain:
 
@@ -323,7 +389,7 @@ Error responses must not contain:
 - payload keys
 - stack traces
 
-## Technical Decision 7: Client Key Manager
+## Technical Decision 8: Client Key Manager
 
 The client key manager is responsible for obtaining and caching the payload key.
 
@@ -336,7 +402,7 @@ Rules:
 - do not expose raw key bytes to UI components
 - do not write to localStorage, sessionStorage, IndexedDB, cookies, or Cache Storage
 
-## Technical Decision 8: Encrypted Fetch Wrapper
+## Technical Decision 9: Encrypted Fetch Wrapper
 
 The client wrapper must support:
 
@@ -360,8 +426,9 @@ Rules:
 - Remove or recalculate misleading Content-Length headers.
 - Do not decrypt non-2xx responses unless explicitly specified.
 - Do not decrypt 204 No Content.
+- Do not send Content-Type for bodyless requests unless required.
 
-## Technical Decision 9: Caching
+## Technical Decision 10: Caching
 
 Encrypted PII responses must include:
 
@@ -372,14 +439,40 @@ The payload key endpoint must also include:
 
 - Cache-Control: no-store
 
+Next.js PII routes should use:
+
+- export const dynamic = 'force-dynamic'
+- export const revalidate = 0
+
 Additional requirements:
 
 - CDN caching must be disabled for PII routes.
 - Service workers must not cache encrypted PII responses.
 - React Query/SWR persistence must not persist encrypted payloads.
 - If decrypted data is persisted, it must follow existing PII storage policies.
+- unstable_cache may cache database query results only if the cached data is reviewed and approved.
+- Server-side plaintext caches of PII search results must be reviewed and approved.
 
-## Technical Decision 10: Observability
+## Technical Decision 11: Auth Guard Compatibility
+
+Payload encryption does not replace authentication or authorization.
+
+PII routes must continue to use approved auth guards.
+
+Preferred pattern:
+
+- requireSuperAdmin(request.headers)
+
+The guard should fail closed on database and platform-organization availability errors.
+
+Recommended mapping:
+
+- Database unavailable → 503
+- Platform organization not found → 503 or approved fail-closed equivalent
+- Unauthorized → 401
+- Forbidden → 403
+
+## Technical Decision 12: Observability
 
 Metrics should include:
 
@@ -392,6 +485,8 @@ Metrics should include:
 - replay detected count
 - payload-too-large count
 - content-type rejection count
+- replay-cache-unavailable count
+- plaintext PII request count in permissive mode
 - latency by route
 
 Logs may include:
@@ -515,7 +610,7 @@ Decrypting large payloads is expensive. Enforce size limits before decryption.
 
 Suggested default:
 
-PAYLOAD_ENCRYPTION_MAX_BYTES = 262144
+PAYLOAD_ENCRYPTION_MAX_BYTES = 65536
 
 Adjust based on product requirements.
 
@@ -538,6 +633,8 @@ Cover:
 - route matcher behavior
 - key manager refresh/expiry behavior
 - API client fallback behavior
+- wrapper param passing behavior
+- skipEncryptionForUnauthenticated behavior
 
 ### Interoperability Tests
 
@@ -570,6 +667,8 @@ Cover:
 - OPTIONS preflight bypass
 - cache-control headers
 - log redaction
+- replay cache unavailable fail-closed behavior
+- unauthenticated user-permissions behavior
 
 ### Browser Tests
 
@@ -602,3 +701,5 @@ Define a performance budget before rollout.
 - Replay cache introduces state and needs a backend decision.
 - The key endpoint returns key material over TLS and must be carefully protected and redacted in logs.
 - This protocol does not protect PII placed outside encrypted bodies.
+- In-memory key storage is not safe for multi-instance enforce mode.
+- Memory-only replay cache is not safe for multi-instance enforce mode.

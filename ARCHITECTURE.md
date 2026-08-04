@@ -362,6 +362,168 @@ This ensures that connection pooling is transparent to the application while pro
 5. Returns JSON response with status, uptime, and individual check results
 6. HTTP 200 for healthy/degraded, HTTP 503 for unhealthy
 
+## 🔒 Data-in-Transit Payload Encryption
+
+**Status: Infrastructure complete — route-by-route migration in progress.**
+
+Payload encryption is gated by `PAYLOAD_ENCRYPTION_MODE=disabled` (default). When enabled, selected PII-bearing API routes encrypt request and response bodies at the application layer using AES-256-GCM, on top of TLS transport encryption.
+
+### Implementation Status (Phase 2)
+
+| Component | Status |
+|---|---|
+| Environment variables (`lib/env.ts`) | ✅ Implemented |
+| Logger PII redaction fields | ✅ Implemented |
+| Payload format module (`lib/payload-format.ts`) | ✅ Implemented |
+| Server crypto (`lib/crypto-server.ts`) | ✅ Implemented |
+| Client crypto (`lib/crypto-client.ts`) | ✅ Implemented |
+| Payload key store & issuance (`lib/payload-key-server.ts`) | ✅ Implemented |
+| Key endpoint (`app/api/security/payload-key/route.ts`) | ✅ Implemented |
+| PII route matcher (`lib/pii-routes.ts`) | ✅ Implemented — 11 patterns |
+| Server middleware/wrapper (`lib/payload-middleware.ts`) | ✅ Implemented |
+| Client key manager (`lib/payload-key-manager.ts`) | ✅ Implemented |
+| Encrypted fetch wrapper (`lib/api-client.ts`) | ✅ Implemented |
+| Unit tests (111 tests) | ✅ Passing |
+| PII routes wrapped with `wrapPiiRoute()` | 🔄 In progress — 11 of ~20 PII routes wrapped |
+| Client calls migrated to `encryptedFetch` | 🔄 In progress — 10 of ~20 client pages migrated |
+| Integration tests | ❌ Planned |
+| Browser/Playwright tests | ❌ Planned |
+
+### Wrapped Routes (Phase 2)
+
+| Route | Methods | PII Data |
+|---|---|---|
+| `/api/admin/users/search` | GET | User names, emails |
+| `/api/admin/organizations/:orgId/members` | GET, POST | Member names, emails |
+| `/api/admin/organizations/:orgId/members/:memberId` | PATCH, DELETE | Member names, emails |
+| `/api/admin/organizations` | GET, POST | Admin email, member lists |
+| `/api/admin/organizations/:orgId` | GET, PATCH, DELETE | Admin email, member lists |
+| `/api/auth/user-permissions` | GET | User identity data |
+| `/api/admin/audit-logs` | GET | User names, emails, actions |
+| `/api/admin/system-logs` | GET | User agents, IPs |
+| `/api/admin/organizations/search` | GET | Org names/slugs (admin-only) |
+| `/api/admin/organizations/:orgId/status` | PATCH | Org status transitions |
+| `/api/admin/organizations/:orgId/settings` | PATCH | Org name/slug/status |
+
+### Client Pages Migrated (Phase 2)
+
+| Page | Route(s) |
+|---|---|
+| `app/admin/organizations/page.tsx` | GET org list, search |
+| `app/admin/organizations/create/page.tsx` | POST create org |
+| `app/admin/organizations/[orgId]/page.tsx` | GET/PATCH status |
+| `app/admin/organizations/[orgId]/members/page.tsx` | GET/POST members, PATCH/DELETE |
+| `app/admin/organizations/[orgId]/settings/page.tsx` | GET/PATCH settings |
+| `features/organization/api/useOrganization.ts` | GET org details |
+| `features/organization/api/useUpdateOrgSettings.ts` | PATCH org settings |
+| `features/permissions/api/usePermissions.ts` | GET user permissions |
+| `app/admin/audit-logs/page.tsx` | GET audit logs |
+| `app/admin/system-logs/page.tsx` | GET system logs |
+
+### Architecture Overview
+
+```
+Phase 1 (implemented): Infrastructure
+┌──────────────┐     POST /api/security/payload-key      ┌──────────────────┐
+│  Browser     │ ──────────────────────────────────────► │  Server          │
+│              │                                         │                  │
+│ encryptedFetch()                    ◄─────────────────  Returns keyId,   │
+│   ├─ getPayloadKey()              encrypted key       │ algorithm,      │
+│   ├─ encrypt(body)                binary response     │ expiresAt, key  │
+│   └─ send binary body               (no-store)        │ material        │
+└──────────────┘                                         └──────────────────┘
+
+Phase 2 (in progress): Route & client migration
+✅ 11 PII routes wrapped with wrapPiiRoute()
+🔄 ~9 additional PII routes to be assessed and wrapped
+✅ 10 client pages migrated to encryptedFetch()
+🔄 ~10 additional client pages to be assessed and migrated
+```
+
+### Key Components
+
+| Component | File | Purpose |
+|---|---|---|
+| Payload Key Store | `lib/payload-key-server.ts` | In-memory key storage with session binding and expiry |
+| Key Issuance Endpoint | `app/api/security/payload-key/route.ts` | Authenticated endpoint for key bootstrap |
+| Server Crypto | `lib/crypto-server.ts` | AES-256-GCM with AAD using `node:crypto` |
+| Client Crypto | `lib/crypto-client.ts` | AES-256-GCM with AAD using Web Crypto API |
+| Wire Format | `lib/payload-format.ts` | Shared constants, binary helpers, validation |
+| Route Matcher | `lib/pii-routes.ts` | PII route configuration and matching (11 patterns) |
+| Server Middleware | `lib/payload-middleware.ts` | Route wrapper with decryption/encryption |
+| Client Key Manager | `lib/payload-key-manager.ts` | In-memory key fetching and caching |
+| API Client | `lib/api-client.ts` | Encrypted fetch wrapper for PII calls |
+
+### Key Lifecycle
+
+1. **Issuance:** Client POSTs to `/api/security/payload-key` with BetterAuth session cookie
+2. **Validation:** Server validates session, generates 32-byte AES-256 key
+3. **Storage:** Key is stored in-memory bound to session ID with TTL expiry (single-instance only)
+4. **Distribution:** Server returns keyId, algorithm, expiresAt, and base64url-encoded key material
+5. **Import:** Client imports as non-extractable `CryptoKey` (Web Crypto)
+6. **Refresh:** Client refreshes key 30s before expiry or on stale-key error
+7. **Revocation:** Keys are revoked on logout via `revokeSessionKeys()`
+
+**Note on multi-instance deployments:** The current in-memory key store does not work across multiple server instances. For production multi-instance deployments, the `PayloadKeyStore` interface should be backed by Redis or a shared database. The interface (`lib/payload-key-server.ts`) is designed to support this via `setPayloadKeyStore()`.
+
+### Payload Format
+
+```
+┌──────────────┬─────────────────┬──────────────────┐
+│ 12-byte      │ ciphertext      │ 16-byte          │
+│ nonce        │ (AES-GCM)       │ auth tag         │
+└──────────────┴─────────────────┴──────────────────┘
+```
+
+HTTP headers for encrypted requests:
+| Header | Value |
+|---|---|
+| `X-Payload-Encryption` | `v1` |
+| `X-Payload-Key-Id` | key identifier |
+| `X-Payload-Timestamp` | Unix timestamp (seconds) |
+| `X-Payload-Nonce` | base64url random value |
+
+### Feature Flag Modes
+
+| Mode | Behavior |
+|---|---|
+| `disabled` (default) | No payload encryption is required or applied |
+| `permissive` | Server accepts encrypted payloads; emits metrics for plaintext PII (migration-only) |
+| `enforce` | Server requires encrypted payloads for configured PII routes |
+
+**Note:** The feature flag enforcement logic is implemented in `lib/payload-middleware.ts`. Currently 11 routes are wrapped with `wrapPiiRoute()`, so enabling the flag will activate encryption for those routes. Additional routes are being assessed and migrated in Phase 2.
+
+### Configuration
+
+| Variable | Default | Description |
+|---|---|---|
+| `PAYLOAD_ENCRYPTION_MODE` | `disabled` | Feature flag mode (`disabled`, `permissive`, `enforce`) |
+| `PAYLOAD_ENCRYPTION_MAX_BYTES` | `65536` | Maximum encrypted payload size |
+| `PAYLOAD_ENCRYPTION_KEY_TTL_SECONDS` | `300` | Payload key lifetime |
+| `PAYLOAD_ENCRYPTION_REPLAY_WINDOW_SECONDS` | `30` | Replay protection window |
+| `PAYLOAD_ENCRYPTION_NONCE_TTL_SECONDS` | `60` | Replay nonce cache TTL |
+| `PAYLOAD_ENCRYPTION_REPLAY_CACHE` | `redis` | Replay cache backend (`memory`, `redis`) |
+| `PAYLOAD_ENCRYPTION_REQUIRE_REPLAY_CACHE` | `false` | Fail closed if replay cache unavailable (set to `true` for production enforce mode) |
+
+### Multi-Instance Deployment Limitations
+
+**Critical:** The current payload key store (`lib/payload-key-server.ts`) uses an in-memory `Map`. This means:
+
+- **Single-instance only:** Keys issued on one instance are not visible to other instances.
+- **Memory-only replay cache** (`PAYLOAD_ENCRYPTION_REPLAY_CACHE=memory`) has the same limitation.
+- **Enforce mode must not be enabled** on multi-instance deployments until a shared key store is implemented.
+
+For production multi-instance deployments, the `PayloadKeyStore` interface should be backed by Redis or a shared database. The interface (`lib/payload-key-server.ts`) is designed to support this via `setPayloadKeyStore()`.
+
+### Fail-Closed Replay Protection
+
+When `PAYLOAD_ENCRYPTION_REQUIRE_REPLAY_CACHE=true`:
+- If the replay cache (Redis) is unavailable during enforce mode, requests return HTTP 503 with error `replay_cache_unavailable`.
+- This prevents replay attacks from being silently disabled during outages.
+- In permissive mode, the cache unavailability check is not enforced (warn-and-continue).
+
+---
+
 ## 🛠️ Development Workflow
 
 ### Local Setup

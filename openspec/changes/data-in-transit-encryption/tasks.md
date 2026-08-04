@@ -1,3 +1,4 @@
+<!-- tasks.md -->
 # Tasks: Data-in-Transit Payload Encryption
 
 ## Phase 0: Security Decisions and Threat Model
@@ -32,6 +33,7 @@
   - Define replay-cache backend: Redis, in-memory, or other.
   - Define nonce TTL.
   - Decide whether replay protection is mandatory for v1 or an accepted risk.
+  - Require fail-closed behavior in enforce mode when PAYLOAD_ENCRYPTION_REQUIRE_REPLAY_CACHE=true.
 
 - [ ] Task 0.5: Approve payload format.
   - Use raw binary body format.
@@ -40,6 +42,7 @@
   - Define maximum payload length.
   - Define header names.
   - Define error codes.
+  - Include replay_cache_unavailable error code.
 
 - [ ] Task 0.6: Define operational limits.
   - Maximum encrypted request size.
@@ -55,6 +58,7 @@
   - Staging monitoring duration.
   - Rollback procedure.
   - External consumer migration plan, if applicable.
+  - Production enforce prerequisites.
 
 - [ ] Task 0.8: Obtain security sign-off.
   - Review threat model.
@@ -62,10 +66,11 @@
   - Review replay protection.
   - Review XSS/session-theft limitations.
   - Review logging policy.
+  - Review multi-instance deployment limitations.
 
 ## Phase 1: Shared Format and Crypto Utilities
 
-- [ ] Task 1.1: Create lib/payload-format.ts.
+- [ ] Task 1.1: Create or verify lib/payload-format.ts.
   - Export PAYLOAD_ENCRYPTION_VERSION.
   - Export NONCE_BYTES = 12.
   - Export AUTH_TAG_BYTES = 16.
@@ -75,7 +80,7 @@
   - Add payload length validation.
   - Do not expose raw key logging or debug printing of secrets.
 
-- [ ] Task 1.2: Create lib/crypto-server.ts.
+- [ ] Task 1.2: Create or verify lib/crypto-server.ts.
   - Implement AES-256-GCM encryption with AAD.
   - Implement AES-256-GCM decryption with AAD.
   - Use raw binary output: nonce, ciphertext, auth tag.
@@ -83,7 +88,7 @@
   - Throw typed errors.
   - Add unit tests.
 
-- [ ] Task 1.3: Create lib/crypto-client.ts.
+- [ ] Task 1.3: Create or verify lib/crypto-client.ts.
   - Implement AES-256-GCM encryption with AAD using Web Crypto.
   - Implement AES-256-GCM decryption with AAD using Web Crypto.
   - Use raw binary output.
@@ -92,8 +97,8 @@
   - Use crypto.getRandomValues for nonces.
   - Add unit tests.
 
-- [ ] Task 1.4: Create optional server-side HKDF utility if using derived keys.
-  - Create lib/payload-key-server.ts.
+- [ ] Task 1.4: Create or verify optional server-side HKDF utility if using derived keys.
+  - Create lib/payload-key-server.ts if not present.
   - Use hkdfSync correctly.
   - Wrap HKDF output with Buffer.from.
   - Include session ID and server-side secret/context.
@@ -106,7 +111,7 @@
   - Import HKDF key with usage deriveBits.
   - Add interoperability tests comparing Node and Web Crypto HKDF output.
 
-- [ ] Task 1.6: Create lib/pii-routes.ts.
+- [ ] Task 1.6: Create or verify lib/pii-routes.ts.
   - Define exact and parameterized PII routes.
   - Implement robust route matching.
   - Strip query strings before matching.
@@ -123,8 +128,9 @@
   - Support expiry.
   - Support multiple active keys.
   - Support session rotation.
+  - Support shared backend for multi-instance deployments.
 
-- [ ] Task 2.2: Implement payload key issuance endpoint.
+- [ ] Task 2.2: Implement or verify payload key issuance endpoint.
   - Create app/api/security/payload-key/route.ts.
   - Require valid BetterAuth session.
   - Return keyId, algorithm, expiresAt, and key.
@@ -133,7 +139,7 @@
   - Do not log response body.
   - Add integration tests.
 
-- [ ] Task 2.3: Create lib/payload-session.ts.
+- [ ] Task 2.3: Create or verify lib/payload-session.ts.
   - Extract BetterAuth session context server-side.
   - Validate session.
   - Extract session ID.
@@ -141,7 +147,7 @@
   - Return typed session context.
   - Add unit/integration tests.
 
-- [ ] Task 2.4: Create lib/payload-middleware.ts or lib/pii-route-wrapper.ts.
+- [ ] Task 2.4: Create or verify lib/payload-middleware.ts.
   - Authenticate session before decryption.
   - Validate feature flag.
   - Validate payload version header.
@@ -160,12 +166,17 @@
   - Build response AAD.
   - Encrypt successful response.
   - Return safe unencrypted errors.
+  - Supply route params to wrapped handlers.
+  - Support skipEncryptionForUnauthenticated option.
 
 - [ ] Task 2.5: Implement replay protection.
   - Validate timestamp window.
   - Store used request nonces.
   - Use TTL-based replay cache.
   - Return error on replay.
+  - Use PAYLOAD_ENCRYPTION_REPLAY_CACHE to select backend.
+  - Use redisPing or equivalent to verify Redis availability.
+  - Return 503 replay_cache_unavailable in enforce mode when required cache is unavailable.
   - Add tests.
 
 - [ ] Task 2.6: Implement cache-prevention headers.
@@ -173,19 +184,26 @@
   - Payload key endpoint must set Cache-Control: no-store.
   - Add tests.
 
-- [ ] Task 2.7: Implement observability.
-  - Add metrics for encrypted requests, encrypted responses, decryption failures, expired keys, unknown keys, replay detections, oversized payloads, and unsupported versions.
+- [ ] Task 2.7: Implement Next.js route cache controls.
+  - Set revalidate = 0 for PII routes.
+  - Set dynamic = force-dynamic for PII routes.
+  - Verify unstable_cache usage does not cache encrypted responses.
+  - Verify unstable_cache plaintext database results are reviewed.
+  - Add tests or audit notes.
+
+- [ ] Task 2.8: Implement observability.
+  - Add metrics for encrypted requests, encrypted responses, decryption failures, expired keys, unknown keys, replay detections, oversized payloads, unsupported versions, replay-cache-unavailable errors, and plaintext PII requests in permissive mode.
   - Ensure logs do not include ciphertext, plaintext bodies, payload keys, or session tokens.
   - Add log redaction tests.
 
-- [ ] Task 2.8: Implement feature-flag enforcement.
+- [ ] Task 2.9: Implement feature-flag enforcement.
   - Add PAYLOAD_ENCRYPTION_MODE.
   - Support disabled, permissive, and enforce.
   - In enforce, reject plaintext PII requests.
   - In permissive, emit metrics for plaintext PII traffic.
   - Add tests for each mode.
 
-- [ ] Task 2.9: Update PII API routes.
+- [ ] Task 2.10: Update PII API routes.
   - Identify all PII routes.
   - Replace direct req.json usage with wrapper-provided input.
   - Ensure error responses are unencrypted.
@@ -193,10 +211,33 @@
   - Handle OPTIONS requests safely.
   - Handle 204 No Content where applicable.
   - Ensure route handlers run in the correct runtime.
+  - Ensure wrapped handlers use params supplied by wrapPiiRoute.
+  - Ensure handlers validate orgId and memberId before database access.
+
+- [ ] Task 2.11: Verify current wrapped route list.
+  - Confirm /api/admin/users/search is wrapped.
+  - Confirm /api/admin/organizations/:orgId/members is wrapped.
+  - Confirm /api/admin/organizations/:orgId/members/:memberId is wrapped.
+  - Confirm /api/admin/organizations is wrapped.
+  - Confirm /api/admin/organizations/:orgId is wrapped.
+  - Confirm /api/auth/user-permissions is wrapped.
+  - Confirm /api/admin/audit-logs is wrapped.
+  - Confirm /api/admin/system-logs is wrapped.
+  - Confirm /api/admin/organizations/search is wrapped.
+  - Confirm /api/admin/organizations/:orgId/status is wrapped.
+  - Confirm /api/admin/organizations/:orgId/settings is wrapped.
+
+- [ ] Task 2.12: Verify existing route behavior does not regress.
+  - Confirm audit-logs route returns the expected response shape.
+  - Confirm audit-logs route returns real data or is explicitly disabled.
+  - Confirm organization deletion behavior matches approved lifecycle policy.
+  - Confirm organization status transitions remain valid.
+  - Confirm audit logs are written for admin mutations.
+  - Confirm response shapes match client expectations.
 
 ## Phase 3: Client Key Manager and API Client
 
-- [ ] Task 3.1: Create lib/payload-key-manager.ts.
+- [ ] Task 3.1: Create or verify lib/payload-key-manager.ts.
   - Fetch payload key from /api/security/payload-key.
   - Import key as non-extractable AES-GCM CryptoKey.
   - Store key only in memory.
@@ -206,7 +247,7 @@
   - Do not persist key material.
   - Add unit tests with mocked fetch.
 
-- [ ] Task 3.2: Create lib/api-client.ts.
+- [ ] Task 3.2: Create or verify lib/api-client.ts.
   - Implement encryptedFetch.
   - Require explicit pii: true for PII routes.
   - Validate that body is JSON-serializable.
@@ -222,6 +263,7 @@
   - Retry once after refreshing payload key on stale-key errors.
   - Override synthetic decrypted response Content-Type to application/json.
   - Remove misleading Content-Length header from synthetic response.
+  - Do not send Content-Type for bodyless requests unless required.
 
 - [ ] Task 3.3: Integrate with SWR/React Query.
   - Ensure fetchers use encryptedFetch.
@@ -236,6 +278,7 @@
   - Add pii: true.
   - Verify mutations and queries.
   - Verify logout/login transitions.
+  - Verify client calls match wrapped server routes.
 
 - [ ] Task 3.5: Handle unsupported browser environments.
   - Check secure context.
@@ -304,32 +347,41 @@
   - Handles stale key retry.
   - Rejects unsupported body types.
 
+- [ ] Task 4.8: Wrapper tests.
+  - Wrapper passes params to handlers.
+  - Wrapper passes decryptedBody to handlers.
+  - Wrapper rejects plaintext in enforce mode.
+  - Wrapper allows plaintext in disabled mode.
+  - Wrapper emits metric in permissive mode.
+  - Wrapper supports skipEncryptionForUnauthenticated.
+  - Wrapper returns safe errors.
+
 ### Integration Tests
 
-- [ ] Task 4.8: Create authenticated test helpers.
+- [ ] Task 4.9: Create authenticated test helpers.
   - Create valid BetterAuth test session.
   - Obtain session cookie.
   - Obtain payload key.
   - Clean up sessions.
 
-- [ ] Task 4.9: Full encrypted request/response tests.
+- [ ] Task 4.10: Full encrypted request/response tests.
   - POST encrypted PII body.
   - Server decrypts.
   - Server processes.
   - Server encrypts response.
   - Client decrypts response.
 
-- [ ] Task 4.10: GET encrypted response tests.
+- [ ] Task 4.11: GET encrypted response tests.
   - GET PII route without request body.
   - Server encrypts response.
   - Client decrypts response.
 
-- [ ] Task 4.11: Plaintext rejection tests.
+- [ ] Task 4.12: Plaintext rejection tests.
   - In enforce mode, plaintext JSON to PII route returns error.
   - In permissive mode, plaintext is accepted but metric is emitted.
   - In disabled mode, encryption is not required.
 
-- [ ] Task 4.12: Security rejection tests.
+- [ ] Task 4.13: Security rejection tests.
   - Tampered ciphertext rejected.
   - Missing nonce rejected.
   - Missing auth tag rejected.
@@ -340,31 +392,33 @@
   - Stale timestamp rejected.
   - Replayed nonce rejected.
 
-- [ ] Task 4.13: Key lifecycle tests.
+- [ ] Task 4.14: Key lifecycle tests.
   - Expired key rejected.
   - Unknown key rejected.
   - Client refreshes and retries once.
   - Logout invalidates keys.
   - Session rotation invalidates old keys according to policy.
 
-- [ ] Task 4.14: Operational tests.
+- [ ] Task 4.15: Operational tests.
   - Oversized payload returns 413.
   - Wrong content type returns 415 or 400.
   - Non-PII routes bypass encryption.
   - OPTIONS requests bypass payload decryption.
   - Encrypted responses include Cache-Control: no-store.
   - Payload key endpoint includes Cache-Control: no-store.
+  - Replay cache unavailable returns 503 in enforce mode when required.
 
-- [ ] Task 4.15: Logging redaction tests.
+- [ ] Task 4.16: Logging redaction tests.
   - Encrypted bodies are not logged.
   - Decrypted PII bodies are not logged.
   - Payload keys are not logged.
   - Session tokens are not logged.
   - Error logs contain only safe metadata.
+  - Query strings containing PII are redacted or flagged.
 
 ### Security Tests
 
-- [ ] Task 4.16: Attack-surface tests.
+- [ ] Task 4.17: Attack-surface tests.
   - Empty payload rejected.
   - Truncated payload rejected.
   - Malformed binary payload rejected.
@@ -376,21 +430,21 @@
   - Invalid timestamp rejected.
   - Reused request nonce rejected.
 
-- [ ] Task 4.17: Timing test as advisory only.
+- [ ] Task 4.18: Timing test as advisory only.
   - Compare valid vs invalid decryption timing.
   - Do not make this a hard CI gate.
   - Use as warning threshold only.
 
 ### Browser and Performance Tests
 
-- [ ] Task 4.18: Add Playwright browser test.
+- [ ] Task 4.19: Add Playwright browser test.
   - Verify Web Crypto works in real browser.
   - Verify payload key import.
   - Verify encrypted request round-trip.
   - Verify encrypted response decryption.
   - Verify logout clears in-memory key.
 
-- [ ] Task 4.19: Add performance benchmark.
+- [ ] Task 4.20: Add performance benchmark.
   - 1KB payload.
   - 10KB payload.
   - 100KB payload.
@@ -399,7 +453,7 @@
   - key refresh overhead.
   - document performance budget.
 
-- [ ] Task 4.20: Add CI pipeline.
+- [ ] Task 4.21: Add CI pipeline.
   - Run unit tests on every PR.
   - Run integration tests with stable test server.
   - Avoid flaky next dev -p 0 if possible.
@@ -451,6 +505,9 @@
   - React Query persistence.
   - SWR persistence.
   - browser back/forward cache.
+  - Next.js route caching.
+  - unstable_cache usage.
+  - hybrid search cache usage.
 
 - [ ] Task 5.7: Audit observability.
   - Metrics.
@@ -468,6 +525,15 @@
   - Multi-device behavior.
   - Session token rotation.
   - Payload key endpoint abuse.
+  - Shared key store readiness for multi-instance deployments.
+
+- [ ] Task 5.9: Review admin route behavior preserved by migration.
+  - Confirm audit logs page and API contract match.
+  - Confirm system logs page and API contract match.
+  - Confirm organization deletion behavior is approved.
+  - Confirm organization status behavior is approved.
+  - Confirm organization settings behavior is approved.
+  - Confirm search endpoints return expected shapes.
 
 ## Phase 6: Documentation and Rollout
 
@@ -477,6 +543,9 @@
   - Document limitations.
   - Document key lifecycle.
   - Document replay protection.
+  - Document replay cache backend selection.
+  - Document fail-closed behavior.
+  - Document multi-instance limitations.
   - Document logging policy.
   - Document incident response for suspected key leakage.
 
@@ -485,6 +554,9 @@
   - Add key issuance flow.
   - Add request/response flow.
   - Add trust boundaries.
+  - Add wrapped route list.
+  - Add client migration list.
+  - Add implementation status.
 
 - [ ] Task 6.3: Update API documentation.
   - Document encrypted request format.
@@ -500,13 +572,15 @@
   - Add PAYLOAD_ENCRYPTION_KEY_TTL_SECONDS.
   - Add PAYLOAD_ENCRYPTION_REPLAY_WINDOW_SECONDS.
   - Add PAYLOAD_ENCRYPTION_NONCE_TTL_SECONDS.
+  - Add PAYLOAD_ENCRYPTION_REPLAY_CACHE.
+  - Add PAYLOAD_ENCRYPTION_REQUIRE_REPLAY_CACHE.
   - Add server-side HKDF salt/secret if used.
   - Document which variables are safe to expose to clients and which must remain server-only.
 
 - [ ] Task 6.5: Deploy to staging.
   - Enable feature flag.
   - Use permissive or enforce according to rollout plan.
-  - Monitor error rates, latency, decryption failures, key refresh failures, replay detections, and payload size rejections.
+  - Monitor error rates, latency, decryption failures, key refresh failures, replay detections, replay-cache-unavailable errors, and payload size rejections.
   - Validate browser behavior.
   - Validate logout/login flows.
   - Validate multi-tab behavior.
@@ -517,6 +591,8 @@
   - Expand to all configured PII routes.
   - Keep rollback procedure documented.
   - Confirm alerts are active.
+  - Confirm PAYLOAD_ENCRYPTION_REQUIRE_REPLAY_CACHE=true for enforce mode.
+  - Confirm deployment topology is safe for payload key storage.
 
 - [ ] Task 6.7: Post-rollout review.
   - Review metrics.

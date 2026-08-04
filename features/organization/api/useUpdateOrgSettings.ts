@@ -1,5 +1,6 @@
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { orgKeys } from './org.keys';
+import { encryptedFetch } from '@/lib/api-client';
 
 interface UpdateOrgSettingsPayload {
   name?: string;
@@ -7,11 +8,9 @@ interface UpdateOrgSettingsPayload {
 }
 
 async function updateOrgSettings(id: string, payload: UpdateOrgSettingsPayload): Promise<{ organization: { id: string; name: string; slug: string; status: string } }> {
-  const response = await fetch(`/api/admin/organizations/${id}`, {
+  const response = await encryptedFetch(`/api/admin/organizations/${id}`, {
     method: 'PATCH',
-    headers: {
-      'Content-Type': 'application/json',
-    },
+    pii: true,
     body: JSON.stringify(payload),
   });
 
@@ -28,7 +27,7 @@ export const useUpdateOrgSettings = (id: string) => {
 
   return useMutation({
     mutationFn: (payload: UpdateOrgSettingsPayload) => updateOrgSettings(id, payload),
-    
+
     // Step 1: Optimistic Update
     onMutate: async (newSettings) => {
       // Cancel any outgoing refetches (so they don't overwrite our optimistic update)

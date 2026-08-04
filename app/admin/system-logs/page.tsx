@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect, useState } from 'react';
+import { encryptedFetch } from '@/lib/api-client';
 
 interface LogEntry {
   timestamp: string;
@@ -18,7 +19,7 @@ export default function SystemLogsPage() {
   useEffect(() => {
     const fetchLogs = async () => {
       try {
-        const res = await fetch('/api/admin/system-logs?limit=100', { cache: 'no-store' });
+        const res = await encryptedFetch('/api/admin/system-logs?limit=100', { pii: true, cache: 'no-store' });
         if (!res.ok) {
           throw new Error('Failed to fetch logs');
         }

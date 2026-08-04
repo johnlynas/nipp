@@ -14,6 +14,7 @@ Property NI provides a secure, multi-tenant platform for managing property portf
 - **Strict Content Security Policy** with nonce-based script execution in Report-Only mode
 - **Comprehensive audit logging** tracking all tenant and platform actions
 - **PII encryption** using AES-256-GCM for sensitive data at rest
+- **Data-in-transit payload encryption** (AES-256-GCM) for PII API routes — infrastructure complete, route-by-route migration in progress
 - **Full test coverage** with unit, integration, and isolation tests verifying tenant data separation
 
 ## Super Admin Dashboard

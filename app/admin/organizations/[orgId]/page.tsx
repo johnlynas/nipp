@@ -6,6 +6,7 @@ import { RequireSuperAdmin } from '@/components/auth/RequireSuperAdmin';
 import { OrgStatusBadge } from '@/components/admin/OrgStatusBadge';
 import { RoleManager } from '@/components/admin/RoleManager';
 import { AuditLogViewer } from '@/components/admin/AuditLogViewer';
+import { encryptedFetch } from '@/lib/api-client';
 
 type Tab = 'overview' | 'members' | 'roles' | 'audit';
 
@@ -38,7 +39,7 @@ export default function OrganizationDetailPage() {
   async function fetchOrganization() {
     setLoading(true);
     try {
-      const res = await fetch(`/api/admin/organizations/${orgId}`);
+      const res = await encryptedFetch(`/api/admin/organizations/${orgId}`, { pii: true });
       if (res.ok) {
         const data = await res.json();
         setOrg(data);
@@ -52,17 +53,15 @@ export default function OrganizationDetailPage() {
 
   async function handleStatusChange(newStatus: string) {
     try {
-      const res = await fetch(`/api/admin/organizations/${orgId}/status`, {
+      const res = await encryptedFetch(`/api/admin/organizations/${orgId}/status`, {
         method: 'PATCH',
-        headers: { 'Content-Type': 'application/json' },
+        pii: true,
         body: JSON.stringify({ status: newStatus }),
       });
 
       if (res.ok) {
         // Force a fresh fetch to bypass any stale cache
-        const freshRes = await fetch(`/api/admin/organizations/${orgId}`, {
-          cache: 'no-store',
-        });
+        const freshRes = await encryptedFetch(`/api/admin/organizations/${orgId}`, { pii: true });
         if (freshRes.ok) {
           const data = await freshRes.json();
           setOrg(data);

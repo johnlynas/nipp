@@ -2,18 +2,22 @@
  * PATCH /api/admin/organizations/:id/status
  *
  * Super Admin only — change organization status with state machine validation.
+ * Wrapped with wrapPiiRoute for payload encryption.
  *
  * State machine: PENDING → ACTIVE ↔ SUSPENDED → ARCHIVED (terminal)
  */
 
 import { NextRequest, NextResponse } from 'next/server';
 import { revalidateTag } from 'next/cache';
-import { auth } from '@/lib/auth';
 import globalDb from '@/lib/global-db';
-import { verifySuperAdmin } from '@/lib/authz';
+import { requireSuperAdmin } from '@/lib/require-super-admin';
+import { recordAuditLog } from '@/lib/audit-log';
 import { logger } from '@/lib/logger';
+import { wrapPiiRoute, PiiRouteParams } from '@/lib/payload-middleware';
 
 export const runtime = 'nodejs';
+export const revalidate = 0;
+export const dynamic = 'force-dynamic';
 
 /**
  * Valid state transitions.
@@ -26,58 +30,42 @@ const VALID_TRANSITIONS: Record<string, string[]> = {
 };
 
 /**
- * Helper function to check if user is Super Admin
+ * PATCH — Change organization status (wrapped with payload encryption).
  */
-async function checkSuperAdmin(headersList: Headers): Promise<{ session: Awaited<ReturnType<typeof auth.api.getSession>> | null; isSuperAdmin: boolean }> {
-  const session = await auth.api.getSession({ headers: headersList });
-  
-  if (!session) {
-    return { session: null, isSuperAdmin: false };
+export const PATCH = wrapPiiRoute(async (request, decryptedBody, params) => {
+  // Auth check — wrapPiiRoute handles encryption, not authorization
+  const authResult = await requireSuperAdmin(request.headers);
+  if (!authResult.authorized) {
+    return NextResponse.json({ error: authResult.error || 'Unauthorized' }, { status: authResult.status });
   }
-  
-  const { authorized, error } = await verifySuperAdmin(session.user.id);
-  
-  if (!authorized) {
-    console.warn(`[AUTH] Super admin verification failed for user ${session.user.id}: ${error}`);
-    return { session, isSuperAdmin: false };
-  }
-  
-  return { session, isSuperAdmin: true };
-}
 
-/**
- * PATCH — Change organization status.
- */
-export async function PATCH(
-  request: NextRequest,
-  { params }: { params: Promise<{ orgId: string }> }
-) {
+  const session = authResult.session!;
+
   try {
     logger.info('[ORG_STATUS_API] PATCH request received');
-    
-    const { session, isSuperAdmin } = await checkSuperAdmin(request.headers);
-    
-    if (!session) {
-      logger.warn('[ORG_STATUS_API] No session found');
-      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
-    }
-    
-    if (!isSuperAdmin) {
-      logger.warn('[ORG_STATUS_API] User is not Super Admin');
-      return NextResponse.json({ error: 'Super Admin access required' }, { status: 403 });
-    }
-    
-    logger.info({ userId: session.user.id }, '[ORG_STATUS_API] Session found for user');
 
-    const { orgId } = await params;
-    const body = await request.json();
-    const { status: newStatus } = body as { status: string };
+    // Get body from decrypted payload or parse JSON
+    let body: { status?: string };
+    if (decryptedBody && typeof decryptedBody === 'object') {
+      body = decryptedBody as { status?: string };
+    } else {
+      body = await request.json();
+    }
+
+    const { status: newStatus } = body;
 
     if (!newStatus || !VALID_TRANSITIONS[newStatus]) {
       return NextResponse.json(
         { error: 'Invalid status value' },
         { status: 400 }
       );
+    }
+
+    // Extract orgId from route params (provided by wrapPiiRoute)
+    const orgId = params?.orgId;
+
+    if (!orgId) {
+      return NextResponse.json({ error: 'Organization ID required' }, { status: 400 });
     }
 
     try {
@@ -118,7 +106,19 @@ export async function PATCH(
       // P7: Invalidate cached org details on status change
       revalidateTag('org');
 
-      logger.info({ orgId, newStatus }, '[ORG_STATUS_API] Organization status updated');
+      logger.info({ userId: session.user.id, orgId, newStatus }, '[ORG_STATUS_API] Organization status updated');
+
+      // Record audit log for status change
+      await recordAuditLog({
+        userId: session.user.id,
+        userName: (session.user as { name?: string }).name ?? undefined,
+        action: 'organization.status_changed',
+        resourceType: 'Organization',
+        resourceId: orgId,
+        organizationId: orgId,
+        metadata: { fromStatus: org.status, toStatus: newStatus },
+        success: true,
+      }).catch((err) => logger.error({ err }, 'Failed to record audit log for status change'));
 
       return NextResponse.json({ organization: updated });
     } catch (error) {
@@ -132,7 +132,7 @@ export async function PATCH(
     logger.error({ err: error }, '[ORG_STATUS_API] PATCH error');
     return NextResponse.json({ error: 'Internal server error' }, { status: 500 });
   }
-}
+});
 
 /**
  * Invalidate all sessions for members of an organization.

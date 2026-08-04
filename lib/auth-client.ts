@@ -4,6 +4,7 @@
 
 import { createAuthClient } from 'better-auth/client';
 import { useSyncExternalStore } from 'react';
+import { clearPayloadKey } from './payload-key-manager';
 
 export const authClient = createAuthClient();
 
@@ -50,12 +51,27 @@ export async function signInEmail(email: string, password: string) {
 /**
  * Sign out the current session. Returns { success: true } on success,
  * or { error: string } on failure.
+ *
+ * On logout, this:
+ * 1. Revokes server-side payload keys for the session
+ * 2. Clears client-side cached payload key
+ * 3. Invalidates all BetterAuth session cookies
  */
 export async function signOutUser() {
+  // Step 1: Revoke server-side payload keys (best-effort)
+  try {
+    await fetch('/api/security/payload-key/revoke', { method: 'POST' });
+  } catch {
+    // Non-fatal — server may not have the endpoint yet
+  }
+
   const result = await authClient.signOut({
     fetchOptions: {
       onSuccess: () => {
-        // Clear all session cookie variants on the client side.
+        // Step 2: Clear client-side cached payload key
+        void clearPayloadKey();
+
+        // Step 3: Clear all session cookie variants on the client side.
         // BetterAuth prefixes with __Secure- when BETTER_AUTH_URL uses https://,
         // so we clear both prefixed and unprefixed variants.
         document.cookie = '__Secure-better-auth.session_token=; path=/; max-age=0';

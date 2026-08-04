@@ -132,3 +132,39 @@ export async function redisDel(key: string): Promise<void> {
   if (!client) return;
   await client.del(key);
 }
+
+/**
+ * Check if Redis is available by sending a PING.
+ */
+export async function redisPing(): Promise<boolean> {
+  const client = getRedis();
+  if (!client) return false;
+  try {
+    const result = await client.ping();
+    return result === 'PONG';
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Atomically set a key only if it does not already exist, with an optional TTL.
+ *
+ * Returns 'OK' (truthy) if the key was set, or null ('nil') if it already existed.
+ * This is used for atomic check-and-record operations in the replay cache to prevent
+ * race conditions where concurrent requests with the same nonce both pass the check.
+ */
+export async function redisSetWithNx(
+  key: string,
+  value: string,
+  ttlSeconds: number,
+): Promise<string | null> {
+  const client = getRedis();
+  if (!client) return null;
+  try {
+    // SET key value NX EX ttl — atomic set-if-not-exists with expiry.
+    return client.call('SET', key, value, 'NX', 'EX', ttlSeconds) as Promise<string | null>;
+  } catch {
+    return null;
+  }
+}

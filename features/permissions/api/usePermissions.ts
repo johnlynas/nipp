@@ -1,11 +1,12 @@
 import { useQuery } from '@tanstack/react-query';
+import { encryptedFetch } from '@/lib/api-client';
 
 export type PermissionKey = string; // e.g., 'logs:view' or 'users:manage'
 export type RoleKey = string; // e.g., 'super_admin' or 'manager'
 
 // Fetches the flattened list of permissions for the current user
 async function fetchUserPermissions(): Promise<string[]> {
-  const response = await fetch('/api/auth/user-permissions'); 
+  const response = await encryptedFetch('/api/auth/user-permissions', { pii: true });
   if (!response.ok) {
     throw new Error('Failed to fetch permissions from the backend');
   }
@@ -30,7 +31,7 @@ export const useHasPermission = (requiredPermissions: string[]) => {
 
   const available = data ?? [];
   // User must have ALL the passed permissions (AND logic)
-  return requiredPermissions.every((perm) => 
+  return requiredPermissions.every((perm) =>
     available.includes(perm) || available.includes('*')
   );
 };
@@ -41,7 +42,7 @@ export const useHasAnyPermission = (requiredPermissions: string[]) => {
 
   const available = data ?? [];
   // User must have ONE of the passed permissions (OR logic)
-  return requiredPermissions.some((perm) => 
+  return requiredPermissions.some((perm) =>
     available.includes(perm) || available.includes('*')
   );
 };
@@ -50,10 +51,10 @@ export const useUserRoles = () => {
   // Simulates fetching a list of roles
   return useQuery({
     queryKey: ['user', 'roles'],
-    queryFn: async () => { 
+    queryFn: async () => {
       const response = await fetch('/api/auth/user-roles');
       return response.json(); // Expected format: [ 'manager', 'viewer' ]
     },
-    staleTime: 1000 * 60 * 30, 
+    staleTime: 1000 * 60 * 30,
   });
 };

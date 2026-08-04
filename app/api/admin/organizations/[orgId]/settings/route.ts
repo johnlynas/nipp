@@ -2,15 +2,19 @@
  * PATCH /api/admin/organizations/[orgId]/settings
  *
  * Super Admin only — update organization settings (name, slug, status).
+ * Wrapped with wrapPiiRoute for payload encryption.
  */
 
 import { NextRequest, NextResponse } from 'next/server';
-import { requireSuperAdmin } from '@/lib/require-super-admin';
 import globalDb from '@/lib/global-db';
+import { requireSuperAdmin } from '@/lib/require-super-admin';
 import { recordAuditLog } from '@/lib/audit-log';
 import { logger } from '@/lib/logger';
+import { wrapPiiRoute } from '@/lib/payload-middleware';
 
 export const runtime = 'nodejs';
+export const revalidate = 0;
+export const dynamic = 'force-dynamic';
 
 // Organization status state machine transitions
 const VALID_TRANSITIONS: Record<string, string[]> = {
@@ -21,32 +25,41 @@ const VALID_TRANSITIONS: Record<string, string[]> = {
 };
 
 // ---------------------------------------------------------------------------
-// PATCH — Update organization settings (super admin)
+// PATCH — Update organization settings (super admin, wrapped with payload encryption)
 // ---------------------------------------------------------------------------
 
-export async function PATCH(
-  request: NextRequest,
-  { params }: { params: Promise<{ orgId: string }> }
-) {
-  const authResult = await requireSuperAdmin();
+export const PATCH = wrapPiiRoute(async (request, decryptedBody, params) => {
+  // Auth check — wrapPiiRoute handles encryption, not authorization
+  const authResult = await requireSuperAdmin(request.headers);
   if (!authResult.authorized) {
     return NextResponse.json({ error: authResult.error || 'Unauthorized' }, { status: authResult.status });
   }
 
   const session = authResult.session!;
-  const { orgId } = await params;
 
+  // Get body from decrypted payload or parse JSON
   let body: { name?: string; slug?: string; status?: 'PENDING' | 'ACTIVE' | 'SUSPENDED' | 'ARCHIVED' };
-  try {
-    body = await request.json();
-  } catch {
-    return NextResponse.json({ error: 'Invalid request body' }, { status: 400 });
+  if (decryptedBody && typeof decryptedBody === 'object') {
+    body = decryptedBody as typeof body;
+  } else {
+    try {
+      body = await request.json();
+    } catch {
+      return NextResponse.json({ error: 'Invalid request body' }, { status: 400 });
+    }
   }
 
   const { name, slug, status } = body;
 
   if (!name && !slug && !status) {
     return NextResponse.json({ error: 'Provide name, slug, or status to update' }, { status: 400 });
+  }
+
+  // Extract orgId from route params (provided by wrapPiiRoute)
+  const orgId = params?.orgId;
+
+  if (!orgId) {
+    return NextResponse.json({ error: 'Organization ID required' }, { status: 400 });
   }
 
   try {
@@ -116,8 +129,10 @@ export async function PATCH(
     logger.info({ userId: session.user.id, orgId, changes: Object.keys(updateData) }, 'Updated organization settings');
     return NextResponse.json({ message: 'Organization updated', organization: updatedOrg });
   } catch (error) {
-    const isDbError = error instanceof Error && error.message.includes('Can\'t reach database server');
+    const isDbError =
+      error instanceof Error &&
+      (error.message.includes('Can\'t reach database server') || error.message.includes('Platform organization not found'));
     logger.error({ err: error, orgId }, isDbError ? 'Database unavailable updating settings' : 'Unexpected error updating settings');
     return NextResponse.json({ error: isDbError ? 'Database unavailable' : 'Internal Server Error' }, { status: isDbError ? 503 : 500 });
   }
-}
+});

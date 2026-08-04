@@ -5,6 +5,7 @@ import Link from 'next/link';
 import { RequireSuperAdmin } from '@/components/auth/RequireSuperAdmin';
 import { OrgTable } from '@/components/admin/OrgTable';
 import { ConfirmDialog } from '@/components/admin/ConfirmDialog';
+import { encryptedFetch } from '@/lib/api-client';
 
 interface Organization {
   id: string;
@@ -68,7 +69,7 @@ export default function OrganizationsPage() {
               search: debouncedSearch,
             });
 
-            const res = await fetch(`/api/admin/organizations?${params}`);
+            const res = await encryptedFetch(`/api/admin/organizations?${params}`, { pii: true });
             const data = await res.json();
 
             setOrganizations(data.organizations || []);
@@ -87,7 +88,7 @@ export default function OrganizationsPage() {
           } else {
             // Name-only search: use cached endpoint (no status filter needed)
             const searchParams = new URLSearchParams({ q: debouncedSearch });
-            const res = await fetch(`/api/admin/organizations/search?${searchParams}`);
+            const res = await encryptedFetch(`/api/admin/organizations/search?${searchParams}`, { pii: true });
             if (!res.ok) {
               throw new Error('Failed to fetch organizations');
             }
@@ -119,7 +120,7 @@ export default function OrganizationsPage() {
           });
           if (statusFilter) params.set('status', statusFilter);
 
-          const res = await fetch(`/api/admin/organizations?${params}`);
+          const res = await encryptedFetch(`/api/admin/organizations?${params}`, { pii: true });
           const data = await res.json();
 
           setOrganizations(data.organizations || []);
@@ -147,7 +148,7 @@ export default function OrganizationsPage() {
 
   async function handleDelete(id: string) {
     try {
-      const res = await fetch(`/api/admin/organizations/${id}`, { method: 'DELETE' });
+      const res = await encryptedFetch(`/api/admin/organizations/${id}`, { method: 'DELETE', pii: true });
       if (res.ok) {
         setOrganizations((prev) => prev.filter((o) => o.id !== id));
       }

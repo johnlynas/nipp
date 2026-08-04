@@ -4,6 +4,7 @@ import { useState, useEffect } from 'react';
 import Link from 'next/link';
 import { RequireSuperAdmin } from '@/components/auth/RequireSuperAdmin';
 import { TenantMemberForm } from '@/components/admin/TenantMemberForm';
+import { encryptedFetch } from '@/lib/api-client';
 
 interface Member {
   id: string;
@@ -36,14 +37,14 @@ export default function TenantMembersPage({ params }: { params: Promise<{ orgId:
       const resolvedParams = await params;
 
       // Fetch org info
-      const orgRes = await fetch(`/api/admin/organizations/${resolvedParams.orgId}`);
+      const orgRes = await encryptedFetch(`/api/admin/organizations/${resolvedParams.orgId}`, { pii: true });
       if (orgRes.ok) {
         const orgData = await orgRes.json();
         setOrgInfo({ id: orgData.id, name: orgData.name, slug: orgData.slug });
       }
 
       // Fetch members
-      const res = await fetch(`/api/admin/organizations/${resolvedParams.orgId}/members`);
+      const res = await encryptedFetch(`/api/admin/organizations/${resolvedParams.orgId}/members`, { pii: true });
       if (res.ok) {
         const data = await res.json();
         setMembers(data.members || []);
@@ -58,9 +59,9 @@ export default function TenantMembersPage({ params }: { params: Promise<{ orgId:
   async function handleAddMember(formData: { email: string; role: string }) {
     try {
       const resolvedParams = await params;
-      const res = await fetch(`/api/admin/organizations/${resolvedParams.orgId}/members`, {
+      const res = await encryptedFetch(`/api/admin/organizations/${resolvedParams.orgId}/members`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        pii: true,
         body: JSON.stringify(formData),
       });
 
@@ -79,9 +80,9 @@ export default function TenantMembersPage({ params }: { params: Promise<{ orgId:
   async function handleUpdateRole(memberId: string, role: string) {
     try {
       const resolvedParams = await params;
-      const res = await fetch(`/api/admin/organizations/${resolvedParams.orgId}/members/${memberId}`, {
+      const res = await encryptedFetch(`/api/admin/organizations/${resolvedParams.orgId}/members/${memberId}`, {
         method: 'PATCH',
-        headers: { 'Content-Type': 'application/json' },
+        pii: true,
         body: JSON.stringify({ role }),
       });
 
@@ -102,8 +103,9 @@ export default function TenantMembersPage({ params }: { params: Promise<{ orgId:
 
     try {
       const resolvedParams = await params;
-      const res = await fetch(`/api/admin/organizations/${resolvedParams.orgId}/members/${memberId}`, {
+      const res = await encryptedFetch(`/api/admin/organizations/${resolvedParams.orgId}/members/${memberId}`, {
         method: 'DELETE',
+        pii: true,
       });
 
       if (res.ok) {

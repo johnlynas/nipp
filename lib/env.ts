@@ -38,6 +38,22 @@ const envSchema = z.object({
   TRUSTED_PROXY_CIDRS: z.string().optional(),
 
   INACTIVITY_TIMEOUT_MINS: z.string().regex(/^\d+$/).default('15').transform(Number),
+
+  // Payload Encryption Configuration
+  PAYLOAD_ENCRYPTION_MODE: z.enum(['disabled', 'permissive', 'enforce']).default('disabled'),
+  PAYLOAD_ENCRYPTION_MAX_BYTES: z.string().regex(/^\d+$/).default('65536').transform(Number),
+  PAYLOAD_ENCRYPTION_KEY_TTL_SECONDS: z.string().regex(/^\d+$/).default('300').transform(Number),
+  PAYLOAD_ENCRYPTION_REPLAY_WINDOW_SECONDS: z.string().regex(/^\d+$/).default('30').transform(Number),
+  PAYLOAD_ENCRYPTION_NONCE_TTL_SECONDS: z.string().regex(/^\d+$/).default('60').transform(Number),
+
+  // Replay cache backend selection: 'memory' or 'redis'
+  PAYLOAD_ENCRYPTION_REPLAY_CACHE: z.enum(['memory', 'redis']).default('redis'),
+
+  // Fail closed if replay cache is unavailable (enforce mode only)
+  PAYLOAD_ENCRYPTION_REQUIRE_REPLAY_CACHE: z.enum(['true', 'false']).default('false'),
+
+  // Maximum number of active payload keys per session (enforces eviction)
+  PAYLOAD_ENCRYPTION_MAX_KEYS_PER_SESSION: z.string().regex(/^\d+$/).default('10').transform(Number),
 });
 
 export type Env = z.infer<typeof envSchema>;
@@ -73,6 +89,14 @@ function testEnv(): Env {
     GOOGLE_CLIENT_SECRET: 'test',
     PII_ENCRYPTION_KEY: 'a'.repeat(64),
     NODE_ENV: 'test',
+    PAYLOAD_ENCRYPTION_MODE: 'disabled',
+    PAYLOAD_ENCRYPTION_MAX_BYTES: '65536',
+    PAYLOAD_ENCRYPTION_KEY_TTL_SECONDS: '300',
+    PAYLOAD_ENCRYPTION_REPLAY_WINDOW_SECONDS: '30',
+    PAYLOAD_ENCRYPTION_NONCE_TTL_SECONDS: '60',
+    PAYLOAD_ENCRYPTION_REPLAY_CACHE: 'redis',
+    PAYLOAD_ENCRYPTION_REQUIRE_REPLAY_CACHE: 'false',
+    PAYLOAD_ENCRYPTION_MAX_KEYS_PER_SESSION: '10',
     ...Object.fromEntries(
       Object.entries(process.env).filter(([, v]) => v !== undefined)
     ),

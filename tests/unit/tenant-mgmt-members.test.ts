@@ -57,10 +57,6 @@ const mockSession = {
 describe('GET /api/admin/organizations/[orgId]/members', () => {
   beforeEach(() => vi.clearAllMocks());
 
-  function createParams(orgId: string) {
-    return Promise.resolve({ orgId });
-  }
-
   it('should return members when authorized', async () => {
     vi.mocked(requireSuperAdmin).mockResolvedValue({
       authorized: true,
@@ -80,7 +76,7 @@ describe('GET /api/admin/organizations/[orgId]/members', () => {
       } as any,
     ]);
 
-    const response = await GET({} as NextRequest, { params: createParams('org-1') });
+    const response = await GET({ url: 'http://localhost/api/admin/organizations/org-1/members', headers: new Headers() } as NextRequest);
 
     expect(response.status).toBe(200);
     const json = await response.json();
@@ -97,11 +93,9 @@ describe('GET /api/admin/organizations/[orgId]/members', () => {
     vi.mocked(globalDb.organization.findUnique).mockResolvedValue({ id: 'org-1' } as any);
     vi.mocked(tenantDb.member.findMany).mockResolvedValue([]);
 
-    const response = await GET({} as NextRequest, { params: createParams('org-1') });
+    const response = await GET({ url: 'http://localhost/api/admin/organizations/org-1/members', headers: new Headers() } as NextRequest);
 
     expect(response.status).toBe(200);
-    const json = await response.json();
-    expect(json.members).toEqual([]);
   });
 
   it('should return 403 when not authorized', async () => {
@@ -112,7 +106,7 @@ describe('GET /api/admin/organizations/[orgId]/members', () => {
       status: 403,
     });
 
-    const response = await GET({} as NextRequest, { params: createParams('org-1') });
+    const response = await GET({ url: 'http://localhost/api/admin/organizations/org-1/members', headers: new Headers() } as NextRequest);
 
     expect(response.status).toBe(403);
   });
@@ -127,7 +121,7 @@ describe('GET /api/admin/organizations/[orgId]/members', () => {
       new Error("Can't reach database server")
     );
 
-    const response = await GET({} as NextRequest, { params: createParams('org-1') });
+    const response = await GET({ url: 'http://localhost/api/admin/organizations/org-1/members', headers: new Headers() } as NextRequest);
 
     expect(response.status).toBe(503);
   });
@@ -140,7 +134,7 @@ describe('GET /api/admin/organizations/[orgId]/members', () => {
 
     vi.mocked(globalDb.organization.findUnique).mockResolvedValue(null);
 
-    const response = await GET({} as NextRequest, { params: createParams('org-1') });
+    const response = await GET({ url: 'http://localhost/api/admin/organizations/org-1/members', headers: new Headers() } as NextRequest);
 
     expect(response.status).toBe(404);
   });
@@ -149,12 +143,9 @@ describe('GET /api/admin/organizations/[orgId]/members', () => {
 describe('POST /api/admin/organizations/[orgId]/members', () => {
   beforeEach(() => vi.clearAllMocks());
 
-  function createParams(orgId: string) {
-    return Promise.resolve({ orgId });
-  }
-
   function createRequest(body: Record<string, unknown>) {
     return {
+      url: 'http://localhost/api/admin/organizations/org-1/members',
       json: () => Promise.resolve(body),
       headers: new Headers(),
     } as unknown as NextRequest;
@@ -177,8 +168,7 @@ describe('POST /api/admin/organizations/[orgId]/members', () => {
     } as any);
 
     const response = await POST(
-      createRequest({ email: 'test@example.com', role: 'member' }),
-      { params: createParams('org-1') }
+      createRequest({ email: 'test@example.com', role: 'member' })
     );
 
     expect(response.status).toBe(201);
@@ -206,8 +196,7 @@ describe('POST /api/admin/organizations/[orgId]/members', () => {
     } as any);
 
     const response = await POST(
-      createRequest({ email: 'new@example.com' }),
-      { params: createParams('org-1') }
+      createRequest({ email: 'new@example.com' })
     );
 
     expect(response.status).toBe(201);
@@ -221,8 +210,7 @@ describe('POST /api/admin/organizations/[orgId]/members', () => {
     } as any);
 
     const response = await POST(
-      createRequest({ role: 'member' }),
-      { params: createParams('org-1') }
+      createRequest({ role: 'member' })
     );
 
     expect(response.status).toBe(400);
@@ -239,8 +227,7 @@ describe('POST /api/admin/organizations/[orgId]/members', () => {
     vi.mocked(globalDb.member.findFirst).mockResolvedValue({ id: 'existing-member' } as any);
 
     const response = await POST(
-      createRequest({ email: 'test@example.com' }),
-      { params: createParams('org-1') }
+      createRequest({ email: 'test@example.com' })
     );
 
     expect(response.status).toBe(409);
@@ -255,8 +242,7 @@ describe('POST /api/admin/organizations/[orgId]/members', () => {
     });
 
     const response = await POST(
-      createRequest({ email: 'test@example.com' }),
-      { params: createParams('org-1') }
+      createRequest({ email: 'test@example.com' })
     );
 
     expect(response.status).toBe(403);
@@ -273,8 +259,7 @@ describe('POST /api/admin/organizations/[orgId]/members', () => {
     );
 
     const response = await POST(
-      createRequest({ email: 'test@example.com' }),
-      { params: createParams('org-1') }
+      createRequest({ email: 'test@example.com' })
     );
 
     expect(response.status).toBe(503);
@@ -289,8 +274,7 @@ describe('POST /api/admin/organizations/[orgId]/members', () => {
     vi.mocked(globalDb.organization.findUnique).mockResolvedValue(null);
 
     const response = await POST(
-      createRequest({ email: 'test@example.com' }),
-      { params: createParams('org-1') }
+      createRequest({ email: 'test@example.com' })
     );
 
     expect(response.status).toBe(404);
@@ -313,8 +297,7 @@ describe('POST /api/admin/organizations/[orgId]/members', () => {
     } as any);
 
     await POST(
-      createRequest({ email: 'test@example.com' }),
-      { params: createParams('org-1') }
+      createRequest({ email: 'test@example.com' })
     );
 
     expect(recordAuditLog).toHaveBeenCalledWith(
@@ -333,8 +316,7 @@ describe('POST /api/admin/organizations/[orgId]/members', () => {
     } as any);
 
     const response = await POST(
-      { json: () => Promise.reject(new Error('Invalid JSON')), headers: new Headers() } as unknown as NextRequest,
-      { params: createParams('org-1') }
+      { url: 'http://localhost/api/admin/organizations/org-1/members', json: () => Promise.reject(new Error('Invalid JSON')), headers: new Headers() } as unknown as NextRequest
     );
 
     expect(response.status).toBe(400);

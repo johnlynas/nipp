@@ -3,6 +3,7 @@
 import { useState, useEffect } from 'react';
 import Link from 'next/link';
 import { RequireSuperAdmin } from '@/components/auth/RequireSuperAdmin';
+import { encryptedFetch } from '@/lib/api-client';
 
 interface OrgInfo {
   id: string;
@@ -30,7 +31,7 @@ export default function TenantSettingsPage({ params }: { params: Promise<{ orgId
       const resolvedParams = await params;
 
       // Fetch org info from the existing detail endpoint
-      const res = await fetch(`/api/admin/organizations/${resolvedParams.orgId}`);
+      const res = await encryptedFetch(`/api/admin/organizations/${resolvedParams.orgId}`, { pii: true });
       if (res.ok) {
         const data = await res.json();
         setOrgInfo({ id: data.id, name: data.name, slug: data.slug || '', status: data.status });
@@ -71,9 +72,9 @@ export default function TenantSettingsPage({ params }: { params: Promise<{ orgId
     setSaving(true);
     try {
       const resolvedParams = await params;
-      const res = await fetch(`/api/admin/organizations/${resolvedParams.orgId}/settings`, {
+      const res = await encryptedFetch(`/api/admin/organizations/${resolvedParams.orgId}/settings`, {
         method: 'PATCH',
-        headers: { 'Content-Type': 'application/json' },
+        pii: true,
         body: JSON.stringify({ name, slug, status }),
       });
 

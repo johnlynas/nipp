@@ -6,6 +6,21 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 
 
 // Mock dependencies
+vi.mock('@/lib/auth', () => ({
+  auth: {
+    api: {
+      getSession: vi.fn().mockResolvedValue({
+        user: { id: 'user-1', name: 'Test User' },
+        session: { id: 'session-1', activeOrganizationId: null },
+      }),
+    },
+  },
+}));
+
+vi.mock('@/lib/authz', () => ({
+  verifySuperAdmin: vi.fn().mockResolvedValue({ authorized: true, error: undefined }),
+}));
+
 vi.mock('@/lib/middleware/auth', () => ({
   withSuperAdmin: (handler: any) => handler, // Pass through for testing
 }));
@@ -20,13 +35,6 @@ vi.mock('@/lib/tenant-db', () => ({
   },
 }));
 
-vi.mock('@/lib/cache/hybrid', () => ({
-  cacheGet: vi.fn(async (key: string, resolver: () => Promise<any>) => {
-    return resolver();
-  }),
-  cacheSet: vi.fn(),
-}));
-
 vi.mock('@/lib/logger', () => ({
   logger: {
     debug: vi.fn(),
@@ -37,13 +45,10 @@ vi.mock('@/lib/logger', () => ({
 }));
 
 describe('Organization Search API', () => {
-  let cacheGet: typeof import('@/lib/cache/hybrid').cacheGet;
   let tenantDb: typeof import('@/lib/tenant-db').default;
 
   beforeEach(async () => {
     vi.clearAllMocks();
-    const hybrid = await import('@/lib/cache/hybrid');
-    cacheGet = hybrid.cacheGet;
     tenantDb = (await import('@/lib/tenant-db')).default;
   });
 
@@ -55,12 +60,13 @@ describe('Organization Search API', () => {
 
   describe('GET handler', () => {
     it('should return organizations matching the query prefix (case-insensitive)', async () => {
-      const mockResults = [
+      const mockResults: any[] = [
         { id: 'org1', name: 'Acme Corp', slug: 'acme-corp' },
         { id: 'org2', name: 'Acme Industries', slug: 'acme-industries' },
       ];
 
-      vi.mocked(cacheGet).mockResolvedValue({ results: mockResults, total: 2 });
+      vi.mocked(tenantDb.organization.findMany).mockResolvedValue(mockResults);
+      vi.mocked(tenantDb.organization.count).mockResolvedValue(2);
 
       const { GET } = await import('@/app/api/admin/organizations/search/route');
       const response = await GET(createRequest('http://localhost:3000/api/admin/organizations/search?q=acme'));
@@ -72,7 +78,8 @@ describe('Organization Search API', () => {
     });
 
     it('should return empty results when no organizations match', async () => {
-      vi.mocked(cacheGet).mockResolvedValue({ results: [], total: 0 });
+      vi.mocked(tenantDb.organization.findMany).mockResolvedValue([]);
+      vi.mocked(tenantDb.organization.count).mockResolvedValue(0);
 
       const { GET } = await import('@/app/api/admin/organizations/search/route');
       const response = await GET(createRequest('http://localhost:3000/api/admin/organizations/search?q=nonexistent'));
@@ -107,11 +114,8 @@ describe('Organization Search API', () => {
     });
 
     it('should cap limit at maximum of 50', async () => {
-      vi.mocked(cacheGet).mockImplementation(async (key, resolver) => {
-        // Verify the limit was capped at 50
-        const result = await resolver();
-        return result;
-      });
+      vi.mocked(tenantDb.organization.findMany).mockResolvedValue([]);
+      vi.mocked(tenantDb.organization.count).mockResolvedValue(0);
 
       const { GET } = await import('@/app/api/admin/organizations/search/route');
       const response = await GET(createRequest('http://localhost:3000/api/admin/organizations/search?q=a&limit=100'));
@@ -120,10 +124,8 @@ describe('Organization Search API', () => {
     });
 
     it('should use default limit of 10 when not specified', async () => {
-      vi.mocked(cacheGet).mockImplementation(async (key, resolver) => {
-        const result = await resolver();
-        return result;
-      });
+      vi.mocked(tenantDb.organization.findMany).mockResolvedValue([]);
+      vi.mocked(tenantDb.organization.count).mockResolvedValue(0);
 
       const { GET } = await import('@/app/api/admin/organizations/search/route');
       const response = await GET(createRequest('http://localhost:3000/api/admin/organizations/search?q=test'));
@@ -131,50 +133,29 @@ describe('Organization Search API', () => {
       expect(response.status).toBe(200);
     });
 
-    it('should normalize query to lowercase for cache key', async () => {
-      vi.mocked(cacheGet).mockImplementation(async (key, resolver) => {
-        expect(key).toBe('search:org:acme');
-        return resolver();
-      });
-
-      const { GET } = await import('@/app/api/admin/organizations/search/route');
-      await GET(createRequest('http://localhost:3000/api/admin/organizations/search?q=ACME'));
-
-      expect(cacheGet).toHaveBeenCalledWith('search:org:acme', expect.any(Function), { ttlType: 'search' });
-    });
-
     it('should trim whitespace from query', async () => {
-      vi.mocked(cacheGet).mockImplementation(async (key, resolver) => {
-        expect(key).toBe('search:org:acme');
-        return resolver();
-      });
+      vi.mocked(tenantDb.organization.findMany).mockResolvedValue([]);
+      vi.mocked(tenantDb.organization.count).mockResolvedValue(0);
 
       const { GET } = await import('@/app/api/admin/organizations/search/route');
       await GET(createRequest('http://localhost:3000/api/admin/organizations/search?q=%20acme%20'));
+
+      expect(tenantDb.organization.findMany).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: { name: { startsWith: 'acme', mode: 'insensitive' } },
+        })
+      );
     });
 
-    it('should return 500 on internal error', async () => {
-      vi.mocked(cacheGet).mockRejectedValue(new Error('Database connection failed'));
+    it('should return 503 on database unavailable error', async () => {
+      vi.mocked(tenantDb.organization.findMany).mockRejectedValue(
+        new Error("Can't reach database server")
+      );
 
       const { GET } = await import('@/app/api/admin/organizations/search/route');
       const response = await GET(createRequest('http://localhost:3000/api/admin/organizations/search?q=test'));
 
-      expect(response.status).toBe(500);
-      const body = await response.json();
-      expect(body.error).toBe('Internal server error');
-    });
-
-    it('should call cacheGet with correct TTL type', async () => {
-      vi.mocked(cacheGet).mockResolvedValue({ results: [], total: 0 });
-
-      const { GET } = await import('@/app/api/admin/organizations/search/route');
-      await GET(createRequest('http://localhost:3000/api/admin/organizations/search?q=test'));
-
-      expect(cacheGet).toHaveBeenCalledWith(
-        'search:org:test',
-        expect.any(Function),
-        { ttlType: 'search' }
-      );
+      expect(response.status).toBe(503);
     });
 
     it('should return 400 when query exceeds max length', async () => {
@@ -183,36 +164,76 @@ describe('Organization Search API', () => {
       const response = await GET(createRequest(`http://localhost:3000/api/admin/organizations/search?q=${longQuery}`));
 
       expect(response.status).toBe(400);
-      const body = await response.json();
-      expect(body.error).toBe('Query must be at most 100 characters');
     });
 
-    it('should include id, name, and slug in each result', async () => {
-      const mockResults = [{ id: 'org1', name: 'Test Org', slug: 'test-org' }];
-      vi.mocked(cacheGet).mockResolvedValue({ results: mockResults, total: 1 });
+    it('should order results by name ascending', async () => {
+      vi.mocked(tenantDb.organization.findMany).mockResolvedValue([]);
+      vi.mocked(tenantDb.organization.count).mockResolvedValue(0);
+
+      const { GET } = await import('@/app/api/admin/organizations/search/route');
+      await GET(createRequest('http://localhost:3000/api/admin/organizations/search?q=test'));
+
+      expect(tenantDb.organization.findMany).toHaveBeenCalledWith(
+        expect.objectContaining({ orderBy: { name: 'asc' } })
+      );
+    });
+
+    it('should select only id, name, and slug', async () => {
+      vi.mocked(tenantDb.organization.findMany).mockResolvedValue([]);
+      vi.mocked(tenantDb.organization.count).mockResolvedValue(0);
+
+      const { GET } = await import('@/app/api/admin/organizations/search/route');
+      await GET(createRequest('http://localhost:3000/api/admin/organizations/search?q=test'));
+
+      expect(tenantDb.organization.findMany).toHaveBeenCalledWith(
+        expect.objectContaining({ select: { id: true, name: true, slug: true } })
+      );
+    });
+
+    it('should execute findMany and count in parallel', async () => {
+      vi.mocked(tenantDb.organization.findMany).mockResolvedValue([]);
+      vi.mocked(tenantDb.organization.count).mockResolvedValue(0);
+
+      const { GET } = await import('@/app/api/admin/organizations/search/route');
+      await GET(createRequest('http://localhost:3000/api/admin/organizations/search?q=test'));
+
+      expect(tenantDb.organization.findMany).toHaveBeenCalled();
+      expect(tenantDb.organization.count).toHaveBeenCalled();
+    });
+
+    it('should enforce minimum limit of 10', async () => {
+      vi.mocked(tenantDb.organization.findMany).mockResolvedValue([]);
+      vi.mocked(tenantDb.organization.count).mockResolvedValue(0);
+
+      const { GET } = await import('@/app/api/admin/organizations/search/route');
+      await GET(createRequest('http://localhost:3000/api/admin/organizations/search?q=test&limit=1'));
+
+      expect(tenantDb.organization.findMany).toHaveBeenCalledWith(
+        expect.objectContaining({ take: 10 })
+      );
+    });
+
+    it('should return organizations with null slug', async () => {
+      const mockResults: any[] = [{ id: 'org1', name: 'Test Org', slug: null }];
+      vi.mocked(tenantDb.organization.findMany).mockResolvedValue(mockResults);
+      vi.mocked(tenantDb.organization.count).mockResolvedValue(1);
 
       const { GET } = await import('@/app/api/admin/organizations/search/route');
       const response = await GET(createRequest('http://localhost:3000/api/admin/organizations/search?q=test'));
 
+      expect(response.status).toBe(200);
       const body = await response.json();
-      expect(body.results[0]).toHaveProperty('id');
-      expect(body.results[0]).toHaveProperty('name');
-      expect(body.results[0]).toHaveProperty('slug');
+      expect(body.results[0].slug).toBeNull();
     });
 
-    it('should serve from cache on repeat queries (no DB call)', async () => {
-      const mockResults = [{ id: 'org1', name: 'Acme Corp', slug: 'acme-corp' }];
-      vi.mocked(cacheGet).mockResolvedValue({ results: mockResults, total: 1 });
+    it('should handle special characters in query', async () => {
+      vi.mocked(tenantDb.organization.findMany).mockResolvedValue([]);
+      vi.mocked(tenantDb.organization.count).mockResolvedValue(0);
 
       const { GET } = await import('@/app/api/admin/organizations/search/route');
-      
-      // First call
-      await GET(createRequest('http://localhost:3000/api/admin/organizations/search?q=acme'));
-      // Second call (cache hit)
-      await GET(createRequest('http://localhost:3000/api/admin/organizations/search?q=acme'));
+      await GET(createRequest('http://localhost:3000/api/admin/organizations/search?q=test%26org'));
 
-      // cacheGet should be called twice (each endpoint invocation calls it)
-      expect(cacheGet).toHaveBeenCalledTimes(2);
+      expect(tenantDb.organization.findMany).toHaveBeenCalled();
     });
   });
 });

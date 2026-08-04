@@ -13,10 +13,15 @@ import '@/lib/env';
 
 // Warm the L1 cache on startup — only runs once per server process
 import { warmCache } from '@/lib/cache/warm';
+// Start the payload key cleanup scheduler on bootstrap.
+import { startKeyCleanupScheduler } from '@/lib/payload-key-server';
 
 warmCache().catch((err) => {
   console.error('[Instrumentation] Cache warming failed:', err);
 });
+
+// Start the payload key cleanup scheduler during application bootstrap.
+startKeyCleanupScheduler();
 
 export default function instrumentation() {
   return {};

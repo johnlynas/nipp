@@ -3,6 +3,7 @@
 import { useState, useEffect } from 'react';
 import { RequireSuperAdmin } from '@/components/auth/RequireSuperAdmin';
 import { AuditLogViewer } from '@/components/admin/AuditLogViewer';
+import { encryptedFetch } from '@/lib/api-client';
 
 interface AuditEntry {
   id: string;
@@ -34,7 +35,7 @@ export default function AuditLogsPage() {
       const params = new URLSearchParams({ page: '1', pageSize: '50' });
       if (resourceFilter) params.set('resourceType', resourceFilter);
 
-      const res = await fetch(`/api/admin/audit-logs?${params}`);
+      const res = await encryptedFetch(`/api/admin/audit-logs?${params}`, { pii: true });
       if (res.ok) {
         const data = await res.json();
         setEntries(data.auditLogs || []);

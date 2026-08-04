@@ -3,14 +3,18 @@
  *
  * Search organizations by name (prefix match, case-insensitive).
  * Requires Super Admin authentication.
- * Results are cached via the L1+L2 hybrid cache layer (30s TTL).
+ * Wrapped with wrapPiiRoute for payload encryption.
  */
 
 import { NextRequest, NextResponse } from 'next/server';
-import { withSuperAdmin } from '@/lib/middleware/auth';
 import tenantDb from '@/lib/tenant-db';
-import { cacheGet } from '@/lib/cache/hybrid';
+import { requireSuperAdmin } from '@/lib/require-super-admin';
 import { logger } from '@/lib/logger';
+import { wrapPiiRoute } from '@/lib/payload-middleware';
+
+// PII data — do not cache at Next.js level
+export const revalidate = 0;
+export const dynamic = 'force-dynamic';
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -25,10 +29,18 @@ function normalizeQuery(q: string): string {
 }
 
 // ---------------------------------------------------------------------------
-// GET — Search organizations by name (prefix match)
+// GET — Search organizations by name (prefix match) — wrapped with payload encryption
 // ---------------------------------------------------------------------------
 
-export const GET = withSuperAdmin(async (request, context) => {
+export const GET = wrapPiiRoute(async (request) => {
+  // Auth check — wrapPiiRoute handles encryption, not authorization
+  const authResult = await requireSuperAdmin(request.headers);
+  if (!authResult.authorized) {
+    return NextResponse.json({ error: authResult.error || 'Unauthorized' }, { status: authResult.status });
+  }
+
+  const session = authResult.session!;
+
   try {
     const url = new URL(request.url);
     const qRaw = url.searchParams.get('q');
@@ -57,47 +69,33 @@ export const GET = withSuperAdmin(async (request, context) => {
       Math.max(DEFAULT_LIMIT, parseInt(limitRaw || String(DEFAULT_LIMIT), 10))
     );
 
-    // Build cache key from normalized query
-    const cacheKey = `search:org:${q}`;
+    // Execute search directly — no plaintext caching for PII results.
+    // The wrapPiiRoute encrypts the response, so cached plaintext is unnecessary
+    // and would expose PII in server-side cache stores.
+    const [results, total] = await Promise.all([
+      tenantDb.organization.findMany({
+        where: {
+          name: { startsWith: q, mode: 'insensitive' },
+        },
+        select: { id: true, name: true, slug: true },
+        orderBy: { name: 'asc' },
+        take: limit,
+      }),
+      tenantDb.organization.count({
+        where: {
+          name: { startsWith: q, mode: 'insensitive' },
+        },
+      }),
+    ]);
 
-    // Check L1 → L2 → DB via hybrid cache layer
-    const cached = await cacheGet<{ results: Array<{ id: string; name: string; slug: string | null }>; total: number }>(
-      cacheKey,
-      async () => {
-        const [results, total] = await Promise.all([
-          tenantDb.organization.findMany({
-            where: {
-              name: { startsWith: q, mode: 'insensitive' },
-            },
-            select: { id: true, name: true, slug: true },
-            orderBy: { name: 'asc' },
-            take: limit,
-          }),
-          tenantDb.organization.count({
-            where: {
-              name: { startsWith: q, mode: 'insensitive' },
-            },
-          }),
-        ]);
-
-        return { results, total };
-      },
-      { ttlType: 'search' } // 30-second TTL for search results
-    );
-
-    if (cached) {
-      logger.debug({ cacheKey, total: cached.total }, 'Organization search cache hit');
-      return NextResponse.json(cached);
-    }
-
-    logger.warn({ cacheKey }, 'Organization search returned null from cacheGet');
-    return NextResponse.json({ results: [], total: 0 });
+    return NextResponse.json({ results, total });
 
   } catch (error) {
+    const isDbError = error instanceof Error && error.message.includes('Can\'t reach database server');
     logger.error(
       { err: error, route: '/api/admin/organizations/search', method: 'GET' },
-      'Unexpected error in organization search'
+      isDbError ? 'Database unavailable in organization search' : 'Unexpected error in organization search'
     );
-    return NextResponse.json({ error: 'Internal server error' }, { status: 500 });
+    return NextResponse.json({ error: isDbError ? 'Database unavailable' : 'Internal server error' }, { status: isDbError ? 503 : 500 });
   }
 });
