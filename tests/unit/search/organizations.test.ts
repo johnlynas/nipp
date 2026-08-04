@@ -2,7 +2,7 @@
  * Unit tests for Organization Search API (GET /api/admin/organizations/search)
  */
 
-import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach } from 'vitest';
 
 
 // Mock dependencies
@@ -52,9 +52,7 @@ describe('Organization Search API', () => {
     tenantDb = (await import('@/lib/tenant-db')).default;
   });
 
-  afterEach(() => {
-    vi.restoreAllMocks();
-  });
+
 
   const createRequest = (url: string) => new Request(url) as unknown as import('next/server').NextRequest;
 

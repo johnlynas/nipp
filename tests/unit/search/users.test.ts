@@ -2,7 +2,7 @@
  * Unit tests for User Search API (GET /api/admin/users/search)
  */
 
-import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach } from 'vitest';
 
 // Mock dependencies
 vi.mock('@/lib/auth', () => ({
@@ -47,9 +47,7 @@ describe('User Search API', () => {
     tenantDb = (await import('@/lib/tenant-db')).default;
   });
 
-  afterEach(() => {
-    vi.restoreAllMocks();
-  });
+
 
   const createRequest = (url: string) => new Request(url) as unknown as import('next/server').NextRequest;
 
