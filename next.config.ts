@@ -11,6 +11,16 @@ const nextConfig: NextConfig = {
       config.externals = config.externals || [];
       config.externals.push('ioredis');
     }
+
+    // Node.js built-ins that webpack can't resolve natively
+    const nodeBuiltins = ['crypto', 'fs', 'path', 'async_hooks'];
+    config.externals = config.externals || [];
+    for (const builtin of nodeBuiltins) {
+      if (!config.externals.includes(builtin)) {
+        config.externals.push(builtin);
+      }
+    }
+
     return config;
   },
 

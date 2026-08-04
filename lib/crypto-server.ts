@@ -5,7 +5,7 @@
  *   <12-byte nonce><ciphertext><16-byte auth tag>
  */
 
-import { createCipheriv, createDecipheriv, randomBytes, hkdfSync } from 'node:crypto';
+import { createCipheriv, createDecipheriv, randomBytes, hkdfSync } from 'crypto';
 import { NONCE_BYTES, AUTH_TAG_BYTES, MIN_ENCRYPTED_BYTES } from './payload-format';
 
 // ---------------------------------------------------------------------------

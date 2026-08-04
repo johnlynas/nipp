@@ -505,7 +505,7 @@ export function wrapPiiRoute(
   handler: PiiRouteHandler,
   options?: WrapPiiRouteOptions,
 ) {
-  return async (request: NextRequest, context?: WrapPiiRouteContext): Promise<Response> => {
+  return async (request: NextRequest, context?: any): Promise<Response> => {
     const mode = getEncryptionMode();
     const pathname = new URL(request.url).pathname;
 

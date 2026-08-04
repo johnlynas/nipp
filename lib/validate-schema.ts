@@ -1,5 +1,5 @@
-import fs from 'node:fs';
-import path from 'node:path';
+import fs from 'fs';
+import path from 'path';
 
 /**
  * Startup validation that checks all non-exempt Prisma models have an organizationId field.

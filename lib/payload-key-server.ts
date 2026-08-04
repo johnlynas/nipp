@@ -5,7 +5,7 @@
  * payload encryption keys. Keys are bound to sessions and have explicit TTLs.
  */
 
-import { randomBytes } from 'node:crypto';
+import { randomBytes } from 'crypto';
 import { encodeBase64url, validateKeyId, ERROR_CODES } from './payload-format';
 import { generateKey } from './crypto-server';
 import { env } from './env';
