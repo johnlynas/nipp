@@ -505,15 +505,15 @@ export function wrapPiiRoute(
   handler: PiiRouteHandler,
   options?: WrapPiiRouteOptions,
 ) {
-  return async (request: NextRequest, context?: any): Promise<Response> => {
+  return (async (request: NextRequest, context?: Record<string, unknown>): Promise<Response> => {
     const mode = getEncryptionMode();
     const pathname = new URL(request.url).pathname;
 
     // Extract route params: prefer Next.js context.params (respects basePath, locales),
     // fall back to URL parsing for backward compatibility.
     let routeParams: PiiRouteParams = {};
-    if (context?.params) {
-      routeParams = await context.params;
+    if ((context as Record<string, unknown>)?.params) {
+      routeParams = await (context as Record<string, Promise<PiiRouteParams>>).params;
     } else {
       routeParams = extractRouteParams(pathname);
     }
@@ -827,5 +827,6 @@ export function wrapPiiRoute(
     errorRes.headers.set('Pragma', 'no-cache');
 
     return errorRes;
-  };
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  }) as any;
 }

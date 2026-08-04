@@ -27,21 +27,10 @@ const ENABLED = process.env.ENABLE_L1_CACHE !== 'false';
 // Runtime Detection
 // ---------------------------------------------------------------------------
 
-const isEdge = process.env.NEXT_RUNTIME === 'edge';
-
-// Singleton stored on globalThis — guaranteed single instance across all bundles
-const lruCacheInstance = (globalThis as unknown as { __lruCache?: LRUCache<string, string> }).__lruCache
-  ?? (ENABLED && !isEdge
-    ? ((globalThis as unknown as { __lruCache: LRUCache<string, string> }).__lruCache = new LRUCache<string, string>({
-        max: MAX_ENTRIES,
-        ttl: TTL_MS,
-        ttlResolution: 1000,
-        allowStale: false,
-        sizeCalculation: (value) => Buffer.byteLength(value),
-        maxEntrySize: 10_000,
-        noDeleteOnFetchRejection: true,
-      }))
-    : null);
+// Singleton stored on globalThis — guaranteed single instance across all bundles.
+// Initialized lazily at call time so that Next.js 15 dev mode (which runs
+// instrumentation on both Edge and Node runtimes) doesn't lock the cache to null.
+let lruCacheInstance: LRUCache<string, string> | null = null;
 
 // ---------------------------------------------------------------------------
 // Public API
@@ -51,6 +40,32 @@ const lruCacheInstance = (globalThis as unknown as { __lruCache?: LRUCache<strin
  * Get the LRU cache singleton. Returns null on Edge runtime or when disabled.
  */
 export function getLruCache(): LRUCache<string, string> | null {
+  if (lruCacheInstance !== null) return lruCacheInstance;
+
+  // Lazy init — re-check runtime at call time so Edge-first loads don't block Node.js
+  if (!ENABLED || process.env.NEXT_RUNTIME === 'edge') {
+    lruCacheInstance = null;
+    return null;
+  }
+
+  // Double-check globalThis in case another bundle already initialized it
+  const existing = (globalThis as unknown as { __lruCache?: LRUCache<string, string> }).__lruCache;
+  if (existing) {
+    lruCacheInstance = existing;
+    return existing;
+  }
+
+  lruCacheInstance = ((globalThis as unknown as { __lruCache: LRUCache<string, string> }).__lruCache =
+    new LRUCache<string, string>({
+      max: MAX_ENTRIES,
+      ttl: TTL_MS,
+      ttlResolution: 1000,
+      allowStale: false,
+      sizeCalculation: (value) => Buffer.byteLength(value),
+      maxEntrySize: 10_000,
+      noDeleteOnFetchRejection: true,
+    }));
+
   return lruCacheInstance;
 }
 
