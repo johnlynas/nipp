@@ -20,7 +20,7 @@ vi.mock('@/lib/global-db', () => ({
 
 vi.mock('@/lib/tenant-db', () => ({
   default: {
-    role: { findMany: vi.fn(), create: vi.fn(), update: vi.fn(), delete: vi.fn() },
+    role: { findMany: vi.fn(), count: vi.fn(), create: vi.fn(), update: vi.fn(), delete: vi.fn() },
     rolePermission: { findMany: vi.fn(), create: vi.fn(), deleteMany: vi.fn() },
   },
 }));
@@ -84,6 +84,7 @@ describe('GET /api/admin/organizations/[orgId]/roles', () => {
         isDefault: false,
       } as any,
     ]);
+    vi.mocked(tenantDb.role.count).mockResolvedValue(1);
 
     const response = await getRoles({} as NextRequest, { params: createParams('org-1') });
 
@@ -101,6 +102,7 @@ describe('GET /api/admin/organizations/[orgId]/roles', () => {
 
     vi.mocked(globalDb.organization.findUnique).mockResolvedValue({ id: 'org-1' } as any);
     vi.mocked(tenantDb.role.findMany).mockResolvedValue([]);
+    vi.mocked(tenantDb.role.count).mockResolvedValue(0);
 
     const response = await getRoles({} as NextRequest, { params: createParams('org-1') });
 

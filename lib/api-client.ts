@@ -19,6 +19,8 @@ import {
   HEADER_PAYLOAD_NONCE,
   PAYLOAD_ENCRYPTION_VERSION,
   ERROR_CODES,
+  buildRequestAad,
+  buildResponseAad,
 } from './payload-format';
 import { isPiiRoute } from './pii-routes';
 
@@ -36,52 +38,6 @@ export interface EncryptedFetchOptions extends RequestInit {
 // ---------------------------------------------------------------------------
 
 const encoder = new TextEncoder();
-
-// AAD builders — sessionId removed from AAD since the key is already session-bound.
-// This avoids the client needing access to the BetterAuth session ID (which may be HTTP-only).
-// The server-side AAD builders in payload-format.ts also pass empty string for sessionId.
-
-function buildRequestAad(
-  version: string,
-  method: string,
-  pathname: string,
-  keyId: string,
-  _sessionId: string,
-  timestamp: number,
-  requestNonce: string,
-): Uint8Array {
-  const parts = [
-    version,
-    'request',
-    method.toUpperCase(),
-    pathname,
-    keyId,
-    '', // sessionId not needed for AAD — key is already session-bound.
-    String(timestamp),
-    requestNonce,
-  ];
-  return encoder.encode(parts.join('\x00'));
-}
-
-function buildResponseAad(
-  version: string,
-  method: string,
-  pathname: string,
-  keyId: string,
-  _sessionId: string,
-  requestNonce: string,
-): Uint8Array {
-  const parts = [
-    version,
-    'response',
-    method.toUpperCase(),
-    pathname,
-    keyId,
-    '', // sessionId not needed for AAD — key is already session-bound.
-    requestNonce,
-  ];
-  return encoder.encode(parts.join('\x00'));
-}
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -106,13 +62,16 @@ function isUnsupportedBodyType(body: unknown): boolean {
   if (body instanceof Blob) return true;
   if (body instanceof ReadableStream) return true;
   if (body instanceof URLSearchParams) return true;
-  if (body instanceof ArrayBuffer || body instanceof SharedArrayBuffer) return true;
+  if (body instanceof ArrayBuffer) return true;
+  if (typeof SharedArrayBuffer !== 'undefined' && body instanceof SharedArrayBuffer) return true;
 
   return false;
 }
 
 /** Serialize a JSON-serializable body to Uint8Array. */
 function serializeBody(body: unknown): Uint8Array {
+  // Callers may pass an object or a pre-stringified JSON string.
+  if (typeof body === 'string') return encoder.encode(body);
   return encoder.encode(JSON.stringify(body));
 }
 
@@ -174,13 +133,13 @@ export async function encryptedFetch(
   // Encrypt request body if present
   if (hasBody) {
     const plaintext = serializeBody(fetchOptions.body);
+    // sessionId is empty string on the server side (key is already session-bound)
     const aad = buildRequestAad(
-      PAYLOAD_ENCRYPTION_VERSION,
+      keyData.keyId,
+      '',
       request.method,
       pathname,
-      keyData.keyId,
-      keyData.sessionId,
-      timestamp,
+      String(timestamp),
       requestNonce,
     );
 
@@ -207,6 +166,22 @@ export async function encryptedFetch(
   // Make the request
   let response = await fetch(new Request(urlObj, modifiedOptions));
 
+  // Detect server-side encryption disabled: if the response is plaintext JSON
+  // (not octet-stream), the server isn't expecting encrypted payloads. Retry
+  // with plaintext body so PII routes work when PAYLOAD_ENCRYPTION_MODE=disabled.
+  if (!response.ok) {
+    const respContentType = response.headers.get('Content-Type') || '';
+    if (respContentType.includes('application/json')) {
+      // Server returned plaintext JSON — it's not encrypting. Retry with
+      // the original (plaintext) body.
+      const retryOptions: RequestInit = { ...fetchOptions };
+      if (hasBody) {
+        retryOptions.body = fetchOptions.body;
+      }
+      response = await fetch(new Request(urlObj, retryOptions));
+    }
+  }
+
   // Handle stale key errors — retry once after refresh
   if (response.status === 401) {
     // Clone before consuming so we can return it if retry fails.
@@ -229,12 +204,11 @@ export async function encryptedFetch(
           if (hasBody) {
             const plaintext = serializeBody(fetchOptions.body);
             const aad = buildRequestAad(
-              PAYLOAD_ENCRYPTION_VERSION,
+              keyData.keyId,
+              '',
               request.method,
               pathname,
-              keyData.keyId,
-              keyData.sessionId,
-              retryTimestamp,
+              String(retryTimestamp),
               retryNonce,
             );
 
@@ -293,13 +267,13 @@ export async function encryptedFetch(
       try {
         const encryptedBytes = new Uint8Array(await response.arrayBuffer());
 
-        // Build response AAD using the (possibly updated) nonce and sessionId.
+        // Build response AAD — sessionId is empty string on the server side
+        // (key is already session-bound), so match that here.
         const aad = buildResponseAad(
-          PAYLOAD_ENCRYPTION_VERSION,
+          keyData.keyId,
+          '',
           request.method,
           pathname,
-          keyData.keyId,
-          keyData.sessionId,
           requestNonce,
         );
 

@@ -127,11 +127,15 @@ describe('Tenant Management API — Structural Verification', () => {
     });
 
     it('should use runWithTenant for scoped operations', () => {
-      expect(content).toContain('runWithTenant');
+      // runWithTenant is now used in RoleService, not the route
+      const serviceContent = readRoute('services/role-service.ts');
+      expect(serviceContent).toContain('runWithTenant');
     });
 
     it('should check for duplicate role name', () => {
-      expect(content).toContain("'A role with this name already exists in this organization'");
+      // Duplicate check is now in RoleService
+      const serviceContent = readRoute('services/role-service.ts');
+      expect(serviceContent).toContain("'A role with this name already exists in this organization'");
     });
 
     it('should record audit log on role creation', () => {
@@ -148,11 +152,15 @@ describe('Tenant Management API — Structural Verification', () => {
     });
 
     it('should include role permissions in GET response', () => {
-      expect(content).toContain("permissions: { include: { permission: true } }");
+      // Role details with permissions are now in RoleService
+      const serviceContent = readRoute('services/role-service.ts');
+      expect(serviceContent).toContain("permissions: { include: { permission: true } }");
     });
 
     it('should include member count in GET response', () => {
-      expect(content).toContain('_count');
+      // Member count is now in RoleService
+      const serviceContent = readRoute('services/role-service.ts');
+      expect(serviceContent).toContain('_count');
     });
   });
 

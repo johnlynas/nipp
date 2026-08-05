@@ -38,6 +38,17 @@ vi.mock('@/lib/logger', () => ({
   logger: { info: vi.fn(), warn: vi.fn(), error: vi.fn() },
 }));
 
+vi.mock('@/lib/auth', () => ({
+  auth: {
+    api: {
+      getSession: vi.fn().mockResolvedValue({
+        session: { id: 'session-1', userId: 'admin-1' },
+        user: { id: 'admin-1', name: 'Admin User' },
+      }),
+    },
+  },
+}));
+
 const { requireSuperAdmin } = await import('@/lib/require-super-admin');
 const globalDb = (await import('@/lib/global-db')).default;
 const tenantDb = (await import('@/lib/tenant-db')).default;

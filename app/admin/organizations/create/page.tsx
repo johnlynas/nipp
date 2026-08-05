@@ -23,7 +23,7 @@ export default function CreateOrganizationPage() {
 
       if (!response.ok) {
         const errorData = await response.json();
-        throw new Error(errorData.message || 'Failed to create organization');
+        throw new Error(errorData.error || 'Failed to create organization');
       }
 
       // Success - redirect to organizations list

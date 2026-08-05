@@ -88,6 +88,14 @@ export const POST = wrapPiiRoute(async (request, decryptedBody, params) => {
   if (decryptedBody && typeof decryptedBody === 'object') {
     body = decryptedBody as { email?: string; role?: string };
   } else {
+    // decryptedBody is null when encryption mode is 'disabled'.
+    const contentType = request.headers.get('Content-Type') || '';
+    if (contentType.includes('application/octet-stream')) {
+      return NextResponse.json(
+        { error: 'Payload encryption is enabled on the client but disabled on the server. Set PAYLOAD_ENCRYPTION_MODE=permissive or enforce.' },
+        { status: 400 },
+      );
+    }
     try {
       body = await request.json();
     } catch {

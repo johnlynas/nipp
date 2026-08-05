@@ -1,6 +1,13 @@
 import { Prisma } from '@prisma/client';
-import tenantDb from '@/lib/tenant-db';
+import globalDb from '@/lib/global-db';
 import { logger } from '@/lib/logger';
+import { env } from '@/lib/env';
+import { ServiceContext, ValidationError, NotFoundError, ConflictError, ForbiddenError } from '@/lib/services/types';
+import { requirePlatformAdmin, requireAnyAdmin, logFailedAuth } from '@/lib/services/base-service';
+
+// ---------------------------------------------------------------------------
+// Input / Output Types (preserved from original)
+// ---------------------------------------------------------------------------
 
 export interface CreateOrganizationInput {
   name: string;
@@ -11,7 +18,7 @@ export interface CreateOrganizationInput {
 export interface OrganizationWithCount {
   id: string;
   name: string;
-  slug: string | null; // ← Prisma schema allows null
+  slug: string | null;
   createdAt: Date;
   updatedAt: Date;
   _count: {
@@ -35,6 +42,16 @@ export interface PaginatedOrganizationsInput {
   status?: 'PENDING' | 'ACTIVE' | 'SUSPENDED' | 'ARCHIVED';
   search?: string;
 }
+
+export interface UpdateOrganizationInput {
+  name?: string;
+  slug?: string;
+  status?: 'PENDING' | 'ACTIVE' | 'SUSPENDED' | 'ARCHIVED';
+}
+
+// ---------------------------------------------------------------------------
+// Internal helpers (preserved from original)
+// ---------------------------------------------------------------------------
 
 /**
  * Attempt to create an organization, retrying with a numeric suffix
@@ -67,6 +84,10 @@ async function createWithUniqueSlug(
   throw new Error('Unable to generate unique slug');
 }
 
+// ---------------------------------------------------------------------------
+// Service singleton — full CRUD with authorization
+// ---------------------------------------------------------------------------
+
 /**
  * Service responsible for managing Organization business logic.
  * Decouples API routes from direct Prisma database operations.
@@ -85,14 +106,14 @@ export const OrganizationService = {
     if (search) where.name = { contains: search, mode: 'insensitive' };
 
     const [organizations, total] = await Promise.all([
-      tenantDb.organization.findMany({
+      globalDb.organization.findMany({
         where,
         skip,
         take: pageSize,
         orderBy: { createdAt: 'desc' },
         include: { _count: { select: { members: true } } },
       }),
-      tenantDb.organization.count({ where }),
+      globalDb.organization.count({ where }),
     ]);
 
     return {
@@ -108,12 +129,13 @@ export const OrganizationService = {
 
   /**
    * Creates a new organization and optionally bootstraps an admin user/member.
-   * Uses a transaction to ensure atomicity between organization and admin creation.
    */
-  async createOrganization(input: CreateOrganizationInput) {
+  async createOrganization(input: CreateOrganizationInput, ctx: ServiceContext) {
+    requirePlatformAdmin(ctx);
+
     const { name, slug, adminEmail } = input;
 
-    return await tenantDb.$transaction(async (tx) => {
+    return await globalDb.$transaction(async (tx) => {
       // 1. Check for existing organization by name
       const existingOrgByName = await tx.organization.findFirst({
         where: { name: { equals: name, mode: 'insensitive' } },
@@ -166,5 +188,112 @@ export const OrganizationService = {
       // 4. Return the created organization
       return organization;
     });
+  },
+
+  /**
+   * Retrieve a single organization by ID.
+   * Platform Admin: any org. Tenant Admin: own org only.
+   */
+  async getOrganizationById(id: string, ctx: ServiceContext) {
+    requireAnyAdmin(ctx);
+
+    const org = await globalDb.organization.findUnique({ where: { id } });
+    if (!org) {
+      throw new NotFoundError('Organization not found');
+    }
+
+    // Tenant Admin can only read their own org
+    if (ctx.role === 'TENANT_ADMIN') {
+      if (org.id !== ctx.organizationId) {
+        logFailedAuth(ctx, 'getOrganizationById');
+        throw new ForbiddenError('Cannot access organizations outside your organization');
+      }
+    }
+
+    return org;
+  },
+
+  /**
+   * Update an existing organization.
+   * Platform Admin: any org (name, slug, status). Tenant Admin: own org only (name, status; slug immutable).
+   */
+  async updateOrganization(id: string, data: UpdateOrganizationInput, ctx: ServiceContext) {
+    requireAnyAdmin(ctx);
+
+    // Verify org exists first
+    const existingOrg = await globalDb.organization.findUnique({ where: { id } });
+    if (!existingOrg) {
+      throw new NotFoundError('Organization not found');
+    }
+
+    // Tenant Admin can only update their own org
+    if (ctx.role === 'TENANT_ADMIN') {
+      if (existingOrg.id !== ctx.organizationId) {
+        logFailedAuth(ctx, 'updateOrganization');
+        throw new ForbiddenError('Cannot update organizations outside your organization');
+      }
+      // Slug is immutable after creation for Tenant Admins
+      if (data.slug !== undefined) {
+        throw new ValidationError('Slug cannot be changed after organization creation');
+      }
+    }
+
+    // Build update data — only include provided fields
+    const updateData: Prisma.OrganizationUpdateInput = {};
+    if (data.name !== undefined) updateData.name = data.name;
+    if (data.status !== undefined) updateData.status = data.status as Prisma.EnumOrgStatusFieldUpdateOperationsInput;
+    if (ctx.role === 'PLATFORM_ADMIN' && data.slug !== undefined) {
+      updateData.slug = data.slug;
+    }
+
+    const updatedOrg = await globalDb.organization.update({
+      where: { id },
+      data: updateData,
+    });
+
+    logger.info(
+      { userId: ctx.userId, orgId: id, method: 'Service.updateOrganization' },
+      'Organization updated',
+    );
+
+    return updatedOrg;
+  },
+
+  /**
+   * Delete an organization with safety semantics.
+   * Platform Admin only. Throws ConflictError if members exist; Platform org is protected.
+   */
+  async deleteOrganization(id: string, ctx: ServiceContext) {
+    requirePlatformAdmin(ctx);
+
+    const org = await globalDb.organization.findUnique({
+      where: { id },
+      include: { _count: { select: { members: true } } },
+    });
+
+    if (!org) {
+      throw new NotFoundError('Organization not found');
+    }
+
+    // Platform Organization is protected from deletion
+    const platformOrgSlug = env.PLATFORM_ORGANIZATION_ID;
+    if (platformOrgSlug && org.id === platformOrgSlug) {
+      logFailedAuth(ctx, 'deleteOrganization');
+      throw new ForbiddenError('Cannot delete the Platform Organization');
+    }
+
+    // Safety check: cannot delete org with members
+    if (org._count.members > 0) {
+      throw new ConflictError('Cannot delete organization with existing members');
+    }
+
+    await globalDb.organization.delete({ where: { id } });
+
+    logger.info(
+      { userId: ctx.userId, orgId: id, method: 'Service.deleteOrganization' },
+      'Organization deleted',
+    );
+
+    return { success: true };
   },
 };

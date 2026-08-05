@@ -11,6 +11,9 @@ import { requireSuperAdmin } from '@/lib/require-super-admin';
 import globalDb from '@/lib/global-db';
 import tenantDb from '@/lib/tenant-db';
 import { runWithTenant } from '@/lib/tenant-context';
+import { PermissionService } from '@/services/permission-service';
+import { handleServiceError } from '@/lib/services/error-handler';
+import { ServiceContext } from '@/lib/services/types';
 import { recordAuditLog } from '@/lib/audit-log';
 import { logger } from '@/lib/logger';
 
@@ -86,9 +89,7 @@ export async function GET(
     logger.info({ userId: session.user.id, orgId }, 'Fetched tenant permissions grid');
     return NextResponse.json({ roles: grid, allPermissions });
   } catch (error) {
-    const isDbError = error instanceof Error && error.message.includes('Can\'t reach database server');
-    logger.error({ err: error, orgId }, isDbError ? 'Database unavailable fetching permissions' : 'Unexpected error fetching permissions');
-    return NextResponse.json({ error: isDbError ? 'Database unavailable' : 'Internal Server Error' }, { status: isDbError ? 503 : 500 });
+    return handleDbOrServiceError(error);
   }
 }
 
@@ -200,8 +201,17 @@ export async function PATCH(
     logger.info({ userId: session.user.id, orgId, assigned, revoked }, 'Updated tenant permissions');
     return NextResponse.json({ message: 'Permissions updated', results });
   } catch (error) {
-    const isDbError = error instanceof Error && error.message.includes('Can\'t reach database server');
-    logger.error({ err: error, orgId }, isDbError ? 'Database unavailable updating permissions' : 'Unexpected error updating permissions');
-    return NextResponse.json({ error: isDbError ? 'Database unavailable' : 'Internal Server Error' }, { status: isDbError ? 503 : 500 });
+    return handleDbOrServiceError(error);
   }
+}
+
+/**
+ * Handle both database errors (503) and service-layer errors.
+ */
+function handleDbOrServiceError(error: unknown): ReturnType<typeof NextResponse.json> {
+  const isDbError = error instanceof Error && error.message.includes('Can\'t reach database server');
+  if (isDbError) {
+    return NextResponse.json({ error: 'Database unavailable' }, { status: 503 });
+  }
+  return handleServiceError(error);
 }

@@ -31,6 +31,7 @@ export default function OrganizationDetailPage() {
   const [activeTab, setActiveTab] = useState<Tab>('overview');
   const [org, setOrg] = useState<OrganizationDetail | null>(null);
   const [loading, setLoading] = useState(true);
+  const [statusChanging, setStatusChanging] = useState(false);
 
   useEffect(() => {
     fetchOrganization();
@@ -52,6 +53,7 @@ export default function OrganizationDetailPage() {
   }
 
   async function handleStatusChange(newStatus: string) {
+    setStatusChanging(true);
     try {
       const res = await encryptedFetch(`/api/admin/organizations/${orgId}/status`, {
         method: 'PATCH',
@@ -60,20 +62,16 @@ export default function OrganizationDetailPage() {
       });
 
       if (res.ok) {
-        // Force a fresh fetch to bypass any stale cache
-        const freshRes = await encryptedFetch(`/api/admin/organizations/${orgId}`, { pii: true });
-        if (freshRes.ok) {
-          const data = await freshRes.json();
-          setOrg(data);
-        }
+        // Optimistically update the UI — avoids stale cache issues from a second fetch
+        setOrg((prev) => (prev ? { ...prev, status: newStatus as OrganizationDetail['status'] } : prev));
       } else {
         const data = await res.json();
         alert(data.error || 'Failed to change status');
-        // Refresh the org data to sync UI with server state
-        fetchOrganization();
       }
     } catch (error) {
       console.error('Failed to change status:', error);
+    } finally {
+      setStatusChanging(false);
     }
   }
 
@@ -110,22 +108,42 @@ export default function OrganizationDetailPage() {
           {org.status !== 'ARCHIVED' && (
             <div className="mb-6 flex gap-2">
               {org.status === 'PENDING' && (
-                <button onClick={() => handleStatusChange('ACTIVE')} className="rounded px-3 py-1.5 text-sm font-medium text-white" style={{ backgroundColor: '#28a745' }}>
+                <button
+                  onClick={() => handleStatusChange('ACTIVE')}
+                  disabled={statusChanging || loading}
+                  className="rounded px-3 py-1.5 text-sm font-medium text-white disabled:opacity-50"
+                  style={{ backgroundColor: '#28a745' }}
+                >
                   Activate
                 </button>
               )}
               {org.status === 'ACTIVE' && (
-                <button onClick={() => handleStatusChange('SUSPENDED')} className="rounded px-3 py-1.5 text-sm font-medium text-white" style={{ backgroundColor: '#dc3545' }}>
+                <button
+                  onClick={() => handleStatusChange('SUSPENDED')}
+                  disabled={statusChanging || loading}
+                  className="rounded px-3 py-1.5 text-sm font-medium text-white disabled:opacity-50"
+                  style={{ backgroundColor: '#dc3545' }}
+                >
                   Suspend
                 </button>
               )}
               {(org.status === 'ACTIVE' || org.status === 'SUSPENDED') && (
-                <button onClick={() => handleStatusChange('ARCHIVED')} className="rounded px-3 py-1.5 text-sm font-medium text-white" style={{ backgroundColor: '#6c757d' }}>
+                <button
+                  onClick={() => handleStatusChange('ARCHIVED')}
+                  disabled={statusChanging || loading}
+                  className="rounded px-3 py-1.5 text-sm font-medium text-white disabled:opacity-50"
+                  style={{ backgroundColor: '#6c757d' }}
+                >
                   Archive
                 </button>
               )}
               {org.status === 'SUSPENDED' && (
-                <button onClick={() => handleStatusChange('ACTIVE')} className="rounded px-3 py-1.5 text-sm font-medium text-white" style={{ backgroundColor: '#28a745' }}>
+                <button
+                  onClick={() => handleStatusChange('ACTIVE')}
+                  disabled={statusChanging || loading}
+                  className="rounded px-3 py-1.5 text-sm font-medium text-white disabled:opacity-50"
+                  style={{ backgroundColor: '#28a745' }}
+                >
                   Reactivate
                 </button>
               )}

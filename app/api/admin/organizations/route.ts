@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { requireSuperAdmin } from '@/lib/require-super-admin';
 import { OrganizationService } from '@/services/organization-service';
+import { ServiceContext } from '@/lib/services/types';
 import { recordAuditLog } from '@/lib/audit-log';
 import { logger } from '@/lib/logger';
 import { wrapPiiRoute } from '@/lib/payload-middleware';
@@ -65,6 +66,18 @@ export const POST = wrapPiiRoute(async (request, decryptedBody) => {
     if (decryptedBody && typeof decryptedBody === 'object') {
       body = decryptedBody as { name?: string; slug?: string; adminEmail?: string };
     } else {
+      // decryptedBody is null when encryption mode is 'disabled'.
+      // In that case the body should be plaintext JSON — but if the client
+      // sent an encrypted payload anyway, give a clear error instead of a
+      // confusing JSON parse failure.
+      const contentType = request.headers.get('Content-Type') || '';
+      if (contentType.includes('application/octet-stream')) {
+        logger.warn({ method: 'POST' }, 'Received encrypted body but encryption mode is disabled');
+        return NextResponse.json(
+          { error: 'Payload encryption is enabled on the client but disabled on the server. Set PAYLOAD_ENCRYPTION_MODE=permissive or enforce.' },
+          { status: 400 },
+        );
+      }
       try {
         body = await request.json();
         logger.debug({ method: 'POST' }, 'Request body parsed');
@@ -80,7 +93,11 @@ export const POST = wrapPiiRoute(async (request, decryptedBody) => {
     }
 
     try {
-      const organization = await OrganizationService.createOrganization({ name, slug, adminEmail });
+      const ctx: ServiceContext = {
+        userId: session.user.id,
+        role: 'PLATFORM_ADMIN',
+      };
+      const organization = await OrganizationService.createOrganization({ name, slug, adminEmail }, ctx);
 
       logger.info({ orgId: organization.id, method: 'POST' }, 'Organization created');
 

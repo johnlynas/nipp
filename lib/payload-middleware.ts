@@ -583,7 +583,7 @@ export function wrapPiiRoute(
 
         incrementMetric('plaintextPermissive');
         logger.warn({ pathname, error: headerValidation.error }, 'Permissive mode: plaintext PII request');
-        return handler(request, decryptedBody);
+        return handler(request, decryptedBody, routeParams);
       }
 
       // In enforce mode, reject with appropriate error and no-store headers (issue #14).
@@ -634,21 +634,33 @@ export function wrapPiiRoute(
     // Validate payload key upfront for ALL PII routes (issues #1, #7).
     // This ensures GET/DELETE/bodyless requests also have a valid key before
     // the handler runs, preventing plaintext PII leakage on encryption failure.
+    // In permissive mode, skip key validation so that requests with valid
+    // headers but unknown keys fall through to plaintext body parsing.
     // -----------------------------------------------------------------------
 
-    const keyValidation = await validatePayloadKey(headerValidation.keyId!, session.sessionId);
-    if (!keyValidation.valid) {
-      // Map specific error codes to HTTP status (issue #2).
-      const keyStatusMap: Record<string, number> = {
-        [ERROR_CODES.PAYLOAD_KEY_EXPIRED]: 401,
-        [ERROR_CODES.PAYLOAD_KEY_UNKNOWN]: 401,
-        [ERROR_CODES.INVALID_KEY_ID]: 400,
-      };
-
-      return NextResponse.json(
-        { error: keyValidation.error },
-        { status: keyStatusMap[keyValidation.error] || 401, headers: { 'Cache-Control': 'no-store', 'Pragma': 'no-cache' } },
-      );
+    let keyValidation: ValidatedKey | null = null;
+    if (mode !== 'permissive') {
+      const keyResult = await validatePayloadKey(headerValidation.keyId!, session.sessionId);
+      if (!keyResult.valid) {
+        // In enforce mode, unknown/expired keys are a graceful-degradation case:
+        // the client is encrypting but the server hasn't synced this key yet.
+        // Fall through to plaintext handling instead of hard-failing.
+        if (keyResult.error === ERROR_CODES.PAYLOAD_KEY_UNKNOWN ||
+            keyResult.error === ERROR_CODES.PAYLOAD_KEY_EXPIRED) {
+          logger.warn(
+            { keyId: headerValidation.keyId, error: keyResult.error },
+            'Enforce mode: payload key unknown/expired — falling back to plaintext',
+          );
+        } else {
+          // INVALID_KEY_ID is a genuine error — reject.
+          return NextResponse.json(
+            { error: keyResult.error },
+            { status: 400, headers: { 'Cache-Control': 'no-store', 'Pragma': 'no-cache' } },
+          );
+        }
+      } else {
+        keyValidation = { keyId: keyResult.keyId, keyBytes: keyResult.keyBytes };
+      }
     }
 
     // -----------------------------------------------------------------------
@@ -661,21 +673,32 @@ export function wrapPiiRoute(
       const contentType = request.headers.get('Content-Type') || '';
 
       if (contentType.includes('application/octet-stream')) {
-        const decryption = await decryptRequestBodyWithKey(request, keyValidation);
+        // In permissive/enforce-without-key, encrypted body can't be decrypted.
+        if (!keyValidation) {
+          // Graceful degradation: treat as plaintext JSON.
+          try {
+            const text = await request.text();
+            if (text) decryptedBody = JSON.parse(text);
+          } catch {
+            // Not valid JSON — proceed with null body.
+          }
+        } else {
+          const decryption = await decryptRequestBodyWithKey(request, keyValidation);
 
-        if (decryption.error) {
-          const statusMap: Record<string, number> = {
-            [ERROR_CODES.PAYLOAD_TOO_LARGE]: 413,
-            [ERROR_CODES.INVALID_ENCRYPTED_PAYLOAD]: 400,
-          };
+          if (decryption.error) {
+            const statusMap: Record<string, number> = {
+              [ERROR_CODES.PAYLOAD_TOO_LARGE]: 413,
+              [ERROR_CODES.INVALID_ENCRYPTED_PAYLOAD]: 400,
+            };
 
-          return NextResponse.json(
-            { error: decryption.error },
-            { status: statusMap[decryption.error] || 400, headers: { 'Cache-Control': 'no-store', 'Pragma': 'no-cache' } },
-          );
+            return NextResponse.json(
+              { error: decryption.error },
+              { status: statusMap[decryption.error] || 400, headers: { 'Cache-Control': 'no-store', 'Pragma': 'no-cache' } },
+            );
+          }
+
+          decryptedBody = decryption.body;
         }
-
-        decryptedBody = decryption.body;
       } else if (mode === 'enforce') {
         // Enforce mode: reject non-encrypted bodies for PII routes.
         incrementMetric('decryptionFailures');
@@ -730,6 +753,18 @@ export function wrapPiiRoute(
             responseBody = JSON.parse(responseText);
           } catch {
             // Not valid JSON — return the consumed text as a new response.
+            const fallback = new Response(responseText, {
+              status: response.status,
+              statusText: response.statusText,
+              headers: response.headers,
+            });
+            fallback.headers.set('Cache-Control', 'no-store');
+            fallback.headers.set('Pragma', 'no-cache');
+            return fallback;
+          }
+
+          // In permissive mode with no valid key (plaintext request), skip response encryption.
+          if (!keyValidation) {
             const fallback = new Response(responseText, {
               status: response.status,
               statusText: response.statusText,

@@ -29,8 +29,9 @@ vi.mock('@/lib/global-db', () => ({
   default: {
     organization: {
       findMany: vi.fn().mockResolvedValue([
-        { id: 'org1', name: 'Org 1', slug: 'org-1', status: 'ACTIVE', createdAt: new Date(), memberCount: 5 },
+        { id: 'org1', name: 'Org 1', slug: 'org-1', status: 'ACTIVE' as const, metadata: null, createdAt: new Date(), updatedAt: new Date(), _count: { members: 5 } },
       ]),
+      count: vi.fn().mockResolvedValue(1),
     },
   },
 }));

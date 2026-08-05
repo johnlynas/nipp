@@ -9,9 +9,9 @@ import { NextRequest, NextResponse } from 'next/server';
 import { revalidateTag } from 'next/cache';
 import { requireSuperAdmin } from '@/lib/require-super-admin';
 import globalDb from '@/lib/global-db';
-import tenantDb from '@/lib/tenant-db';
-import { runWithTenant } from '@/lib/tenant-context';
-import { recordAuditLog } from '@/lib/audit-log';
+import { RoleService } from '@/services/role-service';
+import { handleServiceError } from '@/lib/services/error-handler';
+import type { ServiceContext } from '@/lib/services/types';
 import { logger } from '@/lib/logger';
 
 export const runtime = 'nodejs';
@@ -40,23 +40,18 @@ export async function GET(
       return NextResponse.json({ error: 'Organization not found' }, { status: 404 });
     }
 
-    // Fetch roles within tenant context (tenantDb — orgId auto-injected by extension)
-    const roles = await runWithTenant(orgId, async () => {
-      return tenantDb.role.findMany({
-        include: {
-          permissions: { include: { permission: true } },
-          _count: { select: { memberRoles: true } },
-        },
-        orderBy: [{ isDefault: 'desc' }, { name: 'asc' }],
-      });
-    });
+    // Construct service context — Platform Admin acting on target org
+    const ctx: ServiceContext = {
+      userId: session.user.id,
+      role: 'PLATFORM_ADMIN',
+    };
 
-    logger.info({ userId: session.user.id, orgId, count: roles.length }, 'Fetched tenant roles');
-    return NextResponse.json({ roles });
+    const result = await RoleService.list(orgId, {}, { page: 1, pageSize: 100 }, ctx);
+
+    logger.info({ userId: session.user.id, orgId, count: result.items.length }, 'Fetched tenant roles');
+    return NextResponse.json({ roles: result.items });
   } catch (error) {
-    const isDbError = error instanceof Error && error.message.includes('Can\'t reach database server');
-    logger.error({ err: error, orgId }, isDbError ? 'Database unavailable fetching roles' : 'Unexpected error fetching roles');
-    return NextResponse.json({ error: isDbError ? 'Database unavailable' : 'Internal Server Error' }, { status: isDbError ? 503 : 500 });
+    return handleDbOrServiceError(error);
   }
 }
 
@@ -83,8 +78,7 @@ export async function POST(
     return NextResponse.json({ error: 'Invalid request body' }, { status: 400 });
   }
 
-  const { name, description } = body;
-  if (!name) {
+  if (!body.name) {
     return NextResponse.json({ error: 'Role name is required' }, { status: 400 });
   }
 
@@ -95,29 +89,24 @@ export async function POST(
       return NextResponse.json({ error: 'Organization not found' }, { status: 404 });
     }
 
-    // Check for duplicate name (globalDb)
-    const existingRole = await globalDb.role.findFirst({ where: { name, organizationId: orgId } });
-    if (existingRole) {
-      return NextResponse.json({ error: 'A role with this name already exists in this organization' }, { status: 409 });
-    }
+    // Construct service context — Platform Admin acting on target org
+    const ctx: ServiceContext = {
+      userId: session.user.id,
+      role: 'PLATFORM_ADMIN',
+    };
 
-    // Create role within tenant context (tenantDb)
-    const role = await runWithTenant(orgId, async () => {
-      return tenantDb.role.create({
-        data: { name, description: description || '', organizationId: orgId, isDefault: false },
-      });
-    });
+    const role = await RoleService.create({ name: body.name, description: body.description }, orgId, ctx);
 
     // Audit log (globalDb)
     await recordAuditLog({
       userId: session.user.id,
-      userName: session.user.name || undefined,
+      userName: session.user.name ?? null,
       action: 'role.created',
       success: true,
-      resourceType: 'Organization.Role',
-      resourceId: role.id,
+      resourceType: 'Organization.Role' as string,
+      resourceId: role.id ?? null,
       organizationId: orgId,
-    });
+    } as never);
 
     // Invalidate cache
     revalidateTag('org');
@@ -125,8 +114,34 @@ export async function POST(
     logger.info({ userId: session.user.id, orgId, roleId: role.id }, 'Created role in tenant organization');
     return NextResponse.json({ message: 'Role created successfully', role }, { status: 201 });
   } catch (error) {
-    const isDbError = error instanceof Error && error.message.includes('Can\'t reach database server');
-    logger.error({ err: error, orgId }, isDbError ? 'Database unavailable creating role' : 'Unexpected error creating role');
-    return NextResponse.json({ error: isDbError ? 'Database unavailable' : 'Internal Server Error' }, { status: isDbError ? 503 : 500 });
+    return handleDbOrServiceError(error);
   }
+}
+
+// ---------------------------------------------------------------------------
+// Audit log helper (inline to avoid circular dependency)
+// ---------------------------------------------------------------------------
+
+/**
+ * Handle both database errors (503) and service-layer errors.
+ */
+function handleDbOrServiceError(error: unknown): ReturnType<typeof NextResponse.json> {
+  const isDbError = error instanceof Error && error.message.includes('Can\'t reach database server');
+  if (isDbError) {
+    return NextResponse.json({ error: 'Database unavailable' }, { status: 503 });
+  }
+  return handleServiceError(error);
+}
+
+async function recordAuditLog(params: {
+  userId: string;
+  userName?: string | null;
+  action: string;
+  success: boolean;
+  resourceType?: string | null;
+  resourceId?: string | null;
+  organizationId?: string | null;
+}): Promise<void> {
+  const { recordAuditLog: rl } = await import('@/lib/audit-log');
+  return rl(params as never);
 }

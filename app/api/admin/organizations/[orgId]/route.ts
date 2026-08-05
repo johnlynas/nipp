@@ -95,6 +95,13 @@ export const PATCH = wrapPiiRoute(async (request, decryptedBody, params) => {
     if (decryptedBody && typeof decryptedBody === 'object') {
       body = decryptedBody as typeof body;
     } else {
+      const contentType = request.headers.get('Content-Type') || '';
+      if (contentType.includes('application/octet-stream')) {
+        return NextResponse.json(
+          { error: 'Payload encryption is enabled on the client but disabled on the server. Set PAYLOAD_ENCRYPTION_MODE=permissive or enforce.' },
+          { status: 400 },
+        );
+      }
       try {
         body = await request.json();
       } catch {
