@@ -45,6 +45,7 @@ The Super Admin dashboard has four management pages, but they are inconsistent i
 - Create Users API route using `UserService` (GET/POST/PATCH/DELETE)
 - Add per-row action buttons (View, Edit, Delete with Lucide icons) to all four tables
 - Add inline edit forms (modal or expandable row) for View/Edit operations
+- Add "Roles" and "Users" navigation links to the admin sidebar layout so Super Admins can access all four management pages from a single nav
 
 **Out of scope:**
 - Audit Logs page redesign (separate concern)
