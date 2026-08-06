@@ -1,30 +1,31 @@
 /**
- * GET /api/admin/permissions/[id]
- * PATCH /api/admin/permissions/[id]
- * DELETE /api/admin/permissions/[id]
+ * GET /api/admin/roles/[roleId]
+ * PATCH /api/admin/roles/[roleId]
+ * DELETE /api/admin/roles/[roleId]
  *
- * Super Admin only — single permission CRUD via PermissionService.
+ * Super Admin only — single role CRUD via RoleService.
  */
 
 import { NextRequest, NextResponse } from 'next/server';
 import { requireSuperAdmin } from '@/lib/require-super-admin';
-import { PermissionService, UpdatePermissionInput } from '@/services/permission-service';
+import { RoleService, UpdateRoleInput } from '@/services/role-service';
 import { ServiceContext } from '@/lib/services/types';
 import { recordAuditLog } from '@/lib/audit-log';
 import { logger } from '@/lib/logger';
 import { wrapPiiRoute, PiiRouteParams } from '@/lib/payload-middleware';
+import { env } from '@/lib/env';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 export const revalidate = 0;
 
 // ---------------------------------------------------------------------------
-// GET — Fetch permission by ID via PermissionService
+// GET — Fetch role by ID via RoleService
 // ---------------------------------------------------------------------------
 
 export const GET = wrapPiiRoute(async (request, _decryptedBody, params) => {
   try {
-    logger.info({ route: '/api/admin/permissions/[id]', method: 'GET' }, 'Request received');
+    logger.info({ route: '/api/admin/roles/[roleId]', method: 'GET' }, 'Request received');
 
     const authResult = await requireSuperAdmin(request.headers);
     if (!authResult.authorized) {
@@ -32,36 +33,41 @@ export const GET = wrapPiiRoute(async (request, _decryptedBody, params) => {
     }
 
     const session = authResult.session!;
-    const permissionId = params?.id;
-    if (!permissionId) {
-      return NextResponse.json({ error: 'Permission ID is required' }, { status: 400 });
+    const roleId = params?.roleId;
+    if (!roleId) {
+      return NextResponse.json({ error: 'Role ID is required' }, { status: 400 });
     }
+
+    const targetOrgId = env.PLATFORM_ORGANIZATION_ID!;
 
     const ctx: ServiceContext = {
       userId: session.user.id,
       role: 'PLATFORM_ADMIN',
     };
 
-    const permission = await PermissionService.getById(permissionId, ctx);
+    const role = await RoleService.getById(roleId, targetOrgId, ctx);
 
-    return NextResponse.json({ permission });
+    return NextResponse.json({ role });
   } catch (error) {
     if (error instanceof Error && error.name === 'NotFoundError') {
       return NextResponse.json({ error: error.message }, { status: 404 });
     }
+    if (error instanceof Error && error.name === 'ForbiddenError') {
+      return NextResponse.json({ error: error.message }, { status: 403 });
+    }
     const isDbError = error instanceof Error && error.message.includes('Can\'t reach database server');
-    logger.error({ err: error, route: '/api/admin/permissions/[id]', method: 'GET' }, isDbError ? '[Permissions API] Database unavailable' : '[Permissions API] Unexpected error');
+    logger.error({ err: error, route: '/api/admin/roles/[roleId]', method: 'GET' }, isDbError ? '[Roles API] Database unavailable' : '[Roles API] Unexpected error');
     return NextResponse.json({ error: isDbError ? 'Database unavailable' : 'Internal server error' }, { status: isDbError ? 503 : 500 });
   }
 });
 
 // ---------------------------------------------------------------------------
-// PATCH — Update permission via PermissionService
+// PATCH — Update role via RoleService
 // ---------------------------------------------------------------------------
 
 export const PATCH = wrapPiiRoute(async (request, decryptedBody, params) => {
   try {
-    logger.info({ route: '/api/admin/permissions/[id]', method: 'PATCH' }, 'Request received');
+    logger.info({ route: '/api/admin/roles/[roleId]', method: 'PATCH' }, 'Request received');
 
     const authResult = await requireSuperAdmin(request.headers);
     if (!authResult.authorized) {
@@ -69,15 +75,17 @@ export const PATCH = wrapPiiRoute(async (request, decryptedBody, params) => {
     }
 
     const session = authResult.session!;
-    const permissionId = params?.id;
-    if (!permissionId) {
-      return NextResponse.json({ error: 'Permission ID is required' }, { status: 400 });
+    const roleId = params?.roleId;
+    if (!roleId) {
+      return NextResponse.json({ error: 'Role ID is required' }, { status: 400 });
     }
 
+    const targetOrgId = env.PLATFORM_ORGANIZATION_ID!;
+
     // Parse body from decrypted payload or raw JSON
-    let body: UpdatePermissionInput;
+    let body: UpdateRoleInput;
     if (decryptedBody && typeof decryptedBody === 'object') {
-      body = decryptedBody as UpdatePermissionInput;
+      body = decryptedBody as UpdateRoleInput;
     } else {
       const contentType = request.headers.get('Content-Type') || '';
       if (contentType.includes('application/octet-stream')) {
@@ -98,20 +106,20 @@ export const PATCH = wrapPiiRoute(async (request, decryptedBody, params) => {
       role: 'PLATFORM_ADMIN',
     };
 
-    const updatedPermission = await PermissionService.update(permissionId, body, ctx);
+    const updatedRole = await RoleService.update(roleId, body, targetOrgId, ctx);
 
-    logger.info({ userId: session.user.id, permissionId }, '[Permissions API] Permission updated');
+    logger.info({ userId: session.user.id, roleId }, '[Roles API] Role updated');
 
     await recordAuditLog({
       userId: session.user.id,
       userName: (session.user as { name?: string }).name ?? undefined,
-      action: 'permission.updated',
-      resourceType: 'Permission',
-      resourceId: permissionId,
+      action: 'role.updated',
+      resourceType: 'Role',
+      resourceId: roleId,
       success: true,
-    }).catch((err) => logger.error({ err }, 'Failed to record audit log for permission update'));
+    }).catch((err) => logger.error({ err }, 'Failed to record audit log for role update'));
 
-    return NextResponse.json({ permission: updatedPermission });
+    return NextResponse.json({ role: updatedRole });
   } catch (error) {
     if (error instanceof Error && error.name === 'NotFoundError') {
       return NextResponse.json({ error: error.message }, { status: 404 });
@@ -122,19 +130,22 @@ export const PATCH = wrapPiiRoute(async (request, decryptedBody, params) => {
     if (error instanceof Error && error.name === 'ValidationError') {
       return NextResponse.json({ error: error.message }, { status: 400 });
     }
+    if (error instanceof Error && error.name === 'ForbiddenError') {
+      return NextResponse.json({ error: error.message }, { status: 403 });
+    }
     const isDbError = error instanceof Error && error.message.includes('Can\'t reach database server');
-    logger.error({ err: error, route: '/api/admin/permissions/[id]', method: 'PATCH' }, isDbError ? '[Permissions API] Database unavailable' : '[Permissions API] Unexpected error');
+    logger.error({ err: error, route: '/api/admin/roles/[roleId]', method: 'PATCH' }, isDbError ? '[Roles API] Database unavailable' : '[Roles API] Unexpected error');
     return NextResponse.json({ error: isDbError ? 'Database unavailable' : 'Internal server error' }, { status: isDbError ? 503 : 500 });
   }
 });
 
 // ---------------------------------------------------------------------------
-// DELETE — Delete permission via PermissionService
+// DELETE — Delete role via RoleService
 // ---------------------------------------------------------------------------
 
 export const DELETE = wrapPiiRoute(async (request, _decryptedBody, params) => {
   try {
-    logger.info({ route: '/api/admin/permissions/[id]', method: 'DELETE' }, 'Request received');
+    logger.info({ route: '/api/admin/roles/[roleId]', method: 'DELETE' }, 'Request received');
 
     const authResult = await requireSuperAdmin(request.headers);
     if (!authResult.authorized) {
@@ -142,30 +153,32 @@ export const DELETE = wrapPiiRoute(async (request, _decryptedBody, params) => {
     }
 
     const session = authResult.session!;
-    const permissionId = params?.id;
-    if (!permissionId) {
-      return NextResponse.json({ error: 'Permission ID is required' }, { status: 400 });
+    const roleId = params?.roleId;
+    if (!roleId) {
+      return NextResponse.json({ error: 'Role ID is required' }, { status: 400 });
     }
+
+    const targetOrgId = env.PLATFORM_ORGANIZATION_ID!;
 
     const ctx: ServiceContext = {
       userId: session.user.id,
       role: 'PLATFORM_ADMIN',
     };
 
-    await PermissionService.delete(permissionId, ctx);
+    await RoleService.delete(roleId, targetOrgId, ctx);
 
-    logger.info({ userId: session.user.id, permissionId }, '[Permissions API] Permission deleted');
+    logger.info({ userId: session.user.id, roleId }, '[Roles API] Role deleted');
 
     await recordAuditLog({
       userId: session.user.id,
       userName: (session.user as { name?: string }).name ?? undefined,
-      action: 'permission.deleted',
-      resourceType: 'Permission',
-      resourceId: permissionId,
+      action: 'role.deleted',
+      resourceType: 'Role',
+      resourceId: roleId,
       success: true,
-    }).catch((err) => logger.error({ err }, 'Failed to record audit log for permission delete'));
+    }).catch((err) => logger.error({ err }, 'Failed to record audit log for role delete'));
 
-    return NextResponse.json({ message: 'Permission deleted' });
+    return NextResponse.json({ message: 'Role deleted' });
   } catch (error) {
     if (error instanceof Error && error.name === 'NotFoundError') {
       return NextResponse.json({ error: error.message }, { status: 404 });
@@ -174,7 +187,7 @@ export const DELETE = wrapPiiRoute(async (request, _decryptedBody, params) => {
       return NextResponse.json({ error: error.message }, { status: 409 });
     }
     const isDbError = error instanceof Error && error.message.includes('Can\'t reach database server');
-    logger.error({ err: error, route: '/api/admin/permissions/[id]', method: 'DELETE' }, isDbError ? '[Permissions API] Database unavailable' : '[Permissions API] Unexpected error');
+    logger.error({ err: error, route: '/api/admin/roles/[roleId]', method: 'DELETE' }, isDbError ? '[Roles API] Database unavailable' : '[Roles API] Unexpected error');
     return NextResponse.json({ error: isDbError ? 'Database unavailable' : 'Internal server error' }, { status: isDbError ? 503 : 500 });
   }
 });

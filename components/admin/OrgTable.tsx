@@ -1,5 +1,6 @@
 'use client';
 
+import { Eye, Pencil, Trash2 } from 'lucide-react';
 import { OrgStatusBadge } from './OrgStatusBadge';
 
 interface Organization {
@@ -19,9 +20,9 @@ interface OrgTableProps {
 }
 
 /**
- * Sortable, filterable organization table.
+ * Sortable, filterable organization table with Lucide icon action buttons.
  */
-export function OrgTable({ organizations, onView }: OrgTableProps) {
+export function OrgTable({ organizations, onView, onEdit, onDelete }: OrgTableProps) {
   const formatDate = (date: string | Date) => {
     return new Date(date).toLocaleDateString('en-GB', {
       year: 'numeric',
@@ -54,7 +55,7 @@ export function OrgTable({ organizations, onView }: OrgTableProps) {
         </thead>
         <tbody className="divide-y divide-gray-200 bg-white">
           {organizations.map((org) => (
-            <tr key={org.id}>
+            <tr key={org.id} className="hover:bg-gray-50">
               <td className="whitespace-nowrap px-6 py-4 text-sm font-medium" style={{ color: '#1B2A4A' }}>
                 {org.name}
               </td>
@@ -67,16 +68,39 @@ export function OrgTable({ organizations, onView }: OrgTableProps) {
               <td className="whitespace-nowrap px-6 py-4 text-sm text-gray-500">
                 {formatDate(org.createdAt)}
               </td>
-              <td className="whitespace-nowrap px-6 py-4 text-right text-sm">
-                {onView && (
-                  <button
-                    onClick={() => onView(org.id)}
-                    className="mr-3 text-blue-600 hover:text-blue-800"
-                    aria-label={`View ${org.name}`}
-                  >
-                    View
-                  </button>
-                )}
+              <td className="whitespace-nowrap px-6 py-4 text-right">
+                <div className="flex justify-end gap-2">
+                  {onView && (
+                    <button
+                      onClick={() => onView(org.id)}
+                      className="text-blue-600 hover:text-blue-800 transition-colors"
+                      title="View"
+                      aria-label={`View ${org.name}`}
+                    >
+                      <Eye className="w-4 h-4" />
+                    </button>
+                  )}
+                  {onEdit && (
+                    <button
+                      onClick={() => onEdit(org.id)}
+                      className="text-amber-600 hover:text-amber-800 transition-colors"
+                      title="Edit"
+                      aria-label={`Edit ${org.name}`}
+                    >
+                      <Pencil className="w-4 h-4" />
+                    </button>
+                  )}
+                  {onDelete && (
+                    <button
+                      onClick={() => onDelete(org.id)}
+                      className="text-red-600 hover:text-red-800 transition-colors"
+                      title="Delete"
+                      aria-label={`Delete ${org.name}`}
+                    >
+                      <Trash2 className="w-4 h-4" />
+                    </button>
+                  )}
+                </div>
               </td>
             </tr>
           ))}

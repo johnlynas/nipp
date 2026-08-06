@@ -1,14 +1,14 @@
 /**
- * GET /api/admin/permissions/[id]
- * PATCH /api/admin/permissions/[id]
- * DELETE /api/admin/permissions/[id]
+ * GET /api/admin/users/[userId]
+ * PATCH /api/admin/users/[userId]
+ * DELETE /api/admin/users/[userId]
  *
- * Super Admin only — single permission CRUD via PermissionService.
+ * Super Admin only — single user CRUD via UserService.
  */
 
 import { NextRequest, NextResponse } from 'next/server';
 import { requireSuperAdmin } from '@/lib/require-super-admin';
-import { PermissionService, UpdatePermissionInput } from '@/services/permission-service';
+import { UserService, UpdateUserInput } from '@/services/user-service';
 import { ServiceContext } from '@/lib/services/types';
 import { recordAuditLog } from '@/lib/audit-log';
 import { logger } from '@/lib/logger';
@@ -19,12 +19,12 @@ export const dynamic = 'force-dynamic';
 export const revalidate = 0;
 
 // ---------------------------------------------------------------------------
-// GET — Fetch permission by ID via PermissionService
+// GET — Fetch user by ID via UserService
 // ---------------------------------------------------------------------------
 
 export const GET = wrapPiiRoute(async (request, _decryptedBody, params) => {
   try {
-    logger.info({ route: '/api/admin/permissions/[id]', method: 'GET' }, 'Request received');
+    logger.info({ route: '/api/admin/users/[userId]', method: 'GET' }, 'Request received');
 
     const authResult = await requireSuperAdmin(request.headers);
     if (!authResult.authorized) {
@@ -32,9 +32,9 @@ export const GET = wrapPiiRoute(async (request, _decryptedBody, params) => {
     }
 
     const session = authResult.session!;
-    const permissionId = params?.id;
-    if (!permissionId) {
-      return NextResponse.json({ error: 'Permission ID is required' }, { status: 400 });
+    const userId = params?.userId;
+    if (!userId) {
+      return NextResponse.json({ error: 'User ID is required' }, { status: 400 });
     }
 
     const ctx: ServiceContext = {
@@ -42,26 +42,29 @@ export const GET = wrapPiiRoute(async (request, _decryptedBody, params) => {
       role: 'PLATFORM_ADMIN',
     };
 
-    const permission = await PermissionService.getById(permissionId, ctx);
+    const user = await UserService.getById(userId, ctx);
 
-    return NextResponse.json({ permission });
+    return NextResponse.json({ user });
   } catch (error) {
     if (error instanceof Error && error.name === 'NotFoundError') {
       return NextResponse.json({ error: error.message }, { status: 404 });
     }
+    if (error instanceof Error && error.name === 'ForbiddenError') {
+      return NextResponse.json({ error: error.message }, { status: 403 });
+    }
     const isDbError = error instanceof Error && error.message.includes('Can\'t reach database server');
-    logger.error({ err: error, route: '/api/admin/permissions/[id]', method: 'GET' }, isDbError ? '[Permissions API] Database unavailable' : '[Permissions API] Unexpected error');
+    logger.error({ err: error, route: '/api/admin/users/[userId]', method: 'GET' }, isDbError ? '[Users API] Database unavailable' : '[Users API] Unexpected error');
     return NextResponse.json({ error: isDbError ? 'Database unavailable' : 'Internal server error' }, { status: isDbError ? 503 : 500 });
   }
 });
 
 // ---------------------------------------------------------------------------
-// PATCH — Update permission via PermissionService
+// PATCH — Update user via UserService
 // ---------------------------------------------------------------------------
 
 export const PATCH = wrapPiiRoute(async (request, decryptedBody, params) => {
   try {
-    logger.info({ route: '/api/admin/permissions/[id]', method: 'PATCH' }, 'Request received');
+    logger.info({ route: '/api/admin/users/[userId]', method: 'PATCH' }, 'Request received');
 
     const authResult = await requireSuperAdmin(request.headers);
     if (!authResult.authorized) {
@@ -69,15 +72,15 @@ export const PATCH = wrapPiiRoute(async (request, decryptedBody, params) => {
     }
 
     const session = authResult.session!;
-    const permissionId = params?.id;
-    if (!permissionId) {
-      return NextResponse.json({ error: 'Permission ID is required' }, { status: 400 });
+    const userId = params?.userId;
+    if (!userId) {
+      return NextResponse.json({ error: 'User ID is required' }, { status: 400 });
     }
 
     // Parse body from decrypted payload or raw JSON
-    let body: UpdatePermissionInput;
+    let body: UpdateUserInput;
     if (decryptedBody && typeof decryptedBody === 'object') {
-      body = decryptedBody as UpdatePermissionInput;
+      body = decryptedBody as UpdateUserInput;
     } else {
       const contentType = request.headers.get('Content-Type') || '';
       if (contentType.includes('application/octet-stream')) {
@@ -98,43 +101,43 @@ export const PATCH = wrapPiiRoute(async (request, decryptedBody, params) => {
       role: 'PLATFORM_ADMIN',
     };
 
-    const updatedPermission = await PermissionService.update(permissionId, body, ctx);
+    const updatedUser = await UserService.update(userId, body, ctx);
 
-    logger.info({ userId: session.user.id, permissionId }, '[Permissions API] Permission updated');
+    logger.info({ userId: session.user.id, targetUserId: userId }, '[Users API] User updated');
 
     await recordAuditLog({
       userId: session.user.id,
       userName: (session.user as { name?: string }).name ?? undefined,
-      action: 'permission.updated',
-      resourceType: 'Permission',
-      resourceId: permissionId,
+      action: 'user.updated',
+      resourceType: 'User',
+      resourceId: userId,
       success: true,
-    }).catch((err) => logger.error({ err }, 'Failed to record audit log for permission update'));
+    }).catch((err) => logger.error({ err }, 'Failed to record audit log for user update'));
 
-    return NextResponse.json({ permission: updatedPermission });
+    return NextResponse.json({ user: updatedUser });
   } catch (error) {
     if (error instanceof Error && error.name === 'NotFoundError') {
       return NextResponse.json({ error: error.message }, { status: 404 });
     }
-    if (error instanceof Error && error.name === 'ConflictError') {
-      return NextResponse.json({ error: error.message }, { status: 409 });
+    if (error instanceof Error && error.message === 'A user with this email already exists') {
+      return NextResponse.json({ error: 'A user with this email already exists' }, { status: 409 });
     }
-    if (error instanceof Error && error.name === 'ValidationError') {
-      return NextResponse.json({ error: error.message }, { status: 400 });
+    if (error instanceof Error && error.name === 'ForbiddenError') {
+      return NextResponse.json({ error: error.message }, { status: 403 });
     }
     const isDbError = error instanceof Error && error.message.includes('Can\'t reach database server');
-    logger.error({ err: error, route: '/api/admin/permissions/[id]', method: 'PATCH' }, isDbError ? '[Permissions API] Database unavailable' : '[Permissions API] Unexpected error');
+    logger.error({ err: error, route: '/api/admin/users/[userId]', method: 'PATCH' }, isDbError ? '[Users API] Database unavailable' : '[Users API] Unexpected error');
     return NextResponse.json({ error: isDbError ? 'Database unavailable' : 'Internal server error' }, { status: isDbError ? 503 : 500 });
   }
 });
 
 // ---------------------------------------------------------------------------
-// DELETE — Delete permission via PermissionService
+// DELETE — Delete user via UserService
 // ---------------------------------------------------------------------------
 
 export const DELETE = wrapPiiRoute(async (request, _decryptedBody, params) => {
   try {
-    logger.info({ route: '/api/admin/permissions/[id]', method: 'DELETE' }, 'Request received');
+    logger.info({ route: '/api/admin/users/[userId]', method: 'DELETE' }, 'Request received');
 
     const authResult = await requireSuperAdmin(request.headers);
     if (!authResult.authorized) {
@@ -142,9 +145,9 @@ export const DELETE = wrapPiiRoute(async (request, _decryptedBody, params) => {
     }
 
     const session = authResult.session!;
-    const permissionId = params?.id;
-    if (!permissionId) {
-      return NextResponse.json({ error: 'Permission ID is required' }, { status: 400 });
+    const userId = params?.userId;
+    if (!userId) {
+      return NextResponse.json({ error: 'User ID is required' }, { status: 400 });
     }
 
     const ctx: ServiceContext = {
@@ -152,29 +155,29 @@ export const DELETE = wrapPiiRoute(async (request, _decryptedBody, params) => {
       role: 'PLATFORM_ADMIN',
     };
 
-    await PermissionService.delete(permissionId, ctx);
+    await UserService.delete(userId, ctx);
 
-    logger.info({ userId: session.user.id, permissionId }, '[Permissions API] Permission deleted');
+    logger.info({ userId: session.user.id, targetUserId: userId }, '[Users API] User deleted');
 
     await recordAuditLog({
       userId: session.user.id,
       userName: (session.user as { name?: string }).name ?? undefined,
-      action: 'permission.deleted',
-      resourceType: 'Permission',
-      resourceId: permissionId,
+      action: 'user.deleted',
+      resourceType: 'User',
+      resourceId: userId,
       success: true,
-    }).catch((err) => logger.error({ err }, 'Failed to record audit log for permission delete'));
+    }).catch((err) => logger.error({ err }, 'Failed to record audit log for user delete'));
 
-    return NextResponse.json({ message: 'Permission deleted' });
+    return NextResponse.json({ message: 'User deleted' });
   } catch (error) {
     if (error instanceof Error && error.name === 'NotFoundError') {
       return NextResponse.json({ error: error.message }, { status: 404 });
     }
-    if (error instanceof Error && error.name === 'ConflictError') {
-      return NextResponse.json({ error: error.message }, { status: 409 });
+    if (error instanceof Error && error.name === 'ForbiddenError') {
+      return NextResponse.json({ error: error.message }, { status: 403 });
     }
     const isDbError = error instanceof Error && error.message.includes('Can\'t reach database server');
-    logger.error({ err: error, route: '/api/admin/permissions/[id]', method: 'DELETE' }, isDbError ? '[Permissions API] Database unavailable' : '[Permissions API] Unexpected error');
+    logger.error({ err: error, route: '/api/admin/users/[userId]', method: 'DELETE' }, isDbError ? '[Users API] Database unavailable' : '[Users API] Unexpected error');
     return NextResponse.json({ error: isDbError ? 'Database unavailable' : 'Internal server error' }, { status: isDbError ? 503 : 500 });
   }
 });

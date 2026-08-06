@@ -1,30 +1,30 @@
 /**
- * GET /api/admin/permissions
- * POST /api/admin/permissions
+ * GET /api/admin/roles
+ * POST /api/admin/roles
  *
- * Super Admin only — global permission catalog CRUD.
- * PATCH and DELETE live in ./[id]/route.ts
+ * Super Admin only — global role catalog CRUD via RoleService.
  */
 
 import { NextRequest, NextResponse } from 'next/server';
 import { requireSuperAdmin } from '@/lib/require-super-admin';
-import { PermissionService, CreatePermissionInput } from '@/services/permission-service';
+import { RoleService, CreateRoleInput } from '@/services/role-service';
 import { ServiceContext } from '@/lib/services/types';
 import { recordAuditLog } from '@/lib/audit-log';
 import { logger } from '@/lib/logger';
 import { wrapPiiRoute } from '@/lib/payload-middleware';
+import { env } from '@/lib/env';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 export const revalidate = 0;
 
 // ---------------------------------------------------------------------------
-// GET — List permissions (paginated) via PermissionService
+// GET — List roles (paginated) via RoleService
 // ---------------------------------------------------------------------------
 
 export const GET = wrapPiiRoute(async (request) => {
   try {
-    logger.info({ route: '/api/admin/permissions', method: 'GET' }, 'Request received');
+    logger.info({ route: '/api/admin/roles', method: 'GET' }, 'Request received');
 
     const authResult = await requireSuperAdmin(request.headers);
     if (!authResult.authorized) {
@@ -32,42 +32,40 @@ export const GET = wrapPiiRoute(async (request) => {
     }
 
     const session = authResult.session!;
+    const targetOrgId = env.PLATFORM_ORGANIZATION_ID!;
 
     const url = new URL(request.url);
     const page = parseInt(url.searchParams.get('page') || '1', 10);
     const pageSize = parseInt(url.searchParams.get('pageSize') || '8', 10);
-    const resource = url.searchParams.get('resource') || undefined;
     const search = url.searchParams.get('search') || undefined;
+    const isDefaultRaw = url.searchParams.get('isDefault');
+    const isDefault = isDefaultRaw === 'true' ? true : isDefaultRaw === 'false' ? false : undefined;
 
     const ctx: ServiceContext = {
       userId: session.user.id,
       role: 'PLATFORM_ADMIN',
     };
 
-    const result = await PermissionService.list(
-      { resource, search },
-      { page, pageSize },
-      ctx,
-    );
+    const result = await RoleService.list(targetOrgId, { search, isDefault }, { page, pageSize }, ctx);
 
-    logger.info({ userId: session.user.id, count: result.items.length }, '[Permissions API] Fetched permissions');
+    logger.info({ userId: session.user.id, count: result.items.length }, '[Roles API] Fetched roles');
     return NextResponse.json(result, {
       headers: { 'Cache-Control': 'no-store, no-cache, must-revalidate' },
     });
   } catch (error) {
     const isDbError = error instanceof Error && error.message.includes('Can\'t reach database server');
-    logger.error({ err: error, route: '/api/admin/permissions', method: 'GET' }, isDbError ? '[Permissions API] Database unavailable' : '[Permissions API] Unexpected error');
+    logger.error({ err: error, route: '/api/admin/roles', method: 'GET' }, isDbError ? '[Roles API] Database unavailable' : '[Roles API] Unexpected error');
     return NextResponse.json({ error: isDbError ? 'Database unavailable' : 'Internal server error' }, { status: isDbError ? 503 : 500 });
   }
 });
 
 // ---------------------------------------------------------------------------
-// POST — Create permission via PermissionService
+// POST — Create role via RoleService
 // ---------------------------------------------------------------------------
 
 export const POST = wrapPiiRoute(async (request, decryptedBody) => {
   try {
-    logger.info({ route: '/api/admin/permissions', method: 'POST' }, 'Request received');
+    logger.info({ route: '/api/admin/roles', method: 'POST' }, 'Request received');
 
     const authResult = await requireSuperAdmin(request.headers);
     if (!authResult.authorized) {
@@ -75,11 +73,12 @@ export const POST = wrapPiiRoute(async (request, decryptedBody) => {
     }
 
     const session = authResult.session!;
+    const targetOrgId = env.PLATFORM_ORGANIZATION_ID!;
 
     // Parse body from decrypted payload or raw JSON
-    let body: CreatePermissionInput;
+    let body: CreateRoleInput;
     if (decryptedBody && typeof decryptedBody === 'object') {
-      body = decryptedBody as CreatePermissionInput;
+      body = decryptedBody as CreateRoleInput;
     } else {
       const contentType = request.headers.get('Content-Type') || '';
       if (contentType.includes('application/octet-stream')) {
@@ -100,20 +99,20 @@ export const POST = wrapPiiRoute(async (request, decryptedBody) => {
       role: 'PLATFORM_ADMIN',
     };
 
-    const permission = await PermissionService.create(body, ctx);
+    const role = await RoleService.create(body, targetOrgId, ctx);
 
-    logger.info({ userId: session.user.id, permissionId: permission.id }, '[Permissions API] Permission created');
+    logger.info({ userId: session.user.id, roleId: role.id }, '[Roles API] Role created');
 
     await recordAuditLog({
       userId: session.user.id,
       userName: (session.user as { name?: string }).name ?? undefined,
-      action: 'permission.created',
-      resourceType: 'Permission',
-      resourceId: permission.id,
+      action: 'role.created',
+      resourceType: 'Role',
+      resourceId: role.id,
       success: true,
-    }).catch((err) => logger.error({ err }, 'Failed to record audit log for permission creation'));
+    }).catch((err) => logger.error({ err }, 'Failed to record audit log for role creation'));
 
-    return NextResponse.json({ permission }, { status: 201 });
+    return NextResponse.json({ role }, { status: 201 });
   } catch (error) {
     if (error instanceof Error && error.name === 'ValidationError') {
       return NextResponse.json({ error: error.message }, { status: 400 });
@@ -121,8 +120,11 @@ export const POST = wrapPiiRoute(async (request, decryptedBody) => {
     if (error instanceof Error && error.name === 'ConflictError') {
       return NextResponse.json({ error: error.message }, { status: 409 });
     }
+    if (error instanceof Error && error.name === 'ForbiddenError') {
+      return NextResponse.json({ error: error.message }, { status: 403 });
+    }
     const isDbError = error instanceof Error && error.message.includes('Can\'t reach database server');
-    logger.error({ err: error, route: '/api/admin/permissions', method: 'POST' }, isDbError ? '[Permissions API] Database unavailable' : '[Permissions API] Unexpected error');
+    logger.error({ err: error, route: '/api/admin/roles', method: 'POST' }, isDbError ? '[Roles API] Database unavailable' : '[Roles API] Unexpected error');
     return NextResponse.json({ error: isDbError ? 'Database unavailable' : 'Internal server error' }, { status: isDbError ? 503 : 500 });
   }
 });

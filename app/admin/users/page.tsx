@@ -7,12 +7,12 @@ import { ConfirmDialog } from '@/components/admin/ConfirmDialog';
 import { EditModal } from '@/components/admin/EditModal';
 import { encryptedFetch } from '@/lib/api-client';
 
-interface Permission {
+interface User {
   id: string;
-  key: string;
-  resource: string;
-  action: string;
-  description?: string | null;
+  name?: string | null;
+  email: string;
+  _count?: { members: number };
+  createdAt: string | Date;
 }
 
 interface Pagination {
@@ -22,25 +22,22 @@ interface Pagination {
   totalPages: number;
 }
 
-export default function PermissionsPage() {
-  const [permissions, setPermissions] = useState<Permission[]>([]);
+export default function UsersPage() {
+  const [users, setUsers] = useState<User[]>([]);
   const [pagination, setPagination] = useState<Pagination>({ page: 1, pageSize: 8, total: 0, totalPages: 0 });
   const [search, setSearch] = useState('');
-  const [resourceFilter, setResourceFilter] = useState('');
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
   // Modal states
   const [showCreateModal, setShowCreateModal] = useState(false);
-  const [editingPermission, setEditingPermission] = useState<Permission | null>(null);
-  const [viewingPermission, setViewingPermission] = useState<Permission | null>(null);
+  const [editingUser, setEditingUser] = useState<User | null>(null);
+  const [viewingUser, setViewingUser] = useState<User | null>(null);
   const [deleteConfirm, setDeleteConfirm] = useState<string | null>(null);
 
   // Form state
-  const [formKey, setFormKey] = useState('');
-  const [formResource, setFormResource] = useState('');
-  const [formAction, setFormAction] = useState('');
-  const [formDescription, setFormDescription] = useState('');
+  const [formName, setFormName] = useState('');
+  const [formEmail, setFormEmail] = useState('');
   const [submitting, setSubmitting] = useState(false);
 
   // Debounce search input
@@ -57,9 +54,9 @@ export default function PermissionsPage() {
   useEffect(() => {
     setPagination((p) => ({ ...p, page: 1 }));
     setFetchKey((k) => k + 1);
-  }, [debouncedSearch, resourceFilter]);
+  }, [debouncedSearch]);
 
-  // Fetch permissions
+  // Fetch users
   useEffect(() => {
     async function fetchData() {
       setLoading(true);
@@ -70,16 +67,15 @@ export default function PermissionsPage() {
           pageSize: String(pagination.pageSize),
         });
         if (debouncedSearch) params.set('search', debouncedSearch);
-        if (resourceFilter) params.set('resource', resourceFilter);
 
-        const res = await encryptedFetch(`/api/admin/permissions?${params}`, { pii: true });
+        const res = await encryptedFetch(`/api/admin/users?${params}`, { pii: true });
         if (!res.ok) {
           const data = await res.json().catch(() => ({}));
-          throw new Error(data.error || 'Failed to fetch permissions');
+          throw new Error(data.error || 'Failed to fetch users');
         }
 
         const data = await res.json();
-        setPermissions(data.items || []);
+        setUsers(data.items || []);
 
         const total = data.pagination?.total ?? 0;
         const pageSizeFromApi = data.pagination?.pageSize || pagination.pageSize || 8;
@@ -92,8 +88,8 @@ export default function PermissionsPage() {
           totalPages,
         });
       } catch (err) {
-        console.error('Failed to fetch permissions:', err);
-        setError(err instanceof Error ? err.message : 'Failed to fetch permissions');
+        console.error('Failed to fetch users:', err);
+        setError(err instanceof Error ? err.message : 'Failed to fetch users');
       } finally {
         setLoading(false);
       }
@@ -103,22 +99,18 @@ export default function PermissionsPage() {
   }, [fetchKey, pagination.page, pagination.pageSize]);
 
   // Open edit modal with pre-filled data
-  function openEditModal(perm: Permission) {
-    setEditingPermission(perm);
-    setFormKey(perm.key);
-    setFormResource(perm.resource);
-    setFormAction(perm.action);
-    setFormDescription(perm.description || '');
+  function openEditModal(user: User) {
+    setEditingUser(user);
+    setFormName(user.name || '');
+    setFormEmail(user.email);
     setShowCreateModal(true);
   }
 
   // Open create modal with empty form
   function openCreateModal() {
-    setEditingPermission(null);
-    setFormKey('');
-    setFormResource('');
-    setFormAction('');
-    setFormDescription('');
+    setEditingUser(null);
+    setFormName('');
+    setFormEmail('');
     setShowCreateModal(true);
   }
 
@@ -129,17 +121,17 @@ export default function PermissionsPage() {
     setError(null);
 
     try {
-      const body = { key: formKey, resource: formResource, action: formAction, description: formDescription || undefined };
+      const body = { name: formName, email: formEmail };
 
       let res;
-      if (editingPermission) {
-        res = await encryptedFetch(`/api/admin/permissions/${editingPermission.id}`, {
+      if (editingUser) {
+        res = await encryptedFetch(`/api/admin/users/${editingUser.id}`, {
           method: 'PATCH',
           body: JSON.stringify(body),
           pii: true,
         });
       } else {
-        res = await encryptedFetch('/api/admin/permissions', {
+        res = await encryptedFetch('/api/admin/users', {
           method: 'POST',
           body: JSON.stringify(body),
           pii: true,
@@ -148,54 +140,44 @@ export default function PermissionsPage() {
 
       if (!res.ok) {
         const data = await res.json().catch(() => ({}));
-        throw new Error(data.error || 'Failed to save permission');
+        throw new Error(data.error || 'Failed to save user');
       }
 
       setShowCreateModal(false);
       setFetchKey((k) => k + 1); // Re-fetch table
     } catch (err) {
-      console.error('Failed to save permission:', err);
-      setError(err instanceof Error ? err.message : 'Failed to save permission');
+      console.error('Failed to save user:', err);
+      setError(err instanceof Error ? err.message : 'Failed to save user');
     } finally {
       setSubmitting(false);
     }
   }
 
-  // Delete permission
+  // Delete user
   async function handleDelete(id: string) {
     try {
-      const res = await encryptedFetch(`/api/admin/permissions/${id}`, { method: 'DELETE', pii: true });
+      const res = await encryptedFetch(`/api/admin/users/${id}`, { method: 'DELETE', pii: true });
       if (res.ok) {
         setFetchKey((k) => k + 1); // Re-fetch table
       } else {
         const data = await res.json().catch(() => ({}));
-        setError(data.error || 'Failed to delete permission');
+        setError(data.error || 'Failed to delete user');
       }
     } catch (err) {
-      console.error('Failed to delete permission:', err);
-      setError(err instanceof Error ? err.message : 'Failed to delete permission');
+      console.error('Failed to delete user:', err);
+      setError(err instanceof Error ? err.message : 'Failed to delete user');
     } finally {
       setDeleteConfirm(null);
     }
   }
 
-  // Unique resource types fetched from API (independent of filter)
-  const [resourceTypes, setResourceTypes] = useState<string[]>([]);
-
-  useEffect(() => {
-    async function fetchResources() {
-      try {
-        const res = await encryptedFetch('/api/admin/permissions/resources', { pii: true });
-        if (res.ok) {
-          const data = await res.json();
-          setResourceTypes(data.resources || []);
-        }
-      } catch (err) {
-        console.error('Failed to fetch resource types:', err);
-      }
-    }
-    fetchResources();
-  }, []);
+  const formatDate = (date: string | Date) => {
+    return new Date(date).toLocaleDateString('en-GB', {
+      year: 'numeric',
+      month: 'short',
+      day: 'numeric',
+    });
+  };
 
   return (
     <RequireSuperAdmin>
@@ -204,15 +186,15 @@ export default function PermissionsPage() {
           {/* Page Header */}
           <div className="mb-6 flex items-center justify-between">
             <div>
-              <h2 className="text-2xl font-bold" style={{ color: '#1B2A4A' }}>Permissions</h2>
-              <p className="text-sm text-gray-500">Global permission catalog management</p>
+              <h2 className="text-2xl font-bold" style={{ color: '#1B2A4A' }}>Users</h2>
+              <p className="text-sm text-gray-500">Manage platform users</p>
             </div>
             <button
               onClick={openCreateModal}
               className="rounded px-4 py-2 text-sm font-medium text-white transition hover:opacity-90"
               style={{ backgroundColor: '#F5A623' }}
             >
-              + Add Permission
+              + Add User
             </button>
           </div>
 
@@ -227,26 +209,12 @@ export default function PermissionsPage() {
           <div className="mb-4 flex gap-3">
             <input
               type="text"
-              placeholder="Search permissions..."
+              placeholder="Search users..."
               value={search}
               onChange={(e) => setSearch(e.target.value)}
               className="rounded border px-3 py-2 text-sm bg-white hover:bg-gray-100 text-gray-700 font-medium transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
-              aria-label="Search permissions"
+              aria-label="Search users"
             />
-            <select
-              value={resourceFilter}
-              onChange={(e) => {
-                setResourceFilter(e.target.value);
-                setSearch('');
-              }}
-              className="rounded border px-3 py-2 text-sm bg-white hover:bg-gray-100 text-gray-700 font-medium transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
-              aria-label="Filter by resource type"
-            >
-              <option value="">All</option>
-              {resourceTypes.map((r) => (
-                <option key={r} value={r}>{r}</option>
-              ))}
-            </select>
           </div>
 
           {/* Table */}
@@ -257,52 +225,56 @@ export default function PermissionsPage() {
               <table className="min-w-full divide-y divide-gray-200" role="table">
                 <thead className="bg-[#1B2A4A]">
                   <tr>
-                    <th className="px-6 py-3 text-left text-xs font-medium uppercase tracking-wider text-white" scope="col">Key</th>
-                    <th className="px-6 py-3 text-left text-xs font-medium uppercase tracking-wider text-white" scope="col">Resource</th>
-                    <th className="px-6 py-3 text-left text-xs font-medium uppercase tracking-wider text-white" scope="col">Action</th>
-                    <th className="px-6 py-3 text-left text-xs font-medium uppercase tracking-wider text-white" scope="col">Description</th>
+                    <th className="px-6 py-3 text-left text-xs font-medium uppercase tracking-wider text-white" scope="col">Name</th>
+                    <th className="px-6 py-3 text-left text-xs font-medium uppercase tracking-wider text-white" scope="col">Email</th>
+                    <th className="px-6 py-3 text-left text-xs font-medium uppercase tracking-wider text-white" scope="col">Memberships</th>
+                    <th className="px-6 py-3 text-left text-xs font-medium uppercase tracking-wider text-white" scope="col">Created At</th>
                     <th className="px-6 py-3 text-right text-xs font-medium uppercase tracking-wider text-white" scope="col">Actions</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-gray-200 bg-white">
-                  {permissions.length === 0 ? (
+                  {users.length === 0 ? (
                     <tr>
                       <td colSpan={5} className="px-6 py-8 text-center text-sm text-gray-500">
-                        No permissions found.
+                        No users found.
                       </td>
                     </tr>
                   ) : (
-                    permissions.map((perm) => (
-                      <tr key={perm.id} className="hover:bg-gray-50">
-                        <td className="whitespace-nowrap px-6 py-4 text-sm font-mono" style={{ color: '#1B2A4A' }}>
-                          {perm.key}
+                    users.map((user) => (
+                      <tr key={user.id} className="hover:bg-gray-50">
+                        <td className="whitespace-nowrap px-6 py-4 text-sm font-medium" style={{ color: '#1B2A4A' }}>
+                          {user.name || '—'}
                         </td>
-                        <td className="whitespace-nowrap px-6 py-4 text-sm">{perm.resource}</td>
-                        <td className="whitespace-nowrap px-6 py-4 text-sm">{perm.action}</td>
-                        <td className="whitespace-nowrap px-6 py-4 text-sm text-gray-500">{perm.description || '—'}</td>
+                        <td className="whitespace-nowrap px-6 py-4 text-sm">{user.email}</td>
+                        <td className="whitespace-nowrap px-6 py-4 text-sm text-gray-500">
+                          {user._count?.members ?? 0}
+                        </td>
+                        <td className="whitespace-nowrap px-6 py-4 text-sm text-gray-500">
+                          {formatDate(user.createdAt)}
+                        </td>
                         <td className="whitespace-nowrap px-6 py-4 text-right">
                           <div className="flex justify-end gap-2">
                             <button
-                              onClick={() => setViewingPermission(perm)}
+                              onClick={() => setViewingUser(user)}
                               className="text-blue-600 hover:text-blue-800 transition-colors"
                               title="View"
-                              aria-label={`View ${perm.key}`}
+                              aria-label={`View ${user.name || user.email}`}
                             >
                               <Eye className="w-4 h-4" />
                             </button>
                             <button
-                              onClick={() => openEditModal(perm)}
+                              onClick={() => openEditModal(user)}
                               className="text-amber-600 hover:text-amber-800 transition-colors"
                               title="Edit"
-                              aria-label={`Edit ${perm.key}`}
+                              aria-label={`Edit ${user.name || user.email}`}
                             >
                               <Pencil className="w-4 h-4" />
                             </button>
                             <button
-                              onClick={() => setDeleteConfirm(perm.id)}
+                              onClick={() => setDeleteConfirm(user.id)}
                               className="text-red-600 hover:text-red-800 transition-colors"
                               title="Delete"
-                              aria-label={`Delete ${perm.key}`}
+                              aria-label={`Delete ${user.name || user.email}`}
                             >
                               <Trash2 className="w-4 h-4" />
                             </button>
@@ -347,41 +319,39 @@ export default function PermissionsPage() {
           <EditModal
             isOpen={showCreateModal}
             onClose={() => setShowCreateModal(false)}
-            title={editingPermission ? 'Edit Permission' : 'New Permission'}
+            title={editingUser ? 'Edit User' : 'New User'}
           >
             <form onSubmit={handleSubmit}>
               <div className="space-y-3">
-                <input type="text" placeholder="key (resource:action)" required value={formKey} onChange={(e) => setFormKey(e.target.value)} className="w-full rounded border px-3 py-2 text-sm" aria-label="Permission key" />
-                <input type="text" placeholder="resource" required value={formResource} onChange={(e) => setFormResource(e.target.value)} className="w-full rounded border px-3 py-2 text-sm" aria-label="Resource" />
-                <input type="text" placeholder="action" required value={formAction} onChange={(e) => setFormAction(e.target.value)} className="w-full rounded border px-3 py-2 text-sm" aria-label="Action" />
-                <input type="text" placeholder="description" value={formDescription} onChange={(e) => setFormDescription(e.target.value)} className="w-full rounded border px-3 py-2 text-sm" aria-label="Description" />
+                <input type="text" placeholder="name" required value={formName} onChange={(e) => setFormName(e.target.value)} className="w-full rounded border px-3 py-2 text-sm" aria-label="User name" />
+                <input type="email" placeholder="email" required value={formEmail} onChange={(e) => setFormEmail(e.target.value)} className="w-full rounded border px-3 py-2 text-sm" aria-label="User email" />
               </div>
               <div className="mt-4 flex justify-end gap-2">
                 <button type="button" onClick={() => setShowCreateModal(false)} className="rounded px-4 py-1.5 text-sm font-medium text-gray-700 hover:bg-gray-100">
                   Cancel
                 </button>
                 <button type="submit" disabled={submitting} className="rounded px-4 py-1.5 text-sm font-medium text-white transition hover:opacity-90" style={{ backgroundColor: '#F5A623' }}>
-                  {submitting ? 'Saving...' : editingPermission ? 'Update' : 'Create'}
+                  {submitting ? 'Saving...' : editingUser ? 'Update' : 'Create'}
                 </button>
               </div>
             </form>
           </EditModal>
 
           {/* View Modal */}
-          {viewingPermission && (
+          {viewingUser && (
             <EditModal
-              isOpen={!!viewingPermission}
-              onClose={() => setViewingPermission(null)}
-              title="Permission Details"
+              isOpen={!!viewingUser}
+              onClose={() => setViewingUser(null)}
+              title="User Details"
             >
               <div className="space-y-2 text-sm">
-                <div><span className="font-medium" style={{ color: '#1B2A4A' }}>Key:</span> <code className="ml-2">{viewingPermission.key}</code></div>
-                <div><span className="font-medium" style={{ color: '#1B2A4A' }}>Resource:</span> <span className="ml-2">{viewingPermission.resource}</span></div>
-                <div><span className="font-medium" style={{ color: '#1B2A4A' }}>Action:</span> <span className="ml-2">{viewingPermission.action}</span></div>
-                <div><span className="font-medium" style={{ color: '#1B2A4A' }}>Description:</span> <span className="ml-2">{viewingPermission.description || '—'}</span></div>
+                <div><span className="font-medium" style={{ color: '#1B2A4A' }}>Name:</span> <span className="ml-2">{viewingUser.name || '—'}</span></div>
+                <div><span className="font-medium" style={{ color: '#1B2A4A' }}>Email:</span> <span className="ml-2">{viewingUser.email}</span></div>
+                <div><span className="font-medium" style={{ color: '#1B2A4A' }}>Memberships:</span> <span className="ml-2">{viewingUser._count?.members ?? 0}</span></div>
+                <div><span className="font-medium" style={{ color: '#1B2A4A' }}>Created At:</span> <span className="ml-2">{formatDate(viewingUser.createdAt)}</span></div>
               </div>
               <div className="mt-4 flex justify-end">
-                <button onClick={() => setViewingPermission(null)} className="rounded px-4 py-1.5 text-sm font-medium text-gray-700 hover:bg-gray-100">
+                <button onClick={() => setViewingUser(null)} className="rounded px-4 py-1.5 text-sm font-medium text-gray-700 hover:bg-gray-100">
                   Close
                 </button>
               </div>
@@ -391,8 +361,8 @@ export default function PermissionsPage() {
           {/* Delete Confirmation */}
           <ConfirmDialog
             isOpen={!!deleteConfirm}
-            title="Delete Permission"
-            message="Are you sure you want to delete this permission? This action cannot be undone."
+            title="Delete User"
+            message="Are you sure you want to delete this user? This action cannot be undone."
             confirmLabel="Delete"
             danger
             onConfirm={() => deleteConfirm && handleDelete(deleteConfirm)}

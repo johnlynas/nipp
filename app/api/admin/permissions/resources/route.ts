@@ -1,0 +1,36 @@
+/**
+ * GET /api/admin/permissions/resources
+ *
+ * Super Admin only — returns a sorted list of all unique resource types.
+ */
+
+import { NextResponse } from 'next/server';
+import globalDb from '@/lib/global-db';
+import { requireSuperAdmin } from '@/lib/require-super-admin';
+import { wrapPiiRoute } from '@/lib/payload-middleware';
+
+export const dynamic = 'force-dynamic';
+export const revalidate = 0;
+
+export const GET = wrapPiiRoute(async (request) => {
+  try {
+    const authResult = await requireSuperAdmin(request.headers);
+    if (!authResult.authorized) {
+      return NextResponse.json({ error: authResult.error || 'Unauthorized' }, { status: authResult.status });
+    }
+
+    const resources = await globalDb.permission.findMany({
+      select: { resource: true },
+      distinct: ['resource'],
+      orderBy: { resource: 'asc' },
+    });
+
+    return NextResponse.json({ resources: resources.map((r) => r.resource) });
+  } catch (error) {
+    const isDbError = error instanceof Error && error.message.includes('Can\'t reach database server');
+    return NextResponse.json(
+      { error: isDbError ? 'Database unavailable' : 'Internal server error' },
+      { status: isDbError ? 503 : 500 },
+    );
+  }
+});

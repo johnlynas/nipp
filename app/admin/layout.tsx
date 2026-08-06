@@ -27,6 +27,8 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
 
   const navLinks = [
     { href: '/admin/organizations', label: 'Organizations' },
+    { href: '/admin/roles', label: 'Roles' },
+    { href: '/admin/users', label: 'Users' },
     { href: '/admin/permissions', label: 'Permissions' },
     { href: '/admin/cache-metrics', label: 'Cache Metrics' },
     { href: '/admin/audit-logs', label: 'Security Audit Logs' },
@@ -39,7 +41,7 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
       {/* Sidebar */}
       <aside className="w-64 bg-[#1B2A4A] text-white flex-shrink-0 overflow-hidden">
         <div className="p-6">
-          <h2 className="text-2xl font-bold text-[#F5A623]">Admin Panel</h2>
+          <h2 className="text-2xl font-bold text-[#F5A623]">Admin Dashboard</h2>
         </div>
         <nav className="mt-6">
           {navLinks.map((link) => (

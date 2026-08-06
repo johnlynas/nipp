@@ -117,7 +117,10 @@ export const OrganizationService = {
     ]);
 
     return {
-      organizations,
+      organizations: organizations.map((org) => ({
+        ...org,
+        memberCount: org._count?.members ?? 0,
+      })),
       pagination: {
         page,
         pageSize,

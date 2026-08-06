@@ -94,7 +94,7 @@ test.describe('Super Admin Exclusivity', () => {
     await page.goto('/', { waitUntil: 'load' });
 
     // The admin sidebar should not be visible for a non-super-admin
-    const adminSidebar = page.locator('aside').filter({ hasText: 'Admin Panel' });
+    const adminSidebar = page.locator('aside').filter({ hasText: 'Admin Dashboard' });
     await expect(adminSidebar).not.toBeVisible();
 
     // Verify no admin nav links are present
@@ -141,7 +141,7 @@ test.describe('Super Admin Exclusivity', () => {
     await page.goto('/admin/organizations', { waitUntil: 'load' });
 
     // Admin sidebar should be visible
-    const adminSidebar = page.locator('aside').filter({ hasText: 'Admin Panel' });
+    const adminSidebar = page.locator('aside').filter({ hasText: 'Admin Dashboard' });
     await expect(adminSidebar).toBeVisible();
 
     // Admin nav links should be present

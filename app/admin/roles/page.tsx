@@ -7,12 +7,12 @@ import { ConfirmDialog } from '@/components/admin/ConfirmDialog';
 import { EditModal } from '@/components/admin/EditModal';
 import { encryptedFetch } from '@/lib/api-client';
 
-interface Permission {
+interface Role {
   id: string;
-  key: string;
-  resource: string;
-  action: string;
+  name: string;
   description?: string | null;
+  isDefault: boolean;
+  _count?: { memberRoles: number };
 }
 
 interface Pagination {
@@ -22,25 +22,24 @@ interface Pagination {
   totalPages: number;
 }
 
-export default function PermissionsPage() {
-  const [permissions, setPermissions] = useState<Permission[]>([]);
+export default function RolesPage() {
+  const [roles, setRoles] = useState<Role[]>([]);
   const [pagination, setPagination] = useState<Pagination>({ page: 1, pageSize: 8, total: 0, totalPages: 0 });
   const [search, setSearch] = useState('');
-  const [resourceFilter, setResourceFilter] = useState('');
+  const [isDefaultFilter, setIsDefaultFilter] = useState('');
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
   // Modal states
   const [showCreateModal, setShowCreateModal] = useState(false);
-  const [editingPermission, setEditingPermission] = useState<Permission | null>(null);
-  const [viewingPermission, setViewingPermission] = useState<Permission | null>(null);
+  const [editingRole, setEditingRole] = useState<Role | null>(null);
+  const [viewingRole, setViewingRole] = useState<Role | null>(null);
   const [deleteConfirm, setDeleteConfirm] = useState<string | null>(null);
 
   // Form state
-  const [formKey, setFormKey] = useState('');
-  const [formResource, setFormResource] = useState('');
-  const [formAction, setFormAction] = useState('');
+  const [formName, setFormName] = useState('');
   const [formDescription, setFormDescription] = useState('');
+  const [formIsDefault, setFormIsDefault] = useState(false);
   const [submitting, setSubmitting] = useState(false);
 
   // Debounce search input
@@ -57,9 +56,9 @@ export default function PermissionsPage() {
   useEffect(() => {
     setPagination((p) => ({ ...p, page: 1 }));
     setFetchKey((k) => k + 1);
-  }, [debouncedSearch, resourceFilter]);
+  }, [debouncedSearch, isDefaultFilter]);
 
-  // Fetch permissions
+  // Fetch roles
   useEffect(() => {
     async function fetchData() {
       setLoading(true);
@@ -70,16 +69,17 @@ export default function PermissionsPage() {
           pageSize: String(pagination.pageSize),
         });
         if (debouncedSearch) params.set('search', debouncedSearch);
-        if (resourceFilter) params.set('resource', resourceFilter);
+        if (isDefaultFilter === 'true') params.set('isDefault', 'true');
+        else if (isDefaultFilter === 'false') params.set('isDefault', 'false');
 
-        const res = await encryptedFetch(`/api/admin/permissions?${params}`, { pii: true });
+        const res = await encryptedFetch(`/api/admin/roles?${params}`, { pii: true });
         if (!res.ok) {
           const data = await res.json().catch(() => ({}));
-          throw new Error(data.error || 'Failed to fetch permissions');
+          throw new Error(data.error || 'Failed to fetch roles');
         }
 
         const data = await res.json();
-        setPermissions(data.items || []);
+        setRoles(data.items || []);
 
         const total = data.pagination?.total ?? 0;
         const pageSizeFromApi = data.pagination?.pageSize || pagination.pageSize || 8;
@@ -92,8 +92,8 @@ export default function PermissionsPage() {
           totalPages,
         });
       } catch (err) {
-        console.error('Failed to fetch permissions:', err);
-        setError(err instanceof Error ? err.message : 'Failed to fetch permissions');
+        console.error('Failed to fetch roles:', err);
+        setError(err instanceof Error ? err.message : 'Failed to fetch roles');
       } finally {
         setLoading(false);
       }
@@ -103,22 +103,20 @@ export default function PermissionsPage() {
   }, [fetchKey, pagination.page, pagination.pageSize]);
 
   // Open edit modal with pre-filled data
-  function openEditModal(perm: Permission) {
-    setEditingPermission(perm);
-    setFormKey(perm.key);
-    setFormResource(perm.resource);
-    setFormAction(perm.action);
-    setFormDescription(perm.description || '');
+  function openEditModal(role: Role) {
+    setEditingRole(role);
+    setFormName(role.name);
+    setFormDescription(role.description || '');
+    setFormIsDefault(role.isDefault);
     setShowCreateModal(true);
   }
 
   // Open create modal with empty form
   function openCreateModal() {
-    setEditingPermission(null);
-    setFormKey('');
-    setFormResource('');
-    setFormAction('');
+    setEditingRole(null);
+    setFormName('');
     setFormDescription('');
+    setFormIsDefault(false);
     setShowCreateModal(true);
   }
 
@@ -129,17 +127,17 @@ export default function PermissionsPage() {
     setError(null);
 
     try {
-      const body = { key: formKey, resource: formResource, action: formAction, description: formDescription || undefined };
+      const body = { name: formName, description: formDescription || undefined, isDefault: formIsDefault };
 
       let res;
-      if (editingPermission) {
-        res = await encryptedFetch(`/api/admin/permissions/${editingPermission.id}`, {
+      if (editingRole) {
+        res = await encryptedFetch(`/api/admin/roles/${editingRole.id}`, {
           method: 'PATCH',
           body: JSON.stringify(body),
           pii: true,
         });
       } else {
-        res = await encryptedFetch('/api/admin/permissions', {
+        res = await encryptedFetch('/api/admin/roles', {
           method: 'POST',
           body: JSON.stringify(body),
           pii: true,
@@ -148,54 +146,36 @@ export default function PermissionsPage() {
 
       if (!res.ok) {
         const data = await res.json().catch(() => ({}));
-        throw new Error(data.error || 'Failed to save permission');
+        throw new Error(data.error || 'Failed to save role');
       }
 
       setShowCreateModal(false);
       setFetchKey((k) => k + 1); // Re-fetch table
     } catch (err) {
-      console.error('Failed to save permission:', err);
-      setError(err instanceof Error ? err.message : 'Failed to save permission');
+      console.error('Failed to save role:', err);
+      setError(err instanceof Error ? err.message : 'Failed to save role');
     } finally {
       setSubmitting(false);
     }
   }
 
-  // Delete permission
+  // Delete role
   async function handleDelete(id: string) {
     try {
-      const res = await encryptedFetch(`/api/admin/permissions/${id}`, { method: 'DELETE', pii: true });
+      const res = await encryptedFetch(`/api/admin/roles/${id}`, { method: 'DELETE', pii: true });
       if (res.ok) {
         setFetchKey((k) => k + 1); // Re-fetch table
       } else {
         const data = await res.json().catch(() => ({}));
-        setError(data.error || 'Failed to delete permission');
+        setError(data.error || 'Failed to delete role');
       }
     } catch (err) {
-      console.error('Failed to delete permission:', err);
-      setError(err instanceof Error ? err.message : 'Failed to delete permission');
+      console.error('Failed to delete role:', err);
+      setError(err instanceof Error ? err.message : 'Failed to delete role');
     } finally {
       setDeleteConfirm(null);
     }
   }
-
-  // Unique resource types fetched from API (independent of filter)
-  const [resourceTypes, setResourceTypes] = useState<string[]>([]);
-
-  useEffect(() => {
-    async function fetchResources() {
-      try {
-        const res = await encryptedFetch('/api/admin/permissions/resources', { pii: true });
-        if (res.ok) {
-          const data = await res.json();
-          setResourceTypes(data.resources || []);
-        }
-      } catch (err) {
-        console.error('Failed to fetch resource types:', err);
-      }
-    }
-    fetchResources();
-  }, []);
 
   return (
     <RequireSuperAdmin>
@@ -204,15 +184,15 @@ export default function PermissionsPage() {
           {/* Page Header */}
           <div className="mb-6 flex items-center justify-between">
             <div>
-              <h2 className="text-2xl font-bold" style={{ color: '#1B2A4A' }}>Permissions</h2>
-              <p className="text-sm text-gray-500">Global permission catalog management</p>
+              <h2 className="text-2xl font-bold" style={{ color: '#1B2A4A' }}>Roles</h2>
+              <p className="text-sm text-gray-500">Manage platform roles and permissions</p>
             </div>
             <button
               onClick={openCreateModal}
               className="rounded px-4 py-2 text-sm font-medium text-white transition hover:opacity-90"
               style={{ backgroundColor: '#F5A623' }}
             >
-              + Add Permission
+              + Add Role
             </button>
           </div>
 
@@ -227,25 +207,24 @@ export default function PermissionsPage() {
           <div className="mb-4 flex gap-3">
             <input
               type="text"
-              placeholder="Search permissions..."
+              placeholder="Search roles..."
               value={search}
               onChange={(e) => setSearch(e.target.value)}
               className="rounded border px-3 py-2 text-sm bg-white hover:bg-gray-100 text-gray-700 font-medium transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
-              aria-label="Search permissions"
+              aria-label="Search roles"
             />
             <select
-              value={resourceFilter}
+              value={isDefaultFilter}
               onChange={(e) => {
-                setResourceFilter(e.target.value);
+                setIsDefaultFilter(e.target.value);
                 setSearch('');
               }}
               className="rounded border px-3 py-2 text-sm bg-white hover:bg-gray-100 text-gray-700 font-medium transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
-              aria-label="Filter by resource type"
+              aria-label="Filter by default status"
             >
               <option value="">All</option>
-              {resourceTypes.map((r) => (
-                <option key={r} value={r}>{r}</option>
-              ))}
+              <option value="true">Default Only</option>
+              <option value="false">Custom Only</option>
             </select>
           </div>
 
@@ -257,52 +236,60 @@ export default function PermissionsPage() {
               <table className="min-w-full divide-y divide-gray-200" role="table">
                 <thead className="bg-[#1B2A4A]">
                   <tr>
-                    <th className="px-6 py-3 text-left text-xs font-medium uppercase tracking-wider text-white" scope="col">Key</th>
-                    <th className="px-6 py-3 text-left text-xs font-medium uppercase tracking-wider text-white" scope="col">Resource</th>
-                    <th className="px-6 py-3 text-left text-xs font-medium uppercase tracking-wider text-white" scope="col">Action</th>
+                    <th className="px-6 py-3 text-left text-xs font-medium uppercase tracking-wider text-white" scope="col">Name</th>
                     <th className="px-6 py-3 text-left text-xs font-medium uppercase tracking-wider text-white" scope="col">Description</th>
+                    <th className="px-6 py-3 text-left text-xs font-medium uppercase tracking-wider text-white" scope="col">Type</th>
+                    <th className="px-6 py-3 text-left text-xs font-medium uppercase tracking-wider text-white" scope="col">Members</th>
                     <th className="px-6 py-3 text-right text-xs font-medium uppercase tracking-wider text-white" scope="col">Actions</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-gray-200 bg-white">
-                  {permissions.length === 0 ? (
+                  {roles.length === 0 ? (
                     <tr>
                       <td colSpan={5} className="px-6 py-8 text-center text-sm text-gray-500">
-                        No permissions found.
+                        No roles found.
                       </td>
                     </tr>
                   ) : (
-                    permissions.map((perm) => (
-                      <tr key={perm.id} className="hover:bg-gray-50">
-                        <td className="whitespace-nowrap px-6 py-4 text-sm font-mono" style={{ color: '#1B2A4A' }}>
-                          {perm.key}
+                    roles.map((role) => (
+                      <tr key={role.id} className="hover:bg-gray-50">
+                        <td className="whitespace-nowrap px-6 py-4 text-sm font-medium" style={{ color: '#1B2A4A' }}>
+                          {role.name}
                         </td>
-                        <td className="whitespace-nowrap px-6 py-4 text-sm">{perm.resource}</td>
-                        <td className="whitespace-nowrap px-6 py-4 text-sm">{perm.action}</td>
-                        <td className="whitespace-nowrap px-6 py-4 text-sm text-gray-500">{perm.description || '—'}</td>
+                        <td className="whitespace-nowrap px-6 py-4 text-sm text-gray-500">{role.description || '—'}</td>
+                        <td className="whitespace-nowrap px-6 py-4">
+                          {role.isDefault ? (
+                            <span className="rounded bg-green-100 px-2 py-0.5 text-xs font-medium text-green-800">Default</span>
+                          ) : (
+                            <span className="rounded bg-gray-100 px-2 py-0.5 text-xs font-medium text-gray-600">Custom</span>
+                          )}
+                        </td>
+                        <td className="whitespace-nowrap px-6 py-4 text-sm text-gray-500">
+                          {role._count?.memberRoles ?? 0}
+                        </td>
                         <td className="whitespace-nowrap px-6 py-4 text-right">
                           <div className="flex justify-end gap-2">
                             <button
-                              onClick={() => setViewingPermission(perm)}
+                              onClick={() => setViewingRole(role)}
                               className="text-blue-600 hover:text-blue-800 transition-colors"
                               title="View"
-                              aria-label={`View ${perm.key}`}
+                              aria-label={`View ${role.name}`}
                             >
                               <Eye className="w-4 h-4" />
                             </button>
                             <button
-                              onClick={() => openEditModal(perm)}
+                              onClick={() => openEditModal(role)}
                               className="text-amber-600 hover:text-amber-800 transition-colors"
                               title="Edit"
-                              aria-label={`Edit ${perm.key}`}
+                              aria-label={`Edit ${role.name}`}
                             >
                               <Pencil className="w-4 h-4" />
                             </button>
                             <button
-                              onClick={() => setDeleteConfirm(perm.id)}
+                              onClick={() => setDeleteConfirm(role.id)}
                               className="text-red-600 hover:text-red-800 transition-colors"
                               title="Delete"
-                              aria-label={`Delete ${perm.key}`}
+                              aria-label={`Delete ${role.name}`}
                             >
                               <Trash2 className="w-4 h-4" />
                             </button>
@@ -347,41 +334,43 @@ export default function PermissionsPage() {
           <EditModal
             isOpen={showCreateModal}
             onClose={() => setShowCreateModal(false)}
-            title={editingPermission ? 'Edit Permission' : 'New Permission'}
+            title={editingRole ? 'Edit Role' : 'New Role'}
           >
             <form onSubmit={handleSubmit}>
               <div className="space-y-3">
-                <input type="text" placeholder="key (resource:action)" required value={formKey} onChange={(e) => setFormKey(e.target.value)} className="w-full rounded border px-3 py-2 text-sm" aria-label="Permission key" />
-                <input type="text" placeholder="resource" required value={formResource} onChange={(e) => setFormResource(e.target.value)} className="w-full rounded border px-3 py-2 text-sm" aria-label="Resource" />
-                <input type="text" placeholder="action" required value={formAction} onChange={(e) => setFormAction(e.target.value)} className="w-full rounded border px-3 py-2 text-sm" aria-label="Action" />
-                <input type="text" placeholder="description" value={formDescription} onChange={(e) => setFormDescription(e.target.value)} className="w-full rounded border px-3 py-2 text-sm" aria-label="Description" />
+                <input type="text" placeholder="name" required value={formName} onChange={(e) => setFormName(e.target.value)} className="w-full rounded border px-3 py-2 text-sm" aria-label="Role name" />
+                <input type="text" placeholder="description (optional)" value={formDescription} onChange={(e) => setFormDescription(e.target.value)} className="w-full rounded border px-3 py-2 text-sm" aria-label="Role description" />
+                <label className="flex items-center gap-2 text-sm">
+                  <input type="checkbox" checked={formIsDefault} onChange={(e) => setFormIsDefault(e.target.checked)} className="rounded border-gray-300" />
+                  Default role
+                </label>
               </div>
               <div className="mt-4 flex justify-end gap-2">
                 <button type="button" onClick={() => setShowCreateModal(false)} className="rounded px-4 py-1.5 text-sm font-medium text-gray-700 hover:bg-gray-100">
                   Cancel
                 </button>
                 <button type="submit" disabled={submitting} className="rounded px-4 py-1.5 text-sm font-medium text-white transition hover:opacity-90" style={{ backgroundColor: '#F5A623' }}>
-                  {submitting ? 'Saving...' : editingPermission ? 'Update' : 'Create'}
+                  {submitting ? 'Saving...' : editingRole ? 'Update' : 'Create'}
                 </button>
               </div>
             </form>
           </EditModal>
 
           {/* View Modal */}
-          {viewingPermission && (
+          {viewingRole && (
             <EditModal
-              isOpen={!!viewingPermission}
-              onClose={() => setViewingPermission(null)}
-              title="Permission Details"
+              isOpen={!!viewingRole}
+              onClose={() => setViewingRole(null)}
+              title="Role Details"
             >
               <div className="space-y-2 text-sm">
-                <div><span className="font-medium" style={{ color: '#1B2A4A' }}>Key:</span> <code className="ml-2">{viewingPermission.key}</code></div>
-                <div><span className="font-medium" style={{ color: '#1B2A4A' }}>Resource:</span> <span className="ml-2">{viewingPermission.resource}</span></div>
-                <div><span className="font-medium" style={{ color: '#1B2A4A' }}>Action:</span> <span className="ml-2">{viewingPermission.action}</span></div>
-                <div><span className="font-medium" style={{ color: '#1B2A4A' }}>Description:</span> <span className="ml-2">{viewingPermission.description || '—'}</span></div>
+                <div><span className="font-medium" style={{ color: '#1B2A4A' }}>Name:</span> <span className="ml-2">{viewingRole.name}</span></div>
+                <div><span className="font-medium" style={{ color: '#1B2A4A' }}>Description:</span> <span className="ml-2">{viewingRole.description || '—'}</span></div>
+                <div><span className="font-medium" style={{ color: '#1B2A4A' }}>Is Default:</span> <span className="ml-2">{viewingRole.isDefault ? 'Yes' : 'No'}</span></div>
+                <div><span className="font-medium" style={{ color: '#1B2A4A' }}>Members:</span> <span className="ml-2">{viewingRole._count?.memberRoles ?? 0}</span></div>
               </div>
               <div className="mt-4 flex justify-end">
-                <button onClick={() => setViewingPermission(null)} className="rounded px-4 py-1.5 text-sm font-medium text-gray-700 hover:bg-gray-100">
+                <button onClick={() => setViewingRole(null)} className="rounded px-4 py-1.5 text-sm font-medium text-gray-700 hover:bg-gray-100">
                   Close
                 </button>
               </div>
@@ -391,8 +380,8 @@ export default function PermissionsPage() {
           {/* Delete Confirmation */}
           <ConfirmDialog
             isOpen={!!deleteConfirm}
-            title="Delete Permission"
-            message="Are you sure you want to delete this permission? This action cannot be undone."
+            title="Delete Role"
+            message="Are you sure you want to delete this role? This action cannot be undone."
             confirmLabel="Delete"
             danger
             onConfirm={() => deleteConfirm && handleDelete(deleteConfirm)}
