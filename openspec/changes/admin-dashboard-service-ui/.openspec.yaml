@@ -1,0 +1,7 @@
+schema: spec-driven
+change: admin-dashboard-service-ui
+status: proposed
+artifacts:
+  - proposal.md
+  - design.md
+  - tasks.md
