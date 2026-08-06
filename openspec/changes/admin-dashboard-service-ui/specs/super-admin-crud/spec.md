@@ -18,7 +18,7 @@ The Organizations admin page MUST use Lucide icon action buttons on each row and
 All Super Admin data model pages (Organizations, Permissions, Roles, Users) MUST present data in a consistent paginated table layout.
 
 #### Acceptance Criteria
-- [ ] Each page displays a paginated table with configurable page size (default 20)
+- [ ] Each page displays a paginated table with configurable page size (default 8)
 - [ ] Each page includes a debounced search input (200ms debounce) for filtering by name/key
 - [ ] Each page includes a dropdown filter (e.g., status, resource type, role)
 - [ ] Filter changes reset pagination to page 1
