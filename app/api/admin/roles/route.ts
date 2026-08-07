@@ -13,13 +13,14 @@ import { recordAuditLog } from '@/lib/audit-log';
 import { logger } from '@/lib/logger';
 import { wrapPiiRoute } from '@/lib/payload-middleware';
 import { env } from '@/lib/env';
+import globalDb from '@/lib/global-db';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 export const revalidate = 0;
 
 // ---------------------------------------------------------------------------
-// GET — List roles (paginated) via RoleService
+// GET — List roles (paginated) across all organizations via globalDb
 // ---------------------------------------------------------------------------
 
 export const GET = wrapPiiRoute(async (request) => {
@@ -32,7 +33,6 @@ export const GET = wrapPiiRoute(async (request) => {
     }
 
     const session = authResult.session!;
-    const targetOrgId = env.PLATFORM_ORGANIZATION_ID!;
 
     const url = new URL(request.url);
     const page = parseInt(url.searchParams.get('page') || '1', 10);
@@ -40,13 +40,40 @@ export const GET = wrapPiiRoute(async (request) => {
     const search = url.searchParams.get('search') || undefined;
     const isDefaultRaw = url.searchParams.get('isDefault');
     const isDefault = isDefaultRaw === 'true' ? true : isDefaultRaw === 'false' ? false : undefined;
+    const orgFilter = url.searchParams.get('orgId') || undefined;
 
-    const ctx: ServiceContext = {
-      userId: session.user.id,
-      role: 'PLATFORM_ADMIN',
+    // Build where clause for global query across all orgs
+    const where: Record<string, unknown> = {};
+    if (search) {
+      where.name = { contains: search, mode: 'insensitive' };
+    }
+    if (isDefault !== undefined) {
+      where.isDefault = isDefault;
+    }
+    if (orgFilter) {
+      where.organizationId = orgFilter;
+    }
+
+    const skip = (page - 1) * pageSize;
+
+    const [roles, total] = await Promise.all([
+      globalDb.role.findMany({
+        where,
+        skip,
+        take: pageSize,
+        orderBy: [{ isDefault: 'desc' }, { name: 'asc' }],
+        include: {
+          _count: { select: { memberRoles: true } },
+          organization: { select: { id: true, name: true } },
+        },
+      }),
+      globalDb.role.count({ where }),
+    ]);
+
+    const result = {
+      items: roles,
+      pagination: { page, pageSize, total, totalPages: Math.ceil(total / pageSize) },
     };
-
-    const result = await RoleService.list(targetOrgId, { search, isDefault }, { page, pageSize }, ctx);
 
     logger.info({ userId: session.user.id, count: result.items.length }, '[Roles API] Fetched roles');
     return NextResponse.json(result, {
@@ -73,7 +100,6 @@ export const POST = wrapPiiRoute(async (request, decryptedBody) => {
     }
 
     const session = authResult.session!;
-    const targetOrgId = env.PLATFORM_ORGANIZATION_ID!;
 
     // Parse body from decrypted payload or raw JSON
     let body: CreateRoleInput;
@@ -93,6 +119,10 @@ export const POST = wrapPiiRoute(async (request, decryptedBody) => {
         return NextResponse.json({ error: 'Invalid request body' }, { status: 400 });
       }
     }
+
+    // Accept optional organizationId from body for platform admins to target specific orgs.
+    // Falls back to PLATFORM_ORGANIZATION_ID for backward compatibility.
+    const targetOrgId = body.organizationId || env.PLATFORM_ORGANIZATION_ID!;
 
     const ctx: ServiceContext = {
       userId: session.user.id,

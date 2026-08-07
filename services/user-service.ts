@@ -21,6 +21,7 @@ export interface CreateUserInput {
   email: string;
   name: string;
   password?: string;
+  organizationId?: string;
 }
 
 export interface UpdateUserInput {
@@ -60,8 +61,15 @@ export const UserService = {
       data: { email, name },
     });
 
-    // Tenant Admin also creates a Member relationship for their own org
+    // Tenant Admin creates a Member relationship for their own org
     if (ctx.role === 'TENANT_ADMIN' && ctx.organizationId) {
+      await globalDb.member.create({
+        data: { userId: user.id, orgId: ctx.organizationId, role: 'member' },
+      });
+    }
+
+    // Platform Admin can optionally assign the user to a specific org
+    if (ctx.role === 'PLATFORM_ADMIN' && ctx.organizationId) {
       await globalDb.member.create({
         data: { userId: user.id, orgId: ctx.organizationId, role: 'member' },
       });
@@ -135,13 +143,41 @@ export const UserService = {
       }
     }
 
+    // Platform Admin scope: filter by organization, role, or both
+    if (ctx.role === 'PLATFORM_ADMIN') {
+      const memberWhere: Prisma.MemberWhereInput = {};
+
+      if (filters.organizationId) {
+        memberWhere.orgId = filters.organizationId;
+      }
+      if (filters.role) {
+        memberWhere.role = filters.role;
+      }
+
+      const matchingMembers = await globalDb.member.findMany({
+        where: memberWhere,
+        select: { userId: true },
+      });
+      const userIds = matchingMembers.map((m) => m.userId);
+
+      if (userIds.length > 0) {
+        where.id = { in: userIds };
+      } else {
+        // No users match the filter(s) — return empty
+        where.id = { in: [] };
+      }
+    }
+
     const [users, total] = await Promise.all([
       globalDb.user.findMany({
         where,
         skip,
         take: pageSize,
         orderBy: { createdAt: 'desc' },
-        include: { _count: { select: { members: true } } },
+        include: {
+          _count: { select: { members: true } },
+          members: { take: 1, include: { organization: { select: { id: true, name: true } } } },
+        },
       }),
       globalDb.user.count({ where }),
     ]);

@@ -80,7 +80,9 @@ export const PATCH = wrapPiiRoute(async (request, decryptedBody, params) => {
       return NextResponse.json({ error: 'Role ID is required' }, { status: 400 });
     }
 
-    const targetOrgId = env.PLATFORM_ORGANIZATION_ID!;
+    // Accept optional organizationId from body for platform admins to target specific orgs.
+    // Falls back to PLATFORM_ORGANIZATION_ID for backward compatibility.
+    let targetOrgId = env.PLATFORM_ORGANIZATION_ID!;
 
     // Parse body from decrypted payload or raw JSON
     let body: UpdateRoleInput;
@@ -99,6 +101,12 @@ export const PATCH = wrapPiiRoute(async (request, decryptedBody, params) => {
       } catch {
         return NextResponse.json({ error: 'Invalid request body' }, { status: 400 });
       }
+    }
+
+    // Extract organizationId from body if provided
+    const bodyOrgId = (body as Record<string, unknown>).organizationId as string | undefined;
+    if (bodyOrgId) {
+      targetOrgId = bodyOrgId;
     }
 
     const ctx: ServiceContext = {

@@ -25,12 +25,14 @@ export interface CreateRoleInput {
   name: string;
   description?: string;
   isDefault?: boolean;
+  organizationId?: string;
 }
 
 export interface UpdateRoleInput {
   name?: string;
   description?: string;
   isDefault?: boolean;
+  organizationId?: string;
 }
 
 // ---------------------------------------------------------------------------

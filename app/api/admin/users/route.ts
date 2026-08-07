@@ -36,13 +36,15 @@ export const GET = wrapPiiRoute(async (request) => {
     const page = parseInt(url.searchParams.get('page') || '1', 10);
     const pageSize = parseInt(url.searchParams.get('pageSize') || '8', 10);
     const search = url.searchParams.get('search') || undefined;
+    const role = url.searchParams.get('role') || undefined;
+    const organizationId = url.searchParams.get('organizationId') || undefined;
 
     const ctx: ServiceContext = {
       userId: session.user.id,
       role: 'PLATFORM_ADMIN',
     };
 
-    const result = await UserService.list({ search }, { page, pageSize }, ctx);
+    const result = await UserService.list({ search, role, organizationId }, { page, pageSize }, ctx);
 
     logger.info({ userId: session.user.id, count: result.items.length }, '[Users API] Fetched users');
     return NextResponse.json(result, {
@@ -89,9 +91,13 @@ export const POST = wrapPiiRoute(async (request, decryptedBody) => {
       }
     }
 
+    // Accept optional organizationId from body for platform admins to target specific orgs.
+    const targetOrgId = body.organizationId;
+
     const ctx: ServiceContext = {
       userId: session.user.id,
       role: 'PLATFORM_ADMIN',
+      organizationId: targetOrgId,
     };
 
     const user = await UserService.create(body, ctx);

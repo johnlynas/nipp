@@ -1,5 +1,6 @@
 'use client';
 
+import Link from 'next/link';
 import { Eye, Pencil, Trash2 } from 'lucide-react';
 import { OrgStatusBadge } from './OrgStatusBadge';
 
@@ -14,15 +15,12 @@ interface Organization {
 
 interface OrgTableProps {
   organizations: Organization[];
-  onEdit?: (id: string) => void;
-  onView?: (id: string) => void;
-  onDelete?: (id: string) => void;
 }
 
 /**
- * Sortable, filterable organization table with Lucide icon action buttons.
+ * Organization table with Link-based navigation for view/edit and optional delete callback.
  */
-export function OrgTable({ organizations, onView, onEdit, onDelete }: OrgTableProps) {
+export function OrgTable({ organizations }: OrgTableProps) {
   const formatDate = (date: string | Date) => {
     return new Date(date).toLocaleDateString('en-GB', {
       year: 'numeric',
@@ -70,36 +68,15 @@ export function OrgTable({ organizations, onView, onEdit, onDelete }: OrgTablePr
               </td>
               <td className="whitespace-nowrap px-6 py-4 text-right">
                 <div className="flex justify-end gap-2">
-                  {onView && (
-                    <button
-                      onClick={() => onView(org.id)}
-                      className="text-blue-600 hover:text-blue-800 transition-colors"
-                      title="View"
-                      aria-label={`View ${org.name}`}
-                    >
-                      <Eye className="w-4 h-4" />
-                    </button>
-                  )}
-                  {onEdit && (
-                    <button
-                      onClick={() => onEdit(org.id)}
-                      className="text-amber-600 hover:text-amber-800 transition-colors"
-                      title="Edit"
-                      aria-label={`Edit ${org.name}`}
-                    >
-                      <Pencil className="w-4 h-4" />
-                    </button>
-                  )}
-                  {onDelete && (
-                    <button
-                      onClick={() => onDelete(org.id)}
-                      className="text-red-600 hover:text-red-800 transition-colors"
-                      title="Delete"
-                      aria-label={`Delete ${org.name}`}
-                    >
-                      <Trash2 className="w-4 h-4" />
-                    </button>
-                  )}
+                  <Link href={`/admin/organizations/${org.id}`} className="text-blue-600 hover:text-blue-800 transition-colors" title="View" aria-label={`View ${org.name}`}>
+                    <Eye className="w-4 h-4" />
+                  </Link>
+                  <Link href={`/admin/organizations/${org.id}/edit`} className="text-amber-600 hover:text-amber-800 transition-colors" title="Edit" aria-label={`Edit ${org.name}`}>
+                    <Pencil className="w-4 h-4" />
+                  </Link>
+                  <Link href={`/admin/organizations/${org.id}/delete`} className="text-red-600 hover:text-red-800 transition-colors" title="Delete" aria-label={`Delete ${org.name}`}>
+                    <Trash2 className="w-4 h-4" />
+                  </Link>
                 </div>
               </td>
             </tr>

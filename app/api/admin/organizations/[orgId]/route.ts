@@ -91,7 +91,7 @@ export const PATCH = wrapPiiRoute(async (request, decryptedBody, params) => {
     }
 
     // Get body from decrypted payload or parse JSON
-    let body: { name?: string; slug?: string };
+    let body: { name?: string; slug?: string; status?: string };
     if (decryptedBody && typeof decryptedBody === 'object') {
       body = decryptedBody as typeof body;
     } else {
@@ -114,7 +114,7 @@ export const PATCH = wrapPiiRoute(async (request, decryptedBody, params) => {
       return NextResponse.json({ error: 'Organization not found' }, { status: 404 });
     }
 
-    const updateData: { name?: string; slug?: string } = {};
+    const updateData: Record<string, string> = {};
     if (body.name) updateData.name = body.name;
     if (body.slug && body.slug !== existingOrg.slug) {
       const slugCollision = await globalDb.organization.findFirst({ where: { slug: body.slug, id: { not: orgId } } });
@@ -122,6 +122,9 @@ export const PATCH = wrapPiiRoute(async (request, decryptedBody, params) => {
         return NextResponse.json({ error: 'Slug already in use by another organization' }, { status: 409 });
       }
       updateData.slug = body.slug;
+    }
+    if (body.status && body.status !== existingOrg.status) {
+      updateData.status = body.status;
     }
 
     if (Object.keys(updateData).length === 0) {

@@ -1,17 +1,23 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { Eye, Pencil, Trash2 } from 'lucide-react';
 import { RequireSuperAdmin } from '@/components/auth/RequireSuperAdmin';
-import { ConfirmDialog } from '@/components/admin/ConfirmDialog';
-import { EditModal } from '@/components/admin/EditModal';
+import Link from 'next/link';
 import { encryptedFetch } from '@/lib/api-client';
+
+interface Organization {
+  id: string;
+  name: string;
+}
 
 interface Role {
   id: string;
   name: string;
   description?: string | null;
   isDefault: boolean;
+  organizationId: string;
+  organization?: Organization;
   _count?: { memberRoles: number };
 }
 
@@ -27,23 +33,22 @@ export default function RolesPage() {
   const [pagination, setPagination] = useState<Pagination>({ page: 1, pageSize: 8, total: 0, totalPages: 0 });
   const [search, setSearch] = useState('');
   const [isDefaultFilter, setIsDefaultFilter] = useState('');
+  const [orgFilter, setOrgFilter] = useState('');
+  const [organizations, setOrganizations] = useState<Organization[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
-  // Modal states
-  const [showCreateModal, setShowCreateModal] = useState(false);
-  const [editingRole, setEditingRole] = useState<Role | null>(null);
-  const [viewingRole, setViewingRole] = useState<Role | null>(null);
-  const [deleteConfirm, setDeleteConfirm] = useState<string | null>(null);
-
-  // Form state
-  const [formName, setFormName] = useState('');
-  const [formDescription, setFormDescription] = useState('');
-  const [formIsDefault, setFormIsDefault] = useState(false);
-  const [submitting, setSubmitting] = useState(false);
-
   // Debounce search input
   const [debouncedSearch, setDebouncedSearch] = useState('');
+
+  // Refs to always have the latest values inside async callbacks
+  const orgFilterRef = useRef(orgFilter);
+  const isDefaultFilterRef = useRef(isDefaultFilter);
+  const debouncedSearchRef = useRef(debouncedSearch);
+
+  useEffect(() => { orgFilterRef.current = orgFilter; }, [orgFilter]);
+  useEffect(() => { isDefaultFilterRef.current = isDefaultFilter; }, [isDefaultFilter]);
+  useEffect(() => { debouncedSearchRef.current = debouncedSearch; }, [debouncedSearch]);
 
   useEffect(() => {
     const timer = setTimeout(() => setDebouncedSearch(search), 200);
@@ -56,7 +61,23 @@ export default function RolesPage() {
   useEffect(() => {
     setPagination((p) => ({ ...p, page: 1 }));
     setFetchKey((k) => k + 1);
-  }, [debouncedSearch, isDefaultFilter]);
+  }, [debouncedSearch, isDefaultFilter, orgFilter]);
+
+  // Fetch organizations for the filter dropdown
+  useEffect(() => {
+    async function fetchOrgs() {
+      try {
+        const res = await encryptedFetch('/api/admin/organizations?page=1&pageSize=500', { pii: true });
+        if (res.ok) {
+          const data = await res.json();
+          setOrganizations(data.organizations || []);
+        }
+      } catch (err) {
+        console.error('Failed to fetch organizations:', err);
+      }
+    }
+    fetchOrgs();
+  }, []);
 
   // Fetch roles
   useEffect(() => {
@@ -68,17 +89,24 @@ export default function RolesPage() {
           page: String(pagination.page),
           pageSize: String(pagination.pageSize),
         });
-        if (debouncedSearch) params.set('search', debouncedSearch);
-        if (isDefaultFilter === 'true') params.set('isDefault', 'true');
-        else if (isDefaultFilter === 'false') params.set('isDefault', 'false');
+        if (debouncedSearchRef.current) params.set('search', debouncedSearchRef.current);
+        if (isDefaultFilterRef.current === 'true') params.set('isDefault', 'true');
+        else if (isDefaultFilterRef.current === 'false') params.set('isDefault', 'false');
+        if (orgFilterRef.current) params.set('orgId', orgFilterRef.current);
 
-        const res = await encryptedFetch(`/api/admin/roles?${params}`, { pii: true });
+        const url = `/api/admin/roles?${params}`;
+        console.log('[RolesPage] Fetching:', url);
+
+        const res = await encryptedFetch(url, { pii: true });
+        console.log('[RolesPage] Response status:', res.status);
+
         if (!res.ok) {
           const data = await res.json().catch(() => ({}));
           throw new Error(data.error || 'Failed to fetch roles');
         }
 
         const data = await res.json();
+        console.log('[RolesPage] Roles count:', (data.items || []).length);
         setRoles(data.items || []);
 
         const total = data.pagination?.total ?? 0;
@@ -102,80 +130,12 @@ export default function RolesPage() {
     fetchData();
   }, [fetchKey, pagination.page, pagination.pageSize]);
 
-  // Open edit modal with pre-filled data
-  function openEditModal(role: Role) {
-    setEditingRole(role);
-    setFormName(role.name);
-    setFormDescription(role.description || '');
-    setFormIsDefault(role.isDefault);
-    setShowCreateModal(true);
-  }
-
-  // Open create modal with empty form
-  function openCreateModal() {
-    setEditingRole(null);
-    setFormName('');
-    setFormDescription('');
-    setFormIsDefault(false);
-    setShowCreateModal(true);
-  }
-
-  // Submit create or update
-  async function handleSubmit(e: React.FormEvent) {
-    e.preventDefault();
-    setSubmitting(true);
-    setError(null);
-
-    try {
-      const body = { name: formName, description: formDescription || undefined, isDefault: formIsDefault };
-
-      let res;
-      if (editingRole) {
-        res = await encryptedFetch(`/api/admin/roles/${editingRole.id}`, {
-          method: 'PATCH',
-          body: JSON.stringify(body),
-          pii: true,
-        });
-      } else {
-        res = await encryptedFetch('/api/admin/roles', {
-          method: 'POST',
-          body: JSON.stringify(body),
-          pii: true,
-        });
-      }
-
-      if (!res.ok) {
-        const data = await res.json().catch(() => ({}));
-        throw new Error(data.error || 'Failed to save role');
-      }
-
-      setShowCreateModal(false);
-      setFetchKey((k) => k + 1); // Re-fetch table
-    } catch (err) {
-      console.error('Failed to save role:', err);
-      setError(err instanceof Error ? err.message : 'Failed to save role');
-    } finally {
-      setSubmitting(false);
-    }
-  }
-
-  // Delete role
-  async function handleDelete(id: string) {
-    try {
-      const res = await encryptedFetch(`/api/admin/roles/${id}`, { method: 'DELETE', pii: true });
-      if (res.ok) {
-        setFetchKey((k) => k + 1); // Re-fetch table
-      } else {
-        const data = await res.json().catch(() => ({}));
-        setError(data.error || 'Failed to delete role');
-      }
-    } catch (err) {
-      console.error('Failed to delete role:', err);
-      setError(err instanceof Error ? err.message : 'Failed to delete role');
-    } finally {
-      setDeleteConfirm(null);
-    }
-  }
+  const getOrgName = (role: Role) => {
+    if (role.organization?.name) return role.organization.name;
+    // Fallback: look up from organizations list
+    const org = organizations.find((o) => o.id === role.organizationId);
+    return org?.name || '—';
+  };
 
   return (
     <RequireSuperAdmin>
@@ -187,13 +147,13 @@ export default function RolesPage() {
               <h2 className="text-2xl font-bold" style={{ color: '#1B2A4A' }}>Roles</h2>
               <p className="text-sm text-gray-500">Manage platform roles and permissions</p>
             </div>
-            <button
-              onClick={openCreateModal}
+            <Link
+              href="/admin/roles/create"
               className="rounded px-4 py-2 text-sm font-medium text-white transition hover:opacity-90"
               style={{ backgroundColor: '#F5A623' }}
             >
               + Add Role
-            </button>
+            </Link>
           </div>
 
           {/* Error Banner */}
@@ -213,6 +173,22 @@ export default function RolesPage() {
               className="rounded border px-3 py-2 text-sm bg-white hover:bg-gray-100 text-gray-700 font-medium transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
               aria-label="Search roles"
             />
+            <select
+              value={orgFilter}
+              onChange={(e) => {
+                setOrgFilter(e.target.value);
+                setSearch('');
+              }}
+              className="rounded border px-3 py-2 text-sm bg-white hover:bg-gray-100 text-gray-700 font-medium transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+              aria-label="Filter by organization"
+            >
+              <option value="">All Organizations</option>
+              {organizations.map((org) => (
+                <option key={org.id} value={org.id}>
+                  {org.name}
+                </option>
+              ))}
+            </select>
             <select
               value={isDefaultFilter}
               onChange={(e) => {
@@ -237,6 +213,7 @@ export default function RolesPage() {
                 <thead className="bg-[#1B2A4A]">
                   <tr>
                     <th className="px-6 py-3 text-left text-xs font-medium uppercase tracking-wider text-white" scope="col">Name</th>
+                    <th className="px-6 py-3 text-left text-xs font-medium uppercase tracking-wider text-white" scope="col">Organization</th>
                     <th className="px-6 py-3 text-left text-xs font-medium uppercase tracking-wider text-white" scope="col">Description</th>
                     <th className="px-6 py-3 text-left text-xs font-medium uppercase tracking-wider text-white" scope="col">Type</th>
                     <th className="px-6 py-3 text-left text-xs font-medium uppercase tracking-wider text-white" scope="col">Members</th>
@@ -246,7 +223,7 @@ export default function RolesPage() {
                 <tbody className="divide-y divide-gray-200 bg-white">
                   {roles.length === 0 ? (
                     <tr>
-                      <td colSpan={5} className="px-6 py-8 text-center text-sm text-gray-500">
+                      <td colSpan={6} className="px-6 py-8 text-center text-sm text-gray-500">
                         No roles found.
                       </td>
                     </tr>
@@ -255,6 +232,9 @@ export default function RolesPage() {
                       <tr key={role.id} className="hover:bg-gray-50">
                         <td className="whitespace-nowrap px-6 py-4 text-sm font-medium" style={{ color: '#1B2A4A' }}>
                           {role.name}
+                        </td>
+                        <td className="whitespace-nowrap px-6 py-4 text-sm text-gray-700">
+                          {getOrgName(role)}
                         </td>
                         <td className="whitespace-nowrap px-6 py-4 text-sm text-gray-500">{role.description || '—'}</td>
                         <td className="whitespace-nowrap px-6 py-4">
@@ -269,30 +249,15 @@ export default function RolesPage() {
                         </td>
                         <td className="whitespace-nowrap px-6 py-4 text-right">
                           <div className="flex justify-end gap-2">
-                            <button
-                              onClick={() => setViewingRole(role)}
-                              className="text-blue-600 hover:text-blue-800 transition-colors"
-                              title="View"
-                              aria-label={`View ${role.name}`}
-                            >
+                            <Link href={`/admin/roles/${role.id}/view`} className="text-blue-600 hover:text-blue-800 transition-colors" title="View" aria-label={`View ${role.name}`}>
                               <Eye className="w-4 h-4" />
-                            </button>
-                            <button
-                              onClick={() => openEditModal(role)}
-                              className="text-amber-600 hover:text-amber-800 transition-colors"
-                              title="Edit"
-                              aria-label={`Edit ${role.name}`}
-                            >
+                            </Link>
+                            <Link href={`/admin/roles/${role.id}/edit`} className="text-amber-600 hover:text-amber-800 transition-colors" title="Edit" aria-label={`Edit ${role.name}`}>
                               <Pencil className="w-4 h-4" />
-                            </button>
-                            <button
-                              onClick={() => setDeleteConfirm(role.id)}
-                              className="text-red-600 hover:text-red-800 transition-colors"
-                              title="Delete"
-                              aria-label={`Delete ${role.name}`}
-                            >
+                            </Link>
+                            <Link href={`/admin/roles/${role.id}/delete`} className="text-red-600 hover:text-red-800 transition-colors" title="Delete" aria-label={`Delete ${role.name}`}>
                               <Trash2 className="w-4 h-4" />
-                            </button>
+                            </Link>
                           </div>
                         </td>
                       </tr>
@@ -330,63 +295,8 @@ export default function RolesPage() {
             </div>
           )}
 
-          {/* Create/Edit Modal */}
-          <EditModal
-            isOpen={showCreateModal}
-            onClose={() => setShowCreateModal(false)}
-            title={editingRole ? 'Edit Role' : 'New Role'}
-          >
-            <form onSubmit={handleSubmit}>
-              <div className="space-y-3">
-                <input type="text" placeholder="name" required value={formName} onChange={(e) => setFormName(e.target.value)} className="w-full rounded border px-3 py-2 text-sm" aria-label="Role name" />
-                <input type="text" placeholder="description (optional)" value={formDescription} onChange={(e) => setFormDescription(e.target.value)} className="w-full rounded border px-3 py-2 text-sm" aria-label="Role description" />
-                <label className="flex items-center gap-2 text-sm">
-                  <input type="checkbox" checked={formIsDefault} onChange={(e) => setFormIsDefault(e.target.checked)} className="rounded border-gray-300" />
-                  Default role
-                </label>
-              </div>
-              <div className="mt-4 flex justify-end gap-2">
-                <button type="button" onClick={() => setShowCreateModal(false)} className="rounded px-4 py-1.5 text-sm font-medium text-gray-700 hover:bg-gray-100">
-                  Cancel
-                </button>
-                <button type="submit" disabled={submitting} className="rounded px-4 py-1.5 text-sm font-medium text-white transition hover:opacity-90" style={{ backgroundColor: '#F5A623' }}>
-                  {submitting ? 'Saving...' : editingRole ? 'Update' : 'Create'}
-                </button>
-              </div>
-            </form>
-          </EditModal>
 
-          {/* View Modal */}
-          {viewingRole && (
-            <EditModal
-              isOpen={!!viewingRole}
-              onClose={() => setViewingRole(null)}
-              title="Role Details"
-            >
-              <div className="space-y-2 text-sm">
-                <div><span className="font-medium" style={{ color: '#1B2A4A' }}>Name:</span> <span className="ml-2">{viewingRole.name}</span></div>
-                <div><span className="font-medium" style={{ color: '#1B2A4A' }}>Description:</span> <span className="ml-2">{viewingRole.description || '—'}</span></div>
-                <div><span className="font-medium" style={{ color: '#1B2A4A' }}>Is Default:</span> <span className="ml-2">{viewingRole.isDefault ? 'Yes' : 'No'}</span></div>
-                <div><span className="font-medium" style={{ color: '#1B2A4A' }}>Members:</span> <span className="ml-2">{viewingRole._count?.memberRoles ?? 0}</span></div>
-              </div>
-              <div className="mt-4 flex justify-end">
-                <button onClick={() => setViewingRole(null)} className="rounded px-4 py-1.5 text-sm font-medium text-gray-700 hover:bg-gray-100">
-                  Close
-                </button>
-              </div>
-            </EditModal>
-          )}
 
-          {/* Delete Confirmation */}
-          <ConfirmDialog
-            isOpen={!!deleteConfirm}
-            title="Delete Role"
-            message="Are you sure you want to delete this role? This action cannot be undone."
-            confirmLabel="Delete"
-            danger
-            onConfirm={() => deleteConfirm && handleDelete(deleteConfirm)}
-            onCancel={() => setDeleteConfirm(null)}
-          />
         </main>
       </div>
     </RequireSuperAdmin>

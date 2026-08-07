@@ -144,6 +144,7 @@ export interface OrganizationFilters extends BaseFilters {
 /** Filters for User list queries (Tenant Admin scope: only members of their org). */
 export interface UserFilters extends BaseFilters {
   role?: string; // filter by member role within the org
+  organizationId?: string; // filter users belonging to a specific organization (Platform Admin only)
 }
 
 /** Filters for Role list queries. */

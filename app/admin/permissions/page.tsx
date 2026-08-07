@@ -3,8 +3,7 @@
 import { useState, useEffect } from 'react';
 import { Eye, Pencil, Trash2 } from 'lucide-react';
 import { RequireSuperAdmin } from '@/components/auth/RequireSuperAdmin';
-import { ConfirmDialog } from '@/components/admin/ConfirmDialog';
-import { EditModal } from '@/components/admin/EditModal';
+import Link from 'next/link';
 import { encryptedFetch } from '@/lib/api-client';
 
 interface Permission {
@@ -30,18 +29,9 @@ export default function PermissionsPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
-  // Modal states
-  const [showCreateModal, setShowCreateModal] = useState(false);
-  const [editingPermission, setEditingPermission] = useState<Permission | null>(null);
-  const [viewingPermission, setViewingPermission] = useState<Permission | null>(null);
-  const [deleteConfirm, setDeleteConfirm] = useState<string | null>(null);
 
-  // Form state
-  const [formKey, setFormKey] = useState('');
-  const [formResource, setFormResource] = useState('');
-  const [formAction, setFormAction] = useState('');
-  const [formDescription, setFormDescription] = useState('');
-  const [submitting, setSubmitting] = useState(false);
+
+
 
   // Debounce search input
   const [debouncedSearch, setDebouncedSearch] = useState('');
@@ -102,82 +92,11 @@ export default function PermissionsPage() {
     fetchData();
   }, [fetchKey, pagination.page, pagination.pageSize]);
 
-  // Open edit modal with pre-filled data
-  function openEditModal(perm: Permission) {
-    setEditingPermission(perm);
-    setFormKey(perm.key);
-    setFormResource(perm.resource);
-    setFormAction(perm.action);
-    setFormDescription(perm.description || '');
-    setShowCreateModal(true);
-  }
 
-  // Open create modal with empty form
-  function openCreateModal() {
-    setEditingPermission(null);
-    setFormKey('');
-    setFormResource('');
-    setFormAction('');
-    setFormDescription('');
-    setShowCreateModal(true);
-  }
 
-  // Submit create or update
-  async function handleSubmit(e: React.FormEvent) {
-    e.preventDefault();
-    setSubmitting(true);
-    setError(null);
 
-    try {
-      const body = { key: formKey, resource: formResource, action: formAction, description: formDescription || undefined };
 
-      let res;
-      if (editingPermission) {
-        res = await encryptedFetch(`/api/admin/permissions/${editingPermission.id}`, {
-          method: 'PATCH',
-          body: JSON.stringify(body),
-          pii: true,
-        });
-      } else {
-        res = await encryptedFetch('/api/admin/permissions', {
-          method: 'POST',
-          body: JSON.stringify(body),
-          pii: true,
-        });
-      }
-
-      if (!res.ok) {
-        const data = await res.json().catch(() => ({}));
-        throw new Error(data.error || 'Failed to save permission');
-      }
-
-      setShowCreateModal(false);
-      setFetchKey((k) => k + 1); // Re-fetch table
-    } catch (err) {
-      console.error('Failed to save permission:', err);
-      setError(err instanceof Error ? err.message : 'Failed to save permission');
-    } finally {
-      setSubmitting(false);
-    }
-  }
-
-  // Delete permission
-  async function handleDelete(id: string) {
-    try {
-      const res = await encryptedFetch(`/api/admin/permissions/${id}`, { method: 'DELETE', pii: true });
-      if (res.ok) {
-        setFetchKey((k) => k + 1); // Re-fetch table
-      } else {
-        const data = await res.json().catch(() => ({}));
-        setError(data.error || 'Failed to delete permission');
-      }
-    } catch (err) {
-      console.error('Failed to delete permission:', err);
-      setError(err instanceof Error ? err.message : 'Failed to delete permission');
-    } finally {
-      setDeleteConfirm(null);
-    }
-  }
+  
 
   // Unique resource types fetched from API (independent of filter)
   const [resourceTypes, setResourceTypes] = useState<string[]>([]);
@@ -207,13 +126,13 @@ export default function PermissionsPage() {
               <h2 className="text-2xl font-bold" style={{ color: '#1B2A4A' }}>Permissions</h2>
               <p className="text-sm text-gray-500">Global permission catalog management</p>
             </div>
-            <button
-              onClick={openCreateModal}
+            <Link
+              href="/admin/permissions/create"
               className="rounded px-4 py-2 text-sm font-medium text-white transition hover:opacity-90"
               style={{ backgroundColor: '#F5A623' }}
             >
               + Add Permission
-            </button>
+            </Link>
           </div>
 
           {/* Error Banner */}
@@ -282,30 +201,15 @@ export default function PermissionsPage() {
                         <td className="whitespace-nowrap px-6 py-4 text-sm text-gray-500">{perm.description || '—'}</td>
                         <td className="whitespace-nowrap px-6 py-4 text-right">
                           <div className="flex justify-end gap-2">
-                            <button
-                              onClick={() => setViewingPermission(perm)}
-                              className="text-blue-600 hover:text-blue-800 transition-colors"
-                              title="View"
-                              aria-label={`View ${perm.key}`}
-                            >
+                            <Link href={`/admin/permissions/${perm.id}/view`} className="text-blue-600 hover:text-blue-800 transition-colors" title="View" aria-label={`View ${perm.key}`}>
                               <Eye className="w-4 h-4" />
-                            </button>
-                            <button
-                              onClick={() => openEditModal(perm)}
-                              className="text-amber-600 hover:text-amber-800 transition-colors"
-                              title="Edit"
-                              aria-label={`Edit ${perm.key}`}
-                            >
+                            </Link>
+                            <Link href={`/admin/permissions/${perm.id}/edit`} className="text-amber-600 hover:text-amber-800 transition-colors" title="Edit" aria-label={`Edit ${perm.key}`}>
                               <Pencil className="w-4 h-4" />
-                            </button>
-                            <button
-                              onClick={() => setDeleteConfirm(perm.id)}
-                              className="text-red-600 hover:text-red-800 transition-colors"
-                              title="Delete"
-                              aria-label={`Delete ${perm.key}`}
-                            >
+                            </Link>
+                            <Link href={`/admin/permissions/${perm.id}/delete`} className="text-red-600 hover:text-red-800 transition-colors" title="Delete" aria-label={`Delete ${perm.key}`}>
                               <Trash2 className="w-4 h-4" />
-                            </button>
+                            </Link>
                           </div>
                         </td>
                       </tr>
@@ -343,61 +247,8 @@ export default function PermissionsPage() {
             </div>
           )}
 
-          {/* Create/Edit Modal */}
-          <EditModal
-            isOpen={showCreateModal}
-            onClose={() => setShowCreateModal(false)}
-            title={editingPermission ? 'Edit Permission' : 'New Permission'}
-          >
-            <form onSubmit={handleSubmit}>
-              <div className="space-y-3">
-                <input type="text" placeholder="key (resource:action)" required value={formKey} onChange={(e) => setFormKey(e.target.value)} className="w-full rounded border px-3 py-2 text-sm" aria-label="Permission key" />
-                <input type="text" placeholder="resource" required value={formResource} onChange={(e) => setFormResource(e.target.value)} className="w-full rounded border px-3 py-2 text-sm" aria-label="Resource" />
-                <input type="text" placeholder="action" required value={formAction} onChange={(e) => setFormAction(e.target.value)} className="w-full rounded border px-3 py-2 text-sm" aria-label="Action" />
-                <input type="text" placeholder="description" value={formDescription} onChange={(e) => setFormDescription(e.target.value)} className="w-full rounded border px-3 py-2 text-sm" aria-label="Description" />
-              </div>
-              <div className="mt-4 flex justify-end gap-2">
-                <button type="button" onClick={() => setShowCreateModal(false)} className="rounded px-4 py-1.5 text-sm font-medium text-gray-700 hover:bg-gray-100">
-                  Cancel
-                </button>
-                <button type="submit" disabled={submitting} className="rounded px-4 py-1.5 text-sm font-medium text-white transition hover:opacity-90" style={{ backgroundColor: '#F5A623' }}>
-                  {submitting ? 'Saving...' : editingPermission ? 'Update' : 'Create'}
-                </button>
-              </div>
-            </form>
-          </EditModal>
 
-          {/* View Modal */}
-          {viewingPermission && (
-            <EditModal
-              isOpen={!!viewingPermission}
-              onClose={() => setViewingPermission(null)}
-              title="Permission Details"
-            >
-              <div className="space-y-2 text-sm">
-                <div><span className="font-medium" style={{ color: '#1B2A4A' }}>Key:</span> <code className="ml-2">{viewingPermission.key}</code></div>
-                <div><span className="font-medium" style={{ color: '#1B2A4A' }}>Resource:</span> <span className="ml-2">{viewingPermission.resource}</span></div>
-                <div><span className="font-medium" style={{ color: '#1B2A4A' }}>Action:</span> <span className="ml-2">{viewingPermission.action}</span></div>
-                <div><span className="font-medium" style={{ color: '#1B2A4A' }}>Description:</span> <span className="ml-2">{viewingPermission.description || '—'}</span></div>
-              </div>
-              <div className="mt-4 flex justify-end">
-                <button onClick={() => setViewingPermission(null)} className="rounded px-4 py-1.5 text-sm font-medium text-gray-700 hover:bg-gray-100">
-                  Close
-                </button>
-              </div>
-            </EditModal>
-          )}
 
-          {/* Delete Confirmation */}
-          <ConfirmDialog
-            isOpen={!!deleteConfirm}
-            title="Delete Permission"
-            message="Are you sure you want to delete this permission? This action cannot be undone."
-            confirmLabel="Delete"
-            danger
-            onConfirm={() => deleteConfirm && handleDelete(deleteConfirm)}
-            onCancel={() => setDeleteConfirm(null)}
-          />
         </main>
       </div>
     </RequireSuperAdmin>
