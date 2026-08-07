@@ -43,7 +43,7 @@ export default function CreateRolePage() {
     if (isSuperAdmin === true && organizations.length === 0) {
       fetchOrganizations();
     }
-  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+  }, []);
 
   // Filter organizations based on search query
   useEffect(() => {

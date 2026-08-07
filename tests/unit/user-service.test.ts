@@ -19,7 +19,7 @@ vi.mock('@/lib/global-db', () => ({
       update: vi.fn(),
       delete: vi.fn(),
     },
-    member: { findFirst: vi.fn(), create: vi.fn(), deleteMany: vi.fn() },
+    member: { findFirst: vi.fn(), findMany: vi.fn(), create: vi.fn(), deleteMany: vi.fn() },
   },
 }));
 
@@ -162,6 +162,7 @@ describe('UserService', () => {
     it('returns all users for PLATFORM_ADMIN', async () => {
       vi.mocked(globalDb.user.findMany).mockResolvedValue([castUser(mockUser()) as never]);
       vi.mocked(globalDb.user.count).mockResolvedValue(1);
+      vi.mocked(globalDb.member.findMany).mockResolvedValue([{ id: 'm-1', userId: 'user-1', orgId: 'org-1', role: 'MEMBER', createdAt: new Date(), updatedAt: new Date() }]);
 
       const result = await UserService.list({}, { page: 1, pageSize: 20 }, mockCtx('PLATFORM_ADMIN'));
 
@@ -185,15 +186,18 @@ describe('UserService', () => {
     it('applies search filter', async () => {
       vi.mocked(globalDb.user.findMany).mockResolvedValue([]);
       vi.mocked(globalDb.user.count).mockResolvedValue(0);
+      vi.mocked(globalDb.member.findMany).mockResolvedValue([{ id: 'm-1', userId: 'user-1', orgId: 'org-1', role: 'MEMBER', createdAt: new Date(), updatedAt: new Date() }]);
 
       await UserService.list({ search: 'john' }, { page: 1, pageSize: 20 }, mockCtx('PLATFORM_ADMIN'));
 
       expect(globalDb.user.findMany).toHaveBeenCalledWith(
         expect.objectContaining({
-          where: { OR: [
-            { name: { contains: 'john', mode: 'insensitive' } },
-            { email: { contains: 'john', mode: 'insensitive' } },
-          ]},
+          where: expect.objectContaining({
+            OR: [
+              { name: { contains: 'john', mode: 'insensitive' } },
+              { email: { contains: 'john', mode: 'insensitive' } },
+            ],
+          }),
         }),
       );
     });
@@ -207,6 +211,7 @@ describe('UserService', () => {
     it('returns correct pagination', async () => {
       vi.mocked(globalDb.user.findMany).mockResolvedValue([]);
       vi.mocked(globalDb.user.count).mockResolvedValue(45);
+      vi.mocked(globalDb.member.findMany).mockResolvedValue([{ id: 'm-1', userId: 'user-1', orgId: 'org-1', role: 'MEMBER', createdAt: new Date(), updatedAt: new Date() }]);
 
       const result = await UserService.list({}, { page: 2, pageSize: 10 }, mockCtx('PLATFORM_ADMIN'));
 
