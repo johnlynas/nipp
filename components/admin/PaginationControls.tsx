@@ -1,6 +1,6 @@
 'use client';
 
-interface PaginationProps {
+interface PaginationControlsProps {
   currentPage: number;
   totalPages: number;
   totalItems: number;
@@ -9,14 +9,16 @@ interface PaginationProps {
 }
 
 /**
- * Shared pagination control with smart ellipsis truncation.
+ * Smart pagination with ellipsis truncation.
  * Shows: 1 … 4 5 [6] 7 8 … N   (when on page 6 of 20)
- * - "Showing X–Y of Z entries" on the left
- * - Previous / numbered pages / Next on the right
- * - Current page highlighted in dark navy (#1B2A4A)
- * - Stays within its container bounds
  */
-export function Pagination({ currentPage, totalPages, totalItems, pageSize, onPageChange }: PaginationProps) {
+export function PaginationControls({
+  currentPage,
+  totalPages,
+  totalItems,
+  pageSize,
+  onPageChange,
+}: PaginationControlsProps) {
   if (totalPages <= 1) return null;
 
   const start = (currentPage - 1) * pageSize + 1;
@@ -57,7 +59,6 @@ export function Pagination({ currentPage, totalPages, totalItems, pageSize, onPa
         Showing {start}–{end} of {totalItems} entries
       </div>
       <div className="flex items-center gap-1">
-        {/* Previous */}
         <button
           onClick={() => onPageChange(currentPage - 1)}
           className={`rounded border border-gray-300 text-gray-700 px-3 py-1 text-sm hover:bg-gray-100 ${
@@ -68,7 +69,6 @@ export function Pagination({ currentPage, totalPages, totalItems, pageSize, onPa
           Previous
         </button>
 
-        {/* Page numbers */}
         {pages.map((p, idx) =>
           p === 'ellipsis' ? (
             <span key={`e-${idx}`} className="px-2 py-1 text-sm text-gray-400 select-none">
@@ -89,7 +89,6 @@ export function Pagination({ currentPage, totalPages, totalItems, pageSize, onPa
           )
         )}
 
-        {/* Next */}
         <button
           onClick={() => onPageChange(currentPage + 1)}
           className={`rounded border border-gray-300 text-gray-700 px-3 py-1 text-sm hover:bg-gray-100 ${
