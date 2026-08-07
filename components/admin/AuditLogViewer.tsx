@@ -1,6 +1,7 @@
 'use client';
 
 import { useState } from 'react';
+import { Pagination } from './Pagination';
 
 interface AuditEntry {
   id: string;
@@ -104,46 +105,13 @@ export function AuditLogViewer({ entries, isLoading }: AuditLogViewerProps) {
       </div>
 
       {/* Pagination */}
-      {totalPages > 1 && (
-        <div className="flex items-center justify-between px-4 py-3 border-t border-gray-200">
-          <div className="text-sm text-gray-500">
-            Showing {startIndex + 1}–{Math.min(startIndex + ROWS_PER_PAGE, entries.length)} of {entries.length} entries
-          </div>
-          <div className="flex items-center gap-1">
-            <button
-              onClick={() => goToPage(safePage - 1)}
-              disabled={safePage === 1}
-              className="rounded border px-3 py-1 text-sm disabled:opacity-40 hover:bg-gray-100"
-              aria-label="Previous page"
-            >
-              Previous
-            </button>
-
-            {Array.from({ length: totalPages }, (_, i) => i + 1).map((page) => (
-              <button
-                key={page}
-                onClick={() => goToPage(page)}
-                className={`rounded px-3 py-1 text-sm ${
-                  page === safePage
-                    ? 'bg-[#1B2A4A] text-white'
-                    : 'border hover:bg-gray-100'
-                }`}
-              >
-                {page}
-              </button>
-            ))}
-
-            <button
-              onClick={() => goToPage(safePage + 1)}
-              disabled={safePage === totalPages}
-              className="rounded border px-3 py-1 text-sm disabled:opacity-40 hover:bg-gray-100"
-              aria-label="Next page"
-            >
-              Next
-            </button>
-          </div>
-        </div>
-      )}
+      <Pagination
+        currentPage={safePage}
+        totalPages={totalPages}
+        totalItems={entries.length}
+        pageSize={ROWS_PER_PAGE}
+        onPageChange={goToPage}
+      />
     </div>
   );
 }

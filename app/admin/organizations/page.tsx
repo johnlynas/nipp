@@ -3,6 +3,7 @@
 import { useState, useEffect } from 'react';
 import { RequireSuperAdmin } from '@/components/auth/RequireSuperAdmin';
 import { OrgTable } from '@/components/admin/OrgTable';
+import { Pagination } from '@/components/admin/Pagination';
 import Link from 'next/link';
 import { encryptedFetch } from '@/lib/api-client';
 
@@ -15,7 +16,7 @@ interface Organization {
   createdAt: string;
 }
 
-interface Pagination {
+interface PaginationState {
   page: number;
   pageSize: number;
   total: number;
@@ -29,7 +30,7 @@ interface Pagination {
  */
 export default function OrganizationsPage() {
   const [organizations, setOrganizations] = useState<Organization[]>([]);
-  const [pagination, setPagination] = useState<Pagination>({ page: 1, pageSize: 8, total: 0, totalPages: 0 });
+  const [pagination, setPagination] = useState<PaginationState>({ page: 1, pageSize: 8, total: 0, totalPages: 0 });
   const [search, setSearch] = useState('');
   const [statusFilter, setStatusFilter] = useState('');
   const [loading, setLoading] = useState(true);
@@ -101,8 +102,6 @@ export default function OrganizationsPage() {
 
   
 
-
-
   return (
     <RequireSuperAdmin>
       <div className="min-h-screen">
@@ -166,31 +165,13 @@ export default function OrganizationsPage() {
           )}
 
           {/* Pagination */}
-          {pagination.totalPages > 1 && (
-            <div className="mt-4 flex items-center justify-between">
-              <p className="text-sm text-gray-500">
-                Showing {((pagination.page - 1) * pagination.pageSize) + 1}–{Math.min(pagination.page * pagination.pageSize, pagination.total)} of {pagination.total}
-              </p>
-              <div className="flex gap-2">
-                <button
-                  disabled={pagination.page <= 1}
-                  onClick={() => setPagination((p) => ({ ...p, page: p.page - 1 }))}
-                  className="rounded border px-3 py-1 text-sm disabled:opacity-50 disabled:cursor-not-allowed bg-white hover:bg-gray-100 text-gray-700 font-medium transition-colors"
-                  aria-label="Previous page"
-                >
-                  Previous
-                </button>
-                <button
-                  disabled={pagination.page >= pagination.totalPages}
-                  onClick={() => setPagination((p) => ({ ...p, page: p.page + 1 }))}
-                  className="rounded border px-3 py-1 text-sm disabled:opacity-50 disabled:cursor-not-allowed bg-white hover:bg-gray-100 text-gray-700 font-medium transition-colors"
-                  aria-label="Next page"
-                >
-                  Next
-                </button>
-              </div>
-            </div>
-          )}
+          <Pagination
+            currentPage={pagination.page}
+            totalPages={pagination.totalPages}
+            totalItems={pagination.total}
+            pageSize={pagination.pageSize}
+            onPageChange={(page) => setPagination((p) => ({ ...p, page }))}
+          />
 
 
 
