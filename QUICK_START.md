@@ -52,11 +52,27 @@ npx prisma generate
 npx prisma db push
 ```
 
-Seed the database with default data (Platform Organization, permissions, and admin user):
+Seed the database with default data (Platform Organization, permissions, admin user, and teams):
 
 ```bash
 npm run db:seed
 ```
+
+#### Seeding Modes
+The seed script runs in two modes based on your environment variables:
+
+| Mode | Trigger | What's Created |
+|---|---|---|
+| **Dev** (default) | `TEST_ADMIN_EMAIL` not set | Platform Org + "Platform Ops" team, Dev Tenant Ltd + "Members" + "Operations" teams |
+| **Test** | `TEST_ADMIN_EMAIL` is set | Platform Org + "Members" team, Test Tenant Ltd + "Members" + "QA Operations" teams |
+
+**Required for all modes:** `ADMIN_EMAIL` and `ADMIN_PASSWORD`
+
+**Optional dev mode variables:** `DEV_TENANT_A_EMAIL`, `DEV_TENANT_A_PASSWORD`, `DEV_TENANT_B_EMAIL`, `DEV_TENANT_B_PASSWORD`
+
+**Optional test mode variables:** `TEST_ADMIN_EMAIL`, `TEST_ADMIN_PASSWORD`, `TEST_TENANT_A_EMAIL`, `TEST_TENANT_A_PASSWORD`, `TEST_TENANT_B_EMAIL`, `TEST_TENANT_B_PASSWORD`
+
+See [README.md#database-seeding-guide](./README.md#database-seeding-guide) for the full reference.
 
 ### 5. Start Development Server
 
@@ -89,8 +105,8 @@ cp .env.test.example .env.test
 
 **Required Variables:**
 - `TEST_ADMIN_EMAIL` / `TEST_ADMIN_PASSWORD` — Super admin credentials for testing
-- `TEST_TENANT_A_EMAIL` / `TEST_TENANT_A_PASSWORD` — OrgA tenant user credentials
-- `TEST_TENANT_B_EMAIL` / `TEST_TENANT_B_PASSWORD` — OrgB tenant user credentials
+- `TEST_TENANT_A_EMAIL` / `TEST_TENANT_A_PASSWORD` — Test Tenant Ltd user A credentials (assigned to "QA Operations" team)
+- `TEST_TENANT_B_EMAIL` / `TEST_TENANT_B_PASSWORD` — Test Tenant Ltd user B credentials (assigned to "QA Operations" team)
 - `DB_USER` / `DB_PASS` — PostgreSQL connection credentials for setup scripts
 
 > **Note:** `.env.test` is in `.gitignore`. Only `.env.test.example` (with placeholder values) is committed.
@@ -111,10 +127,9 @@ npm run test:isolation:setup
 ```
 
 This creates the `nipp_test` database, generates the Prisma client, pushes the schema, and seeds it with:
-- Platform Organization (Super Admin)
-- OrgA — Acme Properties Ltd
-- OrgB — Belfast Rentals
-- Test users for each organization
+- Platform Organization (Super Admin) — with "Members" team
+- Test Tenant Ltd — with "Members" + "QA Operations" teams
+- Test users for each organization, assigned to their respective teams
 
 ### 4. Run Tests
 
