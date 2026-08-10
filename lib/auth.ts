@@ -49,7 +49,62 @@ export const auth = betterAuth({
     disableSignUp: true, // Block public registration
   },
 
-  plugins: [organization()],
+  plugins: [
+    organization({
+      // Enable Teams mode — sub-organizational groupings with role inheritance
+      teams: {
+        enabled: true,
+        // Allow organizations to have multiple teams (default: no limit)
+        maximumTeams: undefined,
+        // Allow removing all teams from an organization
+        allowRemovingAllTeams: true,
+      },
+
+      // -----------------------------------------------------------------
+      // Team-specific hooks (scaffolded as no-op stubs for future extension)
+      // -----------------------------------------------------------------
+
+      // Team creation hooks
+      beforeCreateTeam: async ({ data, _session, _organization, _context }: Record<string, unknown>) => {
+        // TODO: Implement custom team creation logic (e.g., audit logging)
+        return data;
+      },
+      afterCreateTeam: async ({ _team, _session, _organization, _context }: Record<string, unknown>) => {
+        // TODO: Implement post-creation logic (e.g., create default resources)
+      },
+
+      // Team update hooks
+      beforeUpdateTeam: async ({ data, _session, _organization, _context }: Record<string, unknown>) => {
+        // TODO: Implement custom team update logic
+        return data;
+      },
+      afterUpdateTeam: async ({ _team, _session, _organization, _context }: Record<string, unknown>) => {
+        // TODO: Implement post-update logic
+      },
+
+      // Team deletion hooks
+      beforeDeleteTeam: async ({ _team, _session, _organization, _context }: Record<string, unknown>) => {
+        // TODO: Implement pre-deletion cleanup logic
+      },
+      afterDeleteTeam: async ({ _team, _session, _organization, _context }: Record<string, unknown>) => {
+        // TODO: Implement post-deletion cleanup logic
+      },
+
+      // Team member hooks
+      beforeAddTeamMember: async ({ _team, _user, _session, _organization, _context }: Record<string, unknown>) => {
+        // TODO: Implement pre-add validation (e.g., check org membership)
+      },
+      afterAddTeamMember: async ({ _team, _user, _session, _organization, _context }: Record<string, unknown>) => {
+        // TODO: Implement post-add logic (e.g., assign team roles, notify)
+      },
+      beforeRemoveTeamMember: async ({ _team, _user, _session, _organization, _context }: Record<string, unknown>) => {
+        // TODO: Implement pre-remove validation (e.g., check last member)
+      },
+      afterRemoveTeamMember: async ({ _team, _user, _session, _organization, _context }: Record<string, unknown>) => {
+        // TODO: Implement post-remove cleanup (e.g., revoke team roles)
+      },
+    }),
+  ],
 
   session: {
     expiresIn: 60 * 60, // 1 hour absolute maximum (tight backstop for inactivity policy)

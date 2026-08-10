@@ -3,10 +3,20 @@
  */
 
 import { createAuthClient } from 'better-auth/client';
+import { organizationClient } from 'better-auth/client/plugins';
 import { useSyncExternalStore } from 'react';
 import { clearPayloadKey } from './payload-key-manager';
 
-export const authClient = createAuthClient();
+export const authClient = createAuthClient({
+  plugins: [
+    // Enable Teams mode on the client side
+    organizationClient({
+      teams: {
+        enabled: true,
+      },
+    }),
+  ],
+});
 
 /**
  * Stable empty session object used as the server snapshot for useSyncExternalStore.

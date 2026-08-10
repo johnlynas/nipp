@@ -96,7 +96,8 @@ nipp/
 │   ├── tenant-context.ts         # AsyncLocalStorage for tenant context propagation
 │   └── permissions/              # Permission resolution & caching logic
 ├── services/                     # Domain-specific business logic layers
-│   └── organization-service.ts   # Organization management service
+│   ├── organization-service.ts   # Organization management service
+│   └── team-service.ts           # Team CRUD, membership, and role inheritance
 ├── hooks/                        # Custom React hooks (useSession, usePermission)
 ├── prisma/                       # Database schema & migrations
 │   ├── schema.prisma             # Prisma schema definition (enums, models, relations)
@@ -138,6 +139,9 @@ The following models are strictly scoped to organizations and protected by the P
 - `Role` (organization-scoped role definitions)
 - `RolePermission` (junction table mapping roles to permissions, org-scoped for isolation)
 - `MemberRole` (junction table linking members to roles, org-scoped for isolation)
+- `Team` (sub-organizational groupings, org-scoped)
+- `TeamMember` (user-to-team membership, org-scoped)
+- `TeamRole` (team-level role definitions mapped to org roles, org-scoped)
 
 Global models (`User`, `Organization`, `Member`, `Permission`, `AuditLog`) are not scoped and require explicit authorization checks.
 
@@ -237,6 +241,41 @@ When an authorization check is performed (via `hasPermission` or `<RequirePermis
 - **Cache Control:** Protected routes return `Cache-Control: no-store, max-age=0` headers to prevent caching of sensitive data and ensure logout is respected across tabs.
 - **Public Routes:** `/login`, `/register`, `/api/auth`, and `/api/health` are explicitly whitelisted.
 
+## 👥 Teams Architecture
+
+BetterAuth's **Teams** plugin provides sub-organizational groupings within each tenant, enabling finer-grained user organization beyond the flat member model.
+
+### Design Decisions
+- **Explicit Prisma Models:** `Team`, `TeamMember`, and `TeamRole` are defined as explicit Prisma models (not relying on BetterAuth's internal schema), giving full type safety and tenant isolation coverage.
+- **Dedicated TeamService:** Business logic lives in `services/team-service.ts` following the single responsibility principle, separate from `OrganizationService`.
+- **Role Inheritance:** When a user is added to a team via `addTeamMember()`, all team roles are automatically assigned to the user's member record via `assignTeamRolesToMember()`. Removing a team member revokes those roles.
+- **Default "Members" Team:** Every organization bootstrapped via seed receives a default "Members" team with slug `members`.
+
+### Team Service API (`services/team-service.ts`)
+| Method | Description |
+|---|---|
+| `createTeam(ctx, input)` | Create a new team within an organization |
+| `getTeamById(ctx, teamId)` | Get team details with members and roles |
+| `updateTeam(ctx, teamId, input)` | Update team name/slug/description |
+| `deleteTeam(ctx, teamId)` | Delete a team (revokes all memberships) |
+| `listTeams(ctx, orgId)` | List all teams in an organization |
+| `addTeamMember(ctx, teamId, userId)` | Add a user to a team (assigns all team roles) |
+| `removeTeamMember(ctx, teamId, userId)` | Remove a user from a team (revokes team roles) |
+| `listTeamMembers(ctx, teamId)` | List all members of a team |
+| `assignTeamRoles(ctx, teamId, roleIds)` | Assign org-scoped roles to a team |
+| `removeTeamRoles(ctx, teamId, roleIds)` | Remove org-scoped roles from a team |
+| `listTeamRoles(ctx, teamId)` | List all roles assigned to a team |
+
+### REST API Routes
+| Route | Methods | Description |
+|---|---|---|
+| `/api/organizations/[orgId]/teams` | GET, POST | List teams / Create team |
+| `/api/organizations/[orgId]/teams/[teamId]` | GET, PATCH, DELETE | Get / Update / Delete team |
+| `/api/organizations/[orgId]/teams/[teamId]/members` | GET, POST, DELETE | List / Add / Remove members |
+| `/api/organizations/[orgId]/teams/[teamId]/roles` | GET, POST, DELETE | List / Assign / Remove roles |
+
+All routes require admin membership in the target organization and enforce tenant isolation via `AsyncLocalStorage` context.
+
 ## 🗄️ Database Design
 
 ### Core Entities
@@ -248,12 +287,18 @@ When an authorization check is performed (via `hasPermission` or `<RequirePermis
 - **RolePermission:** Junction table mapping Roles to Permissions.
 - **MemberRole:** Junction table linking Members to Roles (supports multiple roles per member).
 - **AuditLog:** Global security audit trail recording admin actions across all organizations.
+- **Team:** Sub-organizational groupings within a tenant (e.g., "Operations", "QA"). Organization-scoped.
+- **TeamMember:** Junction table linking a `User` to a `Team`. Organization-scoped.
+- **TeamRole:** Team-level role definitions mapped to organization-scoped `Role` records. Organization-scoped.
 
 ### Relationships
 - `User` ↔ `Organization`: Via `Member` (many-to-many)
 - `Role` → `Permission`: Via `RolePermission` (one-to-many from Role, many-to-one to Permission)
 - `Member` → `Role`: Via `MemberRole` (one-to-many from Member, many-to-one to Role)
-- `Organization` → `Role`, `MemberRole`, `AuditLog`: One-to-many cascading deletes
+- `Organization` → `Role`, `MemberRole`, `AuditLog`, `Team`: One-to-many cascading deletes
+- `Team` → `TeamMember`, `TeamRole`: One-to-many cascading deletes
+- `User` ↔ `Team`: Via `TeamMember` (many-to-many)
+- `TeamRole` → `Role`: Many-to-one mapping to org-scoped roles (role inheritance)
 
 ### Indexing Strategy
 - Foreign keys are automatically indexed by Prisma.

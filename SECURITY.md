@@ -97,6 +97,35 @@ Authorization is enforced via a multi-layered logical flow:
 - **Components:** `<RequirePermission>` and `<RequireSuperAdmin>` wrap UI elements. 
 - **API Routes:** Use `hasPermission()` and `isSuperAdmin()` checks from `lib/authz.ts`.
 
+## 👥 Teams & Sub-Organization Security
+
+BetterAuth's **Teams** plugin provides sub-organizational groupings within each tenant. Teams are fully subject to the same defense-in-depth tenant isolation as all other organization-scoped data.
+
+### Data Model
+| Model | Scope | Purpose |
+|---|---|---|
+| `Team` | Organization-scoped | Sub-organizational groupings (e.g., "Operations", "QA") |
+| `TeamMember` | Organization-scoped | Junction linking users to teams |
+| `TeamRole` | Organization-scoped | Team-level role definitions (mapped to org-scoped `Role`) |
+
+### Tenant Isolation
+- **Application Layer:** The Prisma `$extends` extension in `lib/tenant-db.ts` includes `Team`, `TeamMember`, and `TeamRole` in its tenant-scoped model list. All queries on these models are automatically filtered by `organizationId`.
+- **Database Layer:** PostgreSQL RLS policies apply to team tables using the same `current_setting('app.current_org_id', true)` mechanism as other tenant-scoped tables.
+- **Service Layer:** `services/team-service.ts` enforces authorization via `requireAnyAdmin()` context checks before any team mutation.
+
+### Default Teams
+Every organization bootstrapped via `prisma/seed.ts` receives a default **"Members"** team. In dev mode, an additional **"Platform Ops"** team is created for the Platform organization.
+
+### API Endpoints
+| Route | Methods | Access |
+|---|---|---|
+| `/api/organizations/[orgId]/teams` | GET, POST | Admin (tenant) |
+| `/api/organizations/[orgId]/teams/[teamId]` | GET, PATCH, DELETE | Admin (tenant) |
+| `/api/organizations/[orgId]/teams/[teamId]/members` | GET, POST, DELETE | Admin (tenant) |
+| `/api/organizations/[orgId]/teams/[teamId]/roles` | GET, POST, DELETE | Admin (tenant) |
+
+All team endpoints require an active tenant context and admin membership in the target organization.
+
 ## 🤫 Secrets Management
 
 - **Environment Variables:** All secrets (Database URLs, API Keys, Auth Secrets) are strictly managed via `.env` files and are never hardcoded.

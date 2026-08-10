@@ -64,6 +64,129 @@ const PERMISSION_CATALOG = [
   { key: 'viewings:create', resource: 'viewings', action: 'create', description: 'Schedule property viewings' },
 ];
 
+// =========================================================================
+// HELPER: Default "Members" team bootstrapping
+// Every organization gets a default "Members" team.
+// =========================================================================
+async function ensureDefaultTeam(orgId: string, orgName: string): Promise<void> {
+  const existing = await prisma.team.findFirst({
+    where: { organizationId: orgId, slug: 'members' },
+  });
+
+  if (!existing) {
+    await prisma.team.create({
+      data: { name: 'Members', slug: 'members', organizationId: orgId },
+    });
+    console.log(`   ✅ Created default "Members" team for ${orgName}`);
+  }
+}
+
+// =========================================================================
+// HELPER: Create or update a tenant user with credential account
+// =========================================================================
+async function ensureTenantUser(
+  email: string,
+  password: string,
+  orgId: string,
+  userName: string,
+): Promise<{ userId: string; memberId: string }> {
+  const passwordHash = await hashPassword(password);
+
+  // Upsert user
+  const user = await prisma.user.upsert({
+    where: { email },
+    update: { passwordHash, emailVerified: true, activeOrganizationId: orgId },
+    create: {
+      name: userName,
+      email,
+      passwordHash,
+      emailVerified: true,
+      activeOrganizationId: orgId,
+    },
+  });
+
+  // Ensure credential account exists
+  const existingAccount = await prisma.account.findFirst({
+    where: { userId: user.id, providerId: 'credential' },
+  });
+  if (!existingAccount) {
+    await prisma.account.create({
+      data: { id: user.id, accountId: user.id, providerId: 'credential', password: passwordHash, userId: user.id },
+    });
+  }
+
+  // Ensure member record exists
+  let memberId: string;
+  const existingMember = await prisma.member.findFirst({
+    where: { userId: user.id, orgId },
+  });
+  if (existingMember) {
+    memberId = existingMember.id;
+  } else {
+    const newMember = await prisma.member.create({
+      data: { userId: user.id, orgId, role: 'member' },
+    });
+    memberId = newMember.id;
+  }
+
+  return { userId: user.id, memberId };
+}
+
+// =========================================================================
+// HELPER: Assign default roles to a member
+// =========================================================================
+async function assignDefaultRoles(memberId: string, orgId: string): Promise<void> {
+  const roles = await prisma.role.findMany({ where: { organizationId: orgId, isDefault: true } });
+  for (const role of roles) {
+    const existing = await prisma.memberRole.findFirst({
+      where: { memberId, roleId: role.id },
+    });
+    if (!existing) {
+      await prisma.memberRole.create({
+        data: { member: { connect: { id: memberId } }, role: { connect: { id: role.id } }, organization: { connect: { id: orgId } } },
+      });
+    }
+  }
+}
+
+// =========================================================================
+// HELPER: Add user to a team and assign team roles
+// =========================================================================
+async function addUserToTeam(userId: string, teamId: string, orgId: string): Promise<void> {
+  // Check if already a team member
+  const existing = await prisma.teamMember.findFirst({
+    where: { userId, teamId },
+  });
+  if (existing) return; // Already a member
+
+  const member = await prisma.member.findFirst({
+    where: { userId, orgId },
+  });
+
+  await prisma.teamMember.create({
+    data: { userId, teamId, organizationId: orgId },
+  });
+
+  // Assign all team roles (role inheritance)
+  if (member) {
+    const teamRoles = await prisma.teamRole.findMany({
+      where: { teamId, organizationId: orgId },
+      select: { roleId: true },
+    });
+
+    for (const tr of teamRoles) {
+      const existingMemberRole = await prisma.memberRole.findFirst({
+        where: { memberId: member.id, roleId: tr.roleId },
+      });
+      if (!existingMemberRole) {
+        await prisma.memberRole.create({
+          data: { member: { connect: { id: member.id } }, role: { connect: { id: tr.roleId } }, organization: { connect: { id: orgId } } },
+        });
+      }
+    }
+  }
+}
+
 async function main() {
   // =========================================================================
   // 1. STRICT ENVIRONMENT VARIABLE VALIDATION
@@ -286,142 +409,179 @@ async function main() {
   }
 
   // =========================================================================
-  // 8. TENANT ORGANIZATIONS (OrgA & OrgB)
+  // 8. MODE DETECTION
   // =========================================================================
-  // Always create two tenant organizations for super admin tenant management
-  // testing. In test mode (TEST_ADMIN_EMAIL set), also create dedicated
-  // tenant users with configurable credentials. In dev mode, use defaults.
   const testMode = !!process.env.TEST_ADMIN_EMAIL?.trim();
 
-  // Tenant credentials — use env vars in test mode, defaults in dev mode
-  const tenantAEmail = process.env.TEST_TENANT_A_EMAIL || 'orga-tenant@example.com';
-  const tenantAPassword = process.env.TEST_TENANT_A_PASSWORD || 'TenantA123!';
-  const tenantBEmail = process.env.TEST_TENANT_B_EMAIL || 'orgb-tenant@example.com';
-  const tenantBPassword = process.env.TEST_TENANT_B_PASSWORD || 'TenantB123!';
+  // =========================================================================
+  // 9. DEFAULT "MEMBERS" TEAM FOR PLATFORM ORGANIZATION
+  // =========================================================================
+  await ensureDefaultTeam(platformOrgId, 'Platform');
 
-  const modeLabel = testMode ? 'TEST' : 'DEV';
-  console.log(`\n📦 Seeding tenant organizations (${modeLabel} mode)...`);
-
-  // --- OrgA: Acme Properties Ltd ---
-  let orgA = await prisma.organization.findFirst({ where: { slug: 'acme-properties-ltd' } });
-  if (!orgA) {
-    orgA = await prisma.organization.create({
-      data: { name: 'Acme Properties Ltd', slug: 'acme-properties-ltd', status: 'ACTIVE' },
+  // Add platform user to Platform Ops team (dev mode only)
+  if (!testMode) {
+    const platformOpsTeam = await prisma.team.findFirst({
+      where: { organizationId: platformOrgId, slug: 'platform-ops' },
     });
-    console.log(`✅ Created OrgA: ${orgA.id}`);
-  } else {
-    await prisma.organization.update({ where: { id: orgA.id }, data: { name: 'Acme Properties Ltd', slug: 'acme-properties-ltd', status: 'ACTIVE' } });
-    console.log(`✅ Updated OrgA: ${orgA.id}`);
-  }
 
-  // Create or update OrgA tenant user
-  const orgATenantPasswordHash = await hashPassword(tenantAPassword);
-  const orgATenantUser = await prisma.user.upsert({
-    where: { email: tenantAEmail },
-    update: { passwordHash: orgATenantPasswordHash, emailVerified: true, activeOrganizationId: orgA.id },
-    create: {
-      name: 'OrgA Tenant',
-      email: tenantAEmail,
-      passwordHash: orgATenantPasswordHash,
-      emailVerified: true,
-      activeOrganizationId: orgA.id,
-    },
-  });
-
-  // Create credential account for OrgA tenant user
-  const orgATenantAccount = await prisma.account.findFirst({ where: { userId: orgATenantUser.id, providerId: 'credential' } });
-  if (!orgATenantAccount) {
-    await prisma.account.create({ data: { id: orgATenantUser.id, accountId: orgATenantUser.id, providerId: 'credential', password: orgATenantPasswordHash, userId: orgATenantUser.id } });
-  }
-
-  // Add OrgA tenant user as member of OrgA with default roles
-  let orgAMemberId: string;
-  const existingOrgAMember = await prisma.member.findFirst({ where: { userId: orgATenantUser.id, orgId: orgA.id } });
-  if (existingOrgAMember) {
-    orgAMemberId = existingOrgAMember.id;
-  } else {
-    const newOrgAMember = await prisma.member.create({ data: { userId: orgATenantUser.id, orgId: orgA.id, role: 'member' } });
-    orgAMemberId = newOrgAMember.id;
-    console.log(`✅ Added OrgA tenant user as member of OrgA`);
-  }
-
-  // Assign default roles to OrgA tenant user (member, property-manager, viewer)
-  const orgARoles = await prisma.role.findMany({ where: { organizationId: orgA.id, isDefault: true } });
-  for (const role of orgARoles) {
-    const roleId = role.id;
-    const existingMemberRole = await prisma.memberRole.findFirst({ where: { memberId: orgAMemberId, roleId } });
-    if (!existingMemberRole) {
-      await prisma.memberRole.create({
-        data: {
-          member: { connect: { id: orgAMemberId } },
-          role: { connect: { id: roleId } },
-          organization: { connect: { id: orgA.id } },
-        },
+    if (!platformOpsTeam) {
+      await prisma.team.create({
+        data: { name: 'Platform Ops', slug: 'platform-ops', organizationId: platformOrgId },
       });
+      console.log(`   ✅ Created "Platform Ops" team for Platform organization`);
+    }
+
+    // Add platform user to the Platform Ops team
+    const platOpsTeam = await prisma.team.findFirst({
+      where: { organizationId: platformOrgId, slug: 'platform-ops' },
+    });
+
+    if (platOpsTeam) {
+      await addUserToTeam(superAdmin.id, platOpsTeam.id, platformOrgId);
+      console.log(`   ✅ Added platform user to "Platform Ops" team`);
     }
   }
-
-  // --- OrgB: Belfast Rentals ---
-  let orgB = await prisma.organization.findFirst({ where: { slug: 'belfast-rentals' } });
-  if (!orgB) {
-    orgB = await prisma.organization.create({ data: { name: 'Belfast Rentals', slug: 'belfast-rentals', status: 'ACTIVE' } });
-    console.log(`✅ Created OrgB: ${orgB.id}`);
-  } else {
-    await prisma.organization.update({ where: { id: orgB.id }, data: { name: 'Belfast Rentals', slug: 'belfast-rentals', status: 'ACTIVE' } });
-    console.log(`✅ Updated OrgB: ${orgB.id}`);
-  }
-
-  // Create or update OrgB tenant user
-  const orgBTenantPasswordHash = await hashPassword(tenantBPassword);
-  const orgBTenantUser = await prisma.user.upsert({
-    where: { email: tenantBEmail },
-    update: { passwordHash: orgBTenantPasswordHash, emailVerified: true, activeOrganizationId: orgB.id },
-    create: {
-      name: 'OrgB Tenant',
-      email: tenantBEmail,
-      passwordHash: orgBTenantPasswordHash,
-      emailVerified: true,
-      activeOrganizationId: orgB.id,
-    },
-  });
-
-  // Create credential account for OrgB tenant user
-  const orgBTenantAccount = await prisma.account.findFirst({ where: { userId: orgBTenantUser.id, providerId: 'credential' } });
-  if (!orgBTenantAccount) {
-    await prisma.account.create({ data: { id: orgBTenantUser.id, accountId: orgBTenantUser.id, providerId: 'credential', password: orgBTenantPasswordHash, userId: orgBTenantUser.id } });
-  }
-
-  // Add OrgB tenant user as member of OrgB with default roles
-  let orgBMemberId: string;
-  const existingOrgBMember = await prisma.member.findFirst({ where: { userId: orgBTenantUser.id, orgId: orgB.id } });
-  if (existingOrgBMember) {
-    orgBMemberId = existingOrgBMember.id;
-  } else {
-    const newOrgBMember = await prisma.member.create({ data: { userId: orgBTenantUser.id, orgId: orgB.id, role: 'member' } });
-    orgBMemberId = newOrgBMember.id;
-    console.log(`✅ Added OrgB tenant user as member of OrgB`);
-  }
-
-  // Assign default roles to OrgB tenant user (member, property-manager, viewer)
-  const orgBRoles = await prisma.role.findMany({ where: { organizationId: orgB.id, isDefault: true } });
-  for (const role of orgBRoles) {
-    const roleId = role.id;
-    const existingMemberRole = await prisma.memberRole.findFirst({ where: { memberId: orgBMemberId, roleId } });
-    if (!existingMemberRole) {
-      await prisma.memberRole.create({
-        data: {
-          member: { connect: { id: orgBMemberId } },
-          role: { connect: { id: roleId } },
-          organization: { connect: { id: orgB.id } },
-        },
-      });
-    }
-  }
-
-  console.log(`✅ Tenant organizations seeded: OrgA (${tenantAEmail}), OrgB (${tenantBEmail})`);
 
   // =========================================================================
-  // 9. FINAL OUTPUT & INSTRUCTIONS
+  // 10. TENANT ORGANIZATIONS & DEVELOPER/TESTING PROFILES
+  // =========================================================================
+
+  if (testMode) {
+    // =========================================================================
+    // TESTING PROFILE: Test Tenant Ltd with QA Operations team
+    // =========================================================================
+    const testTenantAEmail = process.env.TEST_TENANT_A_EMAIL || 'test-tenant-a@example.com';
+    const testTenantAPassword = process.env.TEST_TENANT_A_PASSWORD || 'TestTenantA123!';
+    const testTenantBEmail = process.env.TEST_TENANT_B_EMAIL || 'test-tenant-b@example.com';
+    const testTenantBPassword = process.env.TEST_TENANT_B_PASSWORD || 'TestTenantB123!';
+
+    console.log(`\n📦 Seeding testing profile...`);
+
+    // --- Test Tenant: Test Tenant Ltd ---
+    let testTenantOrg = await prisma.organization.findFirst({ where: { slug: 'test-tenant-ltd' } });
+    if (!testTenantOrg) {
+      testTenantOrg = await prisma.organization.create({
+        data: { name: 'Test Tenant Ltd', slug: 'test-tenant-ltd', status: 'ACTIVE' },
+      });
+      console.log(`✅ Created Test Tenant Org: ${testTenantOrg.id}`);
+    } else {
+      await prisma.organization.update({
+        where: { id: testTenantOrg.id },
+        data: { name: 'Test Tenant Ltd', slug: 'test-tenant-ltd', status: 'ACTIVE' },
+      });
+      console.log(`✅ Updated Test Tenant Org: ${testTenantOrg.id}`);
+    }
+
+    // Ensure default "Members" team for test tenant org
+    await ensureDefaultTeam(testTenantOrg.id, 'Test Tenant Ltd');
+
+    // Create "QA Operations" team for test tenant org
+    let qaTeam = await prisma.team.findFirst({
+      where: { organizationId: testTenantOrg.id, slug: 'qa-operations' },
+    });
+    if (!qaTeam) {
+      qaTeam = await prisma.team.create({
+        data: { name: 'QA Operations', slug: 'qa-operations', organizationId: testTenantOrg.id },
+      });
+      console.log(`   ✅ Created "QA Operations" team for Test Tenant Ltd`);
+    }
+
+    // Create test tenant users and add them to QA Operations team
+    const { userId: testUserAId, memberId: testMemberAId } = await ensureTenantUser(
+      testTenantAEmail,
+      testTenantAPassword,
+      testTenantOrg.id,
+      'Test Tenant A',
+    );
+    await assignDefaultRoles(testMemberAId, testTenantOrg.id);
+    if (qaTeam) {
+      await addUserToTeam(testUserAId, qaTeam.id, testTenantOrg.id);
+    }
+    console.log(`   ✅ Created and added Test Tenant User A to QA Operations team`);
+
+    const { userId: testUserBId, memberId: testMemberBId } = await ensureTenantUser(
+      testTenantBEmail,
+      testTenantBPassword,
+      testTenantOrg.id,
+      'Test Tenant B',
+    );
+    await assignDefaultRoles(testMemberBId, testTenantOrg.id);
+    if (qaTeam) {
+      await addUserToTeam(testUserBId, qaTeam.id, testTenantOrg.id);
+    }
+    console.log(`   ✅ Created and added Test Tenant User B to QA Operations team`);
+
+    console.log(`✅ Testing profile seeded: Test Tenant Org (${testTenantAEmail}, ${testTenantBEmail})`);
+  } else {
+    // =========================================================================
+    // DEVELOPER PROFILE: Dev Tenant Ltd with Operations team
+    // =========================================================================
+    const devTenantAEmail = process.env.DEV_TENANT_A_EMAIL || 'dev-tenant-a@example.com';
+    const devTenantAPassword = process.env.DEV_TENANT_A_PASSWORD || 'DevTenantA123!';
+    const devTenantBEmail = process.env.DEV_TENANT_B_EMAIL || 'dev-tenant-b@example.com';
+    const devTenantBPassword = process.env.DEV_TENANT_B_PASSWORD || 'DevTenantB123!';
+
+    console.log(`\n📦 Seeding developer profile...`);
+
+    // --- Dev Tenant: Dev Tenant Ltd ---
+    let devTenantOrg = await prisma.organization.findFirst({ where: { slug: 'dev-tenant-ltd' } });
+    if (!devTenantOrg) {
+      devTenantOrg = await prisma.organization.create({
+        data: { name: 'Dev Tenant Ltd', slug: 'dev-tenant-ltd', status: 'ACTIVE' },
+      });
+      console.log(`✅ Created Dev Tenant Org: ${devTenantOrg.id}`);
+    } else {
+      await prisma.organization.update({
+        where: { id: devTenantOrg.id },
+        data: { name: 'Dev Tenant Ltd', slug: 'dev-tenant-ltd', status: 'ACTIVE' },
+      });
+      console.log(`✅ Updated Dev Tenant Org: ${devTenantOrg.id}`);
+    }
+
+    // Ensure default "Members" team for dev tenant org
+    await ensureDefaultTeam(devTenantOrg.id, 'Dev Tenant Ltd');
+
+    // Create "Operations" team for dev tenant org
+    let opsTeam = await prisma.team.findFirst({
+      where: { organizationId: devTenantOrg.id, slug: 'operations' },
+    });
+    if (!opsTeam) {
+      opsTeam = await prisma.team.create({
+        data: { name: 'Operations', slug: 'operations', organizationId: devTenantOrg.id },
+      });
+      console.log(`   ✅ Created "Operations" team for Dev Tenant Ltd`);
+    }
+
+    // Create dev tenant users and add them to Operations team
+    const { userId: devUserAId, memberId: devMemberAId } = await ensureTenantUser(
+      devTenantAEmail,
+      devTenantAPassword,
+      devTenantOrg.id,
+      'Dev Tenant A',
+    );
+    await assignDefaultRoles(devMemberAId, devTenantOrg.id);
+    if (opsTeam) {
+      await addUserToTeam(devUserAId, opsTeam.id, devTenantOrg.id);
+    }
+    console.log(`   ✅ Created and added Dev Tenant User A to Operations team`);
+
+    const { userId: devUserBId, memberId: devMemberBId } = await ensureTenantUser(
+      devTenantBEmail,
+      devTenantBPassword,
+      devTenantOrg.id,
+      'Dev Tenant B',
+    );
+    await assignDefaultRoles(devMemberBId, devTenantOrg.id);
+    if (opsTeam) {
+      await addUserToTeam(devUserBId, opsTeam.id, devTenantOrg.id);
+    }
+    console.log(`   ✅ Created and added Dev Tenant User B to Operations team`);
+
+    console.log(`✅ Developer profile seeded: Dev Tenant Org (${devTenantAEmail}, ${devTenantBEmail})`);
+  }
+
+  // =========================================================================
+  // 10. FINAL OUTPUT & INSTRUCTIONS
   // =========================================================================
   console.log('\n✅ Seed completed successfully! Database overwritten with latest script values.');
   console.log('\n📝 NEXT STEPS:');

@@ -8,6 +8,7 @@ Property NI provides a secure, multi-tenant platform for managing property portf
 - **Multi-tenant architecture** with defense-in-depth isolation (Prisma extension + PostgreSQL Row Level Security)
 - **Super Admin dashboard** for managing organizations, roles, permissions, and cross-tenant audit logs
 - **Granular RBAC** with organization-scoped roles, member-role assignments, and a catalog of ~50 atomic permissions
+- **Teams** — sub-organizational groupings with role inheritance, managed via dedicated REST API
 - **Secure authentication** via BetterAuth with Google OIDC and email/password, tight session expiry (1-hour absolute max), and auto-logout on inactivity
 - **Hybrid caching** (L1 in-memory + L2 Redis) for permission resolution and search, with automatic cache warming
 - **Real-time notifications** via Server-Sent Events (SSE) with browser-aware polling that sleeps when tabs are backgrounded
@@ -36,6 +37,22 @@ The application includes a Super Admin dashboard for managing tenant organizatio
 | `/admin/organizations/[id]` | Organization detail (Overview, Members, Roles, Audit tabs) | Super Admin only |
 | `/admin/permissions` | Global permission catalog CRUD | Super Admin only |
 | `/admin/audit-logs` | Audit log viewer with filters | Super Admin only |
+
+### Team Management (Tenant Admin)
+
+Teams are managed via REST API endpoints under each organization. Tenant admins can:
+- Create and manage teams within their organization
+- Add/remove team members (with automatic role inheritance)
+- Assign and revoke team-level roles
+
+| Route | Methods | Description |
+|-------|---------|-------------|
+| `/api/organizations/[orgId]/teams` | GET, POST | List teams / Create team |
+| `/api/organizations/[orgId]/teams/[teamId]` | GET, PATCH, DELETE | Get / Update / Delete team |
+| `/api/organizations/[orgId]/teams/[teamId]/members` | GET, POST, DELETE | List / Add / Remove members |
+| `/api/organizations/[orgId]/teams/[teamId]/roles` | GET, POST, DELETE | List / Assign / Remove roles |
+
+See [ARCHITECTURE.md#teams-architecture](./ARCHITECTURE.md#teams-architecture) for the full API reference.
 
 ### Platform Permissions
 
@@ -123,8 +140,15 @@ Edit `.env` and set:
 | `LOG_LEVEL` | Logging verbosity | `debug`, `info`, `warn`, or `error` (default: `debug`) |
 | `FRONTEND_URL` / `NEXT_PUBLIC_API_URL` | App URLs | `http://localhost:3000` (default) |
 | `INACTIVITY_TIMEOUT_MINS` | Auto-logout timeout in minutes | Positive integer (default: `15`) — see [Auto-Logout on Inactivity](#auto-logout-on-inactivity) |
-| `ADMIN_EMAIL` | Admin user email for seeding | e.g. `admin@example.com` (Required for `npm run db:seed`) |
-| `ADMIN_PASSWORD` | Admin user password for seeding | Strong password (Required for `npm run db:seed`) |
+| `ADMIN_EMAIL` | Super admin email for seeding | e.g. `admin@example.com` (Required for `npm run db:seed`) |
+| `ADMIN_PASSWORD` | Super admin password for seeding | Strong password, > 8 chars (Required for `npm run db:seed`) |
+| `DEV_TENANT_A_EMAIL` / `DEV_TENANT_A_PASSWORD` | Dev tenant user A credentials | Optional — defaults to `dev-tenant-a@example.com` / `DevTenantA123!` |
+| `DEV_TENANT_B_EMAIL` / `DEV_TENANT_B_PASSWORD` | Dev tenant user B credentials | Optional — defaults to `dev-tenant-b@example.com` / `DevTenantB123!` |
+| `TEST_ADMIN_EMAIL` | Activate test mode seeding | Set any non-empty value to switch from dev → test profile |
+| `TEST_ADMIN_PASSWORD` | Test super admin password | Required when `TEST_ADMIN_EMAIL` is set |
+| `TEST_TENANT_A_EMAIL` / `TEST_TENANT_A_PASSWORD` | Test tenant user A credentials | Required when in test mode |
+| `TEST_TENANT_B_EMAIL` / `TEST_TENANT_B_PASSWORD` | Test tenant user B credentials | Required when in test mode |
+| `PLATFORM_ORG_ID` | Platform organization ID | Auto-written by seed; optional to set manually for stability |
 
 > **Never commit `.env`** — it is in `.gitignore`. Only `.env.example` (with placeholder values) is committed.
 
@@ -145,6 +169,70 @@ npm run db:seed
 ```
 
 After seeding, check your `.env` file — the `PLATFORM_ORGANIZATION_ID` will be written automatically.
+
+### Database Seeding Guide
+
+The seed script (`prisma/seed.ts`) bootstraps the database with organizations, permissions, admin users, and teams. It runs in two modes depending on your environment variables.
+
+#### Required Variables (Both Modes)
+| Variable | Description |
+|---|---|
+| `ADMIN_EMAIL` | Valid email for the super admin account (e.g., `admin@nipp.gov.uk`) |
+| `ADMIN_PASSWORD` | Password for the super admin (must be > 8 characters) |
+
+#### Dev Mode (Default)
+When `TEST_ADMIN_EMAIL` is **not** set, the seed script runs in **developer profile** mode:
+
+| Variable | Default Value | Description |
+|---|---|---|
+| `DEV_TENANT_A_EMAIL` | `dev-tenant-a@example.com` | First dev tenant user email |
+| `DEV_TENANT_A_PASSWORD` | `DevTenantA123!` | First dev tenant user password |
+| `DEV_TENANT_B_EMAIL` | `dev-tenant-b@example.com` | Second dev tenant user email |
+| `DEV_TENANT_B_PASSWORD` | `DevTenantB123!` | Second dev tenant user password |
+
+**What gets created:**
+- Platform Organization (with "Platform Ops" team)
+- Dev Tenant Ltd organization (with "Members" + "Operations" teams)
+- Super admin user with all platform permissions
+- Two dev tenant users, each added to the Operations team
+
+#### Test Mode
+When `TEST_ADMIN_EMAIL` is **set** (any non-empty value), the seed script runs in **testing profile** mode:
+
+| Variable | Default Value | Description |
+|---|---|---|
+| `TEST_ADMIN_EMAIL` | *(required)* | Super admin email for testing |
+| `TEST_ADMIN_PASSWORD` | *(required)* | Super admin password for testing |
+| `TEST_TENANT_A_EMAIL` | `test-tenant-a@example.com` | First test tenant user email |
+| `TEST_TENANT_A_PASSWORD` | `TestTenantA123!` | First test tenant user password |
+| `TEST_TENANT_B_EMAIL` | `test-tenant-b@example.com` | Second test tenant user email |
+| `TEST_TENANT_B_PASSWORD` | `TestTenantB123!` | Second test tenant user password |
+
+**What gets created:**
+- Platform Organization (with "Members" team only)
+- Test Tenant Ltd organization (with "Members" + "QA Operations" teams)
+- Super admin user with all platform permissions
+- Two test tenant users, each added to the QA Operations team
+
+#### Running the Seed
+```bash
+# Standard seed (dev mode)
+npm run db:seed
+
+# Test mode — set TEST_ADMIN_EMAIL to activate
+cp .env.test.example .env.test
+# Edit .env.test with test credentials, then:
+TEST_ADMIN_EMAIL=platform-test@nipp.gov.uk npx tsx prisma/seed.ts
+```
+
+#### Re-seeding
+The seed script is **idempotent** — running it multiple times will update existing records rather than creating duplicates. All organizations, users, and permissions are upserted to match the latest script values.
+
+#### After Seeding
+1. Add `PLATFORM_ORG_ID=<id>` to your `.env` for stability (auto-printed after seed)
+2. Restart your dev server: `npm run dev`
+3. Log out completely and log back in using the credentials from your `.env` file
+4. You should now see the Super Admin dashboard!
 
 ### 5. Start the development server
 

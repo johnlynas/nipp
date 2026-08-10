@@ -67,6 +67,7 @@ model User {
   sessions Session[]
   accounts Account[]
   members  Member[]
+  teamMembers TeamMember[] // User can be a member of multiple teams
 }
 
 model Session {
@@ -129,6 +130,10 @@ model Organization {
   // RBAC: roles and role-permission mappings scoped to this organization
   roles              Role[]
   rolePermissions    RolePermission[]
+  // Teams: sub-organizational groupings with role inheritance
+  teams              Team[]
+  teamMembers        TeamMember[] // Organization-scoped team memberships
+  teamRoles          TeamRole[]   // Organization-scoped team-role assignments
 }
 
 model Member {
@@ -142,6 +147,9 @@ model Member {
   orgId      String
   organization Organization @relation(fields: [orgId], references: [id], onDelete: Cascade)
   memberRoles MemberRole[]
+
+  // Optional team association (BetterAuth internal alignment when teams are enabled)
+  teamId     String?  @map("teamId")
 
   @@unique([userId, orgId])
 }
@@ -157,7 +165,83 @@ model Invitation {
   orgId      String
   organization Organization @relation(fields: [orgId], references: [id], onDelete: Cascade)
 
+  // Optional team association — invites users directly to a specific team
+  teamId     String?  @map("teamId")
+
   @@index([email])
+}
+
+// ============================================================
+// Teams Models (BetterAuth Organization Plugin — Teams Mode)
+// These are organization-scoped for tenant isolation.
+// ============================================================
+
+/**
+ * Team — Functional grouping within an organization.
+ * Teams allow users to be organized into sub-organizational units
+ * (e.g., "Maintenance Team A", "Letting Agents") with role inheritance.
+ */
+model Team {
+  id          String   @id @default(cuid())
+  name        String   // Human-readable team name (max 100 chars)
+  slug        String?  // URL-friendly identifier (auto-generated from name if not provided)
+  description String?  // Optional team description (max 500 chars)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  organizationId String
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+
+  members TeamMember[]
+  roles  TeamRole[]
+
+  @@unique([organizationId, slug]) // Slug is unique per organization
+  @@index([organizationId, name]) // B-tree index for efficient org-scoped team lookups
+  @@index([slug])                 // Index for unique slug resolution
+}
+
+/**
+ * TeamMember — User-to-team membership within an organization.
+ * A user can be a member of multiple teams within the same org.
+ */
+model TeamMember {
+  id         String   @id @default(cuid())
+  createdAt  DateTime @default(now())
+
+  teamId     String
+  team       Team     @relation(fields: [teamId], references: [id], onDelete: Cascade)
+
+  userId     String
+  user       User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  organizationId String
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, teamId]) // A user can only be in a team once
+  @@index([organizationId])  // Index for tenant-scoped queries
+  @@index([teamId])          // Index for team member lookups
+}
+
+/**
+ * TeamRole — Junction table linking teams to organization-scoped roles.
+ * Enables automatic role inheritance: when a user joins a team,
+ * all roles associated with that team are automatically assigned.
+ */
+model TeamRole {
+  id         String   @id @default(cuid())
+  createdAt  DateTime @default(now())
+
+  teamId     String
+  team       Team     @relation(fields: [teamId], references: [id], onDelete: Cascade)
+
+  roleId     String
+  role       Role     @relation(fields: [roleId], references: [id], onDelete: Cascade)
+
+  organizationId String
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+
+  @@unique([teamId, roleId]) // A role can only be assigned once per team
+  @@index([organizationId])  // Index for tenant-scoped queries
 }
 
 // SentInvitation (BetterAuth internal model for tracking sent invitations)
@@ -213,6 +297,7 @@ model Role {
 
   permissions        RolePermission[]
   memberRoles        MemberRole[]
+  teamRoles          TeamRole[]   // Roles assigned to teams for inheritance
 
   @@index([name]) // B-tree index for prefix search (search-autocomplete)
 }
