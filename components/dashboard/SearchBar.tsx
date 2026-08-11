@@ -38,7 +38,7 @@ export function SearchBar({ value, onChange, placeholder = 'Search...', debounce
         value={localValue}
         onChange={handleChange}
         placeholder={placeholder}
-        className="w-full rounded border border-[#dee2e6] py-2 pl-9 pr-3 text-sm bg-white hover:bg-gray-50 transition-colors focus:outline-none focus:ring-2"
+        className="w-full rounded border border-[#dee2e6] py-2 pl-9 pr-3 text-sm bg-white text-gray-900 hover:bg-gray-50 transition-colors focus:outline-none focus:ring-2"
         style={{ '--tw-ring-color': '#F5A623' } as React.CSSProperties}
         aria-label={ariaLabel || placeholder}
       />
