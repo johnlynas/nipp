@@ -36,7 +36,7 @@ export function DataTable<T>({ columns, data, loading, emptyMessage = 'No result
           {data.map((item, idx) => (
             <tr key={idx} className="hover:bg-gray-50 transition-colors">
               {columns.map((col) => (
-                <td key={col.key} className="px-4 py-3 text-sm">
+                <td key={col.key} className="px-4 py-3 text-sm" style={{ color: '#1B2A4A' }}>
                   {col.render ? col.render(item) : String((item as Record<string, unknown>)[col.key] ?? '')}
                 </td>
               ))}

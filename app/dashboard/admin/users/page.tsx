@@ -48,7 +48,7 @@ export default function UsersPage() {
   const [users, setUsers] = useState<User[]>([]);
   const [organizations, setOrganizations] = useState<Organization[]>([]);
   const [teams, setTeams] = useState<Team[]>([]);
-  const [pagination, setPagination] = useState<PaginationState>({ page: 1, pageSize: 10, total: 0, totalPages: 0 });
+  const [pagination, setPagination] = useState<PaginationState>({ page: 1, pageSize: 8, total: 0, totalPages: 0 });
   const [search, setSearch] = useState('');
   const [orgFilter, setOrgFilter] = useState('');
   const [teamFilter, setTeamFilter] = useState('');
@@ -385,7 +385,7 @@ export default function UsersPage() {
           value={orgFilter}
           onChange={(e) => setOrgFilter(e.target.value)}
           className="rounded border px-3 py-2 text-sm bg-white hover:bg-gray-50 transition-colors focus:outline-none"
-          style={{ borderColor: '#dee2e6' }}
+          style={{ borderColor: '#dee2e6', color: '#1B2A4A' }}
           aria-label="Filter by organization"
         >
           <option value="">All Organizations</option>
@@ -397,7 +397,7 @@ export default function UsersPage() {
           value={teamFilter}
           onChange={(e) => setTeamFilter(e.target.value)}
           className="rounded border px-3 py-2 text-sm bg-white hover:bg-gray-50 transition-colors focus:outline-none"
-          style={{ borderColor: '#dee2e6' }}
+          style={{ borderColor: '#dee2e6', color: '#1B2A4A' }}
           aria-label="Filter by team"
         >
           <option value="">All Teams</option>
@@ -506,7 +506,7 @@ export default function UsersPage() {
               value={createOrgId}
               onChange={(e) => { setCreateOrgId(e.target.value); setCreateTeamId(''); }}
               className="w-full rounded border px-3 py-2 text-sm bg-white focus:outline-none"
-              style={{ borderColor: '#dee2e6' }}
+              style={{ borderColor: '#dee2e6', color: '#1B2A4A' }}
             >
               <option value="">No organization</option>
               {organizations.map((org) => (
@@ -522,7 +522,7 @@ export default function UsersPage() {
                 value={createTeamId}
                 onChange={(e) => setCreateTeamId(e.target.value)}
                 className="w-full rounded border px-3 py-2 text-sm bg-white focus:outline-none"
-                style={{ borderColor: '#dee2e6' }}
+                style={{ borderColor: '#dee2e6', color: '#1B2A4A' }}
               >
                 <option value="">No team</option>
                 {teams.filter((t) => t.organizationId === createOrgId).map((team) => (

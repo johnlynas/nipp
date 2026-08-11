@@ -29,7 +29,7 @@ interface PaginationState {
 
 export default function OrganizationsPage() {
   const [organizations, setOrganizations] = useState<Organization[]>([]);
-  const [pagination, setPagination] = useState<PaginationState>({ page: 1, pageSize: 10, total: 0, totalPages: 0 });
+  const [pagination, setPagination] = useState<PaginationState>({ page: 1, pageSize: 8, total: 0, totalPages: 0 });
   const [search, setSearch] = useState('');
   const [statusFilter, setStatusFilter] = useState('');
   const [loading, setLoading] = useState(true);
@@ -235,7 +235,7 @@ export default function OrganizationsPage() {
           value={statusFilter}
           onChange={(e) => setStatusFilter(e.target.value)}
           className="rounded border px-3 py-2 text-sm bg-white hover:bg-gray-50 transition-colors focus:outline-none"
-          style={{ borderColor: '#dee2e6' }}
+          style={{ borderColor: '#dee2e6', color: '#1B2A4A' }}
           aria-label="Filter by status"
         >
           <option value="">All Statuses</option>

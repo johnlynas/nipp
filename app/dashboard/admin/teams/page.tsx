@@ -36,7 +36,7 @@ interface PaginationState {
 export default function TeamsPage() {
   const [teams, setTeams] = useState<Team[]>([]);
   const [organizations, setOrganizations] = useState<Organization[]>([]);
-  const [pagination, setPagination] = useState<PaginationState>({ page: 1, pageSize: 10, total: 0, totalPages: 0 });
+  const [pagination, setPagination] = useState<PaginationState>({ page: 1, pageSize: 8, total: 0, totalPages: 0 });
   const [search, setSearch] = useState('');
   const [orgFilter, setOrgFilter] = useState('');
   const [loading, setLoading] = useState(true);
@@ -49,6 +49,10 @@ export default function TeamsPage() {
   const [createModalOpen, setCreateModalOpen] = useState(false);
   const [createForm, setCreateForm] = useState({ name: '', description: '' });
   const [createOrgId, setCreateOrgId] = useState('');
+
+  // Edit modal states
+  const [editModalOpen, setEditModalOpen] = useState(false);
+  const [editForm, setEditForm] = useState({ name: '', description: '' });
 
   // Fetch organizations for dropdown
   useEffect(() => {
@@ -70,6 +74,13 @@ export default function TeamsPage() {
   useEffect(() => {
     setPagination((p) => ({ ...p, page: 1 }));
   }, [search, orgFilter]);
+
+  // Reset edit form when modal opens/closes
+  useEffect(() => {
+    if (!editModalOpen) {
+      setEditForm({ name: '', description: '' });
+    }
+  }, [editModalOpen]);
 
   // Abort controller to cancel stale fetch requests on rapid filter changes
   const abortControllerRef = useRef<AbortController | null>(null);
@@ -122,6 +133,30 @@ export default function TeamsPage() {
   useEffect(() => {
     fetchData();
   }, [fetchData]);
+
+  // Handle edit team
+  const handleEdit = async () => {
+    if (!selectedTeam) return;
+
+    try {
+      const res = await fetch(`/api/dashboard/admin/teams/${selectedTeam.id}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(editForm),
+      });
+
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}));
+        throw new Error(data.error || 'Failed to update team');
+      }
+
+      setEditModalOpen(false);
+      fetchData();
+    } catch (err) {
+      console.error('Failed to update team:', err);
+      setError(err instanceof Error ? err.message : 'Failed to update team');
+    }
+  };
 
   // Handle delete team
   const handleDelete = async () => {
@@ -184,6 +219,9 @@ export default function TeamsPage() {
         <button onClick={() => { setSelectedTeam(t); setDetailModalOpen(true); }} className="rounded p-1.5 text-gray-400 hover:bg-gray-100 hover:text-[#1B2A4A] transition-colors" aria-label={`View ${t.name}`}>
           <Eye className="h-4 w-4" />
         </button>
+        <button onClick={() => { setSelectedTeam(t); setEditForm({ name: t.name, description: t.description || '' }); setEditModalOpen(true); }} className="rounded p-1.5 text-gray-400 hover:bg-gray-100 hover:text-[#1B2A4A] transition-colors" aria-label={`Edit ${t.name}`}>
+          <Pencil className="h-4 w-4" />
+        </button>
         <button onClick={() => { setSelectedTeam(t); setDeleteModalOpen(true); }} className="rounded p-1.5 text-gray-400 hover:bg-red-50 hover:text-red-700 transition-colors" aria-label={`Delete ${t.name}`}>
           <Trash2 className="h-4 w-4" />
         </button>
@@ -224,7 +262,7 @@ export default function TeamsPage() {
           value={orgFilter}
           onChange={(e) => setOrgFilter(e.target.value)}
           className="rounded border px-3 py-2 text-sm bg-white hover:bg-gray-50 transition-colors focus:outline-none"
-          style={{ borderColor: '#dee2e6' }}
+          style={{ borderColor: '#dee2e6', color: '#1B2A4A' }}
           aria-label="Filter by organization"
         >
           <option value="">All Organizations</option>
@@ -289,6 +327,53 @@ export default function TeamsPage() {
         confirmLabel="Delete"
         variant="danger"
       />
+
+      {/* Edit Team Modal */}
+      <Modal isOpen={editModalOpen} onClose={() => setEditModalOpen(false)} title="Edit Team" size="md">
+        {selectedTeam && (
+          <div className="space-y-4">
+            <div>
+              <label htmlFor="edit-team-name" className="mb-1 block text-sm font-medium" style={{ color: '#6c757d' }}>Name</label>
+              <input
+                id="edit-team-name"
+                type="text"
+                value={editForm.name}
+                onChange={(e) => setEditForm((f) => ({ ...f, name: e.target.value }))}
+                className="w-full rounded border px-3 py-2 text-sm focus:outline-none"
+                style={{ borderColor: '#dee2e6' }}
+              />
+            </div>
+            <div>
+              <label htmlFor="edit-team-desc" className="mb-1 block text-sm font-medium" style={{ color: '#6c757d' }}>Description (optional)</label>
+              <textarea
+                id="edit-team-desc"
+                value={editForm.description}
+                onChange={(e) => setEditForm((f) => ({ ...f, description: e.target.value }))}
+                className="w-full rounded border px-3 py-2 text-sm focus:outline-none"
+                style={{ borderColor: '#dee2e6' }}
+                rows={3}
+              />
+            </div>
+            <div className="flex justify-end gap-3">
+              <button
+                onClick={() => setEditModalOpen(false)}
+                className="rounded border px-4 py-2 text-sm font-medium transition-colors hover:bg-gray-50"
+                style={{ borderColor: '#dee2e6', color: '#1B2A4A' }}
+              >
+                Cancel
+              </button>
+              <button
+                onClick={handleEdit}
+                disabled={!editForm.name.trim()}
+                className="rounded px-4 py-2 text-sm font-medium text-white transition-colors hover:opacity-90 disabled:opacity-50"
+                style={{ backgroundColor: '#F5A623' }}
+              >
+                Save Changes
+              </button>
+            </div>
+          </div>
+        )}
+      </Modal>
 
       {/* Create Team Modal */}
       <Modal isOpen={createModalOpen} onClose={() => setCreateModalOpen(false)} title="Create Team" size="md">

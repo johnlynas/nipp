@@ -25,7 +25,7 @@ interface PaginationState {
 
 export default function PermissionsPage() {
   const [permissions, setPermissions] = useState<Permission[]>([]);
-  const [pagination, setPagination] = useState<PaginationState>({ page: 1, pageSize: 10, total: 0, totalPages: 0 });
+  const [pagination, setPagination] = useState<PaginationState>({ page: 1, pageSize: 8, total: 0, totalPages: 0 });
   const [totalPermissionsCount, setTotalPermissionsCount] = useState<number>(0);
   const [search, setSearch] = useState('');
   const [resourceFilter, setResourceFilter] = useState('');
@@ -196,7 +196,7 @@ export default function PermissionsPage() {
           value={resourceFilter}
           onChange={(e) => setResourceFilter(e.target.value)}
           className="rounded border px-3 py-2 text-sm bg-white hover:bg-gray-50 transition-colors focus:outline-none"
-          style={{ borderColor: '#dee2e6' }}
+          style={{ borderColor: '#dee2e6', color: '#1B2A4A' }}
           aria-label="Filter by resource"
         >
           <option value="">All Resources</option>
