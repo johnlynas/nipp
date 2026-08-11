@@ -47,6 +47,7 @@ export interface TeamData {
   description: string | null;
   createdAt: Date;
   updatedAt: Date;
+  organizationId: string;
 }
 
 /** Team with members and roles included. */
@@ -317,13 +318,17 @@ export const TeamService = {
         skip,
         take: normalizedPageSize,
         orderBy: { name: 'asc' },
+        include: {
+          _count: { select: { members: true } },
+        },
       }),
       globalDb.team.count({ where: { organizationId } }),
     ]);
 
     return {
-      teams: teams.map(({ id, name, slug, description, createdAt, updatedAt }) => ({
-        id, name, slug, description, createdAt, updatedAt,
+      teams: teams.map(({ id, name, slug, description, createdAt, updatedAt, organizationId, _count }) => ({
+        id, name, slug, description, createdAt, updatedAt, organizationId,
+        _count: { members: _count.members },
       })),
       pagination: {
         page: normalizedPage,
