@@ -108,12 +108,11 @@ export default function PermissionsPage() {
       setPermissions(data.items || []);
 
       const total = data.pagination?.total ?? 0;
-      const pageSizeFromApi = data.pagination?.pageSize || pagination.pageSize || 10;
-      const totalPages = Math.max(1, Math.ceil(total / pageSizeFromApi));
+      const totalPages = Math.max(1, Math.ceil(total / pagination.pageSize));
 
       setPagination({
         page: pagination.page,
-        pageSize: pageSizeFromApi,
+        pageSize: pagination.pageSize,
         total,
         totalPages,
       });
@@ -174,8 +173,7 @@ export default function PermissionsPage() {
       {/* Stat Cards */}
       <div className="mb-6 grid grid-cols-2 gap-4 md:grid-cols-3">
         <StatCard label="Total Permissions" value={totalPermissionsCount} />
-        <StatCard label="Unique Resources" value={resources.length} color="success" />
-        <StatCard label="Showing" value={permissions.length} />
+        <StatCard label="Total Resources" value={resources.length} color="success" />
       </div>
 
       {/* Page Header */}

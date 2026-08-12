@@ -37,6 +37,7 @@ export default function RolesPage() {
   const [roles, setRoles] = useState<Role[]>([]);
   const [organizations, setOrganizations] = useState<Organization[]>([]);
   const [pagination, setPagination] = useState<PaginationState>({ page: 1, pageSize: 8, total: 0, totalPages: 0 });
+  const [counts, setCounts] = useState<{ defaultCount: number; customCount: number; rolesInUseCount: number }>({ defaultCount: 0, customCount: 0, rolesInUseCount: 0 });
   const [search, setSearch] = useState('');
   const [orgFilter, setOrgFilter] = useState('');
   const [typeFilter, setTypeFilter] = useState('');
@@ -115,15 +116,18 @@ export default function RolesPage() {
       setRoles(data.items || []);
 
       const total = data.pagination?.total ?? 0;
-      const pageSizeFromApi = data.pagination?.pageSize || pagination.pageSize || 10;
-      const totalPages = Math.max(1, Math.ceil(total / pageSizeFromApi));
+      const totalPages = Math.max(1, Math.ceil(total / pagination.pageSize));
 
       setPagination({
         page: pagination.page,
-        pageSize: pageSizeFromApi,
+        pageSize: pagination.pageSize,
         total,
         totalPages,
       });
+
+      if (data.counts) {
+        setCounts(data.counts);
+      }
     } catch (err) {
       if (err instanceof DOMException && err.name === 'AbortError') return;
       console.error('Failed to fetch roles:', err);
@@ -244,10 +248,10 @@ export default function RolesPage() {
 
       {/* Stat Cards */}
       <div className="mb-6 grid grid-cols-2 gap-4 md:grid-cols-4">
-        <StatCard label="Total Roles" value={pagination.total} />
-        <StatCard label="Default Roles" value={roles.filter((r) => r.isDefault).length} color="success" />
-        <StatCard label="Custom Roles" value={roles.filter((r) => !r.isDefault).length} />
-        <StatCard label="Roles With Members" value={roles.filter((r) => (r._count?.memberRoles ?? 0) > 0).length} color="success" />
+        <StatCard label="Total Roles" value={counts.defaultCount + counts.customCount} />
+        <StatCard label="Default Roles" value={counts.defaultCount} color="success" />
+        <StatCard label="Custom Roles" value={counts.customCount} />
+        <StatCard label="Roles in use" value={counts.rolesInUseCount} color="success" />
       </div>
 
       {/* Page Header */}

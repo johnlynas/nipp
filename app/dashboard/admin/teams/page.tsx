@@ -127,12 +127,11 @@ export default function TeamsPage() {
       setTeams(data.teams || []);
 
       const total = data.pagination?.total ?? 0;
-      const pageSizeFromApi = data.pagination?.pageSize || pagination.pageSize || 10;
-      const totalPages = Math.max(1, Math.ceil(total / pageSizeFromApi));
+      const totalPages = Math.max(1, Math.ceil(total / pagination.pageSize));
 
       setPagination({
         page: pagination.page,
-        pageSize: pageSizeFromApi,
+        pageSize: pagination.pageSize,
         total,
         totalPages,
       });

@@ -52,6 +52,8 @@ export default function UsersPage() {
   const [search, setSearch] = useState('');
   const [orgFilter, setOrgFilter] = useState('');
   const [teamFilter, setTeamFilter] = useState('');
+  const [statusFilter, setStatusFilter] = useState('');
+  const [counts, setCounts] = useState<{ emailVerifiedCount: number; bannedCount: number; activeCount: number }>({ emailVerifiedCount: 0, bannedCount: 0, activeCount: 0 });
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
@@ -115,7 +117,7 @@ export default function UsersPage() {
   // Reset to page 1 when filters change
   useEffect(() => {
     setPagination((p) => ({ ...p, page: 1 }));
-  }, [search]);
+  }, [search, statusFilter]);
 
   // Clear team filter when org changes (teams are scoped to org)
   useEffect(() => {
@@ -145,6 +147,7 @@ export default function UsersPage() {
       if (search) params.set('search', search);
       if (orgFilter) params.set('organizationId', orgFilter);
       if (teamFilter) params.set('teamId', teamFilter);
+      if (statusFilter) params.set('status', statusFilter);
 
       const res = await fetch(`/api/dashboard/admin/users?${params}`, {
         signal: abortControllerRef.current.signal,
@@ -158,15 +161,18 @@ export default function UsersPage() {
       setUsers(data.items || []);
 
       const total = data.pagination?.total ?? 0;
-      const pageSizeFromApi = data.pagination?.pageSize || pagination.pageSize || 10;
-      const totalPages = Math.max(1, Math.ceil(total / pageSizeFromApi));
+      const totalPages = Math.max(1, Math.ceil(total / pagination.pageSize));
 
       setPagination({
         page: pagination.page,
-        pageSize: pageSizeFromApi,
+        pageSize: pagination.pageSize,
         total,
         totalPages,
       });
+
+      if (data.counts) {
+        setCounts(data.counts);
+      }
     } catch (err) {
       if (err instanceof DOMException && err.name === 'AbortError') return;
       console.error('Failed to fetch users:', err);
@@ -174,7 +180,7 @@ export default function UsersPage() {
     } finally {
       setLoading(false);
     }
-  }, [pagination.page, pagination.pageSize, search, orgFilter, teamFilter]);
+  }, [pagination.page, pagination.pageSize, search, orgFilter, teamFilter, statusFilter]);
 
   useEffect(() => {
     fetchData();
@@ -377,9 +383,9 @@ export default function UsersPage() {
       {/* Stat Cards */}
       <div className="mb-6 grid grid-cols-2 gap-4 md:grid-cols-4">
         <StatCard label="Total Users" value={pagination.total} />
-        <StatCard label="Email Verified" value={users.filter((u) => u.emailVerified).length} color="success" />
-        <StatCard label="Banned" value={users.filter((u) => u.banned).length} color="danger" />
-        <StatCard label="Active Now" value={users.filter((u) => !u.banned).length} color="success" />
+        <StatCard label="Email Verified" value={counts.emailVerifiedCount} color="success" />
+        <StatCard label="Banned" value={counts.bannedCount} color="danger" />
+        <StatCard label="Active Now" value={counts.activeCount} color="success" />
       </div>
 
       {/* Page Header */}
@@ -419,6 +425,17 @@ export default function UsersPage() {
           {teams.map((team) => (
             <option key={team.id} value={team.id}>{team.name}</option>
           ))}
+        </select>
+        <select
+          value={statusFilter}
+          onChange={(e) => setStatusFilter(e.target.value)}
+          className="rounded border px-3 py-2 text-sm bg-white hover:bg-gray-50 transition-colors focus:outline-none"
+          style={{ borderColor: '#dee2e6', color: '#1B2A4A' }}
+          aria-label="Filter by status"
+        >
+          <option value="">All States</option>
+          <option value="active">Active</option>
+          <option value="banned">Banned</option>
         </select>
       </div>
 

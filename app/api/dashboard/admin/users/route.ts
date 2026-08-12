@@ -3,6 +3,7 @@ import { requireSuperAdmin } from '@/lib/require-super-admin';
 import { UserService } from '@/services/user-service';
 import { TeamService } from '@/services/team-service';
 import globalDb from '@/lib/global-db';
+import type { Prisma } from '@prisma/client';
 
 export const runtime = 'nodejs';
 
@@ -24,14 +25,78 @@ export async function GET(request: NextRequest) {
     const role = url.searchParams.get('role') || undefined;
     const organizationId = url.searchParams.get('organizationId') || undefined;
     const teamId = url.searchParams.get('teamId') || undefined;
+    const status = url.searchParams.get('status') as 'active' | 'banned' | undefined;
 
+    // Build the shared where clause so counts match filtered results
+    const where: Prisma.UserWhereInput = {};
+    if (search) {
+      where.OR = [
+        { name: { contains: search, mode: 'insensitive' } },
+        { email: { contains: search, mode: 'insensitive' } },
+      ];
+    }
+
+    // Platform Admin: apply org/role/team filters to the where clause for counts
+    if (organizationId || role || teamId) {
+      const memberWhere: Prisma.MemberWhereInput = {};
+      if (organizationId) memberWhere.orgId = organizationId;
+      if (role) memberWhere.role = role;
+
+      let userIds: string[] = [];
+      if (organizationId || role) {
+        const matchingMembers = await globalDb.member.findMany({
+          where: memberWhere,
+          select: { userId: true },
+        });
+        userIds = matchingMembers.map((m) => m.userId);
+      }
+
+      if (teamId) {
+        const teamMembers = await globalDb.teamMember.findMany({
+          where: { teamId },
+          select: { userId: true },
+        });
+        const teamUserIds = new Set(teamMembers.map((tm) => tm.userId));
+        userIds = userIds.length > 0
+          ? userIds.filter((id) => teamUserIds.has(id))
+          : Array.from(teamUserIds);
+      }
+
+      if (userIds.length > 0) {
+        where.id = { in: userIds };
+      } else {
+        where.id = { in: [] };
+      }
+    }
+
+    // Apply status filter to where clause for counts
+    if (status === 'banned') {
+      where.banned = true;
+    } else if (status === 'active') {
+      where.banned = false;
+    }
+
+    // Fetch paginated items for the table
     const result = await UserService.list(
-      { search, role, organizationId, teamId },
+      { search, role, organizationId, teamId, status },
       { page, pageSize },
       { userId: auth.session!.user.id, role: 'PLATFORM_ADMIN' }
     );
 
-    return NextResponse.json(result);
+    // Compute counts from the full dataset using separate count queries
+    const [emailVerifiedCount, bannedCount] = await Promise.all([
+      globalDb.user.count({ where: { ...where, emailVerified: true } }),
+      globalDb.user.count({ where: { ...where, banned: true } }),
+    ]);
+
+    return NextResponse.json({
+      ...result,
+      counts: {
+        emailVerifiedCount,
+        bannedCount,
+        activeCount: result.pagination.total - bannedCount,
+      },
+    });
   } catch (error) {
     console.error('Failed to list users:', error);
     return NextResponse.json({ error: 'Failed to fetch users' }, { status: 500 });

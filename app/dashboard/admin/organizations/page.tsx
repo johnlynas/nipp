@@ -17,6 +17,7 @@ interface Organization {
   slug: string | null;
   description?: string | null;
   status: 'PENDING' | 'ACTIVE' | 'SUSPENDED' | 'ARCHIVED';
+  teamCount: number;
   memberCount: number;
   createdAt: string;
 }
@@ -31,6 +32,8 @@ interface PaginationState {
 export default function OrganizationsPage() {
   const [organizations, setOrganizations] = useState<Organization[]>([]);
   const [pagination, setPagination] = useState<PaginationState>({ page: 1, pageSize: 8, total: 0, totalPages: 0 });
+  const [globalTotal, setGlobalTotal] = useState(0);
+  const [statusCounts, setStatusCounts] = useState<Record<string, number>>({ ACTIVE: 0, PENDING: 0, SUSPENDED: 0, ARCHIVED: 0 });
   const [search, setSearch] = useState('');
   const [statusFilter, setStatusFilter] = useState('');
   const [loading, setLoading] = useState(true);
@@ -80,14 +83,17 @@ export default function OrganizationsPage() {
 
       const data = await res.json();
       setOrganizations(data.organizations || []);
+      setGlobalTotal(data.globalTotal ?? 0);
+      setStatusCounts(
+        data.statusCounts ?? { ACTIVE: 0, PENDING: 0, SUSPENDED: 0, ARCHIVED: 0 },
+      );
 
       const total = data.pagination?.total ?? 0;
-      const pageSizeFromApi = data.pagination?.pageSize || pagination.pageSize || 10;
-      const totalPages = Math.max(1, Math.ceil(total / pageSizeFromApi));
+      const totalPages = Math.max(1, Math.ceil(total / pagination.pageSize));
 
       setPagination({
         page: pagination.page,
-        pageSize: pageSizeFromApi,
+        pageSize: pagination.pageSize,
         total,
         totalPages,
       });
@@ -181,6 +187,7 @@ export default function OrganizationsPage() {
     )},
     { key: 'description', label: 'Description', render: (o: Organization) => o.description || '—' },
     { key: 'status', label: 'Status', render: (o: Organization) => <StatusBadge status={o.status} /> },
+    { key: 'teamCount', label: 'Teams', render: (o: Organization) => o.teamCount },
     { key: 'memberCount', label: 'Members', render: (o: Organization) => o.memberCount },
     { key: 'createdAt', label: 'Created', render: (o: Organization) => new Date(o.createdAt).toLocaleDateString() },
     { key: 'actions', label: 'Actions', render: (o: Organization) => (
@@ -227,11 +234,12 @@ export default function OrganizationsPage() {
       )}
 
       {/* Stat Cards */}
-      <div className="mb-6 grid grid-cols-2 gap-4 md:grid-cols-4">
-        <StatCard label="Total Orgs" value={pagination.total} />
-        <StatCard label="Active" value={organizations.filter((o) => o.status === 'ACTIVE').length} color="success" />
-        <StatCard label="Suspended" value={organizations.filter((o) => o.status === 'SUSPENDED').length} color="warning" />
-        <StatCard label="Archived" value={organizations.filter((o) => o.status === 'ARCHIVED').length} color="default" />
+      <div className="mb-6 flex gap-4">
+        <StatCard label="Total Orgs" value={globalTotal} className="flex-1 min-w-0" />
+        <StatCard label="Pending" value={statusCounts.PENDING ?? 0} color="warning" className="flex-1 min-w-0" />
+        <StatCard label="Active" value={statusCounts.ACTIVE ?? 0} color="success" className="flex-1 min-w-0" />
+        <StatCard label="Suspended" value={statusCounts.SUSPENDED ?? 0} color="warning" className="flex-1 min-w-0" />
+        <StatCard label="Archived" value={statusCounts.ARCHIVED ?? 0} color="default" className="flex-1 min-w-0" />
       </div>
 
       {/* Page Header */}

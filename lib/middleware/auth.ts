@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { auth } from '@/lib/auth';
-// Use relative import to bypass tenant isolation rule (BetterAuth needs raw Prisma client)
-import { prisma } from '@/lib/db';
+// BetterAuth needs raw Prisma client, not tenant-scoped
+import { prisma } from '@/lib/db'; // eslint-disable-line no-restricted-imports
 import { headers } from 'next/headers';
 import { logger } from '@/lib/logger';
 

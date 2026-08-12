@@ -36,6 +36,13 @@ export interface PaginatedOrganizations {
     total: number;
     totalPages: number;
   };
+  globalTotal: number;
+  statusCounts: {
+    ACTIVE: number;
+    PENDING: number;
+    SUSPENDED: number;
+    ARCHIVED: number;
+  };
 }
 
 export interface PaginatedOrganizationsInput {
@@ -109,13 +116,27 @@ export const OrganizationService = {
     if (status) where.status = status as 'PENDING' | 'ACTIVE' | 'SUSPENDED' | 'ARCHIVED';
     if (search) where.name = { contains: search, mode: 'insensitive' };
 
-    const [organizations, total] = await Promise.all([
+    // Global (unfiltered) counts for dashboard stat cards
+    const [globalTotal, globalStatusCounts] = await Promise.all([
+      globalDb.organization.count(),
+      globalDb.organization.groupBy({
+        by: ['status'],
+        _count: { status: true },
+      }),
+    ]);
+
+    const globalCountsMap: Record<string, number> = {};
+    for (const entry of globalStatusCounts) {
+      globalCountsMap[entry.status] = entry._count.status;
+    }
+
+    const [organizations, filteredTotal] = await Promise.all([
       globalDb.organization.findMany({
         where,
         skip,
         take: pageSize,
         orderBy: { createdAt: 'desc' },
-        include: { _count: { select: { members: true } } },
+        include: { _count: { select: { members: true, teams: true } } },
       }),
       globalDb.organization.count({ where }),
     ]);
@@ -124,12 +145,20 @@ export const OrganizationService = {
       organizations: organizations.map((org) => ({
         ...org,
         memberCount: org._count?.members ?? 0,
+        teamCount: org._count?.teams ?? 0,
       })),
       pagination: {
         page,
         pageSize,
-        total,
-        totalPages: Math.ceil(total / pageSize),
+        total: filteredTotal,
+        totalPages: Math.ceil(filteredTotal / pageSize),
+      },
+      globalTotal,
+      statusCounts: {
+        ACTIVE: globalCountsMap['ACTIVE'] ?? 0,
+        PENDING: globalCountsMap['PENDING'] ?? 0,
+        SUSPENDED: globalCountsMap['SUSPENDED'] ?? 0,
+        ARCHIVED: globalCountsMap['ARCHIVED'] ?? 0,
       },
     };
   },

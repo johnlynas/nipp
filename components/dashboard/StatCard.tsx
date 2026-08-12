@@ -7,6 +7,7 @@ interface StatCardProps {
   value: number | string;
   icon?: ReactNode;
   color?: 'default' | 'success' | 'danger' | 'warning';
+  className?: string;
 }
 
 const colorMap = {
@@ -16,12 +17,12 @@ const colorMap = {
   warning: { bg: '#fffbeb', border: '#fde68a', text: '#92400e' },
 };
 
-export function StatCard({ label, value, icon, color = 'default' }: StatCardProps) {
+export function StatCard({ label, value, icon, color = 'default', className }: StatCardProps) {
   const c = colorMap[color];
 
   return (
     <div
-      className="flex flex-col rounded-lg border p-4 transition-shadow hover:shadow-md"
+      className={`flex flex-col rounded-lg border p-4 transition-shadow hover:shadow-md ${className ?? ''}`}
       style={{ backgroundColor: c.bg, borderColor: c.border }}
     >
       <div className="mb-1 flex items-center gap-2">

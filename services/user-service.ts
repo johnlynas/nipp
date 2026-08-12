@@ -214,6 +214,13 @@ export const UserService = {
       }
     }
 
+    // Apply status filter (active/banned)
+    if (filters.status === 'banned') {
+      where.banned = true;
+    } else if (filters.status === 'active') {
+      where.banned = false;
+    }
+
     const [users, total] = await Promise.all([
       globalDb.user.findMany({
         where,

@@ -28,12 +28,13 @@ export async function GET(request: NextRequest) {
         select: { id: true },
       });
 
+      // Fetch ALL teams from each org (no per-org pagination), then paginate the merged result
       const allTeams = await Promise.all(
         allOrgs.map((org) =>
           TeamService.getTeamsByOrg(org.id, {
             userId: auth.session!.user.id,
             role: 'PLATFORM_ADMIN',
-          }, page, pageSize)
+          }, 1, 10000)
         )
       );
 
@@ -51,9 +52,10 @@ export async function GET(request: NextRequest) {
       }
 
       const totalPages = Math.max(1, Math.ceil(filteredTeams.length / pageSize));
+      const start = (page - 1) * pageSize;
 
       return NextResponse.json({
-        teams: filteredTeams,
+        teams: filteredTeams.slice(start, start + pageSize),
         pagination: { page, pageSize, total: filteredTeams.length, totalPages },
       });
     }

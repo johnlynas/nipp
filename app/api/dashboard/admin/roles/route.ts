@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { requireSuperAdmin } from '@/lib/require-super-admin';
 import globalDb from '@/lib/global-db';
 import { RoleService } from '@/services/role-service';
+import type { Prisma } from '@prisma/client';
 
 export const runtime = 'nodejs';
 
@@ -29,9 +30,10 @@ export async function GET(request: NextRequest) {
         select: { id: true },
       });
 
+      // Fetch ALL roles from each org (no per-org pagination), then paginate the merged result
       const allRoles = await Promise.all(
         allOrgs.map((org) =>
-          RoleService.list(org.id, { search } as import('@/lib/services/types').RoleFilters, { page, pageSize }, {
+          RoleService.list(org.id, { search } as import('@/lib/services/types').RoleFilters, { page: 1, pageSize: 10000 }, {
             userId: auth.session!.user.id,
             role: 'PLATFORM_ADMIN',
           })
@@ -49,12 +51,31 @@ export async function GET(request: NextRequest) {
         filteredItems = items.filter((r) => r.isDefault === filterVal);
       }
 
-      // Apply search client-side if not passed to service (already handled above)
       const totalPages = Math.max(1, Math.ceil(filteredItems.length / pageSize));
+      const start = (page - 1) * pageSize;
+
+      // Dashboard counts: always from the full dataset, independent of filters
+      const allRolesAcrossOrgs = await Promise.all(
+        allOrgs.map((org) =>
+          globalDb.role.findMany({
+            where: { organizationId: org.id },
+            include: {
+              _count: { select: { memberRoles: true, teamRoles: true } },
+            },
+          })
+        )
+      );
+      const allRolesFlat = allRolesAcrossOrgs.flat();
+      const defaultCount = allRolesFlat.filter((r) => r.isDefault).length;
+      const customCount = allRolesFlat.filter((r) => !r.isDefault).length;
+      const rolesInUseCount = allRolesFlat.filter(
+        (r) => (r._count.memberRoles ?? 0) > 0 || (r._count.teamRoles ?? 0) > 0
+      ).length;
 
       return NextResponse.json({
-        items: filteredItems,
+        items: filteredItems.slice(start, start + pageSize),
         pagination: { page, pageSize, total: filteredItems.length, totalPages },
+        counts: { defaultCount, customCount, rolesInUseCount },
       });
     }
 
@@ -69,7 +90,20 @@ export async function GET(request: NextRequest) {
       role: 'PLATFORM_ADMIN',
     });
 
-    return NextResponse.json(result);
+    // Dashboard counts: always from the full dataset, independent of filters
+    const allRoles = await globalDb.role.findMany({
+      where: { organizationId },
+      include: {
+        _count: { select: { memberRoles: true, teamRoles: true } },
+      },
+    });
+    const defaultCount = allRoles.filter((r) => r.isDefault).length;
+    const customCount = allRoles.filter((r) => !r.isDefault).length;
+    const rolesInUseCount = allRoles.filter(
+      (r) => (r._count.memberRoles ?? 0) > 0 || (r._count.teamRoles ?? 0) > 0
+    ).length;
+
+    return NextResponse.json({ ...result, counts: { defaultCount, customCount, rolesInUseCount } });
   } catch (error) {
     console.error('Failed to list roles:', error);
     return NextResponse.json({ error: 'Failed to fetch roles' }, { status: 500 });
