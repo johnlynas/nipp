@@ -18,6 +18,7 @@ function LoginForm() {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [error, setError] = useState<string | null>(null);
+  const [isBanned, setIsBanned] = useState(false);
   const [loading, setLoading] = useState(false);
 
   async function handleSubmit(e: FormEvent) {
@@ -28,7 +29,12 @@ function LoginForm() {
     try {
       const result = await signInEmail(email, password);
       if (result.error) {
-        setError(result.error);
+        const errorMsg = result.error;
+        // Detect banned user error
+        if (errorMsg.toLowerCase().includes('banned') || errorMsg.toLowerCase().includes('access denied')) {
+          setIsBanned(true);
+        }
+        setError(errorMsg);
       } else {
         const callbackUrl = searchParams.get('callbackUrl') || '/';
         router.push(callbackUrl);
@@ -64,9 +70,20 @@ function LoginForm() {
           {error && (
             <div
               role="alert"
-              className="mb-6 p-4 rounded-[26px] text-sm font-medium bg-red-500/10 text-red-600 border border-red-500/20"
+              className={`mb-6 p-4 rounded-[26px] text-sm font-medium border ${
+                isBanned
+                  ? 'bg-red-500/10 text-red-600 border-red-500/20'
+                  : 'bg-red-500/10 text-red-600 border-red-500/20'
+              }`}
             >
-              {error}
+              {isBanned ? (
+                <div>
+                  <p className="font-semibold mb-1">Account Banned</p>
+                  <p>{error}</p>
+                </div>
+              ) : (
+                error
+              )}
             </div>
           )}
 

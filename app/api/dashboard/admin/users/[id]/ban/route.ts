@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { requireSuperAdmin } from '@/lib/require-super-admin';
 import globalDb from '@/lib/global-db';
+import { logger } from '@/lib/logger';
 
 export const runtime = 'nodejs';
 
@@ -36,9 +37,14 @@ export async function POST(
       },
     });
 
+    logger.info(
+      { adminUserId: auth.session!.user.id, targetUserId: id, banned, banReason: updatedUser.banReason },
+      `User ${banned ? 'banned' : 'unbanned'} by admin`,
+    );
+
     return NextResponse.json(updatedUser);
   } catch (error) {
-    console.error('Failed to toggle user ban:', error);
+    logger.error({ err: error, adminUserId: auth.session!.user.id }, 'Failed to toggle user ban');
     return NextResponse.json({ error: 'Failed to update user ban status' }, { status: 500 });
   }
 }
