@@ -82,6 +82,21 @@ export default function TeamsPage() {
     }
   }, [editModalOpen]);
 
+  // Sync create modal org with page filter when modal opens
+  useEffect(() => {
+    if (createModalOpen && !createOrgId) {
+      setCreateOrgId(orgFilter);
+    }
+  }, [createModalOpen]);
+
+  // Reset create form when modal opens/closes
+  useEffect(() => {
+    if (!createModalOpen) {
+      setCreateForm({ name: '', description: '' });
+      setCreateOrgId('');
+    }
+  }, [createModalOpen]);
+
   // Abort controller to cancel stale fetch requests on rapid filter changes
   const abortControllerRef = useRef<AbortController | null>(null);
 
@@ -378,6 +393,22 @@ export default function TeamsPage() {
       {/* Create Team Modal */}
       <Modal isOpen={createModalOpen} onClose={() => setCreateModalOpen(false)} title="Create Team" size="md">
         <div className="space-y-4">
+          <div>
+            <label htmlFor="create-team-org" className="mb-1 block text-sm font-medium" style={{ color: '#6c757d' }}>Organization <span className="text-red-500">*</span></label>
+            <select
+              id="create-team-org"
+              value={createOrgId}
+              onChange={(e) => setCreateOrgId(e.target.value)}
+              className="w-full rounded border px-3 py-2 text-sm bg-white focus:outline-none"
+              style={{ borderColor: '#dee2e6', color: '#1B2A4A' }}
+              required
+            >
+              <option value="">Select organization</option>
+              {organizations.map((org) => (
+                <option key={org.id} value={org.id}>{org.name}</option>
+              ))}
+            </select>
+          </div>
           <div>
             <label htmlFor="team-name" className="mb-1 block text-sm font-medium" style={{ color: '#6c757d' }}>Name</label>
             <input

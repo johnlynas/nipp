@@ -161,7 +161,16 @@ export const OrganizationService = {
         'Organization created in transaction',
       );
 
-      // 3. Handle Admin Bootstrap if email provided
+      // 3. Create default "Members" team for the organization
+      await tx.team.create({
+        data: { name: 'Members', slug: 'members', organizationId: organization.id },
+      });
+      logger.debug(
+        { orgId: organization.id, method: 'Service.createOrganization' },
+        'Default Members team created',
+      );
+
+      // 4. Handle Admin Bootstrap if email provided
       if (adminEmail) {
         let user = await tx.user.findUnique({ where: { email: adminEmail } });
 
@@ -192,7 +201,7 @@ export const OrganizationService = {
         );
       }
 
-      // 4. Return the created organization
+      // 5. Return the created organization
       return organization;
     });
   },

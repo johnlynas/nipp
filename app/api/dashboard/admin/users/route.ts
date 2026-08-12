@@ -1,6 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { requireSuperAdmin } from '@/lib/require-super-admin';
 import { UserService } from '@/services/user-service';
+import { TeamService } from '@/services/team-service';
+import globalDb from '@/lib/global-db';
 
 export const runtime = 'nodejs';
 
@@ -48,10 +50,35 @@ export async function POST(request: NextRequest) {
 
   try {
     const body = await request.json();
+    const organizationId = body.organizationId;
+
+    if (!organizationId) {
+      return NextResponse.json({ error: 'Organization is required' }, { status: 400 });
+    }
+
     const result = await UserService.create(body, {
       userId: auth.session!.user.id,
       role: 'PLATFORM_ADMIN',
     });
+
+    // Auto-add user to the "Members" team in their organization
+    const membersTeam = await globalDb.team.findFirst({
+      where: { organizationId, slug: 'members' },
+    });
+
+    if (membersTeam) {
+      try {
+        await TeamService.addTeamMember(membersTeam.id, { userId: result.id }, {
+          userId: auth.session!.user.id,
+          role: 'PLATFORM_ADMIN',
+        });
+      } catch (err) {
+        // Ignore if user is already a member of this team
+        console.warn('User may already be a team member:', err);
+      }
+    } else {
+      console.warn('Members team not found for organization', organizationId);
+    }
 
     return NextResponse.json(result, { status: 201 });
   } catch (error) {

@@ -61,12 +61,12 @@ export default function UsersPage() {
   const [banModalOpen, setBanModalOpen] = useState(false);
   const [banAction, setBanAction] = useState<'ban' | 'unban'>('ban');
   const [banReason, setBanReason] = useState('');
+  const [deleteModalOpen, setDeleteModalOpen] = useState(false);
 
   // Create modal states
   const [createModalOpen, setCreateModalOpen] = useState(false);
   const [createForm, setCreateForm] = useState({ name: '', email: '', password: '' });
   const [createOrgId, setCreateOrgId] = useState('');
-  const [createTeamId, setCreateTeamId] = useState('');
 
   // Edit modal states
   const [editModalOpen, setEditModalOpen] = useState(false);
@@ -91,7 +91,7 @@ export default function UsersPage() {
     fetchOrganizations();
   }, []);
 
-  // Fetch teams for dropdown (scoped to selected organization)
+  // Fetch teams for filter dropdown (scoped to selected organization)
   useEffect(() => {
     async function fetchTeams() {
       try {
@@ -110,6 +110,8 @@ export default function UsersPage() {
     fetchTeams();
   }, [orgFilter]);
 
+
+
   // Reset to page 1 when filters change
   useEffect(() => {
     setPagination((p) => ({ ...p, page: 1 }));
@@ -125,7 +127,6 @@ export default function UsersPage() {
     if (!createModalOpen) {
       setCreateForm({ name: '', email: '', password: '' });
       setCreateOrgId('');
-      setCreateTeamId('');
     }
   }, [createModalOpen]);
 
@@ -205,13 +206,16 @@ export default function UsersPage() {
   };
 
   // Handle delete user
-  const handleDeleteUser = async (user: User) => {
+  const handleDeleteUser = async () => {
+    if (!selectedUser) return;
+
     try {
-      const res = await fetch(`/api/dashboard/admin/users/${user.id}`, { method: 'DELETE' });
+      const res = await fetch(`/api/dashboard/admin/users/${selectedUser.id}`, { method: 'DELETE' });
       if (!res.ok) {
         const data = await res.json().catch(() => ({}));
         throw new Error(data.error || 'Failed to delete user');
       }
+      setDeleteModalOpen(false);
       fetchData();
     } catch (err) {
       console.error('Failed to delete user:', err);
@@ -226,18 +230,20 @@ export default function UsersPage() {
       return;
     }
 
+    if (!createOrgId) {
+      setError('Organization is required');
+      return;
+    }
+
     try {
-      const body: { name: string; email: string; password?: string; organizationId?: string } = {
+      const body: { name: string; email: string; password?: string; organizationId: string } = {
         name: createForm.name.trim(),
         email: createForm.email.trim(),
+        organizationId: createOrgId,
       };
 
       if (createForm.password) {
         body.password = createForm.password;
-      }
-
-      if (createOrgId) {
-        body.organizationId = createOrgId;
       }
 
       const res = await fetch('/api/dashboard/admin/users', {
@@ -249,22 +255,6 @@ export default function UsersPage() {
       if (!res.ok) {
         const data = await res.json().catch(() => ({}));
         throw new Error(data.error || 'Failed to create user');
-      }
-
-      const newUser = await res.json();
-
-      // If a team is selected, add the user to that team
-      if (createTeamId) {
-        const teamRes = await fetch(`/api/dashboard/admin/teams/${createTeamId}/members`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ userId: newUser.id }),
-        });
-
-        if (!teamRes.ok) {
-          const teamData = await teamRes.json().catch(() => ({}));
-          console.warn('Failed to add user to team:', teamData.error || 'Unknown error');
-        }
       }
 
       setCreateModalOpen(false);
@@ -328,22 +318,47 @@ export default function UsersPage() {
     { key: 'banned', label: 'Status', render: (u: User) => <StatusBadge status={u.banned ? 'Banned' : 'Active'} /> },
     { key: 'actions', label: 'Actions', render: (u: User) => (
       <div className="flex items-center gap-1">
-        <button onClick={() => { setSelectedUser(u); setDetailModalOpen(true); }} className="rounded p-1.5 text-gray-400 hover:bg-gray-100 hover:text-[#1B2A4A] transition-colors" aria-label={`View ${u.name || u.email}`}>
+        <button
+          onClick={() => { setSelectedUser(u); setDetailModalOpen(true); }}
+          title={`View ${u.name || u.email}`}
+          className="rounded p-1.5 text-gray-400 hover:bg-gray-100 hover:text-[#1B2A4A] transition-colors"
+          aria-label={`View ${u.name || u.email}`}
+        >
           <Eye className="h-4 w-4" />
         </button>
-        <button onClick={() => { setSelectedUser(u); setEditForm({ name: u.name || '', email: u.email }); setEditModalOpen(true); }} className="rounded p-1.5 text-gray-400 hover:bg-gray-100 hover:text-[#1B2A4A] transition-colors" aria-label={`Edit ${u.name || u.email}`}>
+        <button
+          onClick={() => { setSelectedUser(u); setEditForm({ name: u.name || '', email: u.email }); setEditModalOpen(true); }}
+          title={`Edit ${u.name || u.email}`}
+          className="rounded p-1.5 text-gray-400 hover:bg-gray-100 hover:text-[#1B2A4A] transition-colors"
+          aria-label={`Edit ${u.name || u.email}`}
+        >
           <Pencil className="h-4 w-4" />
         </button>
         {u.banned ? (
-          <button onClick={() => { setSelectedUser(u); setBanAction('unban'); setDetailModalOpen(false); setBanModalOpen(true); }} className="rounded p-1.5 text-gray-400 hover:bg-green-50 hover:text-green-700 transition-colors" aria-label={`Unban ${u.name || u.email}`}>
+          <button
+            onClick={() => { setSelectedUser(u); setBanAction('unban'); setDetailModalOpen(false); setBanModalOpen(true); }}
+            title={`Unban ${u.name || u.email}`}
+            className="rounded p-1.5 text-gray-400 hover:bg-green-50 hover:text-green-700 transition-colors"
+            aria-label={`Unban ${u.name || u.email}`}
+          >
             <ShieldCheck className="h-4 w-4" />
           </button>
         ) : (
-          <button onClick={() => { setSelectedUser(u); setBanAction('ban'); setDetailModalOpen(false); setBanModalOpen(true); }} className="rounded p-1.5 text-gray-400 hover:bg-red-50 hover:text-red-700 transition-colors" aria-label={`Ban ${u.name || u.email}`}>
+          <button
+            onClick={() => { setSelectedUser(u); setBanAction('ban'); setDetailModalOpen(false); setBanModalOpen(true); }}
+            title={`Ban ${u.name || u.email}`}
+            className="rounded p-1.5 text-gray-400 hover:bg-red-50 hover:text-red-700 transition-colors"
+            aria-label={`Ban ${u.name || u.email}`}
+          >
             <ShieldBan className="h-4 w-4" />
           </button>
         )}
-        <button onClick={() => handleDeleteUser(u)} className="rounded p-1.5 text-gray-400 hover:bg-red-50 hover:text-red-700 transition-colors" aria-label={`Delete ${u.name || u.email}`}>
+        <button
+          onClick={() => { setSelectedUser(u); setDeleteModalOpen(true); }}
+          title={`Delete ${u.name || u.email}`}
+          className="rounded p-1.5 text-gray-400 hover:bg-red-50 hover:text-red-700 transition-colors"
+          aria-label={`Delete ${u.name || u.email}`}
+        >
           <Trash2 className="h-4 w-4" />
         </button>
       </div>
@@ -460,6 +475,17 @@ export default function UsersPage() {
         variant={banAction === 'ban' ? 'danger' : 'default'}
       />
 
+      {/* Delete Confirm Dialog */}
+      <ConfirmDialog
+        isOpen={deleteModalOpen}
+        onClose={() => setDeleteModalOpen(false)}
+        onConfirm={handleDeleteUser}
+        title="Delete User"
+        message={`Are you sure you want to delete ${selectedUser?.name || selectedUser?.email}? This action cannot be undone.`}
+        confirmLabel="Delete"
+        variant="danger"
+      />
+
       {/* Create User Modal */}
       <Modal isOpen={createModalOpen} onClose={() => setCreateModalOpen(false)} title="Create User" size="md">
         <div className="space-y-4">
@@ -500,37 +526,22 @@ export default function UsersPage() {
             />
           </div>
           <div>
-            <label htmlFor="create-org" className="mb-1 block text-sm font-medium" style={{ color: '#6c757d' }}>Organization</label>
+            <label htmlFor="create-org" className="mb-1 block text-sm font-medium" style={{ color: '#6c757d' }}>Organization <span className="text-red-500">*</span></label>
             <select
               id="create-org"
               value={createOrgId}
-              onChange={(e) => { setCreateOrgId(e.target.value); setCreateTeamId(''); }}
+              onChange={(e) => { setCreateOrgId(e.target.value); }}
               className="w-full rounded border px-3 py-2 text-sm bg-white focus:outline-none"
               style={{ borderColor: '#dee2e6', color: '#1B2A4A' }}
+              required
             >
-              <option value="">No organization</option>
+              <option value="">Select organization</option>
               {organizations.map((org) => (
                 <option key={org.id} value={org.id}>{org.name}</option>
               ))}
             </select>
           </div>
-          {createOrgId && (
-            <div>
-              <label htmlFor="create-team" className="mb-1 block text-sm font-medium" style={{ color: '#6c757d' }}>Team (optional)</label>
-              <select
-                id="create-team"
-                value={createTeamId}
-                onChange={(e) => setCreateTeamId(e.target.value)}
-                className="w-full rounded border px-3 py-2 text-sm bg-white focus:outline-none"
-                style={{ borderColor: '#dee2e6', color: '#1B2A4A' }}
-              >
-                <option value="">No team</option>
-                {teams.filter((t) => t.organizationId === createOrgId).map((team) => (
-                  <option key={team.id} value={team.id}>{team.name}</option>
-                ))}
-              </select>
-            </div>
-          )}
+
           <div className="flex justify-end gap-3">
             <button
               onClick={() => setCreateModalOpen(false)}

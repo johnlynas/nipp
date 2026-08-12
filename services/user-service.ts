@@ -12,6 +12,7 @@ import { logger } from '@/lib/logger';
 import { ServiceContext, NotFoundError, ForbiddenError, ValidationError } from '@/lib/services/types';
 import { requireAnyAdmin, logFailedAuth } from '@/lib/services/base-service';
 import { normalizePagination, PaginatedResult, UserFilters } from '@/lib/services/types';
+import { hashPassword } from 'better-auth/crypto';
 
 // ---------------------------------------------------------------------------
 // Input Types
@@ -41,7 +42,7 @@ export const UserService = {
   async create(data: CreateUserInput, ctx: ServiceContext) {
     requireAnyAdmin(ctx);
 
-    const { email, name } = data;
+    const { email, name, password } = data;
 
     // Validate required fields
     if (!email) {
@@ -57,9 +58,28 @@ export const UserService = {
       throw new Error('A user with this email already exists');
     }
 
+    // Build user data — include passwordHash if provided
+    const userData: { email: string; name: string; passwordHash?: string } = {
+      email,
+      name,
+    };
+
+    let passwordHash: string | undefined;
+    if (password) {
+      passwordHash = await hashPassword(password);
+      userData.passwordHash = passwordHash;
+    }
+
     const user = await globalDb.user.create({
-      data: { email, name },
+      data: userData,
     });
+
+    // Create credential account so Better Auth sign-in works
+    if (passwordHash) {
+      await globalDb.account.create({
+        data: { id: user.id, accountId: user.id, providerId: 'credential', password: passwordHash, userId: user.id },
+      });
+    }
 
     // Tenant Admin creates a Member relationship for their own org
     if (ctx.role === 'TENANT_ADMIN' && ctx.organizationId) {
@@ -69,9 +89,9 @@ export const UserService = {
     }
 
     // Platform Admin can optionally assign the user to a specific org
-    if (ctx.role === 'PLATFORM_ADMIN' && ctx.organizationId) {
+    if (ctx.role === 'PLATFORM_ADMIN' && data.organizationId) {
       await globalDb.member.create({
-        data: { userId: user.id, orgId: ctx.organizationId, role: 'member' },
+        data: { userId: user.id, orgId: data.organizationId, role: 'member' },
       });
     }
 
