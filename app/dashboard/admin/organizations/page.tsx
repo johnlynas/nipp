@@ -15,6 +15,7 @@ interface Organization {
   id: string;
   name: string;
   slug: string | null;
+  description?: string | null;
   status: 'PENDING' | 'ACTIVE' | 'SUSPENDED' | 'ARCHIVED';
   memberCount: number;
   createdAt: string;
@@ -40,11 +41,11 @@ export default function OrganizationsPage() {
   const [selectedOrg, setSelectedOrg] = useState<Organization | null>(null);
   const [archiveModalOpen, setArchiveModalOpen] = useState(false);
   const [createModalOpen, setCreateModalOpen] = useState(false);
-  const [createForm, setCreateForm] = useState({ name: '', slug: '' });
+  const [createForm, setCreateForm] = useState({ name: '', description: '' });
 
   // Edit modal states
   const [editModalOpen, setEditModalOpen] = useState(false);
-  const [editForm, setEditForm] = useState({ name: '', slug: '' });
+  const [editForm, setEditForm] = useState({ name: '', description: '', status: '' });
 
   // Reset to page 1 when filters change
   useEffect(() => {
@@ -142,7 +143,7 @@ export default function OrganizationsPage() {
       }
 
       setCreateModalOpen(false);
-      setCreateForm({ name: '', slug: '' });
+      setCreateForm({ name: '', description: '' });
       fetchData();
     } catch (err) {
       console.error('Failed to create org:', err);
@@ -178,21 +179,37 @@ export default function OrganizationsPage() {
     { key: 'name', label: 'Name', render: (o: Organization) => (
       <div className="font-medium" style={{ color: '#1B2A4A' }}>{o.name}</div>
     )},
+    { key: 'description', label: 'Description', render: (o: Organization) => o.description || '—' },
     { key: 'status', label: 'Status', render: (o: Organization) => <StatusBadge status={o.status} /> },
     { key: 'memberCount', label: 'Members', render: (o: Organization) => o.memberCount },
     { key: 'createdAt', label: 'Created', render: (o: Organization) => new Date(o.createdAt).toLocaleDateString() },
     { key: 'actions', label: 'Actions', render: (o: Organization) => (
       <div className="flex items-center gap-1">
-        <button onClick={() => { setSelectedOrg(o); setDetailModalOpen(true); }} className="rounded p-1.5 text-gray-400 hover:bg-gray-100 hover:text-[#1B2A4A] transition-colors" aria-label={`View ${o.name}`}>
+        <button
+          onClick={() => { setSelectedOrg(o); setDetailModalOpen(true); }}
+          title={`View ${o.name}`}
+          className="rounded p-1.5 text-gray-400 hover:bg-gray-100 hover:text-[#1B2A4A] transition-colors"
+          aria-label={`View ${o.name}`}
+        >
           <Eye className="h-4 w-4" />
         </button>
         {o.status !== 'ARCHIVED' && (
-          <button onClick={() => { setSelectedOrg(o); setEditForm({ name: o.name, slug: o.slug || '' }); setEditModalOpen(true); }} className="rounded p-1.5 text-gray-400 hover:bg-gray-100 hover:text-[#1B2A4A] transition-colors" aria-label={`Edit ${o.name}`}>
+          <button
+            onClick={() => { setSelectedOrg(o); setEditForm({ name: o.name, description: o.description || '', status: o.status }); setEditModalOpen(true); }}
+            title={`Edit ${o.name}`}
+            className="rounded p-1.5 text-gray-400 hover:bg-gray-100 hover:text-[#1B2A4A] transition-colors"
+            aria-label={`Edit ${o.name}`}
+          >
             <Pencil className="h-4 w-4" />
           </button>
         )}
         {o.status !== 'ARCHIVED' && (
-          <button onClick={() => { setSelectedOrg(o); setArchiveModalOpen(true); }} className="rounded p-1.5 text-gray-400 hover:bg-red-50 hover:text-red-700 transition-colors" aria-label={`Archive ${o.name}`}>
+          <button
+            onClick={() => { setSelectedOrg(o); setArchiveModalOpen(true); }}
+            title={`Archive ${o.name}`}
+            className="rounded p-1.5 text-gray-400 hover:bg-red-50 hover:text-red-700 transition-colors"
+            aria-label={`Archive ${o.name}`}
+          >
             <Archive className="h-4 w-4" />
           </button>
         )}
@@ -267,6 +284,10 @@ export default function OrganizationsPage() {
               <p className="mt-1" style={{ color: '#1B2A4A' }}>{selectedOrg.name}</p>
             </div>
             <div>
+              <label className="text-sm font-medium" style={{ color: '#6c757d' }}>Description</label>
+              <p className="mt-1" style={{ color: '#1B2A4A' }}>{selectedOrg.description || '—'}</p>
+            </div>
+            <div>
               <label className="text-sm font-medium" style={{ color: '#6c757d' }}>Slug</label>
               <p className="mt-1" style={{ color: '#1B2A4A' }}>{selectedOrg.slug || '—'}</p>
             </div>
@@ -315,15 +336,15 @@ export default function OrganizationsPage() {
             />
           </div>
           <div>
-            <label htmlFor="org-slug" className="mb-1 block text-sm font-medium" style={{ color: '#6c757d' }}>Slug (optional)</label>
-            <input
-              id="org-slug"
-              type="text"
-              value={createForm.slug}
-              onChange={(e) => setCreateForm((f) => ({ ...f, slug: e.target.value }))}
-              className="w-full rounded border px-3 py-2 text-sm focus:outline-none"
+            <label htmlFor="org-description" className="mb-1 block text-sm font-medium" style={{ color: '#6c757d' }}>Description</label>
+            <textarea
+              id="org-description"
+              value={createForm.description}
+              onChange={(e) => setCreateForm((f) => ({ ...f, description: e.target.value }))}
+              className="w-full rounded border px-3 py-2 text-sm focus:outline-none resize-y"
               style={{ borderColor: '#dee2e6' }}
-              placeholder="auto-generated from name"
+              rows={3}
+              placeholder="Organization description"
             />
           </div>
           <div className="flex justify-end gap-3">
@@ -362,15 +383,31 @@ export default function OrganizationsPage() {
               />
             </div>
             <div>
-              <label htmlFor="edit-org-slug" className="mb-1 block text-sm font-medium" style={{ color: '#6c757d' }}>Slug (optional)</label>
-              <input
-                id="edit-org-slug"
-                type="text"
-                value={editForm.slug}
-                onChange={(e) => setEditForm((f) => ({ ...f, slug: e.target.value }))}
-                className="w-full rounded border px-3 py-2 text-sm focus:outline-none"
+              <label htmlFor="edit-org-description" className="mb-1 block text-sm font-medium" style={{ color: '#6c757d' }}>Description</label>
+              <textarea
+                id="edit-org-description"
+                value={editForm.description}
+                onChange={(e) => setEditForm((f) => ({ ...f, description: e.target.value }))}
+                className="w-full rounded border px-3 py-2 text-sm focus:outline-none resize-y"
                 style={{ borderColor: '#dee2e6' }}
+                rows={3}
+                placeholder="Organization description"
               />
+            </div>
+            <div>
+              <label htmlFor="edit-org-status" className="mb-1 block text-sm font-medium" style={{ color: '#6c757d' }}>Status</label>
+              <select
+                id="edit-org-status"
+                value={editForm.status}
+                onChange={(e) => setEditForm((f) => ({ ...f, status: e.target.value }))}
+                className="w-full rounded border px-3 py-2 text-sm focus:outline-none"
+                style={{ borderColor: '#dee2e6', color: '#1B2A4A' }}
+              >
+                <option value="PENDING">Pending</option>
+                <option value="ACTIVE">Active</option>
+                <option value="SUSPENDED">Suspended</option>
+                <option value="ARCHIVED">Archived</option>
+              </select>
             </div>
             <div className="flex justify-end gap-3">
               <button

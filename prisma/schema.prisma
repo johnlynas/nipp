@@ -116,6 +116,7 @@ model Organization {
   id          String   @id @default(cuid())
   slug        String?  @unique
   name        String
+  description String?
   status      OrgStatus @default(PENDING)
   metadata    Json?
   createdAt   DateTime @default(now())

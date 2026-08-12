@@ -235,6 +235,7 @@ async function main() {
       data: {
         name: 'Platform',
         slug: 'platform',
+        description: 'Platform-level organization for global administration and tenant management.',
         status: 'ACTIVE',
         metadata: { type: 'platform' },
       },
@@ -245,6 +246,7 @@ async function main() {
       data: {
         name: 'Platform',
         slug: 'platform',
+        description: 'Platform-level organization for global administration and tenant management.',
         status: 'ACTIVE',
         metadata: { type: 'platform' },
       },
@@ -461,13 +463,13 @@ async function main() {
     let testTenantOrg = await prisma.organization.findFirst({ where: { slug: 'test-tenant-ltd' } });
     if (!testTenantOrg) {
       testTenantOrg = await prisma.organization.create({
-        data: { name: 'Test Tenant Ltd', slug: 'test-tenant-ltd', status: 'ACTIVE' },
+        data: { name: 'Test Tenant Ltd', slug: 'test-tenant-ltd', description: 'Testing tenant organization for QA and integration testing.', status: 'ACTIVE' },
       });
       console.log(`✅ Created Test Tenant Org: ${testTenantOrg.id}`);
     } else {
       await prisma.organization.update({
         where: { id: testTenantOrg.id },
-        data: { name: 'Test Tenant Ltd', slug: 'test-tenant-ltd', status: 'ACTIVE' },
+        data: { name: 'Test Tenant Ltd', slug: 'test-tenant-ltd', description: 'Testing tenant organization for QA and integration testing.', status: 'ACTIVE' },
       });
       console.log(`✅ Updated Test Tenant Org: ${testTenantOrg.id}`);
     }
@@ -527,13 +529,13 @@ async function main() {
     let devTenantOrg = await prisma.organization.findFirst({ where: { slug: 'dev-tenant-ltd' } });
     if (!devTenantOrg) {
       devTenantOrg = await prisma.organization.create({
-        data: { name: 'Dev Tenant Ltd', slug: 'dev-tenant-ltd', status: 'ACTIVE' },
+        data: { name: 'Dev Tenant Ltd', slug: 'dev-tenant-ltd', description: 'Developer tenant organization for development and staging.', status: 'ACTIVE' },
       });
       console.log(`✅ Created Dev Tenant Org: ${devTenantOrg.id}`);
     } else {
       await prisma.organization.update({
         where: { id: devTenantOrg.id },
-        data: { name: 'Dev Tenant Ltd', slug: 'dev-tenant-ltd', status: 'ACTIVE' },
+        data: { name: 'Dev Tenant Ltd', slug: 'dev-tenant-ltd', description: 'Developer tenant organization for development and staging.', status: 'ACTIVE' },
       });
       console.log(`✅ Updated Dev Tenant Org: ${devTenantOrg.id}`);
     }

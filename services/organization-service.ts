@@ -12,6 +12,7 @@ import { requirePlatformAdmin, requireAnyAdmin, logFailedAuth } from '@/lib/serv
 export interface CreateOrganizationInput {
   name: string;
   slug?: string;
+  description?: string | null;
   adminEmail?: string;
 }
 
@@ -19,6 +20,7 @@ export interface OrganizationWithCount {
   id: string;
   name: string;
   slug: string | null;
+  description?: string | null;
   createdAt: Date;
   updatedAt: Date;
   _count: {
@@ -46,6 +48,7 @@ export interface PaginatedOrganizationsInput {
 export interface UpdateOrganizationInput {
   name?: string;
   slug?: string;
+  description?: string | null;
   status?: 'PENDING' | 'ACTIVE' | 'SUSPENDED' | 'ARCHIVED';
 }
 
@@ -61,10 +64,11 @@ async function createWithUniqueSlug(
   tx: Prisma.TransactionClient,
   name: string,
   baseSlug: string,
+  description?: string | null,
 ) {
   try {
     return await tx.organization.create({
-      data: { name, slug: baseSlug },
+      data: { name, slug: baseSlug, description },
     });
   } catch (error: unknown) {
     if ((error as { code?: string }).code !== 'P2002') throw error;
@@ -136,7 +140,7 @@ export const OrganizationService = {
   async createOrganization(input: CreateOrganizationInput, ctx: ServiceContext) {
     requirePlatformAdmin(ctx);
 
-    const { name, slug, adminEmail } = input;
+    const { name, slug, description, adminEmail } = input;
 
     return await globalDb.$transaction(async (tx) => {
       // 1. Check for existing organization by name
@@ -150,7 +154,7 @@ export const OrganizationService = {
 
       // 2. Create organization with unique slug (retry on collision)
       const generatedSlug = slug || name.toLowerCase().replace(/\s+/g, '-');
-      const organization = await createWithUniqueSlug(tx, name, generatedSlug);
+      const organization = await createWithUniqueSlug(tx, name, generatedSlug, description);
 
       logger.info(
         { orgId: organization.id, method: 'Service.createOrganization' },
@@ -244,6 +248,7 @@ export const OrganizationService = {
     // Build update data — only include provided fields
     const updateData: Prisma.OrganizationUpdateInput = {};
     if (data.name !== undefined) updateData.name = data.name;
+    if (data.description !== undefined) updateData.description = data.description;
     if (data.status !== undefined) updateData.status = data.status as Prisma.EnumOrgStatusFieldUpdateOperationsInput;
     if (ctx.role === 'PLATFORM_ADMIN' && data.slug !== undefined) {
       updateData.slug = data.slug;

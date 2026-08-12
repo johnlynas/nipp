@@ -28,7 +28,7 @@ export function Modal({ isOpen, onClose, title, children, size = 'md' }: ModalPr
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4" role="dialog" aria-modal="true">
-      <div className="fixed inset-0 bg-black/50" onClick={onClose} />
+      <div className="fixed inset-0 bg-black/50" />
       <div 
         className="relative w-full max-h-[90vh] overflow-y-auto rounded-lg border border-[#dee2e6] bg-white shadow-xl"
         style={{ maxWidth: sizeMap[size] }}
