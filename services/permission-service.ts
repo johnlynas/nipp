@@ -190,7 +190,11 @@ export const PermissionService = {
     });
 
     if (rolePermissionCount > 0) {
-      throw new ConflictError('Cannot delete permission assigned to roles');
+      logger.warn(
+        { userId: ctx.userId, permissionId: id, rolePermissionCount, method: 'PermissionService.delete' },
+        'Cannot delete permission assigned to roles',
+      );
+      return null;
     }
 
     await globalDb.permission.delete({ where: { id } });

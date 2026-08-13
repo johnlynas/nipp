@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { Eye, Pencil, Archive } from 'lucide-react';
+import { logClientError } from '@/lib/client-error-logger';
 import { SearchBar } from '@/components/dashboard/SearchBar';
 import { StatusBadge } from '@/components/dashboard/StatusBadge';
 import { DataTable } from '@/components/dashboard/DataTable';
@@ -99,8 +100,10 @@ export default function OrganizationsPage() {
       });
     } catch (err) {
       if (err instanceof DOMException && err.name === 'AbortError') return;
+      const message = err instanceof Error ? err.message : 'Failed to fetch organizations';
       console.error('Failed to fetch organizations:', err);
-      setError(err instanceof Error ? err.message : 'Failed to fetch organizations');
+      logClientError(message, 'organizations', 'fetch');
+      setError(message);
     } finally {
       setLoading(false);
     }
@@ -109,6 +112,13 @@ export default function OrganizationsPage() {
   useEffect(() => {
     fetchData();
   }, [fetchData]);
+
+  // Auto-dismiss error banners after 6 seconds
+  useEffect(() => {
+    if (!error) return;
+    const timer = setTimeout(() => setError(null), 6000);
+    return () => clearTimeout(timer);
+  }, [error]);
 
   // Handle archive
   const handleArchive = async () => {
@@ -129,8 +139,10 @@ export default function OrganizationsPage() {
       setArchiveModalOpen(false);
       fetchData();
     } catch (err) {
+      const message = err instanceof Error ? err.message : 'Failed to archive organization';
       console.error('Failed to archive org:', err);
-      setError(err instanceof Error ? err.message : 'Failed to archive organization');
+      logClientError(message, 'organizations', 'archive');
+      setError(message);
     }
   };
 
@@ -152,8 +164,10 @@ export default function OrganizationsPage() {
       setCreateForm({ name: '', description: '' });
       fetchData();
     } catch (err) {
+      const message = err instanceof Error ? err.message : 'Failed to create organization';
       console.error('Failed to create org:', err);
-      setError(err instanceof Error ? err.message : 'Failed to create organization');
+      logClientError(message, 'organizations', 'create');
+      setError(message);
     }
   };
 
@@ -176,8 +190,10 @@ export default function OrganizationsPage() {
       setEditModalOpen(false);
       fetchData();
     } catch (err) {
+      const message = err instanceof Error ? err.message : 'Failed to update organization';
       console.error('Failed to update org:', err);
-      setError(err instanceof Error ? err.message : 'Failed to update organization');
+      logClientError(message, 'organizations', 'update');
+      setError(message);
     }
   };
 
@@ -387,7 +403,7 @@ export default function OrganizationsPage() {
                 value={editForm.name}
                 onChange={(e) => setEditForm((f) => ({ ...f, name: e.target.value }))}
                 className="w-full rounded border px-3 py-2 text-sm focus:outline-none"
-                style={{ borderColor: '#dee2e6' }}
+                style={{ borderColor: '#dee2e6', color: '#1B2A4A' }}
               />
             </div>
             <div>
@@ -397,7 +413,7 @@ export default function OrganizationsPage() {
                 value={editForm.description}
                 onChange={(e) => setEditForm((f) => ({ ...f, description: e.target.value }))}
                 className="w-full rounded border px-3 py-2 text-sm focus:outline-none resize-y"
-                style={{ borderColor: '#dee2e6' }}
+                style={{ borderColor: '#dee2e6', color: '#1B2A4A' }}
                 rows={3}
                 placeholder="Organization description"
               />

@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { Eye, Pencil, Trash2 } from 'lucide-react';
+import { logClientError } from '@/lib/client-error-logger';
 import { SearchBar } from '@/components/dashboard/SearchBar';
 import { StatusBadge } from '@/components/dashboard/StatusBadge';
 import { DataTable } from '@/components/dashboard/DataTable';
@@ -130,8 +131,10 @@ export default function RolesPage() {
       }
     } catch (err) {
       if (err instanceof DOMException && err.name === 'AbortError') return;
+      const message = err instanceof Error ? err.message : 'Failed to fetch roles';
       console.error('Failed to fetch roles:', err);
-      setError(err instanceof Error ? err.message : 'Failed to fetch roles');
+      logClientError(message, 'roles', 'fetch');
+      setError(message);
     } finally {
       setLoading(false);
     }
@@ -140,6 +143,13 @@ export default function RolesPage() {
   useEffect(() => {
     fetchData();
   }, [fetchData]);
+
+  // Auto-dismiss error banners after 6 seconds
+  useEffect(() => {
+    if (!error) return;
+    const timer = setTimeout(() => setError(null), 6000);
+    return () => clearTimeout(timer);
+  }, [error]);
 
   // Handle delete role
   const handleDelete = async () => {
@@ -154,8 +164,10 @@ export default function RolesPage() {
       setDeleteModalOpen(false);
       fetchData();
     } catch (err) {
+      const message = err instanceof Error ? err.message : 'Failed to delete role';
       console.error('Failed to delete role:', err);
-      setError(err instanceof Error ? err.message : 'Failed to delete role');
+      logClientError(message, 'roles', 'delete');
+      setError(message);
     }
   };
 
@@ -178,15 +190,19 @@ export default function RolesPage() {
       setEditModalOpen(false);
       fetchData();
     } catch (err) {
+      const message = err instanceof Error ? err.message : 'Failed to update role';
       console.error('Failed to update role:', err);
-      setError(err instanceof Error ? err.message : 'Failed to update role');
+      logClientError(message, 'roles', 'update');
+      setError(message);
     }
   };
 
   // Handle create role
   const handleCreate = async () => {
     if (!createOrgId) {
-      setError('Please select an organization before creating a role');
+      const message = 'Please select an organization before creating a role';
+      logClientError(message, 'roles', 'create');
+      setError(message);
       return;
     }
 
@@ -207,8 +223,10 @@ export default function RolesPage() {
       setCreateOrgId('');
       fetchData();
     } catch (err) {
+      const message = err instanceof Error ? err.message : 'Failed to create role';
       console.error('Failed to create role:', err);
-      setError(err instanceof Error ? err.message : 'Failed to create role');
+      logClientError(message, 'roles', 'create');
+      setError(message);
     }
   };
 
@@ -216,7 +234,7 @@ export default function RolesPage() {
     { key: 'name', label: 'Role Name', render: (r: Role) => (
       <div>
         <div className="font-medium" style={{ color: '#1B2A4A' }}>{r.name}</div>
-        <div className="text-xs text-gray-500">{r.description || '—'}</div>
+        {r.description && <div className="text-xs text-gray-500">{r.description}</div>}
       </div>
     )},
     { key: 'isDefault', label: 'Type', render: (r: Role) => <StatusBadge status={r.isDefault ? 'Default' : 'Custom'} /> },
@@ -224,13 +242,28 @@ export default function RolesPage() {
     { key: 'createdAt', label: 'Created', render: (r: Role) => new Date(r.createdAt).toLocaleDateString() },
     { key: 'actions', label: 'Actions', render: (r: Role) => (
       <div className="flex items-center gap-1">
-        <button onClick={() => { setSelectedRole(r); setDetailModalOpen(true); }} className="rounded p-1.5 text-gray-400 hover:bg-gray-100 hover:text-[#1B2A4A] transition-colors" aria-label={`View ${r.name}`}>
+        <button
+          onClick={() => { setSelectedRole(r); setDetailModalOpen(true); }}
+          title={`View ${r.name}`}
+          className="rounded p-1.5 text-gray-400 hover:bg-gray-100 hover:text-[#1B2A4A] transition-colors"
+          aria-label={`View ${r.name}`}
+        >
           <Eye className="h-4 w-4" />
         </button>
-        <button onClick={() => { setSelectedRole(r); setEditForm({ name: r.name, description: r.description || '' }); setEditModalOpen(true); }} className="rounded p-1.5 text-gray-400 hover:bg-gray-100 hover:text-[#1B2A4A] transition-colors" aria-label={`Edit ${r.name}`}>
+        <button
+          onClick={() => { setSelectedRole(r); setEditForm({ name: r.name, description: r.description || '' }); setEditModalOpen(true); }}
+          title={`Edit ${r.name}`}
+          className="rounded p-1.5 text-gray-400 hover:bg-gray-100 hover:text-[#1B2A4A] transition-colors"
+          aria-label={`Edit ${r.name}`}
+        >
           <Pencil className="h-4 w-4" />
         </button>
-        <button onClick={() => { setSelectedRole(r); setDeleteModalOpen(true); }} className="rounded p-1.5 text-gray-400 hover:bg-red-50 hover:text-red-700 transition-colors" aria-label={`Delete ${r.name}`}>
+        <button
+          onClick={() => { setSelectedRole(r); setDeleteModalOpen(true); }}
+          title={`Delete ${r.name}`}
+          className="rounded p-1.5 text-gray-400 hover:bg-red-50 hover:text-red-700 transition-colors"
+          aria-label={`Delete ${r.name}`}
+        >
           <Trash2 className="h-4 w-4" />
         </button>
       </div>
@@ -358,7 +391,7 @@ export default function RolesPage() {
                 value={editForm.name}
                 onChange={(e) => setEditForm((f) => ({ ...f, name: e.target.value }))}
                 className="w-full rounded border px-3 py-2 text-sm focus:outline-none"
-                style={{ borderColor: '#dee2e6' }}
+                style={{ borderColor: '#dee2e6', color: '#1B2A4A' }}
               />
             </div>
             <div>
@@ -368,7 +401,7 @@ export default function RolesPage() {
                 value={editForm.description}
                 onChange={(e) => setEditForm((f) => ({ ...f, description: e.target.value }))}
                 className="w-full rounded border px-3 py-2 text-sm focus:outline-none"
-                style={{ borderColor: '#dee2e6' }}
+                style={{ borderColor: '#dee2e6', color: '#1B2A4A' }}
                 rows={3}
               />
             </div>

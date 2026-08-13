@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { Eye, Pencil, ShieldBan, ShieldCheck, Ban, Trash2 } from 'lucide-react';
+import { logClientError } from '@/lib/client-error-logger';
 import { SearchBar } from '@/components/dashboard/SearchBar';
 import { StatusBadge } from '@/components/dashboard/StatusBadge';
 import { DataTable } from '@/components/dashboard/DataTable';
@@ -175,8 +176,10 @@ export default function UsersPage() {
       }
     } catch (err) {
       if (err instanceof DOMException && err.name === 'AbortError') return;
+      const message = err instanceof Error ? err.message : 'Failed to fetch users';
       console.error('Failed to fetch users:', err);
-      setError(err instanceof Error ? err.message : 'Failed to fetch users');
+      logClientError(message, 'users', 'fetch');
+      setError(message);
     } finally {
       setLoading(false);
     }
@@ -185,6 +188,13 @@ export default function UsersPage() {
   useEffect(() => {
     fetchData();
   }, [fetchData]);
+
+  // Auto-dismiss error banners after 6 seconds
+  useEffect(() => {
+    if (!error) return;
+    const timer = setTimeout(() => setError(null), 6000);
+    return () => clearTimeout(timer);
+  }, [error]);
 
   // Handle ban/unban
   const handleBanToggle = async () => {
@@ -206,8 +216,10 @@ export default function UsersPage() {
       setBanReason('');
       fetchData();
     } catch (err) {
+      const message = err instanceof Error ? err.message : 'Failed to update ban status';
       console.error('Failed to toggle ban:', err);
-      setError(err instanceof Error ? err.message : 'Failed to update ban status');
+      logClientError(message, 'users', 'ban');
+      setError(message);
     }
   };
 
@@ -224,20 +236,26 @@ export default function UsersPage() {
       setDeleteModalOpen(false);
       fetchData();
     } catch (err) {
+      const message = err instanceof Error ? err.message : 'Failed to delete user';
       console.error('Failed to delete user:', err);
-      setError(err instanceof Error ? err.message : 'Failed to delete user');
+      logClientError(message, 'users', 'delete');
+      setError(message);
     }
   };
 
   // Handle create user
   const handleCreateUser = async () => {
     if (!createForm.name.trim() || !createForm.email.trim()) {
-      setError('Name and email are required');
+      const message = 'Name and email are required';
+      logClientError(message, 'users', 'create');
+      setError(message);
       return;
     }
 
     if (!createOrgId) {
-      setError('Organization is required');
+      const message = 'Organization is required';
+      logClientError(message, 'users', 'create');
+      setError(message);
       return;
     }
 
@@ -266,8 +284,10 @@ export default function UsersPage() {
       setCreateModalOpen(false);
       fetchData();
     } catch (err) {
+      const message = err instanceof Error ? err.message : 'Failed to create user';
       console.error('Failed to create user:', err);
-      setError(err instanceof Error ? err.message : 'Failed to create user');
+      logClientError(message, 'users', 'create');
+      setError(message);
     }
   };
 
@@ -290,8 +310,10 @@ export default function UsersPage() {
       setEditModalOpen(false);
       fetchData();
     } catch (err) {
+      const message = err instanceof Error ? err.message : 'Failed to update user';
       console.error('Failed to update user:', err);
-      setError(err instanceof Error ? err.message : 'Failed to update user');
+      logClientError(message, 'users', 'update');
+      setError(message);
     }
   };
 
@@ -591,7 +613,7 @@ export default function UsersPage() {
                 value={editForm.name}
                 onChange={(e) => setEditForm((f) => ({ ...f, name: e.target.value }))}
                 className="w-full rounded border px-3 py-2 text-sm focus:outline-none"
-                style={{ borderColor: '#dee2e6' }}
+                style={{ borderColor: '#dee2e6', color: '#1B2A4A' }}
               />
             </div>
             <div>
@@ -602,7 +624,7 @@ export default function UsersPage() {
                 value={editForm.email}
                 onChange={(e) => setEditForm((f) => ({ ...f, email: e.target.value }))}
                 className="w-full rounded border px-3 py-2 text-sm focus:outline-none"
-                style={{ borderColor: '#dee2e6' }}
+                style={{ borderColor: '#dee2e6', color: '#1B2A4A' }}
               />
             </div>
             <div className="flex justify-end gap-3">

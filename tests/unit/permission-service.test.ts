@@ -267,16 +267,16 @@ describe('PermissionService', () => {
 
       const result = await PermissionService.delete('perm-1', mockCtx('PLATFORM_ADMIN'));
 
-      expect(result.success).toBe(true);
+      expect(result?.success).toBe(true);
     });
 
-    it('throws ConflictError when permission is assigned to roles', async () => {
+    it('returns null when permission is assigned to roles', async () => {
       vi.mocked(globalDb.permission.findUnique).mockResolvedValue(mockPermission() as never);
       vi.mocked(globalDb.rolePermission.count).mockResolvedValue(2);
 
-      await expect(
-        PermissionService.delete('perm-1', mockCtx('PLATFORM_ADMIN'))
-      ).rejects.toThrow(ConflictError);
+      const result = await PermissionService.delete('perm-1', mockCtx('PLATFORM_ADMIN'));
+
+      expect(result).toBeNull();
     });
 
     it('throws ForbiddenError for TENANT_ADMIN', async () => {

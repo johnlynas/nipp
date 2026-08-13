@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { Eye, Pencil, Trash2 } from 'lucide-react';
+import { logClientError } from '@/lib/client-error-logger';
 import { SearchBar } from '@/components/dashboard/SearchBar';
 import { StatusBadge } from '@/components/dashboard/StatusBadge';
 import { DataTable } from '@/components/dashboard/DataTable';
@@ -137,8 +138,10 @@ export default function TeamsPage() {
       });
     } catch (err) {
       if (err instanceof DOMException && err.name === 'AbortError') return;
+      const message = err instanceof Error ? err.message : 'Failed to fetch teams';
       console.error('Failed to fetch teams:', err);
-      setError(err instanceof Error ? err.message : 'Failed to fetch teams');
+      logClientError(message, 'teams', 'fetch');
+      setError(message);
     } finally {
       setLoading(false);
     }
@@ -147,6 +150,13 @@ export default function TeamsPage() {
   useEffect(() => {
     fetchData();
   }, [fetchData]);
+
+  // Auto-dismiss error banners after 6 seconds
+  useEffect(() => {
+    if (!error) return;
+    const timer = setTimeout(() => setError(null), 6000);
+    return () => clearTimeout(timer);
+  }, [error]);
 
   // Handle edit team
   const handleEdit = async () => {
@@ -167,8 +177,10 @@ export default function TeamsPage() {
       setEditModalOpen(false);
       fetchData();
     } catch (err) {
+      const message = err instanceof Error ? err.message : 'Failed to update team';
       console.error('Failed to update team:', err);
-      setError(err instanceof Error ? err.message : 'Failed to update team');
+      logClientError(message, 'teams', 'update');
+      setError(message);
     }
   };
 
@@ -185,15 +197,19 @@ export default function TeamsPage() {
       setDeleteModalOpen(false);
       fetchData();
     } catch (err) {
+      const message = err instanceof Error ? err.message : 'Failed to delete team';
       console.error('Failed to delete team:', err);
-      setError(err instanceof Error ? err.message : 'Failed to delete team');
+      logClientError(message, 'teams', 'delete');
+      setError(message);
     }
   };
 
   // Handle create team
   const handleCreate = async () => {
     if (!createOrgId) {
-      setError('Please select an organization before creating a team');
+      const message = 'Please select an organization before creating a team';
+      logClientError(message, 'teams', 'create');
+      setError(message);
       return;
     }
 
@@ -214,8 +230,10 @@ export default function TeamsPage() {
       setCreateOrgId('');
       fetchData();
     } catch (err) {
+      const message = err instanceof Error ? err.message : 'Failed to create team';
       console.error('Failed to create team:', err);
-      setError(err instanceof Error ? err.message : 'Failed to create team');
+      logClientError(message, 'teams', 'create');
+      setError(message);
     }
   };
 
@@ -230,13 +248,28 @@ export default function TeamsPage() {
     }},
     { key: 'actions', label: 'Actions', render: (t: Team) => (
       <div className="flex items-center gap-1">
-        <button onClick={() => { setSelectedTeam(t); setDetailModalOpen(true); }} className="rounded p-1.5 text-gray-400 hover:bg-gray-100 hover:text-[#1B2A4A] transition-colors" aria-label={`View ${t.name}`}>
+        <button
+          onClick={() => { setSelectedTeam(t); setDetailModalOpen(true); }}
+          title={`View ${t.name}`}
+          className="rounded p-1.5 text-gray-400 hover:bg-gray-100 hover:text-[#1B2A4A] transition-colors"
+          aria-label={`View ${t.name}`}
+        >
           <Eye className="h-4 w-4" />
         </button>
-        <button onClick={() => { setSelectedTeam(t); setEditForm({ name: t.name, description: t.description || '' }); setEditModalOpen(true); }} className="rounded p-1.5 text-gray-400 hover:bg-gray-100 hover:text-[#1B2A4A] transition-colors" aria-label={`Edit ${t.name}`}>
+        <button
+          onClick={() => { setSelectedTeam(t); setEditForm({ name: t.name, description: t.description || '' }); setEditModalOpen(true); }}
+          title={`Edit ${t.name}`}
+          className="rounded p-1.5 text-gray-400 hover:bg-gray-100 hover:text-[#1B2A4A] transition-colors"
+          aria-label={`Edit ${t.name}`}
+        >
           <Pencil className="h-4 w-4" />
         </button>
-        <button onClick={() => { setSelectedTeam(t); setDeleteModalOpen(true); }} className="rounded p-1.5 text-gray-400 hover:bg-red-50 hover:text-red-700 transition-colors" aria-label={`Delete ${t.name}`}>
+        <button
+          onClick={() => { setSelectedTeam(t); setDeleteModalOpen(true); }}
+          title={`Delete ${t.name}`}
+          className="rounded p-1.5 text-gray-400 hover:bg-red-50 hover:text-red-700 transition-colors"
+          aria-label={`Delete ${t.name}`}
+        >
           <Trash2 className="h-4 w-4" />
         </button>
       </div>
@@ -354,7 +387,7 @@ export default function TeamsPage() {
                 value={editForm.name}
                 onChange={(e) => setEditForm((f) => ({ ...f, name: e.target.value }))}
                 className="w-full rounded border px-3 py-2 text-sm focus:outline-none"
-                style={{ borderColor: '#dee2e6' }}
+                style={{ borderColor: '#dee2e6', color: '#1B2A4A' }}
               />
             </div>
             <div>
@@ -364,7 +397,7 @@ export default function TeamsPage() {
                 value={editForm.description}
                 onChange={(e) => setEditForm((f) => ({ ...f, description: e.target.value }))}
                 className="w-full rounded border px-3 py-2 text-sm focus:outline-none"
-                style={{ borderColor: '#dee2e6' }}
+                style={{ borderColor: '#dee2e6', color: '#1B2A4A' }}
                 rows={3}
               />
             </div>
