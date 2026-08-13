@@ -20,10 +20,12 @@ export async function GET(request: NextRequest) {
     const pageSize = parseInt(url.searchParams.get('pageSize') || '20', 10);
     const search = url.searchParams.get('search') || undefined;
     const resource = url.searchParams.get('resource') || undefined;
+    const isDefault = url.searchParams.get('isDefault');
 
     const filters: Record<string, unknown> = {};
     if (search) filters.search = search;
     if (resource) filters.resource = resource;
+    if (isDefault !== null) filters.isDefault = isDefault === 'true';
 
     const result = await PermissionService.list(filters as import('@/lib/services/types').PermissionFilters, { page, pageSize }, {
       userId: auth.session!.user.id,
@@ -55,7 +57,7 @@ export async function POST(request: NextRequest) {
     }
 
     const result = await PermissionService.create(
-      { key: body.key, resource: body.resource, action: body.action, description: body.description },
+      { key: body.key, resource: body.resource, action: body.action, description: body.description, isDefault: body.isDefault ?? false },
       { userId: auth.session!.user.id, role: 'PLATFORM_ADMIN' }
     );
 

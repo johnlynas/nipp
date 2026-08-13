@@ -56,6 +56,7 @@ export async function PATCH(
       resource: body.resource,
       action: body.action,
       description: body.description,
+      isDefault: body.isDefault,
     }, { userId: auth.session!.user.id, role: 'PLATFORM_ADMIN' });
 
     return NextResponse.json(result);
@@ -89,7 +90,7 @@ export async function DELETE(
     const result = await PermissionService.delete(id, { userId: auth.session!.user.id, role: 'PLATFORM_ADMIN' });
 
     if (result === null) {
-      return NextResponse.json({ error: 'Cannot delete permission assigned to roles' }, { status: 409 });
+      return NextResponse.json({ error: 'Cannot delete permission — it is either assigned to roles or is a default (bootstrapped) permission' }, { status: 409 });
     }
 
     return NextResponse.json({ success: true });

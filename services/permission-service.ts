@@ -22,6 +22,7 @@ export interface CreatePermissionInput {
   resource: string;
   action: string;
   description?: string;
+  isDefault?: boolean;
 }
 
 export interface UpdatePermissionInput {
@@ -29,6 +30,7 @@ export interface UpdatePermissionInput {
   resource?: string;
   action?: string;
   description?: string;
+  isDefault?: boolean;
 }
 
 // ---------------------------------------------------------------------------
@@ -62,7 +64,7 @@ export const PermissionService = {
     }
 
     const permission = await globalDb.permission.create({
-      data: { key, resource, action, description: data.description || '' },
+      data: { key, resource, action, description: data.description || '', isDefault: data.isDefault ?? false },
     });
 
     logger.info(
@@ -111,12 +113,16 @@ export const PermissionService = {
       where.resource = filters.resource;
     }
 
+    if (filters.isDefault !== undefined) {
+      where.isDefault = filters.isDefault;
+    }
+
     const [permissions, total] = await Promise.all([
       globalDb.permission.findMany({
         where,
         skip,
         take: pageSize,
-        orderBy: [{ resource: 'asc' }, { action: 'asc' }],
+        orderBy: [{ isDefault: 'desc' }, { resource: 'asc' }, { action: 'asc' }],
       }),
       globalDb.permission.count({ where }),
     ]);
@@ -154,6 +160,7 @@ export const PermissionService = {
     if (data.resource !== undefined) updateData.resource = data.resource;
     if (data.action !== undefined) updateData.action = data.action;
     if (data.description !== undefined) updateData.description = data.description;
+    if (data.isDefault !== undefined) updateData.isDefault = data.isDefault;
 
     const updatedPermission = await globalDb.permission.update({
       where: { id },
@@ -193,6 +200,15 @@ export const PermissionService = {
       logger.warn(
         { userId: ctx.userId, permissionId: id, rolePermissionCount, method: 'PermissionService.delete' },
         'Cannot delete permission assigned to roles',
+      );
+      return null;
+    }
+
+    // Safety check: cannot delete default (bootstrapped) permissions
+    if (existingPermission.isDefault) {
+      logger.warn(
+        { userId: ctx.userId, permissionId: id, method: 'PermissionService.delete' },
+        'Cannot delete default permission',
       );
       return null;
     }

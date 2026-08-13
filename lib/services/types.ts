@@ -157,4 +157,5 @@ export interface RoleFilters extends BaseFilters {
 /** Filters for Permission list queries. */
 export interface PermissionFilters extends BaseFilters {
   resource?: string; // filter by resource (e.g., "properties")
+  isDefault?: boolean; // filter by default vs custom permissions
 }

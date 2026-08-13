@@ -275,6 +275,7 @@ model Permission {
   resource    String   // e.g., "properties"
   action      String   // e.g., "view"
   description String?
+  isDefault   Boolean  @default(true) // true = bootstrapped, false = custom
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
 

@@ -2,8 +2,10 @@
 
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { Eye, Pencil, Trash2 } from 'lucide-react';
+import { useIsSuperAdmin } from '@/hooks/usePermission';
 import { logClientError } from '@/lib/client-error-logger';
 import { SearchBar } from '@/components/dashboard/SearchBar';
+import { StatusBadge } from '@/components/dashboard/StatusBadge';
 import { DataTable } from '@/components/dashboard/DataTable';
 import { PageHeader } from '@/components/dashboard/PageHeader';
 import { StatCard } from '@/components/dashboard/StatCard';
@@ -17,6 +19,7 @@ interface Permission {
   resource: string;
   action: string;
   description: string | null;
+  isDefault: boolean;
 }
 
 interface PaginationState {
@@ -32,6 +35,7 @@ export default function PermissionsPage() {
   const [totalPermissionsCount, setTotalPermissionsCount] = useState<number>(0);
   const [search, setSearch] = useState('');
   const [resourceFilter, setResourceFilter] = useState('');
+  const [typeFilter, setTypeFilter] = useState('');
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
@@ -40,11 +44,33 @@ export default function PermissionsPage() {
   const [selectedPermission, setSelectedPermission] = useState<Permission | null>(null);
   const [deleteModalOpen, setDeleteModalOpen] = useState(false);
   const [createModalOpen, setCreateModalOpen] = useState(false);
-  const [createForm, setCreateForm] = useState({ key: '', resource: '', action: '', description: '' });
+  const [createForm, setCreateForm] = useState({ resource: '', action: '', description: '', isDefault: false });
+
+  // Check if current user is a platform super admin
+  const isSuperAdmin = useIsSuperAdmin();
+
+  // Available resources and actions for the create form dropdowns
+  const availableResources = [
+    'platform',
+    'organizations',
+    'members',
+    'roles',
+    'properties',
+    'tenants',
+    'leases',
+    'documents',
+    'payments',
+    'reports',
+    'settings',
+    'audit',
+    'viewings',
+  ];
+
+  const availableActions = ['create', 'read', 'update', 'delete'];
 
   // Edit modal states
   const [editModalOpen, setEditModalOpen] = useState(false);
-  const [editForm, setEditForm] = useState({ key: '', resource: '', action: '', description: '' });
+  const [editForm, setEditForm] = useState({ resource: '', action: '', description: '', isDefault: false });
 
   // Get unique resources for filter (fetched from all permissions, not just current page)
   const [resources, setResources] = useState<string[]>([]);
@@ -52,12 +78,12 @@ export default function PermissionsPage() {
   // Reset to page 1 when filters change
   useEffect(() => {
     setPagination((p) => ({ ...p, page: 1 }));
-  }, [search, resourceFilter]);
+  }, [search, resourceFilter, typeFilter]);
 
   // Reset edit form when modal opens/closes
   useEffect(() => {
     if (!editModalOpen) {
-      setEditForm({ key: '', resource: '', action: '', description: '' });
+      setEditForm({ resource: '', action: '', description: '', isDefault: false });
     }
   }, [editModalOpen]);
 
@@ -112,6 +138,8 @@ export default function PermissionsPage() {
       });
       if (search) params.set('search', search);
       if (resourceFilter) params.set('resource', resourceFilter);
+      if (typeFilter === 'default') params.set('isDefault', 'true');
+      else if (typeFilter === 'custom') params.set('isDefault', 'false');
 
       const res = await fetch(`/api/dashboard/admin/permissions?${params}`, {
         signal: abortControllerRef.current.signal,
@@ -142,7 +170,7 @@ export default function PermissionsPage() {
     } finally {
       setLoading(false);
     }
-  }, [pagination.page, pagination.pageSize, search, resourceFilter]);
+  }, [pagination.page, pagination.pageSize, search, resourceFilter, typeFilter]);
 
   useEffect(() => {
     fetchData();
@@ -164,7 +192,7 @@ export default function PermissionsPage() {
   // Handle edit permission
   const handleEditClick = (p: Permission) => {
     setSelectedPermission(p);
-    setEditForm({ key: p.key, resource: p.resource, action: p.action, description: p.description || '' });
+    setEditForm({ resource: p.resource, action: p.action, description: p.description || '', isDefault: p.isDefault });
     setEditModalOpen(true);
   };
 
@@ -208,9 +236,6 @@ export default function PermissionsPage() {
       const res = await fetch(`/api/dashboard/admin/permissions/${selectedPermission.id}`, { method: 'DELETE' });
       if (!res.ok) {
         const data = await res.json().catch(() => ({}));
-        if (data.error?.includes('assigned to roles')) {
-          throw new Error(`Cannot delete permission "${selectedPermission.key}" because it is assigned to roles`);
-        }
         throw new Error(data.error || 'Failed to delete permission');
       }
 
@@ -224,13 +249,23 @@ export default function PermissionsPage() {
     }
   };
 
+  // Auto-generate key when resource or action changes
+  useEffect(() => {
+    if (createForm.resource && createForm.action) {
+      setCreateForm((f) => ({ ...f, key: `${f.resource}:${f.action}` }));
+    }
+  }, [createForm.resource, createForm.action]);
+
   // Handle create permission
   const handleCreate = async () => {
     try {
+      if (!createForm.resource || !createForm.action) return;
+
+      const key = `${createForm.resource}:${createForm.action}`;
       const res = await fetch('/api/dashboard/admin/permissions', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(createForm),
+        body: JSON.stringify({ key, resource: createForm.resource, action: createForm.action, description: createForm.description, isDefault: createForm.isDefault }),
       });
 
       if (!res.ok) {
@@ -239,7 +274,7 @@ export default function PermissionsPage() {
       }
 
       setCreateModalOpen(false);
-      setCreateForm({ key: '', resource: '', action: '', description: '' });
+      setCreateForm({ resource: '', action: '', description: '', isDefault: false });
       fetchData();
     } catch (err) {
       const message = err instanceof Error ? err.message : 'Failed to create permission';
@@ -254,6 +289,7 @@ export default function PermissionsPage() {
       <code className="text-sm font-mono" style={{ color: '#1B2A4A' }}>{p.key}</code>
     )},
     { key: 'resource', label: 'Resource' },
+    { key: 'isDefault', label: 'Type', render: (p: Permission) => <StatusBadge status={p.isDefault ? 'Default' : 'Custom'} /> },
     { key: 'description', label: 'Description', render: (p: Permission) => p.description || '—' },
     { key: 'actions', label: 'Actions', render: (p: Permission) => (
       <div className="flex items-center gap-1">
@@ -326,6 +362,17 @@ export default function PermissionsPage() {
             <option key={r} value={r}>{r}</option>
           ))}
         </select>
+        <select
+          value={typeFilter}
+          onChange={(e) => setTypeFilter(e.target.value)}
+          className="rounded border px-3 py-2 text-sm bg-white hover:bg-gray-50 transition-colors focus:outline-none"
+          style={{ borderColor: '#dee2e6', color: '#1B2A4A' }}
+          aria-label="Filter by type"
+        >
+          <option value="">All Types</option>
+          <option value="default">Default</option>
+          <option value="custom">Custom</option>
+        </select>
       </div>
 
       {/* Table */}
@@ -359,6 +406,10 @@ export default function PermissionsPage() {
               </div>
             </div>
             <div>
+              <label className="text-sm font-medium" style={{ color: '#6c757d' }}>Type</label>
+              <div className="mt-1"><StatusBadge status={selectedPermission.isDefault ? 'Default' : 'Custom'} /></div>
+            </div>
+            <div>
               <label className="text-sm font-medium" style={{ color: '#6c757d' }}>Description</label>
               <p className="mt-1" style={{ color: '#1B2A4A' }}>{selectedPermission.description || '—'}</p>
             </div>
@@ -381,39 +432,36 @@ export default function PermissionsPage() {
       <Modal isOpen={editModalOpen} onClose={() => setEditModalOpen(false)} title="Edit Permission" size="md">
         {selectedPermission && (
           <div className="space-y-4">
-            <div>
-              <label htmlFor="edit-perm-key" className="mb-1 block text-sm font-medium" style={{ color: '#6c757d' }}>Key (resource:action)</label>
-              <input
-                id="edit-perm-key"
-                type="text"
-                value={editForm.key}
-                onChange={(e) => setEditForm((f) => ({ ...f, key: e.target.value }))}
-                className="w-full rounded border px-3 py-2 text-sm focus:outline-none font-mono"
-                style={{ borderColor: '#dee2e6', color: '#1B2A4A' }}
-              />
-            </div>
             <div className="grid grid-cols-2 gap-4">
               <div>
                 <label htmlFor="edit-perm-resource" className="mb-1 block text-sm font-medium" style={{ color: '#6c757d' }}>Resource</label>
-                <input
+                <select
                   id="edit-perm-resource"
-                  type="text"
                   value={editForm.resource}
                   onChange={(e) => setEditForm((f) => ({ ...f, resource: e.target.value }))}
                   className="w-full rounded border px-3 py-2 text-sm focus:outline-none"
                   style={{ borderColor: '#dee2e6', color: '#1B2A4A' }}
-                />
+                >
+                  <option value="" disabled>Select resource</option>
+                  {availableResources.map((r) => (
+                    <option key={r} value={r}>{r}</option>
+                  ))}
+                </select>
               </div>
               <div>
                 <label htmlFor="edit-perm-action" className="mb-1 block text-sm font-medium" style={{ color: '#6c757d' }}>Action</label>
-                <input
+                <select
                   id="edit-perm-action"
-                  type="text"
                   value={editForm.action}
                   onChange={(e) => setEditForm((f) => ({ ...f, action: e.target.value }))}
                   className="w-full rounded border px-3 py-2 text-sm focus:outline-none"
                   style={{ borderColor: '#dee2e6', color: '#1B2A4A' }}
-                />
+                >
+                  <option value="" disabled>Select action</option>
+                  {availableActions.map((a) => (
+                    <option key={a} value={a}>{a}</option>
+                  ))}
+                </select>
               </div>
             </div>
             <div>
@@ -427,6 +475,16 @@ export default function PermissionsPage() {
                 rows={3}
               />
             </div>
+            <div className="flex items-center gap-2">
+              <input
+                id="edit-perm-isDefault"
+                type="checkbox"
+                checked={editForm.isDefault}
+                onChange={(e) => setEditForm((f) => ({ ...f, isDefault: e.target.checked }))}
+                className="h-4 w-4 rounded"
+              />
+              <label htmlFor="edit-perm-isDefault" className="text-sm font-medium" style={{ color: '#6c757d' }}>Default</label>
+            </div>
             <div className="flex justify-end gap-3">
               <button
                 onClick={() => setEditModalOpen(false)}
@@ -437,7 +495,7 @@ export default function PermissionsPage() {
               </button>
               <button
                 onClick={handleUpdate}
-                disabled={!editForm.key.trim() || !editForm.resource.trim() || !editForm.action.trim()}
+                disabled={!editForm.resource || !editForm.action}
                 className="rounded px-4 py-2 text-sm font-medium text-white transition-colors hover:opacity-90 disabled:opacity-50"
                 style={{ backgroundColor: '#F5A623' }}
               >
@@ -451,42 +509,36 @@ export default function PermissionsPage() {
       {/* Create Permission Modal */}
       <Modal isOpen={createModalOpen} onClose={() => setCreateModalOpen(false)} title="Create Permission" size="md">
         <div className="space-y-4">
-          <div>
-            <label htmlFor="perm-key" className="mb-1 block text-sm font-medium" style={{ color: '#6c757d' }}>Key (resource:action)</label>
-            <input
-              id="perm-key"
-              type="text"
-              value={createForm.key}
-              onChange={(e) => setCreateForm((f) => ({ ...f, key: e.target.value }))}
-              className="w-full rounded border px-3 py-2 text-sm focus:outline-none font-mono"
-              style={{ borderColor: '#dee2e6' }}
-              placeholder="properties:view"
-            />
-          </div>
           <div className="grid grid-cols-2 gap-4">
             <div>
               <label htmlFor="perm-resource" className="mb-1 block text-sm font-medium" style={{ color: '#6c757d' }}>Resource</label>
-              <input
+              <select
                 id="perm-resource"
-                type="text"
                 value={createForm.resource}
                 onChange={(e) => setCreateForm((f) => ({ ...f, resource: e.target.value }))}
                 className="w-full rounded border px-3 py-2 text-sm focus:outline-none"
-                style={{ borderColor: '#dee2e6' }}
-                placeholder="properties"
-              />
+                style={{ borderColor: '#dee2e6', color: '#1B2A4A' }}
+              >
+                <option value="" disabled>Select resource</option>
+                {availableResources.map((r) => (
+                  <option key={r} value={r}>{r}</option>
+                ))}
+              </select>
             </div>
             <div>
               <label htmlFor="perm-action" className="mb-1 block text-sm font-medium" style={{ color: '#6c757d' }}>Action</label>
-              <input
+              <select
                 id="perm-action"
-                type="text"
                 value={createForm.action}
                 onChange={(e) => setCreateForm((f) => ({ ...f, action: e.target.value }))}
                 className="w-full rounded border px-3 py-2 text-sm focus:outline-none"
-                style={{ borderColor: '#dee2e6' }}
-                placeholder="view"
-              />
+                style={{ borderColor: '#dee2e6', color: '#1B2A4A' }}
+              >
+                <option value="" disabled>Select action</option>
+                {availableActions.map((a) => (
+                  <option key={a} value={a}>{a}</option>
+                ))}
+              </select>
             </div>
           </div>
           <div>
@@ -496,11 +548,23 @@ export default function PermissionsPage() {
               value={createForm.description}
               onChange={(e) => setCreateForm((f) => ({ ...f, description: e.target.value }))}
               className="w-full rounded border px-3 py-2 text-sm focus:outline-none"
-              style={{ borderColor: '#dee2e6' }}
+              style={{ borderColor: '#dee2e6', color: '#1B2A4A' }}
               placeholder="Permission description"
               rows={3}
             />
           </div>
+          {isSuperAdmin === true && (
+            <div className="flex items-center gap-2">
+              <input
+                id="perm-isDefault"
+                type="checkbox"
+                checked={createForm.isDefault}
+                onChange={(e) => setCreateForm((f) => ({ ...f, isDefault: e.target.checked }))}
+                className="h-4 w-4 rounded"
+              />
+              <label htmlFor="perm-isDefault" className="text-sm font-medium" style={{ color: '#6c757d' }}>Default</label>
+            </div>
+          )}
           <div className="flex justify-end gap-3">
             <button
               onClick={() => setCreateModalOpen(false)}
@@ -511,7 +575,7 @@ export default function PermissionsPage() {
             </button>
             <button
               onClick={handleCreate}
-              disabled={!createForm.key.trim() || !createForm.resource.trim() || !createForm.action.trim()}
+              disabled={!createForm.resource || !createForm.action}
               className="rounded px-4 py-2 text-sm font-medium text-white transition-colors hover:opacity-90 disabled:opacity-50"
               style={{ backgroundColor: '#F5A623' }}
             >
