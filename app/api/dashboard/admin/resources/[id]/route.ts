@@ -1,0 +1,101 @@
+import { NextRequest, NextResponse } from 'next/server';
+import { requireSuperAdmin } from '@/lib/require-super-admin';
+import { ResourceService } from '@/services/resource-service';
+
+export const runtime = 'nodejs';
+
+/**
+ * GET /api/dashboard/admin/resources/[id]
+ * Get a single resource by ID with assigned roles.
+ */
+export async function GET(
+  _request: NextRequest,
+  { params }: { params: Promise<{ id: string }> }
+) {
+  const auth = await requireSuperAdmin(_request.headers);
+  if (!auth.authorized) {
+    return NextResponse.json({ error: auth.error }, { status: auth.status });
+  }
+
+  try {
+    const id = (await params).id;
+    const result = await ResourceService.getById(id, {
+      userId: auth.session!.user.id,
+      role: 'PLATFORM_ADMIN',
+    });
+
+    return NextResponse.json(result);
+  } catch (error) {
+    if (error instanceof Error && error.message === 'Resource not found') {
+      return NextResponse.json({ error: 'Resource not found' }, { status: 404 });
+    }
+    console.error('Failed to get resource:', error);
+    return NextResponse.json({ error: 'Failed to fetch resource' }, { status: 500 });
+  }
+}
+
+/**
+ * PATCH /api/dashboard/admin/resources/[id]
+ * Update a resource. Platform Admin only.
+ */
+export async function PATCH(
+  request: NextRequest,
+  { params }: { params: Promise<{ id: string }> }
+) {
+  const auth = await requireSuperAdmin(request.headers);
+  if (!auth.authorized) {
+    return NextResponse.json({ error: auth.error }, { status: auth.status });
+  }
+
+  try {
+    const id = (await params).id;
+    const body = await request.json();
+
+    const result = await ResourceService.update(id, {
+      name: body.name,
+      description: body.description,
+      roleIds: body.roleIds,
+    }, { userId: auth.session!.user.id, role: 'PLATFORM_ADMIN' });
+
+    return NextResponse.json(result);
+  } catch (error) {
+    if (error instanceof Error && error.message === 'Resource not found') {
+      return NextResponse.json({ error: 'Resource not found' }, { status: 404 });
+    }
+    if (error instanceof Error && error.message?.includes('already exists')) {
+      return NextResponse.json({ error: error.message }, { status: 409 });
+    }
+    console.error('Failed to update resource:', error);
+    return NextResponse.json({ error: 'Failed to update resource' }, { status: 500 });
+  }
+}
+
+/**
+ * DELETE /api/dashboard/admin/resources/[id]
+ * Delete a resource. Platform Admin only.
+ */
+export async function DELETE(
+  request: NextRequest,
+  { params }: { params: Promise<{ id: string }> }
+) {
+  const auth = await requireSuperAdmin(request.headers);
+  if (!auth.authorized) {
+    return NextResponse.json({ error: auth.error }, { status: auth.status });
+  }
+
+  try {
+    const id = (await params).id;
+    const result = await ResourceService.delete(id, { userId: auth.session!.user.id, role: 'PLATFORM_ADMIN' });
+
+    return NextResponse.json(result);
+  } catch (error) {
+    if (error instanceof Error && error.message === 'Resource not found') {
+      return NextResponse.json({ error: 'Resource not found' }, { status: 404 });
+    }
+    if (error instanceof Error && error.message === 'Cannot delete resource with assigned roles') {
+      return NextResponse.json({ error: error.message }, { status: 409 });
+    }
+    console.error('Failed to delete resource:', error);
+    return NextResponse.json({ error: 'Failed to delete resource' }, { status: 500 });
+  }
+}

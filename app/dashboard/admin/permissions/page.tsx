@@ -49,30 +49,13 @@ export default function PermissionsPage() {
   // Check if current user is a platform super admin
   const isSuperAdmin = useIsSuperAdmin();
 
-  // Available resources and actions for the create form dropdowns
-  const availableResources = [
-    'platform',
-    'organizations',
-    'members',
-    'roles',
-    'properties',
-    'tenants',
-    'leases',
-    'documents',
-    'payments',
-    'reports',
-    'settings',
-    'audit',
-    'viewings',
-  ];
-
   const availableActions = ['create', 'read', 'update', 'delete'];
 
   // Edit modal states
   const [editModalOpen, setEditModalOpen] = useState(false);
   const [editForm, setEditForm] = useState({ resource: '', action: '', description: '', isDefault: false });
 
-  // Get unique resources for filter (fetched from all permissions, not just current page)
+  // Resource names for filter dropdown (fetched from the resources catalog)
   const [resources, setResources] = useState<string[]>([]);
 
   // Reset to page 1 when filters change
@@ -106,21 +89,20 @@ export default function PermissionsPage() {
     fetchTotalCount();
   }, []);
 
-  // Fetch all unique resources (large page size to get everything)
+  // Fetch resource names from the resources catalog for the filter dropdown
   useEffect(() => {
-    async function fetchResources() {
+    async function fetchResourceNames() {
       try {
-        const res = await fetch('/api/dashboard/admin/permissions?pageSize=1000');
+        const res = await fetch('/api/dashboard/admin/resources/names');
         if (res.ok) {
           const data = await res.json();
-          const uniqueResources = [...new Set((data.items as Permission[] || []).map((p) => p.resource))].sort();
-          setResources(uniqueResources);
+          setResources(data.names || []);
         }
       } catch (err) {
-        console.error('Failed to fetch resources:', err);
+        console.error('Failed to fetch resource names:', err);
       }
     }
-    fetchResources();
+    fetchResourceNames();
   }, []);
 
   // Fetch permissions
@@ -443,7 +425,7 @@ export default function PermissionsPage() {
                   style={{ borderColor: '#dee2e6', color: '#1B2A4A' }}
                 >
                   <option value="" disabled>Select resource</option>
-                  {availableResources.map((r) => (
+                  {resources.map((r) => (
                     <option key={r} value={r}>{r}</option>
                   ))}
                 </select>
@@ -520,7 +502,7 @@ export default function PermissionsPage() {
                 style={{ borderColor: '#dee2e6', color: '#1B2A4A' }}
               >
                 <option value="" disabled>Select resource</option>
-                {availableResources.map((r) => (
+                {resources.map((r) => (
                   <option key={r} value={r}>{r}</option>
                 ))}
               </select>

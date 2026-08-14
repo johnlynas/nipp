@@ -615,7 +615,87 @@ async function main() {
   }
 
   // =========================================================================
-  // 10. FINAL OUTPUT & INSTRUCTIONS
+  // 10. RESOURCE CATALOG (FORCE UPSERT)
+  // =========================================================================
+  const RESOURCES = [
+    {
+      name: 'platform',
+      description:
+        'Platform-level administration resources for managing the multi-tenant infrastructure, including global settings, system health monitoring, and cross-organization oversight.',
+    },
+    {
+      name: 'organizations',
+      description:
+        'Tenant organization management resources for creating, configuring, and maintaining tenant organizations including their lifecycle states (pending, active, suspended, archived) and metadata.',
+    },
+    {
+      name: 'members',
+      description:
+        'Organization member management resources for inviting, onboarding, and managing user memberships within organizations including role assignments and team affiliations.',
+    },
+    {
+      name: 'roles',
+      description:
+        'Role-based access control (RBAC) resources for defining organization-scoped roles, assigning permissions to roles, and managing role hierarchies within each tenant.',
+    },
+    {
+      name: 'properties',
+      description:
+        'Property portfolio management resources for creating, updating, and managing rental properties including details such as address, type, status, and associated tenant information.',
+    },
+    {
+      name: 'tenants',
+      description:
+        'Tenant resident management resources for tracking individuals and households occupying rental properties, including contact details, move-in/move-out dates, and lease associations.',
+    },
+    {
+      name: 'leases',
+      description:
+        'Lease agreement management resources for creating, executing, and tracking rental lease agreements including terms, rent amounts, start/end dates, and renewal history.',
+    },
+    {
+      name: 'documents',
+      description:
+        'Document management resources for uploading, organizing, and storing property-related documents such as leases, inspections reports, certificates, and correspondence.',
+    },
+    {
+      name: 'payments',
+      description:
+        'Financial payment processing resources for managing rent collections, tracking payment history, handling late fees, and generating financial reports across properties.',
+    },
+    {
+      name: 'reports',
+      description:
+        'Reporting and analytics resources for generating insights into portfolio performance, occupancy rates, financial summaries, maintenance trends, and compliance status.',
+    },
+    {
+      name: 'settings',
+      description:
+        'Organization settings and configuration resources for managing tenant-specific preferences, notification templates, payment configurations, and system customizations.',
+    },
+    {
+      name: 'audit',
+      description:
+        'Audit logging resources for recording and reviewing security-relevant actions, changes to roles and permissions, administrative operations, and compliance trails across the platform.',
+    },
+    {
+      name: 'viewings',
+      description:
+        'Property viewing scheduling resources for organizing and tracking property viewings including appointment times, attendee details, agent assignments, and viewing outcomes.',
+    },
+  ];
+
+  for (const resource of RESOURCES) {
+    await prisma.resource.upsert({
+      where: { name: resource.name },
+      update: { description: resource.description },
+      create: resource,
+    });
+  }
+  console.log(`✅ Resource catalog overwritten/ensured: ${RESOURCES.length} resources`);
+
+  // =========================================================================
+  // 11. FINAL OUTPUT & INSTRUCTIONS
   // =========================================================================
   console.log('\n✅ Seed completed successfully! Database overwritten with latest script values.');
   console.log('\n📝 NEXT STEPS:');

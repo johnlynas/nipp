@@ -78,9 +78,14 @@ nipp/
 ├── app/                          # Next.js App Router (pages & API routes)
 │   ├── (auth)/                   # Authentication pages (login, register)
 │   ├── admin/                    # Super admin dashboard & layouts
+│   │   ├── organizations/        # Organization management pages
+│   │   ├── permissions/          # Permission catalog page
+│   │   ├── resources/            # Resource catalog page
+│   │   └── ...                   # Other admin pages
 │   ├── api/                      # API endpoints (RESTful routes)
 │   │   ├── auth/[...all]/        # BetterAuth catch-all handler
 │   │   ├── health/               # Health check endpoint for monitoring
+│   │   ├── dashboard/admin/      # Admin dashboard API routes (permissions, resources)
 │   │   └── ...                   # Domain-specific API routes
 │   ├── layout.tsx                # Root layout
 │   └── ...                       # Page components & layouts
@@ -97,7 +102,11 @@ nipp/
 │   └── permissions/              # Permission resolution & caching logic
 ├── services/                     # Domain-specific business logic layers
 │   ├── organization-service.ts   # Organization management service
-│   └── team-service.ts           # Team CRUD, membership, and role inheritance
+│   ├── team-service.ts           # Team CRUD, membership, and role inheritance
+│   ├── resource-service.ts       # Resource catalog CRUD (global, non-org-scoped)
+│   ├── permission-service.ts     # Permission management service
+│   ├── role-service.ts           # Role management service
+│   └── user-service.ts           # User management service
 ├── hooks/                        # Custom React hooks (useSession, usePermission)
 ├── prisma/                       # Database schema & migrations
 │   ├── schema.prisma             # Prisma schema definition (enums, models, relations)
@@ -143,7 +152,7 @@ The following models are strictly scoped to organizations and protected by the P
 - `TeamMember` (user-to-team membership, org-scoped)
 - `TeamRole` (team-level role definitions mapped to org roles, org-scoped)
 
-Global models (`User`, `Organization`, `Member`, `Permission`, `AuditLog`) are not scoped and require explicit authorization checks.
+Global models (`User`, `Organization`, `Member`, `Permission`, `AuditLog`, `NotificationLog`, `Resource`, `ResourceRole`) are not scoped and require explicit authorization checks.
 
 ## 🔒 Content Security Policy (CSP)
 
@@ -266,6 +275,54 @@ BetterAuth's **Teams** plugin provides sub-organizational groupings within each 
 | `removeTeamRoles(ctx, teamId, roleIds)` | Remove org-scoped roles from a team |
 | `listTeamRoles(ctx, teamId)` | List all roles assigned to a team |
 
+### Resource Service API (`services/resource-service.ts`)
+| Method | Description |
+|---|---|
+| `create(data, ctx)` | Create a new global resource with optional role assignments |
+| `getById(id, ctx)` | Get a single resource by ID with assigned roles |
+| `list(filters, pagination, ctx)` | Paginated list of resources with optional search by name |
+| `update(id, data, ctx)` | Update a resource (name, description) and optionally replace role assignments |
+| `delete(id, ctx)` | Delete a resource (with safety check for existing role assignments) |
+
+**Note:** Resources are global (non-org-scoped). All operations require `PLATFORM_ADMIN` role. The service uses `globalDb` (not the tenant-scoped Prisma extension) for all queries.
+
+### Permission Service API (`services/permission-service.ts`)
+| Method | Description |
+|---|---|
+| `create(data, ctx)` | Create a new permission in the global catalog |
+| `getById(id, ctx)` | Get a single permission by ID |
+| `list(filters, pagination, ctx)` | Paginated list of permissions with optional search and resource filter |
+| `update(id, data, ctx)` | Update a permission (key, description, isDefault) |
+| `delete(id, ctx)` | Delete a permission from the catalog |
+
+### Role Service API (`services/role-service.ts`)
+| Method | Description |
+|---|---|
+| `create(data, ctx)` | Create a new org-scoped role with optional permissions |
+| `getById(id, ctx)` | Get a single role by ID with assigned permissions |
+| `list(filters, pagination, ctx)` | Paginated list of roles in an organization |
+| `update(id, data, ctx)` | Update a role (name, description, isDefault) and optionally replace permissions |
+| `delete(id, ctx)` | Delete a role (with safety check for existing member assignments) |
+
+### User Service API (`services/user-service.ts`)
+| Method | Description |
+|---|---|
+| `create(data, ctx)` | Create a new user with optional organization membership |
+| `getById(id, ctx)` | Get a single user by ID |
+| `list(filters, pagination, ctx)` | Paginated list of users with optional search |
+| `update(id, data, ctx)` | Update a user (name, email, role, ban status) |
+| `delete(id, ctx)` | Delete a user (cascades to sessions, accounts, members) |
+
+### Organization Service API (`services/organization-service.ts`)
+| Method | Description |
+|---|---|
+| `create(data, ctx)` | Create a new organization with admin user and default teams |
+| `getById(id, ctx)` | Get a single organization by ID |
+| `list(filters, pagination, ctx)` | Paginated list of organizations with optional search |
+| `update(id, data, ctx)` | Update an organization (name, slug, status, metadata) |
+| `delete(id, ctx)` | Delete an organization (cascades to members, roles, teams) |
+| `getBySlug(slug, ctx)` | Resolve organization by slug (used for tenant routing) |
+
 ### REST API Routes
 | Route | Methods | Description |
 |---|---|---|
@@ -275,6 +332,34 @@ BetterAuth's **Teams** plugin provides sub-organizational groupings within each 
 | `/api/organizations/[orgId]/teams/[teamId]/roles` | GET, POST, DELETE | List / Assign / Remove roles |
 
 All routes require admin membership in the target organization and enforce tenant isolation via `AsyncLocalStorage` context.
+
+### Admin Dashboard API Routes (Super Admin Only)
+| Route | Methods | Description |
+|---|---|---|
+| `/api/dashboard/admin/permissions` | GET, POST | List permissions (paginated) / Create permission |
+| `/api/dashboard/admin/permissions/[id]` | GET, PATCH, DELETE | Get / Update / Delete permission |
+| `/api/dashboard/admin/resources` | GET, POST | List resources (paginated) / Create resource |
+| `/api/dashboard/admin/resources/names` | GET | Get sorted list of all resource names (for dropdowns) |
+| `/api/dashboard/admin/resources/[id]` | GET, PATCH, DELETE | Get / Update / Delete resource |
+
+All admin dashboard routes require `PLATFORM_ADMIN` role and use `requireSuperAdmin()` middleware for authorization.
+
+### Resources Page (`app/dashboard/admin/resources/page.tsx`)
+The Resources page provides a Super Admin interface for managing the global resource catalog. It follows the same UI pattern as the Permissions page with a data table, search, and CRUD modals.
+
+**Features:**
+- **Data Table:** Displays resources with columns for Name, Description, Roles Assigned, and Actions (View/Edit/Delete)
+- **Pagination:** Configurable page size (default: 8 rows per page) with `PaginationControls` component
+- **Search:** Client-side search filtered through the API with abort controller for stale request cancellation
+- **Stat Cards:** Shows "Total Resources" and "Assigned Roles" counts, refreshed on every create/update/delete
+- **Create/Edit/Delete Modals:** Inline modals for full CRUD operations with client-side validation
+- **Detail Modal:** Expanded view showing resource name, description, and all assigned roles with organization context
+- **Resource Name Endpoint:** Dedicated `/api/dashboard/admin/resources/names` endpoint returns a sorted list of resource names, used by the Permissions page to populate its "Filter by Resource" dropdown
+
+**State Management:**
+- `fetchData()` — paginated resource list with search, uses `useCallback` for stable reference
+- `fetchCounts()` — unfiltered total counts and role assignment totals, called after every mutation to keep stat cards in sync
+- Abort controller pattern prevents race conditions from rapid filter changes
 
 ## 🗄️ Database Design
 
@@ -287,18 +372,22 @@ All routes require admin membership in the target organization and enforce tenan
 - **RolePermission:** Junction table mapping Roles to Permissions.
 - **MemberRole:** Junction table linking Members to Roles (supports multiple roles per member).
 - **AuditLog:** Global security audit trail recording admin actions across all organizations.
+- **NotificationLog:** Tracks email notifications sent by the notification system. Global model (not org-scoped).
 - **Team:** Sub-organizational groupings within a tenant (e.g., "Operations", "QA"). Organization-scoped.
 - **TeamMember:** Junction table linking a `User` to a `Team`. Organization-scoped.
 - **TeamRole:** Team-level role definitions mapped to organization-scoped `Role` records. Organization-scoped.
+- **Resource:** Global catalog of portal feature modules (e.g., "platform", "organizations", "properties"). Represents feature areas that are shared across all tenants. Managed exclusively by Super Admins.
+- **ResourceRole:** Global junction table linking Resources to org-scoped Roles. Enables feature-level access control: a role must be assigned to a resource for users with that role to access the feature.
 
 ### Relationships
 - `User` ↔ `Organization`: Via `Member` (many-to-many)
 - `Role` → `Permission`: Via `RolePermission` (one-to-many from Role, many-to-one to Permission)
 - `Member` → `Role`: Via `MemberRole` (one-to-many from Member, many-to-one to Role)
-- `Organization` → `Role`, `MemberRole`, `AuditLog`, `Team`: One-to-many cascading deletes
+- `Organization` → `Role`, `MemberRole`, `AuditLog`, `NotificationLog`, `Team`: One-to-many cascading deletes
 - `Team` → `TeamMember`, `TeamRole`: One-to-many cascading deletes
 - `User` ↔ `Team`: Via `TeamMember` (many-to-many)
 - `TeamRole` → `Role`: Many-to-one mapping to org-scoped roles (role inheritance)
+- `Resource` → `Role`: Via `ResourceRole` (many-to-many, global junction table). A resource can be assigned to multiple roles across organizations; a role can access multiple resources.
 
 ### Indexing Strategy
 - Foreign keys are automatically indexed by Prisma.
@@ -1075,5 +1164,5 @@ This architecture decision should be followed for all future authentication and 
 
 ---
 
-*Last Updated: 26/07/26
+*Last Updated: 14/08/26
 *Maintained by: Property NI Development Team*
