@@ -12,6 +12,7 @@ import { requirePlatformAdmin, requireAnyAdmin, logFailedAuth } from '@/lib/serv
 export interface CreateOrganizationInput {
   name: string;
   slug?: string;
+  description?: string | null;
   adminEmail?: string;
 }
 
@@ -19,6 +20,7 @@ export interface OrganizationWithCount {
   id: string;
   name: string;
   slug: string | null;
+  description?: string | null;
   createdAt: Date;
   updatedAt: Date;
   _count: {
@@ -34,6 +36,13 @@ export interface PaginatedOrganizations {
     total: number;
     totalPages: number;
   };
+  globalTotal: number;
+  statusCounts: {
+    ACTIVE: number;
+    PENDING: number;
+    SUSPENDED: number;
+    ARCHIVED: number;
+  };
 }
 
 export interface PaginatedOrganizationsInput {
@@ -46,6 +55,7 @@ export interface PaginatedOrganizationsInput {
 export interface UpdateOrganizationInput {
   name?: string;
   slug?: string;
+  description?: string | null;
   status?: 'PENDING' | 'ACTIVE' | 'SUSPENDED' | 'ARCHIVED';
 }
 
@@ -61,10 +71,11 @@ async function createWithUniqueSlug(
   tx: Prisma.TransactionClient,
   name: string,
   baseSlug: string,
+  description?: string | null,
 ) {
   try {
     return await tx.organization.create({
-      data: { name, slug: baseSlug },
+      data: { name, slug: baseSlug, description },
     });
   } catch (error: unknown) {
     if ((error as { code?: string }).code !== 'P2002') throw error;
@@ -105,13 +116,27 @@ export const OrganizationService = {
     if (status) where.status = status as 'PENDING' | 'ACTIVE' | 'SUSPENDED' | 'ARCHIVED';
     if (search) where.name = { contains: search, mode: 'insensitive' };
 
-    const [organizations, total] = await Promise.all([
+    // Global (unfiltered) counts for dashboard stat cards
+    const [globalTotal, globalStatusCounts] = await Promise.all([
+      globalDb.organization.count(),
+      globalDb.organization.groupBy({
+        by: ['status'],
+        _count: { status: true },
+      }),
+    ]);
+
+    const globalCountsMap: Record<string, number> = {};
+    for (const entry of globalStatusCounts) {
+      globalCountsMap[entry.status] = entry._count.status;
+    }
+
+    const [organizations, filteredTotal] = await Promise.all([
       globalDb.organization.findMany({
         where,
         skip,
         take: pageSize,
         orderBy: { createdAt: 'desc' },
-        include: { _count: { select: { members: true } } },
+        include: { _count: { select: { members: true, teams: true } } },
       }),
       globalDb.organization.count({ where }),
     ]);
@@ -120,12 +145,20 @@ export const OrganizationService = {
       organizations: organizations.map((org) => ({
         ...org,
         memberCount: org._count?.members ?? 0,
+        teamCount: org._count?.teams ?? 0,
       })),
       pagination: {
         page,
         pageSize,
-        total,
-        totalPages: Math.ceil(total / pageSize),
+        total: filteredTotal,
+        totalPages: Math.ceil(filteredTotal / pageSize),
+      },
+      globalTotal,
+      statusCounts: {
+        ACTIVE: globalCountsMap['ACTIVE'] ?? 0,
+        PENDING: globalCountsMap['PENDING'] ?? 0,
+        SUSPENDED: globalCountsMap['SUSPENDED'] ?? 0,
+        ARCHIVED: globalCountsMap['ARCHIVED'] ?? 0,
       },
     };
   },
@@ -136,7 +169,7 @@ export const OrganizationService = {
   async createOrganization(input: CreateOrganizationInput, ctx: ServiceContext) {
     requirePlatformAdmin(ctx);
 
-    const { name, slug, adminEmail } = input;
+    const { name, slug, description, adminEmail } = input;
 
     return await globalDb.$transaction(async (tx) => {
       // 1. Check for existing organization by name
@@ -150,14 +183,23 @@ export const OrganizationService = {
 
       // 2. Create organization with unique slug (retry on collision)
       const generatedSlug = slug || name.toLowerCase().replace(/\s+/g, '-');
-      const organization = await createWithUniqueSlug(tx, name, generatedSlug);
+      const organization = await createWithUniqueSlug(tx, name, generatedSlug, description);
 
       logger.info(
         { orgId: organization.id, method: 'Service.createOrganization' },
         'Organization created in transaction',
       );
 
-      // 3. Handle Admin Bootstrap if email provided
+      // 3. Create default "Members" team for the organization
+      await tx.team.create({
+        data: { name: 'Members', slug: 'members', organizationId: organization.id },
+      });
+      logger.debug(
+        { orgId: organization.id, method: 'Service.createOrganization' },
+        'Default Members team created',
+      );
+
+      // 4. Handle Admin Bootstrap if email provided
       if (adminEmail) {
         let user = await tx.user.findUnique({ where: { email: adminEmail } });
 
@@ -188,7 +230,7 @@ export const OrganizationService = {
         );
       }
 
-      // 4. Return the created organization
+      // 5. Return the created organization
       return organization;
     });
   },
@@ -244,6 +286,7 @@ export const OrganizationService = {
     // Build update data — only include provided fields
     const updateData: Prisma.OrganizationUpdateInput = {};
     if (data.name !== undefined) updateData.name = data.name;
+    if (data.description !== undefined) updateData.description = data.description;
     if (data.status !== undefined) updateData.status = data.status as Prisma.EnumOrgStatusFieldUpdateOperationsInput;
     if (ctx.role === 'PLATFORM_ADMIN' && data.slug !== undefined) {
       updateData.slug = data.slug;

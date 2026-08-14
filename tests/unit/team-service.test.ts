@@ -232,7 +232,7 @@ describe('TeamService', () => {
 
   describe('getTeamsByOrg', () => {
     it('returns paginated teams for PLATFORM_ADMIN', async () => {
-      vi.mocked(globalDb.team.findMany).mockResolvedValue([mockTeam() as never]);
+      vi.mocked(globalDb.team.findMany).mockResolvedValue([{ ...mockTeam(), _count: { members: 3 } } as never]);
       vi.mocked(globalDb.team.count).mockResolvedValue(1);
 
       const result = await TeamService.getTeamsByOrg('org-1', mockCtx('PLATFORM_ADMIN'), 1, 20);

@@ -6,62 +6,62 @@ const prisma = new PrismaClient();
 // Full 43-permission catalog (4 platform + 39 tenant)
 const PERMISSION_CATALOG = [
   // Platform permissions (4)
-  { key: 'platform:manage_organizations', resource: 'platform', action: 'manage_organizations', description: 'Manage tenant organizations' },
-  { key: 'platform:manage_roles', resource: 'platform', action: 'manage_roles', description: 'Manage global roles' },
-  { key: 'platform:manage_permissions', resource: 'platform', action: 'manage_permissions', description: 'Manage global permission catalog' },
-  { key: 'platform:view_audit_logs', resource: 'platform', action: 'view_audit_logs', description: 'View audit logs across all organizations' },
+  { key: 'platform:manage_organizations', resource: 'platform', action: 'manage_organizations', description: 'Manage tenant organizations', isDefault: true },
+  { key: 'platform:manage_roles', resource: 'platform', action: 'manage_roles', description: 'Manage global roles', isDefault: true },
+  { key: 'platform:manage_permissions', resource: 'platform', action: 'manage_permissions', description: 'Manage global permission catalog', isDefault: true },
+  { key: 'platform:view_audit_logs', resource: 'platform', action: 'view_audit_logs', description: 'View audit logs across all organizations', isDefault: true },
   
   // Tenant permissions (39)
-  { key: 'organizations:read', resource: 'organizations', action: 'read', description: 'View organization details' },
-  { key: 'organizations:create', resource: 'organizations', action: 'create', description: 'Create new organizations' },
-  { key: 'organizations:update', resource: 'organizations', action: 'update', description: 'Update organization details' },
-  { key: 'organizations:delete', resource: 'organizations', action: 'delete', description: 'Delete organizations' },
+  { key: 'organizations:read', resource: 'organizations', action: 'read', description: 'View organization details', isDefault: true },
+  { key: 'organizations:create', resource: 'organizations', action: 'create', description: 'Create new organizations', isDefault: true },
+  { key: 'organizations:update', resource: 'organizations', action: 'update', description: 'Update organization details', isDefault: true },
+  { key: 'organizations:delete', resource: 'organizations', action: 'delete', description: 'Delete organizations', isDefault: true },
   
-  { key: 'members:read', resource: 'members', action: 'read', description: 'View organization members' },
-  { key: 'members:create', resource: 'members', action: 'create', description: 'Invite new members' },
-  { key: 'members:update', resource: 'members', action: 'update', description: 'Update member roles' },
-  { key: 'members:delete', resource: 'members', action: 'delete', description: 'Remove members' },
+  { key: 'members:read', resource: 'members', action: 'read', description: 'View organization members', isDefault: true },
+  { key: 'members:create', resource: 'members', action: 'create', description: 'Invite new members', isDefault: true },
+  { key: 'members:update', resource: 'members', action: 'update', description: 'Update member roles', isDefault: true },
+  { key: 'members:delete', resource: 'members', action: 'delete', description: 'Remove members', isDefault: true },
   
-  { key: 'roles:read', resource: 'roles', action: 'read', description: 'View organization roles' },
-  { key: 'roles:create', resource: 'roles', action: 'create', description: 'Create new roles' },
-  { key: 'roles:update', resource: 'roles', action: 'update', description: 'Update role permissions' },
-  { key: 'roles:delete', resource: 'roles', action: 'delete', description: 'Delete roles' },
+  { key: 'roles:read', resource: 'roles', action: 'read', description: 'View organization roles', isDefault: true },
+  { key: 'roles:create', resource: 'roles', action: 'create', description: 'Create new roles', isDefault: true },
+  { key: 'roles:update', resource: 'roles', action: 'update', description: 'Update role permissions', isDefault: true },
+  { key: 'roles:delete', resource: 'roles', action: 'delete', description: 'Delete roles', isDefault: true },
   
-  { key: 'properties:read', resource: 'properties', action: 'read', description: 'View property details' },
-  { key: 'properties:create', resource: 'properties', action: 'create', description: 'Create new properties' },
-  { key: 'properties:update', resource: 'properties', action: 'update', description: 'Update property details' },
-  { key: 'properties:delete', resource: 'properties', action: 'delete', description: 'Delete properties' },
+  { key: 'properties:read', resource: 'properties', action: 'read', description: 'View property details', isDefault: true },
+  { key: 'properties:create', resource: 'properties', action: 'create', description: 'Create new properties', isDefault: true },
+  { key: 'properties:update', resource: 'properties', action: 'update', description: 'Update property details', isDefault: true },
+  { key: 'properties:delete', resource: 'properties', action: 'delete', description: 'Delete properties', isDefault: true },
   
-  { key: 'tenants:read', resource: 'tenants', action: 'read', description: 'View tenant details' },
-  { key: 'tenants:create', resource: 'tenants', action: 'create', description: 'Create new tenants' },
-  { key: 'tenants:update', resource: 'tenants', action: 'update', description: 'Update tenant details' },
-  { key: 'tenants:delete', resource: 'tenants', action: 'delete', description: 'Delete tenants' },
+  { key: 'tenants:read', resource: 'tenants', action: 'read', description: 'View tenant details', isDefault: true },
+  { key: 'tenants:create', resource: 'tenants', action: 'create', description: 'Create new tenants', isDefault: true },
+  { key: 'tenants:update', resource: 'tenants', action: 'update', description: 'Update tenant details', isDefault: true },
+  { key: 'tenants:delete', resource: 'tenants', action: 'delete', description: 'Delete tenants', isDefault: true },
   
-  { key: 'leases:read', resource: 'leases', action: 'read', description: 'View lease details' },
-  { key: 'leases:create', resource: 'leases', action: 'create', description: 'Create new leases' },
-  { key: 'leases:update', resource: 'leases', action: 'update', description: 'Update lease details' },
-  { key: 'leases:delete', resource: 'leases', action: 'delete', description: 'Delete leases' },
+  { key: 'leases:read', resource: 'leases', action: 'read', description: 'View lease details', isDefault: true },
+  { key: 'leases:create', resource: 'leases', action: 'create', description: 'Create new leases', isDefault: true },
+  { key: 'leases:update', resource: 'leases', action: 'update', description: 'Update lease details', isDefault: true },
+  { key: 'leases:delete', resource: 'leases', action: 'delete', description: 'Delete leases', isDefault: true },
   
-  { key: 'documents:read', resource: 'documents', action: 'read', description: 'View document details' },
-  { key: 'documents:create', resource: 'documents', action: 'create', description: 'Upload new documents' },
-  { key: 'documents:update', resource: 'documents', action: 'update', description: 'Update document details' },
-  { key: 'documents:delete', resource: 'documents', action: 'delete', description: 'Delete documents' },
+  { key: 'documents:read', resource: 'documents', action: 'read', description: 'View document details', isDefault: true },
+  { key: 'documents:create', resource: 'documents', action: 'create', description: 'Upload new documents', isDefault: true },
+  { key: 'documents:update', resource: 'documents', action: 'update', description: 'Update document details', isDefault: true },
+  { key: 'documents:delete', resource: 'documents', action: 'delete', description: 'Delete documents', isDefault: true },
   
-  { key: 'payments:read', resource: 'payments', action: 'read', description: 'View payment details' },
-  { key: 'payments:create', resource: 'payments', action: 'create', description: 'Process new payments' },
-  { key: 'payments:update', resource: 'payments', action: 'update', description: 'Update payment details' },
-  { key: 'payments:delete', resource: 'payments', action: 'delete', description: 'Delete payments' },
+  { key: 'payments:read', resource: 'payments', action: 'read', description: 'View payment details', isDefault: true },
+  { key: 'payments:create', resource: 'payments', action: 'create', description: 'Process new payments', isDefault: true },
+  { key: 'payments:update', resource: 'payments', action: 'update', description: 'Update payment details', isDefault: true },
+  { key: 'payments:delete', resource: 'payments', action: 'delete', description: 'Delete payments', isDefault: true },
   
-  { key: 'reports:read', resource: 'reports', action: 'read', description: 'View reports' },
-  { key: 'reports:generate', resource: 'reports', action: 'generate', description: 'Generate reports' },
+  { key: 'reports:read', resource: 'reports', action: 'read', description: 'View reports', isDefault: true },
+  { key: 'reports:generate', resource: 'reports', action: 'generate', description: 'Generate reports', isDefault: true },
   
-  { key: 'settings:read', resource: 'settings', action: 'read', description: 'View organization settings' },
-  { key: 'settings:update', resource: 'settings', action: 'update', description: 'Update organization settings' },
+  { key: 'settings:read', resource: 'settings', action: 'read', description: 'View organization settings', isDefault: true },
+  { key: 'settings:update', resource: 'settings', action: 'update', description: 'Update organization settings', isDefault: true },
   
-  { key: 'audit:read', resource: 'audit', action: 'read', description: 'View audit logs' },
+  { key: 'audit:read', resource: 'audit', action: 'read', description: 'View audit logs', isDefault: true },
   
-  { key: 'viewings:read', resource: 'viewings', action: 'read', description: 'View property viewings' },
-  { key: 'viewings:create', resource: 'viewings', action: 'create', description: 'Schedule property viewings' },
+  { key: 'viewings:read', resource: 'viewings', action: 'read', description: 'View property viewings', isDefault: true },
+  { key: 'viewings:create', resource: 'viewings', action: 'create', description: 'Schedule property viewings', isDefault: true },
 ];
 
 // =========================================================================
@@ -235,6 +235,7 @@ async function main() {
       data: {
         name: 'Platform',
         slug: 'platform',
+        description: 'Platform-level organization for global administration and tenant management.',
         status: 'ACTIVE',
         metadata: { type: 'platform' },
       },
@@ -245,6 +246,7 @@ async function main() {
       data: {
         name: 'Platform',
         slug: 'platform',
+        description: 'Platform-level organization for global administration and tenant management.',
         status: 'ACTIVE',
         metadata: { type: 'platform' },
       },
@@ -418,6 +420,16 @@ async function main() {
   // =========================================================================
   await ensureDefaultTeam(platformOrgId, 'Platform');
 
+  // Add platform user to the Members team (all modes)
+  const membersTeam = await prisma.team.findFirst({
+    where: { organizationId: platformOrgId, slug: 'members' },
+  });
+
+  if (membersTeam) {
+    await addUserToTeam(superAdmin.id, membersTeam.id, platformOrgId);
+    console.log(`   ✅ Added platform user to "Members" team`);
+  }
+
   // Add platform user to Platform Ops team (dev mode only)
   if (!testMode) {
     const platformOpsTeam = await prisma.team.findFirst({
@@ -448,7 +460,7 @@ async function main() {
 
   if (testMode) {
     // =========================================================================
-    // TESTING PROFILE: Test Tenant Ltd with QA Operations team
+    // TESTING PROFILE: Test Tenant Ltd with QA Operations and Members teams
     // =========================================================================
     const testTenantAEmail = process.env.TEST_TENANT_A_EMAIL || 'test-tenant-a@example.com';
     const testTenantAPassword = process.env.TEST_TENANT_A_PASSWORD || 'TestTenantA123!';
@@ -461,13 +473,13 @@ async function main() {
     let testTenantOrg = await prisma.organization.findFirst({ where: { slug: 'test-tenant-ltd' } });
     if (!testTenantOrg) {
       testTenantOrg = await prisma.organization.create({
-        data: { name: 'Test Tenant Ltd', slug: 'test-tenant-ltd', status: 'ACTIVE' },
+        data: { name: 'Test Tenant Ltd', slug: 'test-tenant-ltd', description: 'Testing tenant organization for QA and integration testing.', status: 'ACTIVE' },
       });
       console.log(`✅ Created Test Tenant Org: ${testTenantOrg.id}`);
     } else {
       await prisma.organization.update({
         where: { id: testTenantOrg.id },
-        data: { name: 'Test Tenant Ltd', slug: 'test-tenant-ltd', status: 'ACTIVE' },
+        data: { name: 'Test Tenant Ltd', slug: 'test-tenant-ltd', description: 'Testing tenant organization for QA and integration testing.', status: 'ACTIVE' },
       });
       console.log(`✅ Updated Test Tenant Org: ${testTenantOrg.id}`);
     }
@@ -486,7 +498,12 @@ async function main() {
       console.log(`   ✅ Created "QA Operations" team for Test Tenant Ltd`);
     }
 
-    // Create test tenant users and add them to QA Operations team
+    // Get the default "Members" team for test tenant org
+    const membersTeam = await prisma.team.findFirst({
+      where: { organizationId: testTenantOrg.id, slug: 'members' },
+    });
+
+    // Create test tenant users and add them to both QA Operations and Members teams
     const { userId: testUserAId, memberId: testMemberAId } = await ensureTenantUser(
       testTenantAEmail,
       testTenantAPassword,
@@ -497,7 +514,10 @@ async function main() {
     if (qaTeam) {
       await addUserToTeam(testUserAId, qaTeam.id, testTenantOrg.id);
     }
-    console.log(`   ✅ Created and added Test Tenant User A to QA Operations team`);
+    if (membersTeam) {
+      await addUserToTeam(testUserAId, membersTeam.id, testTenantOrg.id);
+    }
+    console.log(`   ✅ Created and added Test Tenant User A to QA Operations and Members teams`);
 
     const { userId: testUserBId, memberId: testMemberBId } = await ensureTenantUser(
       testTenantBEmail,
@@ -509,12 +529,15 @@ async function main() {
     if (qaTeam) {
       await addUserToTeam(testUserBId, qaTeam.id, testTenantOrg.id);
     }
-    console.log(`   ✅ Created and added Test Tenant User B to QA Operations team`);
+    if (membersTeam) {
+      await addUserToTeam(testUserBId, membersTeam.id, testTenantOrg.id);
+    }
+    console.log(`   ✅ Created and added Test Tenant User B to QA Operations and Members teams`);
 
     console.log(`✅ Testing profile seeded: Test Tenant Org (${testTenantAEmail}, ${testTenantBEmail})`);
   } else {
     // =========================================================================
-    // DEVELOPER PROFILE: Dev Tenant Ltd with Operations team
+    // DEVELOPER PROFILE: Dev Tenant Ltd with Operations and Members teams
     // =========================================================================
     const devTenantAEmail = process.env.DEV_TENANT_A_EMAIL || 'dev-tenant-a@example.com';
     const devTenantAPassword = process.env.DEV_TENANT_A_PASSWORD || 'DevTenantA123!';
@@ -527,13 +550,13 @@ async function main() {
     let devTenantOrg = await prisma.organization.findFirst({ where: { slug: 'dev-tenant-ltd' } });
     if (!devTenantOrg) {
       devTenantOrg = await prisma.organization.create({
-        data: { name: 'Dev Tenant Ltd', slug: 'dev-tenant-ltd', status: 'ACTIVE' },
+        data: { name: 'Dev Tenant Ltd', slug: 'dev-tenant-ltd', description: 'Developer tenant organization for development and staging.', status: 'ACTIVE' },
       });
       console.log(`✅ Created Dev Tenant Org: ${devTenantOrg.id}`);
     } else {
       await prisma.organization.update({
         where: { id: devTenantOrg.id },
-        data: { name: 'Dev Tenant Ltd', slug: 'dev-tenant-ltd', status: 'ACTIVE' },
+        data: { name: 'Dev Tenant Ltd', slug: 'dev-tenant-ltd', description: 'Developer tenant organization for development and staging.', status: 'ACTIVE' },
       });
       console.log(`✅ Updated Dev Tenant Org: ${devTenantOrg.id}`);
     }
@@ -552,7 +575,12 @@ async function main() {
       console.log(`   ✅ Created "Operations" team for Dev Tenant Ltd`);
     }
 
-    // Create dev tenant users and add them to Operations team
+    // Get the default "Members" team for dev tenant org
+    const membersTeam = await prisma.team.findFirst({
+      where: { organizationId: devTenantOrg.id, slug: 'members' },
+    });
+
+    // Create dev tenant users and add them to both Operations and Members teams
     const { userId: devUserAId, memberId: devMemberAId } = await ensureTenantUser(
       devTenantAEmail,
       devTenantAPassword,
@@ -563,7 +591,10 @@ async function main() {
     if (opsTeam) {
       await addUserToTeam(devUserAId, opsTeam.id, devTenantOrg.id);
     }
-    console.log(`   ✅ Created and added Dev Tenant User A to Operations team`);
+    if (membersTeam) {
+      await addUserToTeam(devUserAId, membersTeam.id, devTenantOrg.id);
+    }
+    console.log(`   ✅ Created and added Dev Tenant User A to Operations and Members teams`);
 
     const { userId: devUserBId, memberId: devMemberBId } = await ensureTenantUser(
       devTenantBEmail,
@@ -575,7 +606,10 @@ async function main() {
     if (opsTeam) {
       await addUserToTeam(devUserBId, opsTeam.id, devTenantOrg.id);
     }
-    console.log(`   ✅ Created and added Dev Tenant User B to Operations team`);
+    if (membersTeam) {
+      await addUserToTeam(devUserBId, membersTeam.id, devTenantOrg.id);
+    }
+    console.log(`   ✅ Created and added Dev Tenant User B to Operations and Members teams`);
 
     console.log(`✅ Developer profile seeded: Dev Tenant Org (${devTenantAEmail}, ${devTenantBEmail})`);
   }

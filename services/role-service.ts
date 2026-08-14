@@ -259,6 +259,112 @@ export const RoleService = {
 
     return { success: true };
   },
+
+  /**
+   * Get permissions assigned to a role.
+   */
+  async getRolePermissions(roleId: string, targetOrgId: string, ctx: ServiceContext) {
+    requireAnyAdmin(ctx);
+
+    const role = await runWithTenant(targetOrgId, async () => {
+      return tenantDb.role.findUnique({
+        where: { id: roleId },
+        include: {
+          permissions: { include: { permission: true } },
+        },
+      });
+    });
+
+    if (!role) {
+      throw new NotFoundError('Role not found');
+    }
+
+    return role.permissions.map((rp) => rp.permission);
+  },
+
+  /**
+   * Assign a permission to a role. Invalidates Redis cache.
+   */
+  async assignPermission(roleId: string, targetOrgId: string, data: { permissionId: string }, ctx: ServiceContext) {
+    requireAnyAdmin(ctx);
+
+    // Verify role exists
+    const existingRole = await globalDb.role.findUnique({ where: { id: roleId } });
+    if (!existingRole) {
+      throw new NotFoundError('Role not found');
+    }
+
+    // Verify permission exists
+    const existingPermission = await globalDb.permission.findUnique({ where: { id: data.permissionId } });
+    if (!existingPermission) {
+      throw new NotFoundError('Permission not found');
+    }
+
+    // Check for duplicate assignment
+    const existing = await globalDb.rolePermission.findFirst({
+      where: { roleId, permissionId: data.permissionId },
+    });
+
+    if (existing) {
+      throw new ConflictError('Permission already assigned to this role');
+    }
+
+    await runWithTenant(targetOrgId, async () => {
+      return tenantDb.rolePermission.create({
+        data: { roleId, permissionId: data.permissionId, organizationId: targetOrgId },
+      });
+    });
+
+    // Invalidate Redis permission cache after mutation
+    await invalidatePermissionCache();
+
+    return { success: true };
+  },
+
+  /**
+   * Revoke a permission from a role. Invalidates Redis cache.
+   */
+  async revokePermission(roleId: string, targetOrgId: string, permissionId: string, ctx: ServiceContext) {
+    requireAnyAdmin(ctx);
+
+    await runWithTenant(targetOrgId, async () => {
+      return tenantDb.rolePermission.deleteMany({
+        where: { roleId, permissionId },
+      });
+    });
+
+    // Invalidate Redis permission cache after mutation
+    await invalidatePermissionCache();
+
+    return { success: true };
+  },
+
+  /**
+   * Get members assigned to a role.
+   */
+  async getRoleMembers(roleId: string, targetOrgId: string, ctx: ServiceContext) {
+    requireAnyAdmin(ctx);
+
+    const members = await runWithTenant(targetOrgId, async () => {
+      return tenantDb.memberRole.findMany({
+        where: { roleId },
+        include: {
+          member: {
+            include: {
+              user: { select: { id: true, name: true, email: true } },
+            },
+          },
+        },
+      });
+    });
+
+    return members.map((mr) => ({
+      memberId: mr.member.id,
+      userId: mr.member.userId,
+      userName: mr.member.user.name,
+      userEmail: mr.member.user.email,
+    }));
+  },
 };
 
 /**

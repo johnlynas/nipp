@@ -116,6 +116,7 @@ model Organization {
   id          String   @id @default(cuid())
   slug        String?  @unique
   name        String
+  description String?
   status      OrgStatus @default(PENDING)
   metadata    Json?
   createdAt   DateTime @default(now())
@@ -274,6 +275,7 @@ model Permission {
   resource    String   // e.g., "properties"
   action      String   // e.g., "view"
   description String?
+  isDefault   Boolean  @default(true) // true = bootstrapped, false = custom
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
 

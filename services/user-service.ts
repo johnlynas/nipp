@@ -12,6 +12,7 @@ import { logger } from '@/lib/logger';
 import { ServiceContext, NotFoundError, ForbiddenError, ValidationError } from '@/lib/services/types';
 import { requireAnyAdmin, logFailedAuth } from '@/lib/services/base-service';
 import { normalizePagination, PaginatedResult, UserFilters } from '@/lib/services/types';
+import { hashPassword } from 'better-auth/crypto';
 
 // ---------------------------------------------------------------------------
 // Input Types
@@ -41,7 +42,7 @@ export const UserService = {
   async create(data: CreateUserInput, ctx: ServiceContext) {
     requireAnyAdmin(ctx);
 
-    const { email, name } = data;
+    const { email, name, password } = data;
 
     // Validate required fields
     if (!email) {
@@ -57,9 +58,28 @@ export const UserService = {
       throw new Error('A user with this email already exists');
     }
 
+    // Build user data — include passwordHash if provided
+    const userData: { email: string; name: string; passwordHash?: string } = {
+      email,
+      name,
+    };
+
+    let passwordHash: string | undefined;
+    if (password) {
+      passwordHash = await hashPassword(password);
+      userData.passwordHash = passwordHash;
+    }
+
     const user = await globalDb.user.create({
-      data: { email, name },
+      data: userData,
     });
+
+    // Create credential account so Better Auth sign-in works
+    if (passwordHash) {
+      await globalDb.account.create({
+        data: { id: user.id, accountId: user.id, providerId: 'credential', password: passwordHash, userId: user.id },
+      });
+    }
 
     // Tenant Admin creates a Member relationship for their own org
     if (ctx.role === 'TENANT_ADMIN' && ctx.organizationId) {
@@ -69,9 +89,9 @@ export const UserService = {
     }
 
     // Platform Admin can optionally assign the user to a specific org
-    if (ctx.role === 'PLATFORM_ADMIN' && ctx.organizationId) {
+    if (ctx.role === 'PLATFORM_ADMIN' && data.organizationId) {
       await globalDb.member.create({
-        data: { userId: user.id, orgId: ctx.organizationId, role: 'member' },
+        data: { userId: user.id, orgId: data.organizationId, role: 'member' },
       });
     }
 
@@ -143,29 +163,62 @@ export const UserService = {
       }
     }
 
-    // Platform Admin scope: filter by organization, role, or both
+    // Platform Admin scope: filter by organization, role, or team
     if (ctx.role === 'PLATFORM_ADMIN') {
-      const memberWhere: Prisma.MemberWhereInput = {};
+      const hasFilter = filters.organizationId || filters.role || filters.teamId;
 
-      if (filters.organizationId) {
-        memberWhere.orgId = filters.organizationId;
-      }
-      if (filters.role) {
-        memberWhere.role = filters.role;
-      }
+      if (hasFilter) {
+        // Build organization/role filter set
+        const memberWhere: Prisma.MemberWhereInput = {};
 
-      const matchingMembers = await globalDb.member.findMany({
-        where: memberWhere,
-        select: { userId: true },
-      });
-      const userIds = matchingMembers.map((m) => m.userId);
+        if (filters.organizationId) {
+          memberWhere.orgId = filters.organizationId;
+        }
+        if (filters.role) {
+          memberWhere.role = filters.role;
+        }
 
-      if (userIds.length > 0) {
-        where.id = { in: userIds };
-      } else {
-        // No users match the filter(s) — return empty
-        where.id = { in: [] };
+        let userIds: string[] = [];
+
+        if (filters.organizationId || filters.role) {
+          const matchingMembers = await globalDb.member.findMany({
+            where: memberWhere,
+            select: { userId: true },
+          });
+          userIds = matchingMembers.map((m) => m.userId);
+        }
+
+        // Apply team filter if specified (intersection with existing userIds)
+        if (filters.teamId) {
+          const teamMemberWhere: Prisma.TeamMemberWhereInput = { teamId: filters.teamId };
+          const matchingTeamMembers = await globalDb.teamMember.findMany({
+            where: teamMemberWhere,
+            select: { userId: true },
+          });
+          const teamUserIds = new Set(matchingTeamMembers.map((tm) => tm.userId));
+
+          if (userIds.length > 0) {
+            // Intersection: users must be in both the org/role set AND the team
+            userIds = userIds.filter((id) => teamUserIds.has(id));
+          } else {
+            userIds = Array.from(teamUserIds);
+          }
+        }
+
+        if (userIds.length > 0) {
+          where.id = { in: userIds };
+        } else {
+          // No users match the filter(s) — return empty
+          where.id = { in: [] };
+        }
       }
+    }
+
+    // Apply status filter (active/banned)
+    if (filters.status === 'banned') {
+      where.banned = true;
+    } else if (filters.status === 'active') {
+      where.banned = false;
     }
 
     const [users, total] = await Promise.all([
@@ -177,6 +230,12 @@ export const UserService = {
         include: {
           _count: { select: { members: true } },
           members: { take: 1, include: { organization: { select: { id: true, name: true } } } },
+          teamMembers: {
+            include: {
+              team: { select: { id: true, name: true } },
+              organization: { select: { id: true, name: true } },
+            },
+          },
         },
       }),
       globalDb.user.count({ where }),

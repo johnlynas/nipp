@@ -19,6 +19,7 @@ vi.mock('@/lib/global-db', () => ({
       create: vi.fn(),
       update: vi.fn(),
       delete: vi.fn(),
+      groupBy: vi.fn().mockResolvedValue([]),
     },
     user: { findUnique: vi.fn(), create: vi.fn() },
     member: { create: vi.fn() },

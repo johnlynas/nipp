@@ -26,6 +26,7 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
   };
 
   const navLinks = [
+    { href: '/dashboard/admin', label: 'Integrated Dashboard' },
     { href: '/admin/organizations', label: 'Organizations' },
     { href: '/admin/roles', label: 'Roles' },
     { href: '/admin/users', label: 'Users' },

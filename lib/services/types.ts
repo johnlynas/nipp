@@ -145,6 +145,8 @@ export interface OrganizationFilters extends BaseFilters {
 export interface UserFilters extends BaseFilters {
   role?: string; // filter by member role within the org
   organizationId?: string; // filter users belonging to a specific organization (Platform Admin only)
+  teamId?: string; // filter users belonging to a specific team (Platform Admin only)
+  status?: 'active' | 'banned'; // filter by ban status (Platform Admin only)
 }
 
 /** Filters for Role list queries. */
@@ -155,4 +157,5 @@ export interface RoleFilters extends BaseFilters {
 /** Filters for Permission list queries. */
 export interface PermissionFilters extends BaseFilters {
   resource?: string; // filter by resource (e.g., "properties")
+  isDefault?: boolean; // filter by default vs custom permissions
 }

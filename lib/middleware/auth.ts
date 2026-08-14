@@ -1,5 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { auth } from '@/lib/auth';
+// BetterAuth needs raw Prisma client, not tenant-scoped
+import { prisma } from '@/lib/db'; // eslint-disable-line no-restricted-imports
 import { headers } from 'next/headers';
 import { logger } from '@/lib/logger';
 
@@ -29,7 +31,26 @@ export function withAuth(handler: AuthMiddlewareHandler) {
         return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
       }
 
-      // 2. Execute Handler with context
+      // 2. Check if user is banned
+      const user = await prisma.user.findUnique({ where: { id: session.user.id } });
+      if (user?.banned) {
+        const now = new Date();
+        // If ban has expired, clear the flag
+        if (user.banExpires && user.banExpires < now) {
+          await prisma.user.update({
+            where: { id: user.id },
+            data: { banned: false, banReason: null, banExpires: null },
+          });
+        } else {
+          logger.warn(
+            { userId: session.user.id, url: request.url, banReason: user.banReason },
+            'Banned user attempted to access protected route',
+          );
+          return NextResponse.json({ error: 'Your account has been banned. Contact your administrator.' }, { status: 403 });
+        }
+      }
+
+      // 3. Execute Handler with context
       return await handler(request, {
         user: session.user,
         session: session.session,

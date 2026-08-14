@@ -4,6 +4,8 @@ import { prismaAdapter } from 'better-auth/adapters/prisma';
 import { prisma } from './db';
 import { organization } from 'better-auth/plugins';
 import { env } from './env';
+import { createAuthMiddleware, APIError } from 'better-auth/api';
+import { logger } from './logger';
 
 interface ExtendedUser {
   permissions: string[];
@@ -130,8 +132,40 @@ export const auth = betterAuth({
     },
   },
 
+  hooks: {
+    before: createAuthMiddleware(async (ctx) => {
+      // Check banned status during email sign-in
+      if (ctx.path === '/sign-in/email' && ctx.body?.email) {
+        const user = await prisma.user.findUnique({
+          where: { email: ctx.body.email },
+        });
+
+        if (user?.banned) {
+          const now = new Date();
+          // If ban has expired, allow login (ban is lifted)
+          if (user.banExpires && user.banExpires < now) {
+            // Ban expired — clear the ban flag
+            await prisma.user.update({
+              where: { id: user.id },
+              data: { banned: false, banReason: null, banExpires: null },
+            });
+          } else {
+            const reason = user.banReason || 'Your account has been banned.';
+            logger.warn(
+              { userId: user.id, email: ctx.body.email },
+              `Banned user login attempt: ${reason}`,
+            );
+            throw new APIError('UNAUTHORIZED', {
+              message: `Access denied. ${reason}`,
+            });
+          }
+        }
+      }
+    }),
+  },
+
   callbacks: {
-    async session({ session, user }: { session: ExtendedSession; user: { id: string } }): Promise<ExtendedSession> {
+    async session({ session, user }: { session: ExtendedSession; user: { id: string } }): Promise<ExtendedSession | null> {
       // Check if we're in Edge Runtime (middleware)
       // If so, skip permission resolution to avoid Prisma errors
       const isEdgeRuntime = typeof (globalThis as { EdgeRuntime?: string }).EdgeRuntime !== 'undefined';
@@ -142,8 +176,27 @@ export const auth = betterAuth({
         return session;
       }
 
-      // In Node.js runtime, resolve permissions
+      // In Node.js runtime, resolve permissions and check ban status
       try {
+        // Check if user is banned — invalidate session if so
+        const currentUser = await prisma.user.findUnique({ where: { id: user.id } });
+        if (currentUser?.banned) {
+          const now = new Date();
+          // If ban has expired, clear the flag and allow session
+          if (currentUser.banExpires && currentUser.banExpires < now) {
+            await prisma.user.update({
+              where: { id: user.id },
+              data: { banned: false, banReason: null, banExpires: null },
+            });
+          } else {
+            logger.warn(
+              { userId: user.id, banReason: currentUser.banReason },
+              'Session invalidated for banned user',
+            );
+            return null;
+          }
+        }
+
         const { resolvePermissions } = await import('@/lib/permissions/resolver');
         const { getPlatformOrgId, isSuperAdmin: checkIsSuperAdmin } = await import('@/lib/authz');
 
