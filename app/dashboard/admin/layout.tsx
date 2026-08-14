@@ -3,7 +3,7 @@
 import { useState } from 'react';
 import { useRouter, usePathname } from 'next/navigation';
 import Link from 'next/link';
-import { Menu, X, UserRound, Building2, UsersRound, Shield, Key, LogOut } from 'lucide-react';
+import { Menu, X, UserRound, Building2, UsersRound, Shield, Key, Layers, LogOut } from 'lucide-react';
 import { authClient } from '@/lib/auth-client';
 import { RequireSuperAdmin } from '@/components/auth/RequireSuperAdmin';
 
@@ -13,6 +13,7 @@ const navItems = [
   { href: '/dashboard/admin/teams', label: 'Teams', icon: UsersRound },
   { href: '/dashboard/admin/roles', label: 'Roles', icon: Shield },
   { href: '/dashboard/admin/permissions', label: 'Permissions', icon: Key },
+  { href: '/dashboard/admin/resources', label: 'Resources', icon: Layers },
 ];
 
 export default function AdminDashboardLayout({ children }: { children: React.ReactNode }) {

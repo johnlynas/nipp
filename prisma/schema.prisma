@@ -300,6 +300,8 @@ model Role {
   permissions        RolePermission[]
   memberRoles        MemberRole[]
   teamRoles          TeamRole[]   // Roles assigned to teams for inheritance
+  // Resource access control — global junction table back-reference
+  resources          ResourceRole[]
 
   @@index([name]) // B-tree index for prefix search (search-autocomplete)
 }
@@ -390,4 +392,41 @@ model NotificationLog {
 
   @@index([organizationId])
   @@index([timestamp])
+}
+
+// ============================================================
+// Resource Data Model (Global — not org-scoped)
+// ============================================================
+
+/**
+ * Resource — Global catalog of portal feature modules.
+ * Resources represent feature areas (e.g., "Maintenance Requests", "Work Orders")
+ * and are linked to org-scoped roles via the ResourceRole junction table.
+ */
+model Resource {
+  id          String   @id @default(cuid())
+  name        String   @unique
+  description String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  resourceRoles ResourceRole[]
+}
+
+/**
+ * ResourceRole — Global junction table linking Resources to org-scoped Roles.
+ * Enables feature-level access control: a role must be assigned to a resource
+ * for users with that role to access the feature.
+ */
+model ResourceRole {
+  id         String   @id @default(cuid())
+  createdAt  DateTime @default(now())
+
+  resourceId String
+  resource   Resource @relation(fields: [resourceId], references: [id], onDelete: Cascade)
+
+  roleId     String
+  role       Role     @relation(fields: [roleId], references: [id], onDelete: Cascade)
+
+  @@unique([resourceId, roleId]) // A role can only be assigned once per resource
 }
