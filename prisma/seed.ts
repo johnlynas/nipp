@@ -62,6 +62,12 @@ const PERMISSION_CATALOG = [
   
   { key: 'viewings:read', resource: 'viewings', action: 'read', description: 'View property viewings', isDefault: true },
   { key: 'viewings:create', resource: 'viewings', action: 'create', description: 'Schedule property viewings', isDefault: true },
+  
+  // Calendar permissions (4)
+  { key: 'calendar:read', resource: 'calendars', action: 'read', description: 'View calendar events', isDefault: true },
+  { key: 'calendar:create', resource: 'calendars', action: 'create', description: 'Create calendar events', isDefault: true },
+  { key: 'calendar:update', resource: 'calendars', action: 'update', description: 'Update calendar events', isDefault: true },
+  { key: 'calendar:delete', resource: 'calendars', action: 'delete', description: 'Delete calendar events', isDefault: true },
 ];
 
 // =========================================================================
@@ -458,6 +464,9 @@ async function main() {
   // 10. TENANT ORGANIZATIONS & DEVELOPER/TESTING PROFILES
   // =========================================================================
 
+  let devTenantOrg: { id: string } | null = null;
+  let testTenantOrg: { id: string } | null = null;
+
   if (testMode) {
     // =========================================================================
     // TESTING PROFILE: Test Tenant Ltd with QA Operations and Members teams
@@ -470,7 +479,7 @@ async function main() {
     console.log(`\n📦 Seeding testing profile...`);
 
     // --- Test Tenant: Test Tenant Ltd ---
-    let testTenantOrg = await prisma.organization.findFirst({ where: { slug: 'test-tenant-ltd' } });
+    testTenantOrg = await prisma.organization.findFirst({ where: { slug: 'test-tenant-ltd' } });
     if (!testTenantOrg) {
       testTenantOrg = await prisma.organization.create({
         data: { name: 'Test Tenant Ltd', slug: 'test-tenant-ltd', description: 'Testing tenant organization for QA and integration testing.', status: 'ACTIVE' },
@@ -547,7 +556,7 @@ async function main() {
     console.log(`\n📦 Seeding developer profile...`);
 
     // --- Dev Tenant: Dev Tenant Ltd ---
-    let devTenantOrg = await prisma.organization.findFirst({ where: { slug: 'dev-tenant-ltd' } });
+    devTenantOrg = await prisma.organization.findFirst({ where: { slug: 'dev-tenant-ltd' } });
     if (!devTenantOrg) {
       devTenantOrg = await prisma.organization.create({
         data: { name: 'Dev Tenant Ltd', slug: 'dev-tenant-ltd', description: 'Developer tenant organization for development and staging.', status: 'ACTIVE' },
@@ -612,6 +621,189 @@ async function main() {
     console.log(`   ✅ Created and added Dev Tenant User B to Operations and Members teams`);
 
     console.log(`✅ Developer profile seeded: Dev Tenant Org (${devTenantAEmail}, ${devTenantBEmail})`);
+  }
+
+  // =========================================================================
+  // 9.5. CALENDAR TEST DATA (DEV & TEST PROFILES)
+  // =========================================================================
+
+  /** Helper to create a calendar for an org */
+  async function ensureCalendar(orgId: string, name: string, isDefault: boolean = false): Promise<{ id: string }> {
+    const existing = await prisma.calendar.findFirst({
+      where: { organizationId: orgId, name },
+    });
+    if (existing) return { id: existing.id };
+
+    const calendar = await prisma.calendar.create({
+      data: {
+        name,
+        description: isDefault ? 'Default calendar' : undefined,
+        color: isDefault ? '#1B2A4A' : '#2A9D8F',
+        isDefault,
+        organization: { connect: { id: orgId } },
+      },
+    });
+    return { id: calendar.id };
+  }
+
+  /** Helper to create an event for a calendar */
+  async function ensureEvent(
+    orgId: string,
+    calendarId: string,
+    title: string,
+    startDate: Date,
+    endDate: Date,
+    eventType?: 'VIEWING' | 'INSPECTION' | 'MAINTENANCE' | 'LEASE_SIGNING' | 'LEASE_RENEWAL' | 'KEY_EXCHANGE' | 'OTHER',
+  ): Promise<void> {
+    const existing = await prisma.calendarEvent.findFirst({
+      where: { organizationId: orgId, title },
+    });
+    if (existing) return;
+
+    await prisma.calendarEvent.create({
+      data: {
+        title,
+        startDate,
+        endDate,
+        eventType: eventType || 'OTHER',
+        calendarId,
+        organizationId: orgId,
+      },
+    });
+  }
+
+  /** Helper to create a recurring event */
+  async function ensureRecurringEvent(
+    orgId: string,
+    calendarId: string,
+    title: string,
+    startDate: Date,
+    endDate: Date,
+    frequency: 'WEEKLY' | 'MONTHLY' | 'QUARTERLY' | 'SEMI_ANNUALLY' | 'ANNUALLY',
+    interval: number = 1,
+  ): Promise<void> {
+    const existing = await prisma.calendarEvent.findFirst({
+      where: { organizationId: orgId, title },
+    });
+    if (existing) return;
+
+    const event = await prisma.calendarEvent.create({
+      data: { title, startDate, endDate, calendarId, organizationId: orgId },
+    });
+
+    await prisma.calendarRecurrence.create({
+      data: {
+        frequency,
+        interval,
+        organizationId: orgId,
+        eventId: event.id,
+      },
+    });
+  }
+
+  // Seed calendar test data for both dev and test profiles
+  console.log('\n📅 Seeding calendar test data...');
+
+  // Platform org calendar (no events, just the default calendar)
+  await ensureCalendar(platformOrgId, 'Main Calendar', true);
+  console.log('   ✅ Created default calendar for Platform organization');
+
+  // Dev tenant org calendars and events
+  if (devTenantOrg) {
+    const devCalendar = await ensureCalendar(devTenantOrg.id, 'Main Calendar', true);
+
+    // Create some test events for the dev tenant
+    const now = new Date();
+    const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+
+    // Event happening today
+    await ensureEvent(
+      devTenantOrg.id,
+      devCalendar.id,
+      'Team Standup',
+      new Date(today.getTime() + 2 * 60 * 60 * 1000), // 2:00 PM today
+      new Date(today.getTime() + 2.5 * 60 * 60 * 1000), // 2:30 PM today
+      'INSPECTION',
+    );
+
+    // Event happening tomorrow
+    const tomorrow = new Date(today);
+    tomorrow.setDate(tomorrow.getDate() + 1);
+    await ensureEvent(
+      devTenantOrg.id,
+      devCalendar.id,
+      'Property Viewing - 123 High St',
+      new Date(tomorrow.getTime() + 10 * 60 * 60 * 1000), // 10:00 AM tomorrow
+      new Date(tomorrow.getTime() + 11 * 60 * 60 * 1000), // 11:00 AM tomorrow
+      'VIEWING',
+    );
+
+    // Recurring weekly event
+    await ensureRecurringEvent(
+      devTenantOrg.id,
+      devCalendar.id,
+      'Weekly Maintenance Check',
+      today,
+      new Date(today.getTime() + 60 * 60 * 1000), // 1 hour duration
+      'WEEKLY',
+      1,
+    );
+
+    // Recurring monthly event
+    await ensureRecurringEvent(
+      devTenantOrg.id,
+      devCalendar.id,
+      'Monthly Lease Review',
+      new Date(today.getFullYear(), today.getMonth(), 15), // 15th of this month
+      new Date(today.getFullYear(), today.getMonth(), 15, 14, 0), // 2:00 PM
+      'MONTHLY',
+      1,
+    );
+
+    // Multi-day event
+    const nextWeek = new Date(today);
+    nextWeek.setDate(nextWeek.getDate() + 7);
+    const nextWeekEnd = new Date(nextWeek);
+    nextWeekEnd.setDate(nextWeekEnd.getDate() + 2);
+    await ensureEvent(
+      devTenantOrg.id,
+      devCalendar.id,
+      'Building Maintenance Window',
+      nextWeek,
+      new Date(nextWeekEnd.getTime() + 24 * 60 * 60 * 1000), // 3 days
+      'MAINTENANCE',
+    );
+
+    console.log('   ✅ Calendar test data seeded for dev tenant');
+  }
+
+  // Test tenant org calendars and events
+  if (testTenantOrg) {
+    const testCalendar = await ensureCalendar(testTenantOrg.id, 'Main Calendar', true);
+
+    const now = new Date();
+    const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+
+    await ensureEvent(
+      testTenantOrg.id,
+      testCalendar.id,
+      'QA Testing Session',
+      new Date(today.getTime() + 3 * 60 * 60 * 1000), // 3:00 PM today
+      new Date(today.getTime() + 4 * 60 * 60 * 1000), // 4:00 PM today
+      'INSPECTION',
+    );
+
+    await ensureRecurringEvent(
+      testTenantOrg.id,
+      testCalendar.id,
+      'Weekly QA Review',
+      today,
+      new Date(today.getTime() + 60 * 60 * 1000),
+      'WEEKLY',
+      1,
+    );
+
+    console.log('   ✅ Calendar test data seeded for test tenant');
   }
 
   // =========================================================================
@@ -682,6 +874,11 @@ async function main() {
       name: 'viewings',
       description:
         'Property viewing scheduling resources for organizing and tracking property viewings including appointment times, attendee details, agent assignments, and viewing outcomes.',
+    },
+    {
+      name: 'calendars',
+      description:
+        'Calendar and event management resources for creating, viewing, updating, and deleting organization-scoped calendar events including recurring events and drag-and-drop rescheduling.',
     },
   ];
 

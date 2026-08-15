@@ -1,0 +1,287 @@
+'use client';
+
+import { useMemo } from 'react';
+import type { CalendarEvent } from './types';
+import { generateWeekGrid, generateHourlySlots, isToday, formatTime } from './calendar-utils';
+
+// ---------------------------------------------------------------------------
+// Props
+// ---------------------------------------------------------------------------
+
+interface CalendarWeekViewProps {
+  referenceDate: Date;
+  events: CalendarEvent[];
+  onDateClick?: (date: Date) => void;
+  onEventClick?: (event: CalendarEvent) => void;
+  onDateRightClick?: (date: Date, e: React.MouseEvent) => void;
+  onEventRightClick?: (event: CalendarEvent, e: React.MouseEvent) => void;
+  onEventDragStart?: (event: CalendarEvent, e: React.DragEvent) => void;
+  onDrop?: (date: Date, eventId: string) => void;
+}
+
+// ---------------------------------------------------------------------------
+// Component
+// ---------------------------------------------------------------------------
+
+export default function CalendarWeekView({
+  referenceDate,
+  events,
+  onDateClick,
+  onEventClick,
+  onDateRightClick,
+  onEventRightClick,
+  onDrop,
+}: CalendarWeekViewProps) {
+  const weekDays = useMemo(() => generateWeekGrid(referenceDate), [referenceDate]);
+  const hours = useMemo(() => generateHourlySlots(), []);
+
+  // Group events by day and determine position (start/middle/end/single)
+  const eventsByDay = useMemo(() => {
+    // For each event, determine which days it spans and its position on each day
+    const map: Record<string, Array<CalendarEvent & { position: 'start' | 'middle' | 'end' | 'single' }>> = {};
+
+    for (const day of weekDays) {
+      const dayStr = formatDateKey(day);
+      map[dayStr] = [];
+    }
+
+    for (const event of events) {
+      const eventStart = new Date(event.startDate);
+      eventStart.setHours(0, 0, 0, 0);
+
+      const eventEnd = new Date(event.endDate);
+      eventEnd.setHours(23, 59, 59, 999);
+
+      // Calculate the number of days this event spans (using date-only comparison)
+      const startDay = new Date(eventStart);
+      let dayCount = 0;
+      while (startDay <= eventEnd) {
+        startDay.setDate(startDay.getDate() + 1);
+        dayCount++;
+      }
+
+      // Now assign position for each day the event spans
+      let currentDay = new Date(eventStart);
+      let dayIndex = 0;
+      while (currentDay <= eventEnd) {
+        const dayStr = formatDateKey(currentDay);
+        let position: 'start' | 'middle' | 'end' | 'single';
+
+        if (dayCount === 1) {
+          position = 'single';
+        } else if (dayIndex === 0) {
+          position = 'start';
+        } else if (dayIndex === dayCount - 1) {
+          position = 'end';
+        } else {
+          position = 'middle';
+        }
+
+        if (map[dayStr]) {
+          map[dayStr].push({ ...event, position });
+        }
+
+        currentDay = new Date(currentDay.getTime() + 86400000);
+        dayIndex++;
+      }
+    }
+
+    return map;
+  }, [events, weekDays]);
+
+  const handleDrop = (e: React.DragEvent, date: Date) => {
+    e.preventDefault();
+    const eventId = e.dataTransfer.getData('text/plain');
+    if (eventId) {
+      onDrop?.(date, eventId);
+    }
+  };
+
+  const handleDragOver = (e: React.DragEvent) => {
+    e.preventDefault();
+    e.dataTransfer.dropEffect = 'move';
+  };
+
+  return (
+    <div className="bg-white rounded-lg shadow-sm border overflow-hidden" style={{ borderColor: '#dee2e6' }}>
+      {/* Day headers */}
+      <div className="grid grid-cols-8 border-b sticky top-0 bg-white z-10" style={{ borderColor: '#dee2e6' }}>
+        <div className="py-2 px-1 text-center text-xs font-semibold" style={{ color: '#6c757d' }}>
+          GMT
+        </div>
+        {weekDays.map((day, i) => (
+          <div
+            key={i}
+            className="py-2 text-center border-l"
+            style={{ borderColor: '#f0f0f0' }}
+          >
+            <div className="text-xs font-medium" style={{ color: '#6c757d' }}>
+              {day.toLocaleDateString('en-GB', { weekday: 'short' })}
+            </div>
+            <div className={`text-lg font-bold ${isToday(day) ? 'rounded-full w-8 h-8 flex items-center justify-center mx-auto' : ''}`}
+              style={isToday(day) ? { backgroundColor: '#F5A623', color: '#ffffff' } : { color: '#1B2A4A' }}
+            >
+              {day.getDate()}
+            </div>
+          </div>
+        ))}
+      </div>
+
+      {/* Time grid */}
+      <div className="grid grid-cols-8" style={{ maxHeight: '600px', overflowY: 'auto' }}>
+        {/* Time labels column */}
+        <div className="border-r" style={{ borderColor: '#f0f0f0' }}>
+          {hours.map((hour) => (
+            <div
+              key={hour}
+              className="text-xs text-right pr-2 py-0"
+              style={{ height: '64px', color: '#6c757d' }}
+            >
+              {hour === 0 ? '' : formatTime(new Date(2000, 0, 1, hour, 0))}
+            </div>
+          ))}
+        </div>
+
+        {/* Day columns */}
+        {weekDays.map((day, dayIndex) => {
+          const dayStr = formatDateKey(day);
+          const dayEvents = eventsByDay[dayStr] || [];
+
+          return (
+            <div
+              key={dayIndex}
+              className="border-l relative"
+              style={{ borderColor: '#f0f0f0' }}
+              onClick={() => onDateClick?.(day)}
+              onContextMenu={(e) => { e.preventDefault(); onDateRightClick?.(day, e); }}
+              onDrop={(e) => handleDrop(e, day)}
+              onDragOver={handleDragOver}
+            >
+              {/* Hourly grid lines */}
+              {hours.map((hour) => (
+                <div
+                  key={hour}
+                  className="border-b"
+                  style={{ height: '64px', borderColor: '#f0f0f0' }}
+                />
+              ))}
+
+              {/* Event overlays */}
+              {dayEvents.map((event) => {
+                const startHour = event.startDate.getHours() + event.startDate.getMinutes() / 60;
+                const endHour = event.endDate.getHours() + event.endDate.getMinutes() / 60;
+                const duration = Math.max(endHour - startHour, 0.5);
+
+                // Multi-day events: render differently based on position
+                if (event.position === 'middle') {
+                  // Just a colored bar spanning the cell width — no click, only drag + context menu
+                  return (
+                    <div
+                      key={event.id}
+                      className="absolute left-0.5 right-0.5 rounded cursor-grab hover:brightness-95 transition-all"
+                      style={{
+                        top: `${startHour * 64}px`,
+                        height: `${duration * 64}px`,
+                        backgroundColor: `${event.color || '#2A9D8F'}30`,
+                        borderLeft: `3px solid ${event.color || '#2A9D8F'}`,
+                        zIndex: 10,
+                      }}
+                      onContextMenu={(e) => { e.preventDefault(); e.stopPropagation(); onEventRightClick?.(event, e); }}
+                    />
+                  );
+                }
+
+                if (event.position === 'start') {
+                  // Title with left indicator and colored bar — no click, only drag + context menu
+                  return (
+                    <div
+                      key={event.id}
+                      className="absolute left-0.5 right-0.5 rounded cursor-grab hover:brightness-95 transition-all"
+                      style={{
+                        top: `${startHour * 64}px`,
+                        height: `${duration * 64}px`,
+                        backgroundColor: `${event.color || '#2A9D8F'}30`,
+                        borderLeft: `3px solid ${event.color || '#2A9D8F'}`,
+                        zIndex: 10,
+                      }}
+                      onContextMenu={(e) => { e.preventDefault(); e.stopPropagation(); onEventRightClick?.(event, e); }}
+                    >
+                      <div className="px-1.5 py-0.5 overflow-hidden" style={{ maxHeight: '100%' }}>
+                        <div className="text-xs font-semibold truncate" style={{ color: event.color || '#1B2A4A' }}>
+                          ▸ {event.title}
+                        </div>
+                        <div className="text-[10px] text-gray-500">
+                          {formatTime(event.startDate)} – {formatTime(event.endDate)}
+                        </div>
+                      </div>
+                    </div>
+                  );
+                }
+
+                if (event.position === 'end') {
+                  // Title with right indicator and colored bar — no click, only drag + context menu
+                  return (
+                    <div
+                      key={event.id}
+                      className="absolute left-0.5 right-0.5 rounded cursor-grab hover:brightness-95 transition-all"
+                      style={{
+                        top: `${startHour * 64}px`,
+                        height: `${duration * 64}px`,
+                        backgroundColor: `${event.color || '#2A9D8F'}30`,
+                        borderLeft: `3px solid ${event.color || '#2A9D8F'}`,
+                        zIndex: 10,
+                      }}
+                      onContextMenu={(e) => { e.preventDefault(); e.stopPropagation(); onEventRightClick?.(event, e); }}
+                    >
+                      <div className="px-1.5 py-0.5 overflow-hidden" style={{ maxHeight: '100%' }}>
+                        <div className="text-xs font-semibold truncate" style={{ color: event.color || '#1B2A4A' }}>
+                          {event.title} ◂
+                        </div>
+                        <div className="text-[10px] text-gray-500">
+                          {formatTime(event.startDate)} – {formatTime(event.endDate)}
+                        </div>
+                      </div>
+                    </div>
+                  );
+                }
+
+                // Single-day event: render normally with time
+                return (
+                  <div
+                    key={event.id}
+                    className="absolute left-0.5 right-0.5 rounded cursor-pointer hover:brightness-95 transition-all"
+                    style={{
+                      top: `${startHour * 64}px`,
+                      height: `${duration * 64}px`,
+                      backgroundColor: `${event.color || '#2A9D8F'}30`,
+                      borderLeft: `3px solid ${event.color || '#2A9D8F'}`,
+                      zIndex: 10,
+                    }}
+                    onClick={(e) => { e.stopPropagation(); onEventClick?.(event); }}
+                    onContextMenu={(e) => { e.preventDefault(); e.stopPropagation(); onEventRightClick?.(event, e); }}
+                  >
+                    <div className="px-1.5 py-0.5 overflow-hidden" style={{ maxHeight: '100%' }}>
+                      <div className="text-xs font-semibold truncate" style={{ color: event.color || '#1B2A4A' }}>
+                        {event.title}
+                      </div>
+                      <div className="text-[10px] text-gray-500">
+                        {formatTime(event.startDate)} – {formatTime(event.endDate)}
+                      </div>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+function formatDateKey(date: Date): string {
+  const y = date.getFullYear();
+  const m = String(date.getMonth() + 1).padStart(2, '0');
+  const d = String(date.getDate()).padStart(2, '0');
+  return `${y}-${m}-${d}`;
+}

@@ -45,6 +45,27 @@ enum NotificationStatus {
   FAILED
 }
 
+/** Calendar event types */
+enum CalendarEventType {
+  VIEWING
+  INSPECTION
+  MAINTENANCE
+  LEASE_SIGNING
+  LEASE_RENEWAL
+  KEY_EXCHANGE
+  OTHER
+}
+
+/** Recurrence frequency for recurring calendar events */
+enum CalendarRecurrenceFrequency {
+  DAILY
+  WEEKLY
+  MONTHLY
+  QUARTERLY
+  SEMI_ANNUALLY
+  ANNUALLY
+}
+
 // ============================================================
 // Authentication Models (BetterAuth — global, not org-scoped)
 // ============================================================
@@ -135,6 +156,10 @@ model Organization {
   teams              Team[]
   teamMembers        TeamMember[] // Organization-scoped team memberships
   teamRoles          TeamRole[]   // Organization-scoped team-role assignments
+  // Calendars: organization-scoped calendar containers and events
+  calendars          Calendar[]
+  calendarEvents     CalendarEvent[]
+  calendarRecurrences CalendarRecurrence[]
 }
 
 model Member {
@@ -429,4 +454,87 @@ model ResourceRole {
   role       Role     @relation(fields: [roleId], references: [id], onDelete: Cascade)
 
   @@unique([resourceId, roleId]) // A role can only be assigned once per resource
+}
+
+// ============================================================
+// Calendar Models (Interactive Calendar — org-scoped)
+// ============================================================
+
+/**
+ * Calendar — Container/namespace for events within an organization.
+ * Each org gets one default calendar at bootstrap. Supports multiple calendars
+ * per org for future extensibility (e.g., "Maintenance Calendar", "Lettings Calendar").
+ */
+model Calendar {
+  id          String   @id @default(cuid())
+  name        String   // Human-readable calendar name
+  description String?
+  color       String   @default("#1B2A4A") // Default color theme
+  isDefault   Boolean  @default(false) // Exactly one default calendar per org
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  organizationId String
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+
+  events CalendarEvent[]
+
+  @@unique([organizationId, name]) // Prevent duplicate names within an org
+  @@index([organizationId])
+}
+
+/**
+ * CalendarEvent — Individual events within a calendar.
+ * Supports single-day, multi-day, and recurring events via CalendarRecurrence.
+ */
+model CalendarEvent {
+  id          String   @id @default(cuid())
+  title       String
+  description String?
+  startDate   DateTime // Local datetime (no timezone for v1)
+  endDate     DateTime // Local datetime (no timezone for v1)
+  eventType   CalendarEventType @default(OTHER)
+  color       String?  // Event-level override of calendar default color
+
+  calendarId String
+  calendar   Calendar @relation(fields: [calendarId], references: [id], onDelete: Cascade)
+
+  recurrenceId String?
+  recurrence   CalendarRecurrence? @relation
+
+  propertyId String? // Optional property association (nullable for general events)
+
+  organizationId String
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@index([organizationId, startDate]) // Efficient date range queries
+  @@index([propertyId])                // Property-based event lookups (future scheduler)
+}
+
+/**
+ * CalendarRecurrence — Recurrence rules for recurring calendar events.
+ * Uses iCal-inspired fields: frequency, interval, endDate/count, byDay, byMonthDay.
+ */
+model CalendarRecurrence {
+  id         String   @id @default(cuid())
+  frequency  CalendarRecurrenceFrequency
+  interval   Int      @default(1) // Every N frequency units (e.g., interval=2 with WEEKLY = every 2 weeks)
+  endDate    DateTime? // Hard end date (mutually exclusive with count)
+  count      Int?     // Max occurrence count (mutually exclusive with endDate)
+  byDay      String?  // iCal-style by-day rules (e.g., "MO,WE,FR" for Mon/Wed/Fri)
+  byMonthDay Int?     // Specific day of month for monthly recurrences (1-31)
+
+  eventId    String   @unique
+  event      CalendarEvent @relation(fields: [eventId], references: [id])
+
+  organizationId String
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@index([organizationId])
 }
