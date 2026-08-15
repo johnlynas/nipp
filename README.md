@@ -7,6 +7,8 @@ Property NI provides a secure, multi-tenant platform for managing property portf
 **Key features:**
 - **Multi-tenant architecture** with defense-in-depth isolation (Prisma extension + PostgreSQL Row Level Security)
 - **Super Admin dashboard** for managing organizations, roles, permissions, and cross-tenant audit logs
+- **Interactive Calendar** — multi-view (month/week/day) calendar component with drag-and-drop rescheduling, recurring events (weekly through annually), event detail modals, quick-add via sidebar or right-click context menu, and color-coded event types (viewings, inspections, maintenance, lease events)
+- **Calendar Notifications** — email notification service that alerts users or entire organizations about events happening today, with rate limiting via Redis and delivery logging to NotificationLog
 - **Granular RBAC** with organization-scoped roles, member-role assignments, and a catalog of ~50 atomic permissions
 - **Teams** — sub-organizational groupings with role inheritance, managed via dedicated REST API
 - **Secure authentication** via BetterAuth with Google OIDC and email/password, tight session expiry (1-hour absolute max), and auto-logout on inactivity
@@ -54,6 +56,46 @@ Teams are managed via REST API endpoints under each organization. Tenant admins 
 
 See [ARCHITECTURE.md#teams-architecture](./ARCHITECTURE.md#teams-architecture) for the full API reference.
 
+### Interactive Calendar (Tenant Admin)
+
+The calendar is a standalone, reusable component (`components/calendar/`) that can be integrated into any organization context. It supports month, week, and day views with drag-and-drop rescheduling, recurring events (weekly through annually), event detail modals, and quick-add via sidebar or right-click context menu.
+
+| Route | Methods | Description |
+|-------|---------|-------------|
+| `/api/organizations/[orgId]/calendar` | GET, POST | List calendars / Create a new calendar |
+| `/api/organizations/[orgId]/calendar/[id]` | GET, PATCH, DELETE | Get / Update / Delete calendar |
+| `/api/organizations/[orgId]/calendar-events` | GET, POST | List events in date range / Create event |
+| `/api/organizations/[orgId]/calendar-events/[id]` | GET, PATCH, DELETE | Get / Update / Delete event |
+| `/api/organizations/[orgId]/calendar-events/upcoming` | GET | Get upcoming events for sidebar |
+
+**Query Parameters (Event List):**
+```
+GET /api/organizations/[orgId]/calendar-events?start=2026-08-01&end=2026-08-31&calendarId=xxx
+```
+
+**Event Types:** `VIEWING`, `INSPECTION`, `MAINTENANCE`, `LEASE_SIGNING`, `LEASE_RENEWAL`, `KEY_EXCHANGE`, `OTHER`
+
+**Recurrence Frequencies:** `DAILY`, `WEEKLY`, `MONTHLY`, `QUARTERLY`, `SEMI_ANNUALLY`, `ANNUALLY`
+
+### Calendar Notifications (Tenant Admin)
+
+The calendar notification service sends email notifications to users or entire organizations about events happening today. It reuses the existing notification infrastructure (`lib/notifications/dispatcher.ts`) for rate-limited email delivery and logs all notifications to `NotificationLog`.
+
+| Route | Methods | Description |
+|-------|---------|-------------|
+| `/api/organizations/[orgId]/calendar-notifications/today` | GET | Get today's events for the current user/org |
+| `/api/organizations/[orgId]/calendar-notifications/send-today` | POST | Trigger notifications for today's events |
+| `/api/organizations/[orgId]/calendar-notifications/history` | GET | View notification delivery history |
+
+**Notification Flow:**
+1. Scans for events where `startDate` falls on the current date
+2. Resolves recipients (specific user or all org members)
+3. Builds a branded email using Property NI colors
+4. Dispatches via the existing rate-limited email dispatcher
+5. Logs each notification to `NotificationLog`
+
+**Rate Limiting:** Max 5 notifications per event type per 24-hour window (same as existing notification system).
+
 ### Platform Permissions
 
 The following platform-level permissions are available (Super Admin only):
@@ -64,6 +106,19 @@ The following platform-level permissions are available (Super Admin only):
 | `platform:manage_roles` | Manage global roles |
 | `platform:manage_permissions` | Manage global permission catalog |
 | `platform:view_audit_logs` | View audit logs across all organizations |
+
+### Organization-Scoped Permissions (Calendar)
+
+The following calendar-related permissions are available for tenant users, scoped to their organization:
+
+| Permission Key | Description |
+|---------------|-------------|
+| `calendar:read` | View calendar events |
+| `calendar:create` | Create new calendar events |
+| `calendar:update` | Edit existing calendar events |
+| `calendar:delete` | Delete calendar events |
+
+These permissions are enforced on all `/api/organizations/[orgId]/calendar*` endpoints and integrated with the existing RBAC engine.
 
 ### Organization Lifecycle States
 
