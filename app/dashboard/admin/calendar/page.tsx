@@ -16,7 +16,7 @@ export default function CalendarPage() {
 
   useEffect(() => {
     async function init() {
-      // Fetch available organizations for the selector
+      // Fetch available organizations for the selector (super admin only)
       try {
         const res = await fetch("/api/dashboard/admin/organizations");
         if (res.ok) {
@@ -51,13 +51,35 @@ export default function CalendarPage() {
     init();
   }, []);
 
-  // Set org name when both orgId and orgs are available
+  // Fetch organization name directly when orgId is available
   useEffect(() => {
-    if (orgId && orgs.length > 0) {
-      const current = orgs.find((o) => o.id === orgId);
-      setSelectedOrgName(current?.name || '');
+    if (!orgId) return;
+
+    let cancelled = false;
+    async function fetchOrgName() {
+      try {
+        const res = await fetch(`/api/organizations/${orgId}`);
+        if (res.ok && !cancelled) {
+          const data = await res.json();
+          setSelectedOrgName(data.name || '');
+        }
+      } catch {
+        // Silently fail — fall back to org list lookup
+      }
     }
-  }, [orgId, orgs]);
+
+    fetchOrgName();
+
+    // Fallback: if direct fetch failed, try the org list
+    if (orgs.length > 0 && !selectedOrgName) {
+      const current = orgs.find((o) => o.id === orgId);
+      if (current?.name) {
+        setSelectedOrgName(current.name);
+      }
+    }
+
+    return () => { cancelled = true; };
+  }, [orgId, orgs, selectedOrgName]);
 
   if (loading) {
     return (

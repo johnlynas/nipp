@@ -71,35 +71,52 @@ export default function CalendarSidebar({
     }
   };
 
+  // Format event date/time for display in upcoming events list
+  const formatEventDateTime = (event: UpcomingEvent): string => {
+    const isMultiDay = event.startDate.toDateString() !== event.endDate.toDateString();
+
+    if (isMultiDay) {
+      // Multi-day: show date range with times
+      const startOpts: Intl.DateTimeFormatOptions = {
+        day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit'
+      };
+      const endOpts: Intl.DateTimeFormatOptions = {
+        day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit'
+      };
+      return `${event.startDate.toLocaleDateString('en-GB', startOpts)} – ${event.endDate.toLocaleDateString('en-GB', endOpts)}`;
+    }
+
+    // Single day with time range: show date and both times
+    const dateOpts: Intl.DateTimeFormatOptions = { day: 'numeric', month: 'short' };
+    const timeOpts: Intl.DateTimeFormatOptions = { hour: '2-digit', minute: '2-digit' };
+    return `${event.startDate.toLocaleDateString('en-GB', dateOpts)} ${event.startDate.toLocaleTimeString('en-GB', timeOpts)} – ${event.endDate.toLocaleTimeString('en-GB', timeOpts)}`;
+  };
+
   return (
     <aside
       className={`flex-shrink-0 bg-[#1B2A4A] text-white flex flex-col h-full transition-all duration-200 overflow-hidden ${
         isExpanded ? 'w-80' : 'w-16'
       }`}
     >
-      {/* Toggle button */}
-      <button
-        onClick={onToggle}
-        className="flex items-center justify-between px-4 py-3 border-b"
-        style={{ borderColor: '#24355c' }}
-        aria-label={isExpanded ? 'Collapse sidebar' : 'Expand sidebar'}
-      >
+      {/* Toggle button / title bar */}
+      <div className="flex items-center justify-between px-4 py-3 border-b flex-shrink-0" style={{ borderColor: '#24355c' }}>
         {isExpanded && (
           <span className="text-sm font-semibold">Upcoming Events</span>
         )}
-        <span className="text-gray-300 hover:text-white transition-colors">
+        <button
+          onClick={onToggle}
+          className="text-gray-300 hover:text-white transition-colors"
+          aria-label={isExpanded ? 'Collapse sidebar' : 'Expand sidebar'}
+        >
           {isExpanded ? '◀' : '▶'}
-        </span>
-      </button>
+        </button>
+      </div>
 
       {isExpanded && (
         <>
           {/* Organization Switcher */}
           {organizations.length > 0 && (
-            <div className="px-4 pb-3 border-b" style={{ borderColor: '#24355c' }}>
-              <label className="block text-xs font-medium mb-1.5" style={{ color: '#94a3b8' }}>
-                Switch Organization
-              </label>
+            <div className="px-4 pb-3 border-b flex-shrink-0" style={{ borderColor: '#24355c' }}>
               <div className="relative" ref={orgDropdownRef}>
                 <button
                   onClick={() => setOrgDropdownOpen(!orgDropdownOpen)}
@@ -139,8 +156,8 @@ export default function CalendarSidebar({
           )}
 
           {/* Quick Add Form */}
-          <div className="p-4 border-b" style={{ borderColor: '#24355c' }}>
-            <h3 className="text-sm font-semibold mb-3">Quick Add</h3>
+          <div className="px-4 pb-3 border-b flex-shrink-0" style={{ borderColor: '#24355c' }}>
+            <h3 className="text-sm font-semibold mb-2">Quick Add</h3>
             <form onSubmit={handleQuickAddSubmit} className="space-y-2">
               {/* Event Type dropdown */}
               <select
@@ -177,8 +194,8 @@ export default function CalendarSidebar({
             </form>
           </div>
 
-          {/* Upcoming Events List */}
-          <div className="flex-1 overflow-y-auto p-4">
+          {/* Upcoming Events List - scrollable container */}
+          <div className="flex-1 overflow-y-auto px-4 pb-4">
             {upcomingEvents.length === 0 ? (
               <p className="text-sm text-gray-400">No upcoming events</p>
             ) : (
@@ -191,44 +208,10 @@ export default function CalendarSidebar({
                         style={{ backgroundColor: event.color || '#2A9D8F' }}
                       />
                       <div className="min-w-0">
-                        <p className="text-sm font-medium truncate">{event.title}</p>
-                        {event.startDate.toDateString() === event.endDate.toDateString() ? (
-                          <p className="text-xs text-gray-400">
-                            {event.startDate.toLocaleDateString('en-GB', {
-                              day: 'numeric',
-                              month: 'short',
-                            })}{' '}
-                            {event.startDate.toLocaleTimeString('en-GB', {
-                              hour: '2-digit',
-                              minute: '2-digit',
-                            })}{' '}
-                            –{' '}
-                            {event.endDate.toLocaleTimeString('en-GB', {
-                              hour: '2-digit',
-                              minute: '2-digit',
-                            })}
-                          </p>
-                        ) : (
-                          <p className="text-xs text-gray-400">
-                            {event.startDate.toLocaleDateString('en-GB', {
-                              day: 'numeric',
-                              month: 'short',
-                            })}{' '}
-                            {event.startDate.toLocaleTimeString('en-GB', {
-                              hour: '2-digit',
-                              minute: '2-digit',
-                            })}{' '}
-                            –{' '}
-                            {event.endDate.toLocaleDateString('en-GB', {
-                              day: 'numeric',
-                              month: 'short',
-                            })}{' '}
-                            {event.endDate.toLocaleTimeString('en-GB', {
-                              hour: '2-digit',
-                              minute: '2-digit',
-                            })}
-                          </p>
-                        )}
+                        <p className="text-sm font-medium truncate" style={{ color: '#e2e8f0' }}>{event.title}</p>
+                        <p className="text-xs truncate" style={{ color: '#94a3b8' }}>
+                          {formatEventDateTime(event)}
+                        </p>
                       </div>
                     </div>
                   </li>

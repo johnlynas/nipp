@@ -13,6 +13,7 @@ interface CalendarEventCardProps {
   compact?: boolean;
   onClick?: (event: CalendarEvent) => void;
   onDragStart?: (event: CalendarEvent, e: React.DragEvent) => void;
+  onDragEnd?: () => void;
   onRightClick?: (event: CalendarEvent, e: React.MouseEvent) => void;
   isDragging?: boolean;
 }
@@ -26,6 +27,7 @@ export default function CalendarEventCard({
   compact = true,
   onClick,
   onDragStart,
+  onDragEnd,
   onRightClick,
   isDragging = false,
 }: CalendarEventCardProps) {
@@ -48,6 +50,10 @@ export default function CalendarEventCard({
     onDragStart?.(event, e);
   };
 
+  const handleDragEnd = () => {
+    onDragEnd?.();
+  };
+
   const handleRightClick = (e: React.MouseEvent) => {
     e.preventDefault();
     onRightClick?.(event, e);
@@ -55,8 +61,9 @@ export default function CalendarEventCard({
 
   return (
     <div
-      draggable={!compact}
+      draggable
       onDragStart={handleDragStart}
+      onDragEnd={handleDragEnd}
       onClick={handleClick}
       onContextMenu={handleRightClick}
       className={`rounded cursor-pointer transition-all ${

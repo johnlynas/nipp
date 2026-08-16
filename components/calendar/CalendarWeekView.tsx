@@ -16,7 +16,9 @@ interface CalendarWeekViewProps {
   onDateRightClick?: (date: Date, e: React.MouseEvent) => void;
   onEventRightClick?: (event: CalendarEvent, e: React.MouseEvent) => void;
   onEventDragStart?: (event: CalendarEvent, e: React.DragEvent) => void;
+  onDragEnd?: () => void;
   onDrop?: (date: Date, eventId: string) => void;
+  draggingEventId?: string | null;
 }
 
 // ---------------------------------------------------------------------------
@@ -30,7 +32,10 @@ export default function CalendarWeekView({
   onEventClick,
   onDateRightClick,
   onEventRightClick,
+  onEventDragStart,
+  onDragEnd,
   onDrop,
+  draggingEventId,
 }: CalendarWeekViewProps) {
   const weekDays = useMemo(() => generateWeekGrid(referenceDate), [referenceDate]);
   const hours = useMemo(() => generateHourlySlots(), []);
@@ -45,7 +50,17 @@ export default function CalendarWeekView({
       map[dayStr] = [];
     }
 
+    // Deduplicate by ID — keep the latest entry for each event
+    const seen = new Set<string>();
+    const uniqueEvents: CalendarEvent[] = [];
     for (const event of events) {
+      if (!seen.has(event.id)) {
+        seen.add(event.id);
+        uniqueEvents.push(event);
+      }
+    }
+
+    for (const event of uniqueEvents) {
       const eventStart = new Date(event.startDate);
       eventStart.setHours(0, 0, 0, 0);
 
@@ -146,7 +161,6 @@ export default function CalendarWeekView({
         {weekDays.map((day, dayIndex) => {
           const dayStr = formatDateKey(day);
           const dayEvents = eventsByDay[dayStr] || [];
-
           return (
             <div
               key={dayIndex}
@@ -174,10 +188,18 @@ export default function CalendarWeekView({
 
                 // Multi-day events: render differently based on position
                 if (event.position === 'middle') {
-                  // Just a colored bar spanning the cell width — no click, only drag + context menu
+                  // Just a colored bar spanning the cell width — draggable + context menu
+                  const isDragging = event.id === draggingEventId;
                   return (
                     <div
-                      key={event.id}
+                      key={`${event.id}-${event.position}`}
+                      draggable
+                      onDragStart={(e) => {
+                        e.dataTransfer.setData('text/plain', event.id);
+                        e.dataTransfer.effectAllowed = 'move';
+                        onEventDragStart?.(event, e as unknown as React.DragEvent);
+                      }}
+                      onContextMenu={(e) => { e.preventDefault(); e.stopPropagation(); onEventRightClick?.(event, e); }}
                       className="absolute left-0.5 right-0.5 rounded cursor-grab hover:brightness-95 transition-all"
                       style={{
                         top: `${startHour * 64}px`,
@@ -185,17 +207,26 @@ export default function CalendarWeekView({
                         backgroundColor: `${event.color || '#2A9D8F'}30`,
                         borderLeft: `3px solid ${event.color || '#2A9D8F'}`,
                         zIndex: 10,
+                        opacity: isDragging ? 0.5 : 1,
                       }}
-                      onContextMenu={(e) => { e.preventDefault(); e.stopPropagation(); onEventRightClick?.(event, e); }}
                     />
                   );
                 }
 
                 if (event.position === 'start') {
-                  // Title with left indicator and colored bar — no click, only drag + context menu
+                  // Title with left indicator and colored bar — draggable + context menu
+                  const isDragging = event.id === draggingEventId;
                   return (
                     <div
-                      key={event.id}
+                      key={`${event.id}-${event.position}`}
+                      draggable
+                      onDragStart={(e) => {
+                        e.dataTransfer.setData('text/plain', event.id);
+                        e.dataTransfer.effectAllowed = 'move';
+                        onEventDragStart?.(event, e as unknown as React.DragEvent);
+                      }}
+                      onDragEnd={() => onDragEnd?.()}
+                      onContextMenu={(e) => { e.preventDefault(); e.stopPropagation(); onEventRightClick?.(event, e); }}
                       className="absolute left-0.5 right-0.5 rounded cursor-grab hover:brightness-95 transition-all"
                       style={{
                         top: `${startHour * 64}px`,
@@ -203,8 +234,8 @@ export default function CalendarWeekView({
                         backgroundColor: `${event.color || '#2A9D8F'}30`,
                         borderLeft: `3px solid ${event.color || '#2A9D8F'}`,
                         zIndex: 10,
+                        opacity: isDragging ? 0.5 : 1,
                       }}
-                      onContextMenu={(e) => { e.preventDefault(); e.stopPropagation(); onEventRightClick?.(event, e); }}
                     >
                       <div className="px-1.5 py-0.5 overflow-hidden" style={{ maxHeight: '100%' }}>
                         <div className="text-xs font-semibold truncate" style={{ color: event.color || '#1B2A4A' }}>
@@ -219,10 +250,19 @@ export default function CalendarWeekView({
                 }
 
                 if (event.position === 'end') {
-                  // Title with right indicator and colored bar — no click, only drag + context menu
+                  // Title with right indicator and colored bar — draggable + context menu
+                  const isDragging = event.id === draggingEventId;
                   return (
                     <div
-                      key={event.id}
+                      key={`${event.id}-${event.position}`}
+                      draggable
+                      onDragStart={(e) => {
+                        e.dataTransfer.setData('text/plain', event.id);
+                        e.dataTransfer.effectAllowed = 'move';
+                        onEventDragStart?.(event, e as unknown as React.DragEvent);
+                      }}
+                      onDragEnd={() => onDragEnd?.()}
+                      onContextMenu={(e) => { e.preventDefault(); e.stopPropagation(); onEventRightClick?.(event, e); }}
                       className="absolute left-0.5 right-0.5 rounded cursor-grab hover:brightness-95 transition-all"
                       style={{
                         top: `${startHour * 64}px`,
@@ -230,8 +270,8 @@ export default function CalendarWeekView({
                         backgroundColor: `${event.color || '#2A9D8F'}30`,
                         borderLeft: `3px solid ${event.color || '#2A9D8F'}`,
                         zIndex: 10,
+                        opacity: isDragging ? 0.5 : 1,
                       }}
-                      onContextMenu={(e) => { e.preventDefault(); e.stopPropagation(); onEventRightClick?.(event, e); }}
                     >
                       <div className="px-1.5 py-0.5 overflow-hidden" style={{ maxHeight: '100%' }}>
                         <div className="text-xs font-semibold truncate" style={{ color: event.color || '#1B2A4A' }}>
@@ -245,20 +285,29 @@ export default function CalendarWeekView({
                   );
                 }
 
-                // Single-day event: render normally with time
+                // Single-day event: render normally with time — draggable + context menu
+                const isDragging = event.id === draggingEventId;
                 return (
                   <div
-                    key={event.id}
-                    className="absolute left-0.5 right-0.5 rounded cursor-pointer hover:brightness-95 transition-all"
+                    key={`${event.id}-${event.position}`}
+                    draggable
+                    onDragStart={(e) => {
+                      e.dataTransfer.setData('text/plain', event.id);
+                      e.dataTransfer.effectAllowed = 'move';
+                      onEventDragStart?.(event, e as unknown as React.DragEvent);
+                    }}
+                    onDragEnd={() => onDragEnd?.()}
+                    onClick={(e) => { e.stopPropagation(); onEventClick?.(event); }}
+                    onContextMenu={(e) => { e.preventDefault(); e.stopPropagation(); onEventRightClick?.(event, e); }}
+                    className="absolute left-0.5 right-0.5 rounded cursor-grab hover:brightness-95 transition-all"
                     style={{
                       top: `${startHour * 64}px`,
                       height: `${duration * 64}px`,
                       backgroundColor: `${event.color || '#2A9D8F'}30`,
                       borderLeft: `3px solid ${event.color || '#2A9D8F'}`,
                       zIndex: 10,
+                      opacity: isDragging ? 0.5 : 1,
                     }}
-                    onClick={(e) => { e.stopPropagation(); onEventClick?.(event); }}
-                    onContextMenu={(e) => { e.preventDefault(); e.stopPropagation(); onEventRightClick?.(event, e); }}
                   >
                     <div className="px-1.5 py-0.5 overflow-hidden" style={{ maxHeight: '100%' }}>
                       <div className="text-xs font-semibold truncate" style={{ color: event.color || '#1B2A4A' }}>

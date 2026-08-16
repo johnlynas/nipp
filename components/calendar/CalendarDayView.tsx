@@ -16,7 +16,9 @@ interface CalendarDayViewProps {
   onDateRightClick?: (date: Date, e: React.MouseEvent) => void;
   onEventRightClick?: (event: CalendarEvent, e: React.MouseEvent) => void;
   onEventDragStart?: (event: CalendarEvent, e: React.DragEvent) => void;
+  onDragEnd?: () => void;
   onDrop?: (date: Date, eventId: string) => void;
+  draggingEventId?: string | null;
 }
 
 // ---------------------------------------------------------------------------
@@ -30,7 +32,10 @@ export default function CalendarDayView({
   _onEventClick,
   onDateRightClick,
   onEventRightClick,
+  onEventDragStart,
+  onDragEnd,
   onDrop,
+  draggingEventId,
 }: CalendarDayViewProps) {
   const hours = useMemo(() => generateHourlySlots(), []);
 
@@ -119,10 +124,19 @@ export default function CalendarDayView({
               const startHour = event.startDate.getHours() + event.startDate.getMinutes() / 60;
               const endHour = event.endDate.getHours() + event.endDate.getMinutes() / 60;
               const duration = Math.max(endHour - startHour, 0.5);
+              const isDragging = event.id === draggingEventId;
 
               return (
                 <div
-                  key={event.id}
+                  key={`${event.id}-${date.toISOString().slice(0, 10)}`}
+                  draggable
+                  onDragStart={(e) => {
+                    e.dataTransfer.setData('text/plain', event.id);
+                    e.dataTransfer.effectAllowed = 'move';
+                    onEventDragStart?.(event, e as unknown as React.DragEvent);
+                  }}
+                  onDragEnd={() => onDragEnd?.()}
+                  onContextMenu={(e) => { e.preventDefault(); e.stopPropagation(); onEventRightClick?.(event, e); }}
                   className="absolute left-2 right-4 rounded cursor-grab hover:brightness-95 transition-all"
                   style={{
                     top: `${startHour * 64}px`,
@@ -130,8 +144,8 @@ export default function CalendarDayView({
                     backgroundColor: `${event.color || '#2A9D8F'}30`,
                     borderLeft: `3px solid ${event.color || '#2A9D8F'}`,
                     zIndex: 10,
+                    opacity: isDragging ? 0.5 : 1,
                   }}
-                  onContextMenu={(e) => { e.preventDefault(); e.stopPropagation(); onEventRightClick?.(event, e); }}
                 >
                   <div className="px-2 py-1 overflow-hidden" style={{ maxHeight: '100%' }}>
                     <div className="text-sm font-semibold truncate" style={{ color: event.color || '#1B2A4A' }}>

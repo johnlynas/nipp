@@ -18,7 +18,9 @@ interface CalendarMonthViewProps {
   onDateRightClick?: (date: Date, e: React.MouseEvent) => void;
   onEventRightClick?: (event: CalendarEvent, e: React.MouseEvent) => void;
   onEventDragStart?: (event: CalendarEvent, e: React.DragEvent) => void;
+  onDragEnd?: () => void;
   onDrop?: (date: Date, eventId: string) => void;
+  draggingEventId?: string | null;
 }
 
 // ---------------------------------------------------------------------------
@@ -34,7 +36,9 @@ export default function CalendarMonthView({
   onDateRightClick,
   onEventRightClick,
   onEventDragStart,
+  onDragEnd,
   onDrop,
+  draggingEventId,
 }: CalendarMonthViewProps) {
   // Generate month grid days (42 cells max, with prev/next month padding)
   const days = useMemo(() => generateMonthDays(year, month), [year, month]);
@@ -44,7 +48,17 @@ export default function CalendarMonthView({
     // For each event, determine which days it spans and its position on each day
     const map: Record<string, Array<CalendarEvent & { position: 'start' | 'middle' | 'end' | 'single' }>> = {};
 
+    // Deduplicate by ID — keep the latest entry for each event
+    const seen = new Set<string>();
+    const uniqueEvents: CalendarEvent[] = [];
     for (const event of events) {
+      if (!seen.has(event.id)) {
+        seen.add(event.id);
+        uniqueEvents.push(event);
+      }
+    }
+
+    for (const event of uniqueEvents) {
       const eventStart = new Date(event.startDate);
       eventStart.setHours(0, 0, 0, 0);
 
@@ -106,7 +120,6 @@ export default function CalendarMonthView({
 
   const handleDragOver = (e: React.DragEvent) => {
     e.preventDefault();
-    e.dataTransfer.dropEffect = 'move';
   };
 
   return (
@@ -154,31 +167,49 @@ export default function CalendarMonthView({
                 {dayEvents.slice(0, 3).map((event) => {
                   // Multi-day events: render differently based on position
                   if (event.position === 'middle') {
-                    // Just a colored bar spanning the cell width — no click, only drag + context menu
+                    // Just a colored bar spanning the cell width — draggable + context menu
+                    const isDragging = event.id === draggingEventId;
                     return (
                       <div
-                        key={event.id}
+                        key={`${event.id}-${event.position}`}
+                        draggable
+                        onDragStart={(e) => {
+                          e.dataTransfer.setData('text/plain', event.id);
+                          e.dataTransfer.effectAllowed = 'move';
+                          onEventDragStart?.(event, e as unknown as React.DragEvent);
+                        }}
+                        onDragEnd={() => onDragEnd?.()}
+                        onContextMenu={(e) => { e.preventDefault(); onEventRightClick?.(event, e); }}
                         className="w-full h-4 rounded cursor-grab hover:brightness-95 transition-all"
                         style={{
                           backgroundColor: `${event.color || '#2A9D8F'}30`,
                           borderLeft: `3px solid ${event.color || '#2A9D8F'}`,
+                          opacity: isDragging ? 0.5 : 1,
                         }}
-                        onContextMenu={(e) => { e.preventDefault(); onEventRightClick?.(event, e); }}
                       />
                     );
                   }
 
                   if (event.position === 'start') {
-                    // Title with left indicator and colored bar — no click, only drag + context menu
+                    // Title with left indicator and colored bar — draggable + context menu
+                    const isDragging = event.id === draggingEventId;
                     return (
                       <div
-                        key={event.id}
+                        key={`${event.id}-${event.position}`}
+                        draggable
+                        onDragStart={(e) => {
+                          e.dataTransfer.setData('text/plain', event.id);
+                          e.dataTransfer.effectAllowed = 'move';
+                          onEventDragStart?.(event, e as unknown as React.DragEvent);
+                        }}
+                        onDragEnd={() => onDragEnd?.()}
+                        onContextMenu={(e) => { e.preventDefault(); onEventRightClick?.(event, e); }}
                         className="flex items-center gap-1 px-1 py-0.5 rounded cursor-grab hover:brightness-95 transition-all overflow-hidden"
                         style={{
                           backgroundColor: `${event.color || '#2A9D8F'}30`,
                           borderLeft: `3px solid ${event.color || '#2A9D8F'}`,
+                          opacity: isDragging ? 0.5 : 1,
                         }}
-                        onContextMenu={(e) => { e.preventDefault(); onEventRightClick?.(event, e); }}
                       >
                         <span className="text-xs font-medium truncate" style={{ color: event.color || '#1B2A4A' }}>
                           ▸ {event.title}
@@ -188,16 +219,25 @@ export default function CalendarMonthView({
                   }
 
                   if (event.position === 'end') {
-                    // Title with right indicator and colored bar — no click, only drag + context menu
+                    // Title with right indicator and colored bar — draggable + context menu
+                    const isDragging = event.id === draggingEventId;
                     return (
                       <div
-                        key={event.id}
+                        key={`${event.id}-${event.position}`}
+                        draggable
+                        onDragStart={(e) => {
+                          e.dataTransfer.setData('text/plain', event.id);
+                          e.dataTransfer.effectAllowed = 'move';
+                          onEventDragStart?.(event, e as unknown as React.DragEvent);
+                        }}
+                        onDragEnd={() => onDragEnd?.()}
+                        onContextMenu={(e) => { e.preventDefault(); onEventRightClick?.(event, e); }}
                         className="flex items-center gap-1 px-1 py-0.5 rounded cursor-grab hover:brightness-95 transition-all overflow-hidden"
                         style={{
                           backgroundColor: `${event.color || '#2A9D8F'}30`,
                           borderLeft: `3px solid ${event.color || '#2A9D8F'}`,
+                          opacity: isDragging ? 0.5 : 1,
                         }}
-                        onContextMenu={(e) => { e.preventDefault(); onEventRightClick?.(event, e); }}
                       >
                         <span className="text-xs font-medium truncate" style={{ color: event.color || '#1B2A4A' }}>
                           {event.title} ◂
@@ -209,12 +249,14 @@ export default function CalendarMonthView({
                   // Single-day event: render as normal card
                   return (
                     <CalendarEventCard
-                      key={event.id}
+                      key={`${event.id}-${event.position}`}
                       event={event}
                       compact
                       onClick={() => onEventClick?.(event)}
                       onDragStart={onEventDragStart}
+                      onDragEnd={() => onDragEnd?.()}
                       onRightClick={(ev, e) => onEventRightClick?.(ev, e)}
+                      isDragging={event.id === draggingEventId}
                     />
                   );
                 })}

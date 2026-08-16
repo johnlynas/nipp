@@ -67,6 +67,9 @@ export default function Calendar({
   const [organizations, setOrganizations] = useState<{ id: string; name: string }[]>([]);
   const [selectedOrgId, setSelectedOrgId] = useState<string | null>(organizationId);
 
+  // Drag-and-drop state
+  const [draggingEventId, setDraggingEventId] = useState<string | null>(null);
+
   // ---------------------------------------------------------------------------
   // API helpers
   // ---------------------------------------------------------------------------
@@ -103,7 +106,32 @@ export default function Calendar({
         createdAt: new Date(e.createdAt as string),
         updatedAt: new Date(e.updatedAt as string),
       }));
-      setEvents(parsed);
+
+      // Merge with existing events instead of replacing — keeps events from other months
+      setEvents((prev) => {
+        const merged = new Map<string, CalendarEvent>();
+
+        // Keep existing events that fall outside the fetched range
+        for (const event of prev) {
+          const evStart = event.startDate instanceof Date ? event.startDate : new Date(event.startDate);
+          const evEnd = event.endDate instanceof Date ? event.endDate : new Date(event.endDate);
+          if (isNaN(evStart.getTime()) || isNaN(evEnd.getTime())) continue;
+          if (evEnd < start || evStart > end) {
+            merged.set(event.id, event);
+          }
+        }
+
+        // Add/update with fetched events (these are in the current range)
+        for (const event of parsed) {
+          merged.set(event.id, event);
+        }
+
+        return Array.from(merged.values()).sort((a, b) => {
+          const aStart = a.startDate instanceof Date ? a.startDate : new Date(a.startDate);
+          const bStart = b.startDate instanceof Date ? b.startDate : new Date(b.startDate);
+          return aStart.getTime() - bStart.getTime();
+        });
+      });
     } catch {
       // Silently fail — calendar will show empty
     } finally {
@@ -232,25 +260,65 @@ export default function Calendar({
     setContextMenuDate(date);
   }, []);
 
-  const handleEventDragStart = useCallback((_event: CalendarEvent, _e: React.DragEvent) => {
-    // Drag start handled by individual event cards
+  const handleEventDragStart = useCallback((event: CalendarEvent, _e: React.DragEvent) => {
+    setDraggingEventId(event.id);
   }, []);
 
-  const handleDrop = useCallback((date: Date, eventId: string) => {
-    // Reschedule event to new date (in production, call PATCH API)
-    setEvents((prev) =>
-      prev.map((event) => {
-        if (event.id === eventId) {
-          const duration = event.endDate.getTime() - event.startDate.getTime();
-          const newStart = new Date(date);
-          newStart.setHours(event.startDate.getHours(), event.startDate.getMinutes());
-          const newEnd = new Date(newStart.getTime() + duration);
+  const handleDrop = useCallback(async (date: Date, eventId: string) => {
+    // Find the event in local state
+    const existing = events.find((e) => e.id === eventId);
+    if (!existing || existing.id.startsWith('temp-')) return;
 
-          return { ...event, startDate: newStart, endDate: newEnd };
+    const start = existing.startDate instanceof Date ? existing.startDate : new Date(existing.startDate);
+    const end = existing.endDate instanceof Date ? existing.endDate : new Date(existing.endDate);
+    if (isNaN(start.getTime()) || isNaN(end.getTime())) return;
+
+    const duration = end.getTime() - start.getTime();
+    const newStart = new Date(date);
+    newStart.setHours(start.getHours(), start.getMinutes());
+    const newEnd = new Date(newStart.getTime() + duration);
+
+    // Optimistically update local state so UI reflects the move immediately
+    const optimisticUpdate = {
+      ...existing,
+      startDate: newStart,
+      endDate: newEnd,
+    };
+    setEvents((prev) => prev.map((e) => (e.id === eventId ? optimisticUpdate : e)));
+
+    // Persist to API in the background
+    try {
+      const res = await fetch(
+        `/api/organizations/${organizationId}/calendar-events/${eventId}`,
+        {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            startDate: newStart.toISOString(),
+            endDate: newEnd.toISOString(),
+          }),
         }
-        return event;
-      })
-    );
+      );
+
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({ error: 'Failed to move event' }));
+        console.error('Failed to move event:', err);
+        // Revert on failure
+        setEvents((prev) => prev.map((e) => (e.id === eventId ? existing : e)));
+        return;
+      }
+
+      const { event: updatedEvent }: { event: CalendarEvent } = await res.json();
+      setEvents((prev) => prev.map((e) => (e.id === updatedEvent.id ? updatedEvent : e)));
+    } catch {
+      console.error('Error moving event');
+      // Revert on error
+      setEvents((prev) => prev.map((e) => (e.id === eventId ? existing : e)));
+    }
+  }, [events, organizationId]);
+
+  const handleDragEnd = useCallback(() => {
+    setDraggingEventId(null);
   }, []);
 
   const handleQuickAdd = useCallback(async (input: QuickAddInput) => {
@@ -535,7 +603,9 @@ export default function Calendar({
           onDateRightClick={handleDateRightClick}
           onEventRightClick={handleEventRightClick}
           onEventDragStart={handleEventDragStart}
+          onDragEnd={handleDragEnd}
           onDrop={handleDrop}
+          draggingEventId={draggingEventId}
         />
       );
     }
@@ -550,7 +620,9 @@ export default function Calendar({
           onDateRightClick={handleDateRightClick}
           onEventRightClick={handleEventRightClick}
           onEventDragStart={handleEventDragStart}
+          onDragEnd={handleDragEnd}
           onDrop={handleDrop}
+          draggingEventId={draggingEventId}
         />
       );
     }
@@ -564,7 +636,9 @@ export default function Calendar({
         onDateRightClick={handleDateRightClick}
         onEventRightClick={handleEventRightClick}
         onEventDragStart={handleEventDragStart}
+        onDragEnd={handleDragEnd}
         onDrop={handleDrop}
+        draggingEventId={draggingEventId}
       />
     );
   };

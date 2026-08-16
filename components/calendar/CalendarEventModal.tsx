@@ -40,19 +40,21 @@ export default function CalendarEventModal({
 
   useEffect(() => {
     if (event) {
-      setTitle(event.title);
+      setTitle(event.title || '');
       setDescription(event.description || '');
       setEventType(event.eventType);
-      setStartDate(
-        event.startDate instanceof Date
-          ? event.startDate.toISOString().slice(0, 16)
-          : String(event.startDate).slice(0, 16)
-      );
-      setEndDate(
-        event.endDate instanceof Date
-          ? event.endDate.toISOString().slice(0, 16)
-          : String(event.endDate).slice(0, 16)
-      );
+
+      // Parse start date — handle both Date objects and ISO strings
+      const start = event.startDate instanceof Date ? event.startDate : new Date(event.startDate);
+      if (!isNaN(start.getTime())) {
+        setStartDate(start.toISOString().slice(0, 16));
+      }
+
+      // Parse end date — handle both Date objects and ISO strings
+      const end = event.endDate instanceof Date ? event.endDate : new Date(event.endDate);
+      if (!isNaN(end.getTime())) {
+        setEndDate(end.toISOString().slice(0, 16));
+      }
     }
     // Clear error when event changes
     setSaveError(null);
@@ -92,14 +94,14 @@ export default function CalendarEventModal({
             Title
           </label>
           {isViewMode ? (
-            <div className="w-full px-3 py-2 rounded border text-sm" style={{ borderColor: '#dee2e6', color: '#1B2A4A' }}>{event.title}</div>
+            <div className="w-full px-3 py-2 rounded border text-sm" style={{ borderColor: '#dee2e6', color: '#1a1a2e' }}>{event.title}</div>
           ) : (
             <input
               type="text"
               value={title}
               onChange={(e) => setTitle(e.target.value)}
               className="w-full px-3 py-2 rounded border text-sm focus:outline-none"
-              style={{ borderColor: '#dee2e6', color: '#1B2A4A' }}
+              style={{ borderColor: '#dee2e6', color: '#1a1a2e' }}
             />
           )}
         </div>
@@ -110,14 +112,14 @@ export default function CalendarEventModal({
             Description
           </label>
           {isViewMode ? (
-            <div className="w-full px-3 py-2 rounded border text-sm min-h-[60px] whitespace-pre-wrap" style={{ borderColor: '#dee2e6', color: '#1B2A4A' }}>{event.description || '—'}</div>
+            <div className="w-full px-3 py-2 rounded border text-sm min-h-[60px] whitespace-pre-wrap" style={{ borderColor: '#dee2e6', color: '#1a1a2e' }}>{event.description || '—'}</div>
           ) : (
             <textarea
               value={description}
               onChange={(e) => setDescription(e.target.value)}
               rows={3}
               className="w-full px-3 py-2 rounded border text-sm resize-none focus:outline-none"
-              style={{ borderColor: '#dee2e6', color: '#1B2A4A' }}
+              style={{ borderColor: '#dee2e6', color: '#1a1a2e' }}
             />
           )}
         </div>
@@ -128,7 +130,7 @@ export default function CalendarEventModal({
             Event Type
           </label>
           {isViewMode ? (
-            <div className="w-full px-3 py-2 rounded border text-sm" style={{ borderColor: '#dee2e6', color: '#1B2A4A' }}>
+            <div className="w-full px-3 py-2 rounded border text-sm" style={{ borderColor: '#dee2e6', color: '#1a1a2e' }}>
               {EVENT_TYPES.find((t) => t.value === event.eventType)?.label || event.eventType}
             </div>
           ) : (
@@ -136,7 +138,7 @@ export default function CalendarEventModal({
               value={eventType}
               onChange={(e) => setEventType(e.target.value as CalendarEventType)}
               className="w-full px-3 py-2 rounded border text-sm focus:outline-none"
-              style={{ borderColor: '#dee2e6', color: '#1B2A4A' }}
+              style={{ borderColor: '#dee2e6', color: '#1a1a2e' }}
             >
               {EVENT_TYPES.map((type) => (
                 <option key={type.value} value={type.value}>
@@ -154,7 +156,7 @@ export default function CalendarEventModal({
               Start
             </label>
             {isViewMode ? (
-              <div className="w-full px-3 py-2 rounded border text-sm" style={{ borderColor: '#dee2e6', color: '#1B2A4A' }}>
+              <div className="w-full px-3 py-2 rounded border text-sm" style={{ borderColor: '#dee2e6', color: '#1a1a2e' }}>
                 {event.startDate.toLocaleString()}
               </div>
             ) : (
@@ -163,7 +165,7 @@ export default function CalendarEventModal({
                 value={startDate}
                 onChange={(e) => setStartDate(e.target.value)}
                 className="w-full px-3 py-2 rounded border text-sm focus:outline-none"
-                style={{ borderColor: '#dee2e6', color: '#1B2A4A' }}
+                style={{ borderColor: '#dee2e6', color: '#1a1a2e' }}
               />
             )}
           </div>
@@ -172,7 +174,7 @@ export default function CalendarEventModal({
               End
             </label>
             {isViewMode ? (
-              <div className="w-full px-3 py-2 rounded border text-sm" style={{ borderColor: '#dee2e6', color: '#1B2A4A' }}>
+              <div className="w-full px-3 py-2 rounded border text-sm" style={{ borderColor: '#dee2e6', color: '#1a1a2e' }}>
                 {event.endDate.toLocaleString()}
               </div>
             ) : (
@@ -181,7 +183,7 @@ export default function CalendarEventModal({
                 value={endDate}
                 onChange={(e) => setEndDate(e.target.value)}
                 className="w-full px-3 py-2 rounded border text-sm focus:outline-none"
-                style={{ borderColor: '#dee2e6', color: '#1B2A4A' }}
+                style={{ borderColor: '#dee2e6', color: '#1a1a2e' }}
               />
             )}
           </div>
