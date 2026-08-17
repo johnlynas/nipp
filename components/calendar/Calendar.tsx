@@ -64,6 +64,9 @@ export default function Calendar({
   const [deleteConfirmOpen, setDeleteConfirmOpen] = useState(false);
   const [eventToDelete, setEventToDelete] = useState<CalendarEvent | null>(null);
 
+  // Selected calendar cell date (for border highlight)
+  const [selectedCalendarDate, setSelectedCalendarDate] = useState<Date | null>(null);
+
   // Organizations for switcher (super admin only)
   const [organizations, setOrganizations] = useState<{ id: string; name: string }[]>([]);
   const [selectedOrgId, setSelectedOrgId] = useState<string | null>(organizationId);
@@ -287,7 +290,9 @@ export default function Calendar({
   }, [view]);
 
   const navigateToday = useCallback(() => {
-    setCurrentDate(new Date());
+    const today = new Date();
+    setCurrentDate(today);
+    setSelectedCalendarDate(today);
   }, []);
 
   // Drill from the Year view into a specific month (switches to Month view)
@@ -313,6 +318,7 @@ export default function Calendar({
 
   const handleDateClick = useCallback((date: Date) => {
     setCurrentDate(date);
+    setSelectedCalendarDate(date);
   }, []);
 
   const handleDateRightClick = useCallback((date: Date, e: React.MouseEvent) => {
@@ -695,6 +701,7 @@ export default function Calendar({
         <CalendarMonthView
           year={currentDate.getFullYear()}
           month={currentDate.getMonth()}
+          selectedDate={selectedCalendarDate}
           events={events}
           onDateClick={handleDateClick}
           onEventClick={handleEventClick}
