@@ -91,6 +91,7 @@ nipp/
 │   └── ...                       # Page components & layouts
 ├── components/                   # Reusable React components
 │   ├── auth/                     # Auth-related components (RequirePermission, RequireSuperAdmin)
+│   ├── calendar/                 # Interactive calendar (month/week/day views, DnD, recurrence)
 │   └── ui/                       # UI primitives & domain components
 ├── lib/                          # Core business logic & utilities
 │   ├── auth.ts                   # BetterAuth configuration & session callbacks
@@ -102,6 +103,9 @@ nipp/
 │   └── permissions/              # Permission resolution & caching logic
 ├── services/                     # Domain-specific business logic layers
 │   ├── organization-service.ts   # Organization management service
+│   ├── calendar-service.ts       # Calendar CRUD + default-calendar bootstrapping (org-scoped)
+│   ├── calendar-event-service.ts # Calendar event CRUD, recurrence expansion, upcoming events
+│   ├── calendar-notification-service.ts  # Today's-events email notifications
 │   ├── team-service.ts           # Team CRUD, membership, and role inheritance
 │   ├── resource-service.ts       # Resource catalog CRUD (global, non-org-scoped)
 │   ├── permission-service.ts     # Permission management service
@@ -153,6 +157,11 @@ The following models are strictly scoped to organizations and protected by the P
 - `TeamRole` (team-level role definitions mapped to org roles, org-scoped)
 
 Global models (`User`, `Organization`, `Member`, `Permission`, `AuditLog`, `NotificationLog`, `Resource`, `ResourceRole`) are not scoped and require explicit authorization checks.
+
+> **Calendar models (known gap):** `Calendar`, `CalendarEvent`, and `CalendarRecurrence` carry an
+> `organizationId` column but are **not** in the extension's scoped-model list. Calendar services
+> query via `globalDb` and several event queries lack an org filter — see SECURITY.md (Calendar &
+> Event Security) and the interactive-calendar feature doc (§11 Known Gaps).
 
 ## 🔒 Content Security Policy (CSP)
 
@@ -330,8 +339,16 @@ BetterAuth's **Teams** plugin provides sub-organizational groupings within each 
 | `/api/organizations/[orgId]/teams/[teamId]` | GET, PATCH, DELETE | Get / Update / Delete team |
 | `/api/organizations/[orgId]/teams/[teamId]/members` | GET, POST, DELETE | List / Add / Remove members |
 | `/api/organizations/[orgId]/teams/[teamId]/roles` | GET, POST, DELETE | List / Assign / Remove roles |
+| `/api/organizations/[orgId]/calendar` | GET, POST | List calendars / Create calendar |
+| `/api/organizations/[orgId]/calendar/[id]` | GET, PATCH, DELETE | Get / Update / Delete calendar |
+| `/api/organizations/[orgId]/calendar-events` | GET, POST | List events in date range (expanded recurrence instances) / Create event |
+| `/api/organizations/[orgId]/calendar-events/[id]` | GET, PATCH, DELETE | Get / Update / Delete event |
+| `/api/organizations/[orgId]/calendar-events/upcoming` | GET | Get upcoming events for sidebar |
+| `/api/organizations/[orgId]/calendar-notifications/today` | GET | Get today's events for the current user/org |
+| `/api/organizations/[orgId]/calendar-notifications/send-today` | POST | Trigger notifications for today's events |
+| `/api/organizations/[orgId]/calendar-notifications/history` | GET | View notification delivery history |
 
-All routes require admin membership in the target organization and enforce tenant isolation via `AsyncLocalStorage` context.
+All routes require admin membership in the target organization and enforce tenant isolation via `AsyncLocalStorage` context. Calendar event routes verify session + membership in the URL's organization; note that calendar service queries are not yet org-filtered (see SECURITY.md).
 
 ### Admin Dashboard API Routes (Super Admin Only)
 | Route | Methods | Description |
@@ -378,6 +395,9 @@ The Resources page provides a Super Admin interface for managing the global reso
 - **TeamRole:** Team-level role definitions mapped to organization-scoped `Role` records. Organization-scoped.
 - **Resource:** Global catalog of portal feature modules (e.g., "platform", "organizations", "properties"). Represents feature areas that are shared across all tenants. Managed exclusively by Super Admins.
 - **ResourceRole:** Global junction table linking Resources to org-scoped Roles. Enables feature-level access control: a role must be assigned to a resource for users with that role to access the feature.
+- **Calendar:** Organization-scoped container/namespace for calendar events (one default per org, multiple supported).
+- **CalendarEvent:** Organization-scoped event within a calendar (local datetimes, optional property association). Recurring events reference a `CalendarRecurrence`.
+- **CalendarRecurrence:** 1:1 recurrence rule for an event (`eventId @unique`), iCal-inspired fields (frequency, interval, endDate/count, byDay, byMonthDay). Organization-scoped.
 
 ### Relationships
 - `User` ↔ `Organization`: Via `Member` (many-to-many)
@@ -388,6 +408,9 @@ The Resources page provides a Super Admin interface for managing the global reso
 - `User` ↔ `Team`: Via `TeamMember` (many-to-many)
 - `TeamRole` → `Role`: Many-to-one mapping to org-scoped roles (role inheritance)
 - `Resource` → `Role`: Via `ResourceRole` (many-to-many, global junction table). A resource can be assigned to multiple roles across organizations; a role can access multiple resources.
+- `Organization` → `Calendar`: One-to-many cascading delete
+- `Calendar` → `CalendarEvent`: One-to-many cascading delete
+- `CalendarEvent` ↔ `CalendarRecurrence`: One-to-one via `eventId @unique` (deleting an event with a rule is blocked by FK `Restrict`; the service deletes the rule first)
 
 ### Indexing Strategy
 - Foreign keys are automatically indexed by Prisma.

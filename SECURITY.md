@@ -126,6 +126,42 @@ Every organization bootstrapped via `prisma/seed.ts` receives a default **"Membe
 
 All team endpoints require an active tenant context and admin membership in the target organization.
 
+## 📅 Calendar & Event Security
+
+The interactive calendar (`components/calendar/`, `services/calendar*-service.ts`) stores organization-scoped events with optional recurrence rules. It is integrated into the Super Admin dashboard at `/dashboard/admin/calendar` and exposed via org-scoped REST endpoints.
+
+### Data Model
+| Model | Scope | Purpose |
+|---|---|---|
+| `Calendar` | Organization-scoped (`organizationId`) | Container/namespace for events (one default per org) |
+| `CalendarEvent` | Organization-scoped (`organizationId`) | Individual events (local datetimes, optional property association) |
+| `CalendarRecurrence` | Organization-scoped (`organizationId`) | 1:1 recurrence rule per event (`eventId @unique`, iCal-inspired fields) |
+
+### Authorization (RBAC)
+- **Route layer:** Every `/api/organizations/[orgId]/calendar*` route verifies the session (401) and membership in the URL's organization via `globalDb.member.findFirst` (403 for non-members), then derives `TENANT_ADMIN` / `MEMBER` from the member record.
+- **Service layer:** Mutations (`createEvent`, `updateEvent`, `deleteEvent`, calendar create/update/delete) call `requireAnyAdmin(ctx)` — only tenant admins can modify data; members are read-only.
+- **Permissions:** `calendar:read`, `calendar:create`, `calendar:update`, `calendar:delete` are seeded into the permission catalog (resource `calendars`) for role-based assignment.
+
+### Tenant Isolation — ⚠️ Known Gap (Open)
+The calendar models are **not** in the Prisma extension's `TENANT_SCOPED_MODELS` list (`lib/tenant-db.ts`), and the event service queries do not filter by `organizationId`:
+- `getEventsWithRecurrences` — no org filter (only an optional `calendarId`)
+- `getEventById`, `updateEvent`, `deleteEvent` — lookup by event `id` only
+- `getUpcomingEvents` — computes a target org id but never applies it to the queries
+
+Because routes only verify membership in the URL's organization, an authenticated member of Org A could read or modify Org B events by supplying their IDs/calendarId. **Follow-up (required before broader rollout):** add `organizationId` filters to these service queries and/or register the calendar models in the tenant extension, then add calendar-specific isolation tests (see `ISOLATION_TEST_STRATEGY.md`).
+
+### API Endpoints
+| Route | Methods | Access |
+|---|---|---|
+| `/api/organizations/[orgId]/calendar` | GET, POST | Member (read) / Admin (create) |
+| `/api/organizations/[orgId]/calendar/[id]` | GET, PATCH, DELETE | Member (read) / Admin (mutate) |
+| `/api/organizations/[orgId]/calendar-events` | GET, POST | Member (read) / Admin (create) |
+| `/api/organizations/[orgId]/calendar-events/[id]` | GET, PATCH, DELETE | Member (read) / Admin (mutate) |
+| `/api/organizations/[orgId]/calendar-events/upcoming` | GET | Member (read) |
+| `/api/organizations/[orgId]/calendar-notifications/today` | GET | Member (read) |
+| `/api/organizations/[orgId]/calendar-notifications/send-today` | POST | Admin |
+| `/api/organizations/[orgId]/calendar-notifications/history` | GET | Admin |
+
 ## 🤫 Secrets Management
 
 - **Environment Variables:** All secrets (Database URLs, API Keys, Auth Secrets) are strictly managed via `.env` files and are never hardcoded.

@@ -61,6 +61,13 @@ export interface GetEventsInput {
   calendarId?: string;
 }
 
+export interface CalendarEventRecurrenceDetails {
+  frequency: 'DAILY' | 'WEEKLY' | 'MONTHLY' | 'QUARTERLY' | 'SEMI_ANNUALLY' | 'ANNUALLY';
+  interval: number;
+  endDate?: Date | null;
+  count?: number | null;
+}
+
 export interface CalendarEventWithDetails {
   id: string;
   title: string;
@@ -71,9 +78,31 @@ export interface CalendarEventWithDetails {
   color?: string | null;
   calendarId: string;
   recurrenceId?: string | null;
+  /** Recurrence rule details (present when the event repeats). */
+  recurrence?: CalendarEventRecurrenceDetails | null;
   propertyId?: string | null;
   createdAt: Date;
   updatedAt: Date;
+}
+
+/**
+ * Map a Prisma CalendarRecurrence relation (or null) to the API output shape.
+ */
+function mapRecurrence(
+  r: {
+    frequency: string;
+    interval: number;
+    endDate?: Date | null;
+    count?: number | null;
+  } | null | undefined,
+): CalendarEventRecurrenceDetails | null {
+  if (!r) return null;
+  return {
+    frequency: r.frequency as CalendarEventRecurrenceDetails['frequency'],
+    interval: r.interval,
+    endDate: r.endDate ?? null,
+    count: r.count ?? null,
+  };
 }
 
 // ---------------------------------------------------------------------------
@@ -84,7 +113,7 @@ export interface CalendarEventWithDetails {
  * Expand a recurring event into individual instances within the given date range.
  */
 export function expandRecurrence(
-  event: CalendarEventWithDetails & { recurrence?: { frequency: string; interval: number; endDate?: Date | null; count?: number } },
+  event: CalendarEventWithDetails,
   rangeStart: Date,
   rangeEnd: Date,
 ): CalendarEventWithDetails[] {
@@ -103,13 +132,17 @@ export function expandRecurrence(
   const maxOccurrences = 52 * 12; // Cap at ~10 years of weekly events
   let occurrenceCount = 0;
 
+  // Each instance keeps the base event's duration (end - start)
+  const durationMs = event.endDate.getTime() - event.startDate.getTime();
+
   while (current <= rangeEnd && occurrenceCount < maxOccurrences) {
     // Stop if past recurrence end date or count limit
     if (endDate && current > endDate) break;
-    if (count !== undefined && occurrenceCount >= count) break;
+    if (count != null && occurrenceCount >= count) break;
 
-    // Check overlap with range
-    const instanceEnd = new Date(event.endDate);
+    // Check overlap with range — the instance end is shifted by duration so
+    // later occurrences are not compared against the base event's absolute end
+    const instanceEnd = new Date(current.getTime() + durationMs);
     if (current <= rangeEnd && instanceEnd >= rangeStart) {
       instances.push({ ...event, startDate: new Date(current), endDate: instanceEnd });
     }
@@ -201,6 +234,13 @@ export async function createEvent(
 
   // Create recurrence rule if provided
   let recurrenceId: string | null = null;
+  let recurrence: {
+    id: string;
+    frequency: string;
+    interval: number;
+    endDate?: Date | null;
+    count?: number | null;
+  } | null = null;
   if (input.recurrence) {
     const recurrenceData: Record<string, unknown> = {
       frequency: input.recurrence.frequency,
@@ -217,7 +257,7 @@ export async function createEvent(
       recurrenceData.count = input.recurrence.count;
     }
 
-    const recurrence = await globalDb.calendarRecurrence.create({
+    recurrence = await globalDb.calendarRecurrence.create({
       data: {
         frequency: input.recurrence.frequency,
         interval: input.recurrence.interval || 1,
@@ -231,6 +271,12 @@ export async function createEvent(
     });
 
     recurrenceId = recurrence.id;
+
+    // Keep the event's scalar in sync so filters and lookups by recurrenceId work
+    await globalDb.calendarEvent.update({
+      where: { id: event.id },
+      data: { recurrenceId },
+    });
   }
 
   logger.info(
@@ -248,6 +294,7 @@ export async function createEvent(
     color: event.color,
     calendarId: event.calendarId,
     recurrenceId,
+    recurrence: mapRecurrence(recurrence),
     propertyId: event.propertyId,
     createdAt: event.createdAt,
     updatedAt: event.updatedAt,
@@ -298,9 +345,14 @@ export async function getEventsWithRecurrences(
   ctx: ServiceContext,
   input: GetEventsInput,
 ): Promise<CalendarEventWithDetails[]> {
+  // Non-recurring events must overlap the range directly. Recurring events are
+  // active as long as the series has started by range end — expandRecurrence
+  // applies the rule's own end date/count and per-instance overlap check.
   const where: Record<string, unknown> = {
-    startDate: { lte: input.endDate },
-    endDate: { gte: input.startDate },
+    OR: [
+      { recurrence: null, startDate: { lte: input.endDate }, endDate: { gte: input.startDate } },
+      { recurrence: { isNot: null }, startDate: { lte: input.endDate } },
+    ],
   };
 
   if (input.calendarId) {
@@ -317,6 +369,8 @@ export async function getEventsWithRecurrences(
   const allInstances: CalendarEventWithDetails[] = [];
 
   for (const event of events) {
+    const recurrenceDetails = mapRecurrence(event.recurrence);
+
     const expanded = expandRecurrence(
       { ...event, recurrence: event.recurrence ? {
         frequency: event.recurrence.frequency,
@@ -328,7 +382,8 @@ export async function getEventsWithRecurrences(
       input.endDate,
     );
 
-    allInstances.push(...expanded);
+    // Attach recurrence details to each instance so clients can display/edit the rule
+    allInstances.push(...expanded.map((instance) => ({ ...instance, recurrence: recurrenceDetails })));
   }
 
   // Sort by start date and deduplicate (same event may appear in overlapping ranges)
@@ -346,6 +401,7 @@ export async function getEventById(
 ): Promise<CalendarEventWithDetails> {
   const event = await globalDb.calendarEvent.findFirst({
     where: { id: eventId },
+    include: { recurrence: true },
   });
 
   if (!event) {
@@ -362,6 +418,7 @@ export async function getEventById(
     color: event.color,
     calendarId: event.calendarId,
     recurrenceId: event.recurrenceId,
+    recurrence: mapRecurrence(event.recurrence),
     propertyId: event.propertyId,
     createdAt: event.createdAt,
     updatedAt: event.updatedAt,
@@ -380,6 +437,7 @@ export async function updateEvent(
 
   const event = await globalDb.calendarEvent.findFirst({
     where: { id: eventId },
+    include: { recurrence: true },
   });
 
   if (!event) {
@@ -427,13 +485,14 @@ export async function updateEvent(
     updateData.propertyId = input.propertyId;
   }
 
-  // Handle recurrence changes
+  // Handle recurrence changes — branch on the relation (robust even if the
+  // event's recurrenceId scalar is stale from legacy rows)
   if (input.recurrence !== undefined) {
     if (input.recurrence === null) {
       // Remove recurrence — delete the rule and set recurrenceId to null
-      if (event.recurrenceId) {
+      if (event.recurrence) {
         await globalDb.calendarRecurrence.delete({
-          where: { id: event.recurrenceId },
+          where: { id: event.recurrence.id },
         });
       }
       updateData.recurrenceId = null;
@@ -454,10 +513,10 @@ export async function updateEvent(
         recurrenceData.count = input.recurrence.count;
       }
 
-      if (event.recurrenceId) {
+      if (event.recurrence) {
         // Update existing recurrence rule
         await globalDb.calendarRecurrence.update({
-          where: { id: event.recurrenceId },
+          where: { id: event.recurrence.id },
           data: recurrenceData,
         });
       } else {
@@ -482,6 +541,7 @@ export async function updateEvent(
   const updated = await globalDb.calendarEvent.update({
     where: { id: eventId },
     data: updateData,
+    include: { recurrence: true },
   });
 
   logger.info(
@@ -499,6 +559,7 @@ export async function updateEvent(
     color: updated.color,
     calendarId: updated.calendarId,
     recurrenceId: updated.recurrenceId,
+    recurrence: mapRecurrence(updated.recurrence),
     propertyId: updated.propertyId,
     createdAt: updated.createdAt,
     updatedAt: updated.updatedAt,
@@ -516,16 +577,18 @@ export async function deleteEvent(
 
   const event = await globalDb.calendarEvent.findFirst({
     where: { id: eventId },
+    include: { recurrence: true },
   });
 
   if (!event) {
     throw new NotFoundError(`Event with ID "${eventId}" not found`);
   }
 
-  // Delete recurrence rule if it exists (cascade handles the rest)
-  if (event.recurrenceId) {
+  // Delete recurrence rule if it exists (the relation is Restrict, so the
+  // child row must go first — use the relation id, not just the scalar)
+  if (event.recurrence) {
     await globalDb.calendarRecurrence.delete({
-      where: { id: event.recurrenceId },
+      where: { id: event.recurrence.id },
     });
   }
 
@@ -556,25 +619,30 @@ export async function getUpcomingEvents(
   const today = new Date();
   today.setHours(0, 0, 0, 0);
 
-  // Get non-recurring upcoming events
+  const upcomingWindowEnd = new Date(today.getTime() + 30 * 24 * 60 * 60 * 1000);
+
+  // Get non-recurring upcoming events (exclude recurring ones — they are
+  // expanded below, which would otherwise double-count them)
   const singleEvents = await globalDb.calendarEvent.findMany({
     where: {
+      recurrence: null,
       startDate: { gte: today },
     },
     orderBy: { startDate: 'asc' },
     take: limit,
   });
 
-  // Get recurring events and expand for upcoming window (next 30 days)
+  // Get recurring events and expand for upcoming window (next 30 days).
+  // A series is active if it has started by the end of the window; expansion
+  // applies the rule's own end date/count and per-instance overlap check.
   const recurringEvents = await globalDb.calendarEvent.findMany({
     where: {
-      recurrenceId: { not: undefined },
-      startDate: { lte: new Date(today.getTime() + 30 * 24 * 60 * 60 * 1000) },
+      recurrence: { isNot: null },
+      startDate: { lte: upcomingWindowEnd },
     },
     include: { recurrence: true },
   });
 
-  const upcomingWindowEnd = new Date(today.getTime() + 30 * 24 * 60 * 60 * 1000);
   const recurringInstances: CalendarEventWithDetails[] = [];
 
   for (const event of recurringEvents) {

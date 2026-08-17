@@ -2,7 +2,7 @@
 
 import { useMemo } from 'react';
 import type { CalendarEvent } from './types';
-import { generateMonthDays, isToday } from './calendar-utils';
+import { generateMonthDays, isToday, getEventInstanceKey } from './calendar-utils';
 import CalendarEventCard, { EventOverflowIndicator } from './CalendarEventCard';
 
 // ---------------------------------------------------------------------------
@@ -48,12 +48,14 @@ export default function CalendarMonthView({
     // For each event, determine which days it spans and its position on each day
     const map: Record<string, Array<CalendarEvent & { position: 'start' | 'middle' | 'end' | 'single' }>> = {};
 
-    // Deduplicate by ID — keep the latest entry for each event
+    // Deduplicate by instance key — keep the latest entry for each occurrence
+    // (recurring events expand into instances that share the base event id)
     const seen = new Set<string>();
     const uniqueEvents: CalendarEvent[] = [];
     for (const event of events) {
-      if (!seen.has(event.id)) {
-        seen.add(event.id);
+      const key = getEventInstanceKey(event);
+      if (!seen.has(key)) {
+        seen.add(key);
         uniqueEvents.push(event);
       }
     }
@@ -171,7 +173,7 @@ export default function CalendarMonthView({
                     const isDragging = event.id === draggingEventId;
                     return (
                       <div
-                        key={`${event.id}-${event.position}`}
+                        key={`${getEventInstanceKey(event)}-${event.position}`}
                         draggable
                         onDragStart={(e) => {
                           e.dataTransfer.setData('text/plain', event.id);
@@ -195,7 +197,7 @@ export default function CalendarMonthView({
                     const isDragging = event.id === draggingEventId;
                     return (
                       <div
-                        key={`${event.id}-${event.position}`}
+                        key={`${getEventInstanceKey(event)}-${event.position}`}
                         draggable
                         onDragStart={(e) => {
                           e.dataTransfer.setData('text/plain', event.id);
@@ -212,7 +214,7 @@ export default function CalendarMonthView({
                         }}
                       >
                         <span className="text-xs font-medium truncate" style={{ color: event.color || '#1B2A4A' }}>
-                          ▸ {event.title}
+                          ▸ {event.recurrence && <span title="Recurring event">↻</span>} {event.title}
                         </span>
                       </div>
                     );
@@ -223,7 +225,7 @@ export default function CalendarMonthView({
                     const isDragging = event.id === draggingEventId;
                     return (
                       <div
-                        key={`${event.id}-${event.position}`}
+                        key={`${getEventInstanceKey(event)}-${event.position}`}
                         draggable
                         onDragStart={(e) => {
                           e.dataTransfer.setData('text/plain', event.id);
@@ -240,7 +242,7 @@ export default function CalendarMonthView({
                         }}
                       >
                         <span className="text-xs font-medium truncate" style={{ color: event.color || '#1B2A4A' }}>
-                          {event.title} ◂
+                          {event.recurrence && <span title="Recurring event">↻</span>} {event.title} ◂
                         </span>
                       </div>
                     );
@@ -249,7 +251,7 @@ export default function CalendarMonthView({
                   // Single-day event: render as normal card
                   return (
                     <CalendarEventCard
-                      key={`${event.id}-${event.position}`}
+                      key={`${getEventInstanceKey(event)}-${event.position}`}
                       event={event}
                       compact
                       onClick={() => onEventClick?.(event)}

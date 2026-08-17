@@ -2,7 +2,7 @@
 
 import { useMemo } from 'react';
 import type { CalendarEvent } from './types';
-import { generateHourlySlots, isToday, formatTime } from './calendar-utils';
+import { generateHourlySlots, isToday, formatTime, getEventInstanceKey } from './calendar-utils';
 
 // ---------------------------------------------------------------------------
 // Props
@@ -128,7 +128,7 @@ export default function CalendarDayView({
 
               return (
                 <div
-                  key={`${event.id}-${date.toISOString().slice(0, 10)}`}
+                  key={getEventInstanceKey(event)}
                   draggable
                   onDragStart={(e) => {
                     e.dataTransfer.setData('text/plain', event.id);
@@ -149,6 +149,7 @@ export default function CalendarDayView({
                 >
                   <div className="px-2 py-1 overflow-hidden" style={{ maxHeight: '100%' }}>
                     <div className="text-sm font-semibold truncate" style={{ color: event.color || '#1B2A4A' }}>
+                      {event.recurrence && <span className="mr-1" title="Recurring event">↻</span>}
                       {event.title}
                     </div>
                     <div className="text-xs text-gray-500">

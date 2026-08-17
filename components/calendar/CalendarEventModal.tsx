@@ -1,8 +1,10 @@
 'use client';
 
 import { useState, useEffect } from 'react';
-import type { CalendarEvent, CalendarEventType } from './types';
+import type { CalendarEvent, CalendarEventType, CalendarEventRecurrence } from './types';
 import { EVENT_TYPES } from './types';
+import { getRecurrenceLabel, getRecurrenceEndDateLabel } from './calendar-utils';
+import CalendarRecurrencePicker from './CalendarRecurrencePicker';
 import { Modal } from '@/components/dashboard/Modal';
 
 // ---------------------------------------------------------------------------
@@ -34,6 +36,8 @@ export default function CalendarEventModal({
   const [eventType, setEventType] = useState<CalendarEventType>('OTHER');
   const [startDate, setStartDate] = useState('');
   const [endDate, setEndDate] = useState('');
+  // Recurrence state (null = does not repeat)
+  const [recurrence, setRecurrence] = useState<CalendarEventRecurrence | null>(null);
 
   // Error state for save failures
   const [saveError, setSaveError] = useState<string | null>(null);
@@ -55,6 +59,18 @@ export default function CalendarEventModal({
       if (!isNaN(end.getTime())) {
         setEndDate(end.toISOString().slice(0, 16));
       }
+
+      // Pre-populate recurrence rule (null/undefined = does not repeat)
+      if (event.recurrence) {
+        setRecurrence({
+          frequency: event.recurrence.frequency,
+          interval: event.recurrence.interval || 1,
+          endDate: event.recurrence.endDate ? new Date(event.recurrence.endDate) : null,
+          count: event.recurrence.count ?? null,
+        });
+      } else {
+        setRecurrence(null);
+      }
     }
     // Clear error when event changes
     setSaveError(null);
@@ -75,6 +91,7 @@ export default function CalendarEventModal({
         eventType,
         startDate: new Date(startDate),
         endDate: new Date(endDate),
+        recurrence,
       });
 
       onClose();
@@ -188,6 +205,21 @@ export default function CalendarEventModal({
             )}
           </div>
         </div>
+
+        {/* Recurrence */}
+        {isViewMode ? (
+          event.recurrence && (
+            <div className="px-3 py-2 rounded border text-sm" style={{ borderColor: '#dee2e6', color: '#1a1a2e' }}>
+              <span className="mr-1" title="Recurring event">↻</span>
+              {getRecurrenceLabel(event.recurrence.frequency, event.recurrence.interval)}
+              {getRecurrenceEndDateLabel(event.recurrence.endDate, event.recurrence.count) && (
+                <span style={{ color: '#6c757d' }}> · {getRecurrenceEndDateLabel(event.recurrence.endDate, event.recurrence.count)}</span>
+              )}
+            </div>
+          )
+        ) : (
+          <CalendarRecurrencePicker value={recurrence} onChange={setRecurrence} />
+        )}
       </div>
 
       {/* Error message */}

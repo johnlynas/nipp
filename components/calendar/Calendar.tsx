@@ -2,7 +2,7 @@
 
 import { useState, useCallback, useEffect, useMemo } from 'react';
 import type { CalendarView, CalendarEvent, QuickAddInput } from './types';
-import { getMonthName } from './calendar-utils';
+import { getMonthName, getEventInstanceKey } from './calendar-utils';
 
 // Sub-components
 import CalendarMonthView from './CalendarMonthView';
@@ -107,7 +107,9 @@ export default function Calendar({
         updatedAt: new Date(e.updatedAt as string),
       }));
 
-      // Merge with existing events instead of replacing — keeps events from other months
+      // Merge with existing events instead of replacing — keeps events from other months.
+      // Keyed by instance key (id + start date) so recurring events, whose expanded
+      // instances share the base event id, are kept as separate occurrences.
       setEvents((prev) => {
         const merged = new Map<string, CalendarEvent>();
 
@@ -117,13 +119,13 @@ export default function Calendar({
           const evEnd = event.endDate instanceof Date ? event.endDate : new Date(event.endDate);
           if (isNaN(evStart.getTime()) || isNaN(evEnd.getTime())) continue;
           if (evEnd < start || evStart > end) {
-            merged.set(event.id, event);
+            merged.set(getEventInstanceKey(event), event);
           }
         }
 
         // Add/update with fetched events (these are in the current range)
         for (const event of parsed) {
-          merged.set(event.id, event);
+          merged.set(getEventInstanceKey(event), event);
         }
 
         return Array.from(merged.values()).sort((a, b) => {
@@ -278,13 +280,20 @@ export default function Calendar({
     newStart.setHours(start.getHours(), start.getMinutes());
     const newEnd = new Date(newStart.getTime() + duration);
 
-    // Optimistically update local state so UI reflects the move immediately
-    const optimisticUpdate = {
-      ...existing,
-      startDate: newStart,
-      endDate: newEnd,
-    };
-    setEvents((prev) => prev.map((e) => (e.id === eventId ? optimisticUpdate : e)));
+    // Recurring events: moving an instance moves the whole series (the base start
+    // date), so skip the optimistic single-instance update and refresh all
+    // instances from the server after a successful PATCH.
+    const isRecurring = !!existing.recurrence;
+
+    if (!isRecurring) {
+      // Optimistically update local state so UI reflects the move immediately
+      const optimisticUpdate = {
+        ...existing,
+        startDate: newStart,
+        endDate: newEnd,
+      };
+      setEvents((prev) => prev.map((e) => (e.id === eventId ? optimisticUpdate : e)));
+    }
 
     // Persist to API in the background
     try {
@@ -304,18 +313,31 @@ export default function Calendar({
         const err = await res.json().catch(() => ({ error: 'Failed to move event' }));
         console.error('Failed to move event:', err);
         // Revert on failure
-        setEvents((prev) => prev.map((e) => (e.id === eventId ? existing : e)));
+        if (!isRecurring) {
+          setEvents((prev) => prev.map((e) => (e.id === eventId ? existing : e)));
+        }
         return;
       }
 
       const { event: updatedEvent }: { event: CalendarEvent } = await res.json();
-      setEvents((prev) => prev.map((e) => (e.id === updatedEvent.id ? updatedEvent : e)));
+
+      if (isRecurring) {
+        // Drop all instances of this series and re-fetch the visible range so
+        // every occurrence reflects the new schedule (instances share base id)
+        setEvents((prev) => prev.filter((e) => e.id !== updatedEvent.id));
+        const { start, end } = getDateRange();
+        await fetchEvents(selectedOrgId || organizationId, start, end);
+      } else {
+        setEvents((prev) => prev.map((e) => (e.id === updatedEvent.id ? updatedEvent : e)));
+      }
     } catch {
       console.error('Error moving event');
       // Revert on error
-      setEvents((prev) => prev.map((e) => (e.id === eventId ? existing : e)));
+      if (!isRecurring) {
+        setEvents((prev) => prev.map((e) => (e.id === eventId ? existing : e)));
+      }
     }
-  }, [events, organizationId]);
+  }, [events, organizationId, selectedOrgId, getDateRange, fetchEvents]);
 
   const handleDragEnd = useCallback(() => {
     setDraggingEventId(null);
@@ -398,6 +420,10 @@ export default function Calendar({
       }
     }
 
+    // Serialize the recurrence rule (null = does not repeat). Dates are
+    // serialized to ISO strings by JSON.stringify.
+    const recurrencePayload = eventData.recurrence ?? null;
+
     if (isExisting) {
       // Update existing event via PATCH
       const res = await fetch(
@@ -411,6 +437,7 @@ export default function Calendar({
             startDate: (eventData.startDate as Date).toISOString(),
             endDate: (eventData.endDate as Date).toISOString(),
             eventType: eventData.eventType,
+            recurrence: recurrencePayload,
           }),
         }
       );
@@ -421,7 +448,16 @@ export default function Calendar({
       }
 
       const { event: updatedEvent }: { event: CalendarEvent } = await res.json();
-      setEvents((prev) => prev.map((e) => (e.id === updatedEvent.id ? updatedEvent : e)));
+
+      if (updatedEvent.recurrence) {
+        // Recurring series changed — drop all instances and re-fetch the visible
+        // range so every occurrence reflects the new rule (instances share base id)
+        setEvents((prev) => prev.filter((e) => e.id !== updatedEvent.id));
+        const { start, end } = getDateRange();
+        await fetchEvents(selectedOrgId || organizationId, start, end);
+      } else {
+        setEvents((prev) => prev.map((e) => (e.id === updatedEvent.id ? updatedEvent : e)));
+      }
     } else {
       // Create new event via POST
       const res = await fetch(`/api/organizations/${organizationId}/calendar-events`, {
@@ -434,6 +470,7 @@ export default function Calendar({
           endDate: (eventData.endDate as Date).toISOString(),
           calendarId: targetCalendarId,
           eventType: eventData.eventType,
+          recurrence: recurrencePayload,
         }),
       });
 
@@ -443,9 +480,16 @@ export default function Calendar({
       }
 
       const { event: createdEvent }: { event: CalendarEvent } = await res.json();
-      setEvents((prev) => [...prev, createdEvent]);
+
+      if (createdEvent.recurrence) {
+        // Re-fetch the visible range so all occurrences of the new series render
+        const { start, end } = getDateRange();
+        await fetchEvents(selectedOrgId || organizationId, start, end);
+      } else {
+        setEvents((prev) => [...prev, createdEvent]);
+      }
     }
-  }, [selectedEvent, organizationId, defaultCalendarId]);
+  }, [selectedEvent, organizationId, defaultCalendarId, selectedOrgId, getDateRange, fetchEvents]);
 
   const handleContextMenuClose = useCallback(() => {
     setContextMenuPos(null);
@@ -549,12 +593,14 @@ export default function Calendar({
 
   const upcomingEvents = useMemo(() => {
     const now = new Date();
-    // Deduplicate by ID (multi-day events may appear multiple times in the raw list)
+    // Deduplicate by instance key (multi-day events and recurring instances may
+    // appear multiple times in the raw list)
     const seen = new Set<string>();
     return events
       .filter((e) => {
-        if (seen.has(e.id)) return false;
-        seen.add(e.id);
+        const key = getEventInstanceKey(e);
+        if (seen.has(key)) return false;
+        seen.add(key);
         return e.startDate >= now;
       })
       .sort((a, b) => a.startDate.getTime() - b.startDate.getTime())

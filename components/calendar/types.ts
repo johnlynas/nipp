@@ -23,6 +23,13 @@ export type CalendarRecurrenceFrequency =
   | 'SEMI_ANNUALLY'
   | 'ANNUALLY';
 
+export interface CalendarEventRecurrence {
+  frequency: CalendarRecurrenceFrequency;
+  interval: number;
+  endDate?: Date | null;
+  count?: number | null;
+}
+
 export interface CalendarEvent {
   id: string;
   title: string;
@@ -33,6 +40,8 @@ export interface CalendarEvent {
   color?: string | null;
   calendarId: string;
   recurrenceId?: string | null;
+  /** Recurrence rule details (present when the event repeats). */
+  recurrence?: CalendarEventRecurrence | null;
   propertyId?: string | null;
   createdAt: Date;
   updatedAt: Date;
@@ -142,19 +151,17 @@ export interface ContextMenuEventCell {
 // Recurrence Picker Types
 // ---------------------------------------------------------------------------
 
+export interface RecurrencePickerValue {
+  frequency: CalendarRecurrenceFrequency;
+  interval: number;
+  endDate?: Date | null;
+  count?: number | null;
+}
+
 export interface RecurrencePickerProps {
-  value?: {
-    frequency: CalendarRecurrenceFrequency;
-    interval: number;
-    endDate?: Date | null;
-    count?: number | null;
-  };
-  onChange: (value: {
-    frequency: CalendarRecurrenceFrequency;
-    interval: number;
-    endDate?: Date | null;
-    count?: number | null;
-  } | null) => void;
+  /** The current recurrence rule, or null/undefined when the event does not repeat. */
+  value?: RecurrencePickerValue | null;
+  onChange: (value: RecurrencePickerValue | null) => void;
 }
 
 export const RECURRENCE_FREQUENCIES: { value: CalendarRecurrenceFrequency; label: string }[] = [

@@ -65,13 +65,13 @@ export function generateMonthGrid(year: number, month: number): Date[][] {
       week.push(cellDate);
     }
 
-    // Stop if we've gone past the last day of the month by more than a week
+    // Push first so the row containing the last day of the month is never
+    // dropped, then stop once we've gone past it by more than a week.
     const lastDayOfMonth = new Date(year, month + 1, 0);
+    grid.push(week);
     if (week[6] > lastDayOfMonth && row >= 4) {
       break;
     }
-
-    grid.push(week);
   }
 
   return grid;
@@ -192,13 +192,17 @@ export function expandRecurrence(
   const maxOccurrences = 52 * 12; // Cap at ~10 years of weekly events
   let occurrenceCount = 0;
 
+  // Each instance keeps the base event's duration (end - start)
+  const durationMs = event.endDate.getTime() - event.startDate.getTime();
+
   while (current <= rangeEnd && occurrenceCount < maxOccurrences) {
     // Stop if past recurrence end date or count limit
     if (endDate && current > endDate) break;
     if (count != null && occurrenceCount >= count) break;
 
-    // Check overlap with range
-    const instanceEnd = new Date(event.endDate);
+    // Check overlap with range — the instance end is shifted by duration so
+    // later occurrences are not compared against the base event's absolute end
+    const instanceEnd = new Date(current.getTime() + durationMs);
     if (current <= rangeEnd && instanceEnd >= rangeStart) {
       instances.push({ ...event, startDate: new Date(current), endDate: instanceEnd });
     }
@@ -302,6 +306,21 @@ export function getFirstDayOfMonth(year: number, month: number): number {
 }
 
 // ---------------------------------------------------------------------------
+// Instance identity (recurring events expand into multiple instances that
+// share the base event id — use this key to dedupe and render them)
+// ---------------------------------------------------------------------------
+
+/**
+ * Stable per-instance key for an event. For recurring events the API returns
+ * one instance per occurrence, all sharing the base event id; combining the
+ * id with the instance start date makes each occurrence unique.
+ */
+export function getEventInstanceKey(event: { id: string; startDate: Date | string }): string {
+  const start = event.startDate instanceof Date ? event.startDate : new Date(event.startDate);
+  return `${event.id}:${start.toISOString()}`;
+}
+
+// ---------------------------------------------------------------------------
 // Recurrence display helpers
 // ---------------------------------------------------------------------------
 
@@ -391,6 +410,7 @@ export const CalendarUtils = {
   getDayName,
   getDaysInMonth,
   getFirstDayOfMonth,
+  getEventInstanceKey,
   getRecurrenceLabel,
   getRecurrenceEndDateLabel,
   getEventPosition,

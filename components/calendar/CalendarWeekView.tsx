@@ -2,7 +2,7 @@
 
 import { useMemo } from 'react';
 import type { CalendarEvent } from './types';
-import { generateWeekGrid, generateHourlySlots, isToday, formatTime } from './calendar-utils';
+import { generateWeekGrid, generateHourlySlots, isToday, formatTime, getEventInstanceKey } from './calendar-utils';
 
 // ---------------------------------------------------------------------------
 // Props
@@ -50,12 +50,14 @@ export default function CalendarWeekView({
       map[dayStr] = [];
     }
 
-    // Deduplicate by ID — keep the latest entry for each event
+    // Deduplicate by instance key — keep the latest entry for each occurrence
+    // (recurring events expand into instances that share the base event id)
     const seen = new Set<string>();
     const uniqueEvents: CalendarEvent[] = [];
     for (const event of events) {
-      if (!seen.has(event.id)) {
-        seen.add(event.id);
+      const key = getEventInstanceKey(event);
+      if (!seen.has(key)) {
+        seen.add(key);
         uniqueEvents.push(event);
       }
     }
@@ -192,7 +194,7 @@ export default function CalendarWeekView({
                   const isDragging = event.id === draggingEventId;
                   return (
                     <div
-                      key={`${event.id}-${event.position}`}
+                      key={`${getEventInstanceKey(event)}-${event.position}`}
                       draggable
                       onDragStart={(e) => {
                         e.dataTransfer.setData('text/plain', event.id);
@@ -218,7 +220,7 @@ export default function CalendarWeekView({
                   const isDragging = event.id === draggingEventId;
                   return (
                     <div
-                      key={`${event.id}-${event.position}`}
+                      key={`${getEventInstanceKey(event)}-${event.position}`}
                       draggable
                       onDragStart={(e) => {
                         e.dataTransfer.setData('text/plain', event.id);
@@ -239,7 +241,7 @@ export default function CalendarWeekView({
                     >
                       <div className="px-1.5 py-0.5 overflow-hidden" style={{ maxHeight: '100%' }}>
                         <div className="text-xs font-semibold truncate" style={{ color: event.color || '#1B2A4A' }}>
-                          ▸ {event.title}
+                          ▸ {event.recurrence && <span title="Recurring event">↻</span>} {event.title}
                         </div>
                         <div className="text-[10px] text-gray-500">
                           {formatTime(event.startDate)} – {formatTime(event.endDate)}
@@ -254,7 +256,7 @@ export default function CalendarWeekView({
                   const isDragging = event.id === draggingEventId;
                   return (
                     <div
-                      key={`${event.id}-${event.position}`}
+                      key={`${getEventInstanceKey(event)}-${event.position}`}
                       draggable
                       onDragStart={(e) => {
                         e.dataTransfer.setData('text/plain', event.id);
@@ -275,7 +277,7 @@ export default function CalendarWeekView({
                     >
                       <div className="px-1.5 py-0.5 overflow-hidden" style={{ maxHeight: '100%' }}>
                         <div className="text-xs font-semibold truncate" style={{ color: event.color || '#1B2A4A' }}>
-                          {event.title} ◂
+                          {event.recurrence && <span title="Recurring event">↻</span>} {event.title} ◂
                         </div>
                         <div className="text-[10px] text-gray-500">
                           {formatTime(event.startDate)} – {formatTime(event.endDate)}
@@ -289,7 +291,7 @@ export default function CalendarWeekView({
                 const isDragging = event.id === draggingEventId;
                 return (
                   <div
-                    key={`${event.id}-${event.position}`}
+                    key={`${getEventInstanceKey(event)}-${event.position}`}
                     draggable
                     onDragStart={(e) => {
                       e.dataTransfer.setData('text/plain', event.id);
@@ -311,7 +313,7 @@ export default function CalendarWeekView({
                   >
                     <div className="px-1.5 py-0.5 overflow-hidden" style={{ maxHeight: '100%' }}>
                       <div className="text-xs font-semibold truncate" style={{ color: event.color || '#1B2A4A' }}>
-                        {event.title}
+                        {event.recurrence && <span title="Recurring event">↻</span>} {event.title}
                       </div>
                       <div className="text-[10px] text-gray-500">
                         {formatTime(event.startDate)} – {formatTime(event.endDate)}

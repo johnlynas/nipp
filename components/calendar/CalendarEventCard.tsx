@@ -83,6 +83,7 @@ export default function CalendarEventCard({
             <span className="text-xs font-medium truncate text-[#1B2A4A]">
               {event.title}
             </span>
+            <RecurrenceIndicator hasRecurrence={!!event.recurrence} />
           </div>
         </div>
       )}
@@ -93,6 +94,7 @@ export default function CalendarEventCard({
           <div className="flex items-center gap-1.5 mb-1">
             <span style={{ color }} className="text-sm">●</span>
             <h4 className="font-semibold text-[#1B2A4A]">{event.title}</h4>
+            <RecurrenceIndicator hasRecurrence={!!event.recurrence} />
           </div>
           {event.description && (
             <p className="text-xs text-gray-600 mb-1">{event.description}</p>

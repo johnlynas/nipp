@@ -4,6 +4,11 @@
  * Configures global matchers and common mocks for the test environment.
  */
 
+// Pin the timezone so date/time assertions are deterministic regardless of the
+// machine's local zone (e.g. Europe/London GMT/BST). Must be set before any
+// Date arithmetic in tests; Node re-reads TZ on each operation.
+process.env.TZ = 'UTC';
+
 import { vi } from 'vitest';
 import '@testing-library/jest-dom/vitest';
 
