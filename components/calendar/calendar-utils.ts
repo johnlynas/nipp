@@ -101,9 +101,6 @@ export function generateMonthDays(year: number, month: number): { date: Date; is
       date: cellDate,
       isCurrentMonth: cellDate.getMonth() === month && cellDate.getFullYear() === year,
     });
-
-    // Stop after the last day of the month + 6 days (to fill the grid)
-    if (cellDate > lastDayOfMonth && i >= 35) break;
   }
 
   return days;
@@ -266,6 +263,37 @@ export function formatDateTime(date: Date): string {
 
 export function formatTime(date: Date): string {
   return date.toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' });
+}
+
+/**
+ * Format a Date as `YYYY-MM-DDTHH:mm` in LOCAL time for <input type="datetime-local">.
+ * toISOString() returns UTC and shifts the displayed day/time in non-UTC timezones.
+ */
+export function toLocalDateTimeInputValue(date: Date): string {
+  const y = date.getFullYear();
+  const m = String(date.getMonth() + 1).padStart(2, '0');
+  const d = String(date.getDate()).padStart(2, '0');
+  const h = String(date.getHours()).padStart(2, '0');
+  const min = String(date.getMinutes()).padStart(2, '0');
+  return `${y}-${m}-${d}T${h}:${min}`;
+}
+
+/**
+ * Format a Date as `YYYY-MM-DD` in LOCAL time for <input type="date">.
+ */
+export function toLocalDateInputValue(date: Date): string {
+  const y = date.getFullYear();
+  const m = String(date.getMonth() + 1).padStart(2, '0');
+  const d = String(date.getDate()).padStart(2, '0');
+  return `${y}-${m}-${d}`;
+}
+
+/**
+ * Parse a `YYYY-MM-DD` date-input value as LOCAL midnight.
+ * (new Date('YYYY-MM-DD') parses as UTC and shifts the day in negative-offset timezones.)
+ */
+export function parseLocalDateInputValue(value: string): Date {
+  return new Date(`${value}T00:00`);
 }
 
 export function isSameDay(a: Date, b: Date): boolean {
@@ -492,6 +520,9 @@ export const CalendarUtils = {
   getRecurrenceEndDateLabel,
   getEventPosition,
   getEventSpan,
+  toLocalDateTimeInputValue,
+  toLocalDateInputValue,
+  parseLocalDateInputValue,
 };
 
 export default CalendarUtils;

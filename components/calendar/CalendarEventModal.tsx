@@ -3,7 +3,7 @@
 import { useState, useEffect } from 'react';
 import type { CalendarEvent, CalendarEventType, CalendarEventRecurrence } from './types';
 import { EVENT_TYPES } from './types';
-import { getRecurrenceLabel, getRecurrenceEndDateLabel } from './calendar-utils';
+import { getRecurrenceLabel, getRecurrenceEndDateLabel, toLocalDateTimeInputValue } from './calendar-utils';
 import CalendarRecurrencePicker from './CalendarRecurrencePicker';
 import { Modal } from '@/components/dashboard/Modal';
 
@@ -48,16 +48,18 @@ export default function CalendarEventModal({
       setDescription(event.description || '');
       setEventType(event.eventType);
 
-      // Parse start date — handle both Date objects and ISO strings
+      // Parse start date — handle both Date objects and ISO strings.
+      // datetime-local inputs expect LOCAL time; toISOString() is UTC and
+      // shifts the displayed day/time in non-UTC timezones.
       const start = event.startDate instanceof Date ? event.startDate : new Date(event.startDate);
       if (!isNaN(start.getTime())) {
-        setStartDate(start.toISOString().slice(0, 16));
+        setStartDate(toLocalDateTimeInputValue(start));
       }
 
       // Parse end date — handle both Date objects and ISO strings
       const end = event.endDate instanceof Date ? event.endDate : new Date(event.endDate);
       if (!isNaN(end.getTime())) {
-        setEndDate(end.toISOString().slice(0, 16));
+        setEndDate(toLocalDateTimeInputValue(end));
       }
 
       // Pre-populate recurrence rule (null/undefined = does not repeat)

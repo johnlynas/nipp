@@ -58,8 +58,11 @@ export default function CalendarMonthView({
       if (!seen.has(key)) {
         seen.add(key);
         uniqueEvents.push(event);
+      } else {
+        console.log('[CAL-DEBUG] MonthView: dedup dropped duplicate event:', key);
       }
     }
+    console.log(`[CAL-DEBUG] MonthView: ${events.length} events in, ${uniqueEvents.length} unique out`);
 
     for (const event of uniqueEvents) {
       const eventStart = new Date(event.startDate);
@@ -99,6 +102,21 @@ export default function CalendarMonthView({
         currentDay = new Date(currentDay.getTime() + 86400000);
         dayIndex++;
       }
+    }
+
+    // Final dedup pass: remove duplicate entries in the same day cell
+    // keyed by instance key + position — this catches race-condition duplicates
+    for (const [dayStr, dayEvents] of Object.entries(map)) {
+      const seen = new Set<string>();
+      const unique: typeof dayEvents = [];
+      for (const e of dayEvents) {
+        const k = `${getEventInstanceKey(e)}-${e.position}`;
+        if (!seen.has(k)) {
+          seen.add(k);
+          unique.push(e);
+        }
+      }
+      map[dayStr] = unique;
     }
 
     return map;
@@ -167,14 +185,14 @@ export default function CalendarMonthView({
 
               {/* Events */}
               <div className="space-y-0.5">
-                {dayEvents.slice(0, 3).map((event) => {
+                {dayEvents.slice(0, 3).map((event, index) => {
                   // Multi-day events: render differently based on position
                   if (event.position === 'middle') {
                     // Just a colored bar spanning the cell width — draggable + context menu
                     const isDragging = event.id === draggingEventId;
                     return (
                       <div
-                        key={`${getEventInstanceKey(event)}-${event.position}`}
+                        key={`${getEventInstanceKey(event)}-${event.position}-${index}`}
                         draggable
                         onDragStart={(e) => {
                           e.dataTransfer.setData('text/plain', event.id);
@@ -198,7 +216,7 @@ export default function CalendarMonthView({
                     const isDragging = event.id === draggingEventId;
                     return (
                       <div
-                        key={`${getEventInstanceKey(event)}-${event.position}`}
+                        key={`${getEventInstanceKey(event)}-${event.position}-${index}`}
                         draggable
                         onDragStart={(e) => {
                           e.dataTransfer.setData('text/plain', event.id);
@@ -226,7 +244,7 @@ export default function CalendarMonthView({
                     const isDragging = event.id === draggingEventId;
                     return (
                       <div
-                        key={`${getEventInstanceKey(event)}-${event.position}`}
+                        key={`${getEventInstanceKey(event)}-${event.position}-${index}`}
                         draggable
                         onDragStart={(e) => {
                           e.dataTransfer.setData('text/plain', event.id);
@@ -252,7 +270,7 @@ export default function CalendarMonthView({
                   // Single-day event: render as normal card
                   return (
                     <CalendarEventCard
-                      key={`${getEventInstanceKey(event)}-${event.position}`}
+                      key={`${getEventInstanceKey(event)}-${event.position}-${index}`}
                       event={event}
                       compact
                       onClick={() => onEventClick?.(event)}

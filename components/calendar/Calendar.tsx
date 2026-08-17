@@ -1,8 +1,8 @@
 'use client';
 
-import { useState, useCallback, useEffect, useMemo } from 'react';
+import { useState, useCallback, useEffect, useMemo, useRef } from 'react';
 import type { CalendarView, CalendarEvent, QuickAddInput } from './types';
-import { getMonthName, getEventInstanceKey } from './calendar-utils';
+import { getMonthName, getEventInstanceKey, toLocalDateInputValue } from './calendar-utils';
 
 // Sub-components
 import CalendarMonthView from './CalendarMonthView';
@@ -71,6 +71,9 @@ export default function Calendar({
   // Drag-and-drop state
   const [draggingEventId, setDraggingEventId] = useState<string | null>(null);
 
+  // Abort controller to cancel stale in-flight fetches when navigating months
+  const abortRef = useRef<AbortController | null>(null);
+
   // ---------------------------------------------------------------------------
   // API helpers
   // ---------------------------------------------------------------------------
@@ -99,16 +102,23 @@ export default function Calendar({
     }
   }, []);
 
-  const fetchEvents = useCallback(async (orgId: string, start: Date, end: Date) => {
+  const fetchEvents = useCallback(async (orgId: string, start: Date, end: Date, signal?: AbortSignal) => {
     console.log('[Calendar] fetchEvents called:', { orgId, start: start.toISOString(), end: end.toISOString() });
     try {
       const res = await fetch(
-        `/api/organizations/${orgId}/calendar-events?start=${encodeURIComponent(start.toISOString())}&end=${encodeURIComponent(end.toISOString())}`
+        `/api/organizations/${orgId}/calendar-events?start=${encodeURIComponent(start.toISOString())}&end=${encodeURIComponent(end.toISOString())}`,
+        { signal }
       );
       if (!res.ok) {
         console.log('[Calendar] fetchEvents failed:', res.status);
         return;
       }
+      // Skip if this request was aborted while waiting for response
+      if (signal?.aborted) {
+        console.log('[Calendar] fetchEvents: request aborted, skipping');
+        return;
+      }
+
       const data = await res.json();
       console.log('[Calendar] fetchEvents API returned', data.length, 'events:', JSON.stringify(data.map(e => ({ id: e.id, title: e.title, startDate: e.startDate, recurrence: !!e.recurrence }))));
       // Convert string dates back to Date objects
@@ -150,6 +160,16 @@ export default function Calendar({
           return aStart.getTime() - bStart.getTime();
         });
         console.log('[Calendar] merge: result has', result.length, 'events');
+        // [CAL-DEBUG] duplicates after merge? (should be impossible — Map is keyed by instance key)
+        {
+          const keys = new Map<string, number>();
+          for (const e of result) {
+            const k = getEventInstanceKey(e);
+            keys.set(k, (keys.get(k) || 0) + 1);
+          }
+          const dups = [...keys.entries()].filter(([, n]) => n > 1);
+          console.log(`[CAL-DEBUG] fetchEvents: merged state duplicates=${dups.length ? JSON.stringify(dups) : 'none'}`);
+        }
         return result;
       });
     } catch {
@@ -205,6 +225,11 @@ export default function Calendar({
   useEffect(() => {
     let cancelled = false;
 
+    // Cancel any in-flight fetch from a previous navigation
+    abortRef.current?.abort();
+    const controller = new AbortController();
+    abortRef.current = controller;
+
     const load = async () => {
       if (cancelled) return;
       console.log('[Calendar] Mount/load effect:', { selectedOrgId, organizationId });
@@ -213,11 +238,11 @@ export default function Calendar({
 
       const { start, end } = getDateRange();
       console.log('[Calendar] Fetching events for org:', selectedOrgId || organizationId, 'range:', start.toISOString(), '-', end.toISOString());
-      await fetchEvents(selectedOrgId || organizationId, start, end);
+      await fetchEvents(selectedOrgId || organizationId, start, end, controller.signal);
     };
 
     load();
-    return () => { cancelled = true; };
+    return () => { cancelled = true; abortRef.current?.abort(); };
   }, [selectedOrgId, organizationId, currentDateKey, view, fetchCalendars, fetchEvents, getDateRange]);
 
   // Fetch organizations list on mount (for super admin org switcher)
@@ -551,12 +576,15 @@ export default function Calendar({
   }, []);
 
   const handleAddEventFromContext = useCallback((date: Date) => {
-    // Open modal pre-populated with the clicked date
+    // Open modal pre-populated with the clicked date.
+    // Use LOCAL date components — toISOString() is UTC and shifts the day
+    // back by one in positive-UTC-offset timezones (e.g. BST).
+    const dateStr = toLocalDateInputValue(date);
     const newEvent: CalendarEvent = {
       id: `temp-${Date.now()}`,
       title: 'New Event',
-      startDate: new Date(`${date.toISOString().slice(0, 10)}T10:00`),
-      endDate: new Date(`${date.toISOString().slice(0, 10)}T11:00`),
+      startDate: new Date(`${dateStr}T10:00`),
+      endDate: new Date(`${dateStr}T11:00`),
       eventType: 'OTHER',
       calendarId: '',
       createdAt: new Date(),
@@ -733,6 +761,29 @@ export default function Calendar({
       <div className="flex-1 flex flex-col overflow-hidden">
         {/* Toolbar */}
         <div className="flex items-center justify-between px-4 py-3 bg-white border-b" style={{ borderColor: '#dee2e6' }}>
+
+
+          {/* View title */}
+          <h2 className="text-lg font-semibold" style={{ color: '#1B2A4A' }}>
+            {renderViewTitle()}
+          </h2>
+
+          {/* View toggle */}
+          <div className="flex items-center gap-1">
+            {(['month', 'week', 'day', 'year'] as CalendarView[]).map((v) => (
+              <button
+                key={v}
+                onClick={() => setView(v)}
+                className={`px-3 py-1.5 rounded text-sm font-medium transition-colors ${
+                  view === v ? 'text-white' : 'hover:bg-gray-100'
+                }`}
+                style={view === v ? { backgroundColor: '#F5A623' } : { color: '#1B2A4A' }}
+              >
+                {v.charAt(0).toUpperCase() + v.slice(1)}
+              </button>
+            ))}
+          </div>
+
           {/* Navigation */}
           <div className="flex items-center gap-2">
             <button
@@ -757,36 +808,6 @@ export default function Calendar({
               ›
             </button>
           </div>
-
-          {/* View title */}
-          <h2 className="text-lg font-semibold" style={{ color: '#1B2A4A' }}>
-            {renderViewTitle()}
-          </h2>
-
-          {/* View toggle */}
-          <div className="flex items-center gap-1">
-            {(['month', 'week', 'day', 'year'] as CalendarView[]).map((v) => (
-              <button
-                key={v}
-                onClick={() => setView(v)}
-                className={`px-3 py-1.5 rounded text-sm font-medium transition-colors ${
-                  view === v ? 'text-white' : 'hover:bg-gray-100'
-                }`}
-                style={view === v ? { backgroundColor: '#F5A623' } : { color: '#1B2A4A' }}
-              >
-                {v.charAt(0).toUpperCase() + v.slice(1)}
-              </button>
-            ))}
-          </div>
-
-          {/* Sidebar toggle */}
-          <button
-            onClick={() => setSidebarOpen(!sidebarOpen)}
-            className="p-1.5 rounded hover:bg-gray-100 transition-colors"
-            style={{ color: '#1B2A4A' }}
-          >
-            {sidebarOpen ? '◀' : '▶'}
-          </button>
         </div>
 
         {/* Calendar grid */}

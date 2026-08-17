@@ -2,6 +2,7 @@
 
 import type { RecurrencePickerProps, CalendarRecurrenceFrequency } from './types';
 import { RECURRENCE_FREQUENCIES } from './types';
+import { toLocalDateInputValue, parseLocalDateInputValue } from './calendar-utils';
 
 // ---------------------------------------------------------------------------
 // Component
@@ -51,7 +52,9 @@ export default function CalendarRecurrencePicker({ value, onChange }: Recurrence
     onChange({
       frequency,
       interval,
-      endDate: e.target.value ? new Date(e.target.value) : null,
+      // Parse as LOCAL midnight — new Date('YYYY-MM-DD') parses as UTC and
+      // shifts the day in negative-UTC-offset timezones.
+      endDate: e.target.value ? parseLocalDateInputValue(e.target.value) : null,
       count: undefined,
     });
   };
@@ -159,7 +162,7 @@ export default function CalendarRecurrencePicker({ value, onChange }: Recurrence
           By{' '}
           <input
             type="date"
-            value={value?.endDate ? new Date(value.endDate).toISOString().slice(0, 10) : ''}
+            value={value?.endDate ? toLocalDateInputValue(new Date(value.endDate)) : ''}
             onChange={handleEndDateChange}
             className="px-2 py-1 rounded border text-sm"
             style={{ borderColor: '#dee2e6' }}

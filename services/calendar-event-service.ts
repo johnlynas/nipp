@@ -145,11 +145,23 @@ export function expandRecurrence(
     const instanceEnd = new Date(current.getTime() + durationMs);
     if (current <= rangeEnd && instanceEnd >= rangeStart) {
       instances.push({ ...event, startDate: new Date(current), endDate: instanceEnd });
+      console.log(`[CAL-DEBUG] expandRecurrence: event=${event.id} occ#${occurrenceCount} start=${current.toISOString()} end=${instanceEnd.toISOString()}`);
     }
 
     // Advance by frequency + interval
     current = advanceDate(current, frequency, freqInterval);
     occurrenceCount++;
+  }
+
+  // [CAL-DEBUG] detect duplicate instances produced by expansion itself
+  {
+    const keys = new Map<string, number>();
+    for (const i of instances) {
+      const k = `${i.id}:${new Date(i.startDate).toISOString()}`;
+      keys.set(k, (keys.get(k) || 0) + 1);
+    }
+    const dups = [...keys.entries()].filter(([, n]) => n > 1);
+    if (dups.length) console.log(`[CAL-DEBUG] expandRecurrence: DUPLICATE instances for event=${event.id}:`, dups);
   }
 
   return instances;
@@ -396,6 +408,17 @@ export async function getEventsWithRecurrences(
 
   // Sort by start date and deduplicate (same event may appear in overlapping ranges)
   allInstances.sort((a, b) => a.startDate.getTime() - b.startDate.getTime());
+
+  // [CAL-DEBUG] detect duplicates in the final list returned to the client
+  {
+    const keys = new Map<string, number>();
+    for (const i of allInstances) {
+      const k = `${i.id}:${new Date(i.startDate).toISOString()}`;
+      keys.set(k, (keys.get(k) || 0) + 1);
+    }
+    const dups = [...keys.entries()].filter(([, n]) => n > 1);
+    console.log(`[CAL-DEBUG] getEventsWithRecurrences: returning ${allInstances.length} instances, duplicates=${dups.length ? JSON.stringify(dups) : 'none'}`);
+  }
 
   return allInstances;
 }
