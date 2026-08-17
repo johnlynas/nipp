@@ -1,5 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { auth } from '@/lib/auth';
+import globalDb from '@/lib/global-db';
+import { logger } from '@/lib/logger';
 
 export const runtime = 'nodejs';
 
@@ -14,9 +16,44 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
   }
 
+  logger.info(
+    { userId: session.user.id, userEmail: session.user.email },
+    '[/api/auth/me] Fetching activeOrganizationId',
+  );
+
   // Better Auth organization plugin stores activeOrganizationId on session.session
   const sessionRecord = session as Record<string, unknown>;
-  const activeOrgId = (sessionRecord.session as Record<string, string | null>)?.activeOrganizationId ?? null;
+  let activeOrgId = (sessionRecord.session as Record<string, string | null>)?.activeOrganizationId ?? null;
+
+  logger.info(
+    { userId: session.user.id, fromSession: activeOrgId },
+    '[/api/auth/me] activeOrganizationId from session',
+  );
+
+  // Fallback: read from User model (where we set it via databaseHooks)
+  if (!activeOrgId) {
+    logger.info(
+      { userId: session.user.id },
+      '[/api/auth/me] Not in session — reading from User model',
+    );
+
+    const user = await globalDb.user.findUnique({
+      where: { id: session.user.id },
+      select: { activeOrganizationId: true },
+    });
+
+    activeOrgId = user?.activeOrganizationId ?? null;
+
+    logger.info(
+      { userId: session.user.id, fromUserModel: activeOrgId },
+      '[/api/auth/me] activeOrganizationId from User model',
+    );
+  }
+
+  logger.info(
+    { userId: session.user.id, finalActiveOrgId: activeOrgId },
+    '[/api/auth/me] Returning response',
+  );
 
   return NextResponse.json({
     userId: session.user.id,

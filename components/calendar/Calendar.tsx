@@ -8,6 +8,7 @@ import { getMonthName, getEventInstanceKey } from './calendar-utils';
 import CalendarMonthView from './CalendarMonthView';
 import CalendarWeekView from './CalendarWeekView';
 import CalendarDayView from './CalendarDayView';
+import CalendarYearView from './CalendarYearView';
 import CalendarSidebar from './CalendarSidebar';
 import CalendarEventModal from './CalendarEventModal';
 import CalendarContextMenu from './CalendarContextMenu';
@@ -75,10 +76,17 @@ export default function Calendar({
   // ---------------------------------------------------------------------------
 
   const fetchCalendars = useCallback(async (orgId: string) => {
+    console.log('[Calendar] fetchCalendars called for org:', orgId);
     try {
       const res = await fetch(`/api/organizations/${orgId}/calendar`);
-      if (!res.ok) return;
+      console.log('[Calendar] Calendars fetch status:', res.status, 'for org:', orgId);
+      if (!res.ok) {
+        const errText = await res.text();
+        console.log('[Calendar] Calendars fetch error:', errText);
+        return;
+      }
       const calendars = await res.json();
+      console.log('[Calendar] Calendars response:', calendars);
       const def = calendars.find((c: { isDefault: boolean }) => c.isDefault);
       if (def) {
         setDefaultCalendarId(def.id);
@@ -86,18 +94,23 @@ export default function Calendar({
         // No default marked — fall back to first calendar
         setDefaultCalendarId(calendars[0].id);
       }
-    } catch {
-      // Silently fail — calendar creation will still work with a fallback
+    } catch (err) {
+      console.log('[Calendar] Calendars fetch exception:', err);
     }
   }, []);
 
   const fetchEvents = useCallback(async (orgId: string, start: Date, end: Date) => {
+    console.log('[Calendar] fetchEvents called:', { orgId, start: start.toISOString(), end: end.toISOString() });
     try {
       const res = await fetch(
         `/api/organizations/${orgId}/calendar-events?start=${encodeURIComponent(start.toISOString())}&end=${encodeURIComponent(end.toISOString())}`
       );
-      if (!res.ok) return;
+      if (!res.ok) {
+        console.log('[Calendar] fetchEvents failed:', res.status);
+        return;
+      }
       const data = await res.json();
+      console.log('[Calendar] fetchEvents API returned', data.length, 'events:', JSON.stringify(data.map(e => ({ id: e.id, title: e.title, startDate: e.startDate, recurrence: !!e.recurrence }))));
       // Convert string dates back to Date objects
       const parsed: CalendarEvent[] = data.map((e: Record<string, unknown>) => ({
         ...e,
@@ -111,6 +124,7 @@ export default function Calendar({
       // Keyed by instance key (id + start date) so recurring events, whose expanded
       // instances share the base event id, are kept as separate occurrences.
       setEvents((prev) => {
+        console.log('[Calendar] merge: prev has', prev.length, 'events');
         const merged = new Map<string, CalendarEvent>();
 
         // Keep existing events that fall outside the fetched range
@@ -119,20 +133,24 @@ export default function Calendar({
           const evEnd = event.endDate instanceof Date ? event.endDate : new Date(event.endDate);
           if (isNaN(evStart.getTime()) || isNaN(evEnd.getTime())) continue;
           if (evEnd < start || evStart > end) {
+            console.log('[Calendar] merge: keeping event outside range:', getEventInstanceKey(event), evStart.toISOString());
             merged.set(getEventInstanceKey(event), event);
           }
         }
 
         // Add/update with fetched events (these are in the current range)
         for (const event of parsed) {
+          console.log('[Calendar] merge: adding fetched event:', getEventInstanceKey(event), new Date(event.startDate as string).toISOString());
           merged.set(getEventInstanceKey(event), event);
         }
 
-        return Array.from(merged.values()).sort((a, b) => {
+        const result = Array.from(merged.values()).sort((a, b) => {
           const aStart = a.startDate instanceof Date ? a.startDate : new Date(a.startDate);
           const bStart = b.startDate instanceof Date ? b.startDate : new Date(b.startDate);
           return aStart.getTime() - bStart.getTime();
         });
+        console.log('[Calendar] merge: result has', result.length, 'events');
+        return result;
       });
     } catch {
       // Silently fail — calendar will show empty
@@ -172,6 +190,9 @@ export default function Calendar({
       end = new Date(start);
       end.setDate(end.getDate() + 6); // Saturday
       end.setHours(23, 59, 59, 999);
+    } else if (view === 'year') {
+      start = new Date(currentDate.getFullYear(), 0, 1);
+      end = new Date(currentDate.getFullYear(), 11, 31, 23, 59, 59);
     } else {
       start = new Date(currentDate);
       end = new Date(currentDate);
@@ -186,10 +207,12 @@ export default function Calendar({
 
     const load = async () => {
       if (cancelled) return;
+      console.log('[Calendar] Mount/load effect:', { selectedOrgId, organizationId });
       setLoading(true);
       await fetchCalendars(selectedOrgId || organizationId);
 
       const { start, end } = getDateRange();
+      console.log('[Calendar] Fetching events for org:', selectedOrgId || organizationId, 'range:', start.toISOString(), '-', end.toISOString());
       await fetchEvents(selectedOrgId || organizationId, start, end);
     };
 
@@ -213,6 +236,8 @@ export default function Calendar({
         next.setMonth(next.getMonth() - 1);
       } else if (view === 'week') {
         next.setDate(next.getDate() - 7);
+      } else if (view === 'year') {
+        next.setFullYear(next.getFullYear() - 1);
       } else {
         next.setDate(next.getDate() - 1);
       }
@@ -227,6 +252,8 @@ export default function Calendar({
         next.setMonth(next.getMonth() + 1);
       } else if (view === 'week') {
         next.setDate(next.getDate() + 7);
+      } else if (view === 'year') {
+        next.setFullYear(next.getFullYear() + 1);
       } else {
         next.setDate(next.getDate() + 1);
       }
@@ -237,6 +264,12 @@ export default function Calendar({
   const navigateToday = useCallback(() => {
     setCurrentDate(new Date());
   }, []);
+
+  // Drill from the Year view into a specific month (switches to Month view)
+  const handleMonthClick = useCallback((month: number) => {
+    setCurrentDate(new Date(currentDate.getFullYear(), month, 1));
+    setView('month');
+  }, [currentDate]);
 
   // ---------------------------------------------------------------------------
   // Event handlers
@@ -364,14 +397,25 @@ export default function Calendar({
 
     const isExisting = selectedEvent.id && !selectedEvent.id.startsWith('temp-');
 
+    const effectiveOrgId = selectedOrgId || organizationId;
+    console.log('[Calendar] handleSaveEvent:', { 
+      selectedOrgId, 
+      organizationId, 
+      effectiveOrgId,
+      defaultCalendarId,
+    });
+
     // Ensure we have a calendar ID before creating events
     let targetCalendarId = defaultCalendarId;
     if (!targetCalendarId) {
       // Try to fetch calendars again
       try {
-        const calRes = await fetch(`/api/organizations/${organizationId}/calendar`);
+        console.log('[Calendar] Fetching calendars for org:', effectiveOrgId);
+        const calRes = await fetch(`/api/organizations/${effectiveOrgId}/calendar`);
+        console.log('[Calendar] Calendars fetch status:', calRes.status);
         if (calRes.ok) {
           const calendars = await calRes.json();
+          console.log('[Calendar] Calendars response:', calendars);
           const def = calendars.find((c: { isDefault: boolean }) => c.isDefault);
           if (def) {
             targetCalendarId = def.id;
@@ -380,15 +424,19 @@ export default function Calendar({
             targetCalendarId = calendars[0].id;
             setDefaultCalendarId(calendars[0].id);
           }
+        } else {
+          const errBody = await calRes.text();
+          console.log('[Calendar] Calendars fetch error:', errBody);
         }
-      } catch {
-        // Silently fail
+      } catch (err) {
+        console.log('[Calendar] Calendars fetch exception:', err);
       }
     }
 
     if (!targetCalendarId) {
       // No calendar ID known — try to create a default one
-      const calRes = await fetch(`/api/organizations/${organizationId}/calendar`, {
+      console.log('[Calendar] Creating default calendar for org:', effectiveOrgId);
+      const calRes = await fetch(`/api/organizations/${effectiveOrgId}/calendar`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ name: 'Main Calendar', description: 'Default calendar' }),
@@ -549,43 +597,15 @@ export default function Calendar({
 
       if (!res.ok) {
         // Re-fetch events to sync with server on failure
-        let start: Date, end: Date;
-        if (view === 'month') {
-          start = new Date(currentDate.getFullYear(), currentDate.getMonth(), 1);
-          end = new Date(currentDate.getFullYear(), currentDate.getMonth() + 1, 0, 23, 59, 59);
-        } else if (view === 'week') {
-          start = new Date(currentDate);
-          start.setDate(start.getDate() - start.getDay());
-          end = new Date(start);
-          end.setDate(end.getDate() + 6);
-          end.setHours(23, 59, 59, 999);
-        } else {
-          start = new Date(currentDate);
-          end = new Date(currentDate);
-          end.setHours(23, 59, 59, 999);
-        }
+        const { start, end } = getDateRange();
         await fetchEvents(organizationId, start, end);
       }
     } catch {
       // Re-fetch events to sync with server on error
-      let start: Date, end: Date;
-      if (view === 'month') {
-        start = new Date(currentDate.getFullYear(), currentDate.getMonth(), 1);
-        end = new Date(currentDate.getFullYear(), currentDate.getMonth() + 1, 0, 23, 59, 59);
-      } else if (view === 'week') {
-        start = new Date(currentDate);
-        start.setDate(start.getDate() - start.getDay());
-        end = new Date(start);
-        end.setDate(end.getDate() + 6);
-        end.setHours(23, 59, 59, 999);
-      } else {
-        start = new Date(currentDate);
-        end = new Date(currentDate);
-        end.setHours(23, 59, 59, 999);
-      }
+      const { start, end } = getDateRange();
       await fetchEvents(organizationId, start, end);
     }
-  }, [eventToDelete, organizationId, view, currentDate, fetchEvents]);
+  }, [eventToDelete, organizationId, getDateRange, fetchEvents]);
 
   // ---------------------------------------------------------------------------
   // Upcoming events for sidebar
@@ -614,6 +634,10 @@ export default function Calendar({
   const renderViewTitle = () => {
     if (view === 'month') {
       return `${getMonthName(currentDate.getMonth())} ${currentDate.getFullYear()}`;
+    }
+
+    if (view === 'year') {
+      return String(currentDate.getFullYear());
     }
 
     if (view === 'week') {
@@ -669,6 +693,16 @@ export default function Calendar({
           onDragEnd={handleDragEnd}
           onDrop={handleDrop}
           draggingEventId={draggingEventId}
+        />
+      );
+    }
+
+    if (view === 'year') {
+      return (
+        <CalendarYearView
+          year={currentDate.getFullYear()}
+          events={events}
+          onMonthClick={handleMonthClick}
         />
       );
     }
@@ -731,7 +765,7 @@ export default function Calendar({
 
           {/* View toggle */}
           <div className="flex items-center gap-1">
-            {(['month', 'week', 'day'] as CalendarView[]).map((v) => (
+            {(['month', 'week', 'day', 'year'] as CalendarView[]).map((v) => (
               <button
                 key={v}
                 onClick={() => setView(v)}

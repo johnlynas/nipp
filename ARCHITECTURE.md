@@ -91,7 +91,7 @@ nipp/
 │   └── ...                       # Page components & layouts
 ├── components/                   # Reusable React components
 │   ├── auth/                     # Auth-related components (RequirePermission, RequireSuperAdmin)
-│   ├── calendar/                 # Interactive calendar (month/week/day views, DnD, recurrence)
+│   ├── calendar/                 # Interactive calendar (month/week/day/year views, DnD, recurrence)
 │   └── ui/                       # UI primitives & domain components
 ├── lib/                          # Core business logic & utilities
 │   ├── auth.ts                   # BetterAuth configuration & session callbacks
@@ -155,13 +155,14 @@ The following models are strictly scoped to organizations and protected by the P
 - `Team` (sub-organizational groupings, org-scoped)
 - `TeamMember` (user-to-team membership, org-scoped)
 - `TeamRole` (team-level role definitions mapped to org roles, org-scoped)
+- `Calendar`, `CalendarEvent`, `CalendarRecurrence` (interactive calendar models, org-scoped)
 
 Global models (`User`, `Organization`, `Member`, `Permission`, `AuditLog`, `NotificationLog`, `Resource`, `ResourceRole`) are not scoped and require explicit authorization checks.
 
-> **Calendar models (known gap):** `Calendar`, `CalendarEvent`, and `CalendarRecurrence` carry an
-> `organizationId` column but are **not** in the extension's scoped-model list. Calendar services
-> query via `globalDb` and several event queries lack an org filter — see SECURITY.md (Calendar &
-> Event Security) and the interactive-calendar feature doc (§11 Known Gaps).
+> **Calendar models:** `Calendar`, `CalendarEvent`, and `CalendarRecurrence` are registered in the
+> extension's scoped-model list (`lib/tenant-db.ts`) and every calendar service query additionally
+> filters by `organizationId` from the verified route context — see SECURITY.md (Calendar & Event
+> Security) for details.
 
 ## 🔒 Content Security Policy (CSP)
 
@@ -348,7 +349,7 @@ BetterAuth's **Teams** plugin provides sub-organizational groupings within each 
 | `/api/organizations/[orgId]/calendar-notifications/send-today` | POST | Trigger notifications for today's events |
 | `/api/organizations/[orgId]/calendar-notifications/history` | GET | View notification delivery history |
 
-All routes require admin membership in the target organization and enforce tenant isolation via `AsyncLocalStorage` context. Calendar event routes verify session + membership in the URL's organization; note that calendar service queries are not yet org-filtered (see SECURITY.md).
+All routes require admin membership in the target organization and enforce tenant isolation via `AsyncLocalStorage` context. Calendar event routes verify session + membership in the URL's organization, and calendar service queries filter by `organizationId` from that verified context (see SECURITY.md).
 
 ### Admin Dashboard API Routes (Super Admin Only)
 | Route | Methods | Description |

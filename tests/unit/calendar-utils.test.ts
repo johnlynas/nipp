@@ -23,8 +23,10 @@ import {
   getRecurrenceEndDateLabel,
   getEventPosition,
   getEventSpan,
+  generateYearMonths,
 } from '@/components/calendar/calendar-utils';
 import type { RecurringEvent } from '@/components/calendar/calendar-utils';
+import type { CalendarEvent } from '@/components/calendar/types';
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -38,6 +40,23 @@ const makeEvent = (overrides: Partial<RecurringEvent> = {}): RecurringEvent => (
   endDate: new Date('2026-08-17T11:00:00'),
   eventType: 'OTHER',
   color: null,
+  recurrenceId: null,
+  propertyId: null,
+  createdAt: new Date('2026-01-01T00:00:00'),
+  updatedAt: new Date('2026-01-01T00:00:00'),
+  recurrence: null,
+  ...overrides,
+});
+
+const makeCalEvent = (overrides: Partial<CalendarEvent> = {}): CalendarEvent => ({
+  id: 'event-1',
+  title: 'Test Event',
+  description: null,
+  startDate: new Date('2026-08-17T10:00:00'),
+  endDate: new Date('2026-08-17T11:00:00'),
+  eventType: 'OTHER',
+  color: null,
+  calendarId: 'cal-1',
   recurrenceId: null,
   propertyId: null,
   createdAt: new Date('2026-01-01T00:00:00'),
@@ -423,6 +442,124 @@ describe('calendar-utils', () => {
       });
 
       expect(getEventSpan(event)).toEqual({ startCol: 3, endCol: 5 });
+    });
+  });
+
+  // -------------------------------------------------------------------------
+  // Year view generation
+  // -------------------------------------------------------------------------
+
+  describe('generateYearMonths', () => {
+    it('returns 12 month summaries with correct names, day counts and start weekdays', () => {
+      const months = generateYearMonths(2026);
+
+      expect(months).toHaveLength(12);
+      expect(months[0].name).toBe('January');
+      expect(months[11].name).toBe('December');
+      expect(months[0].daysInMonth).toBe(31);
+      expect(months[1].daysInMonth).toBe(28); // 2026 is not a leap year
+      expect(months[0].firstDayOfWeek).toBe(4); // Jan 1, 2026 is a Thursday
+      expect(months[1].firstDayOfWeek).toBe(0); // Feb 1, 2026 is a Sunday
+    });
+
+    it('reports 29 days in February for leap years', () => {
+      const months = generateYearMonths(2028);
+
+      expect(months[1].daysInMonth).toBe(29);
+    });
+
+    it('returns empty event maps when no events are provided', () => {
+      for (const m of generateYearMonths(2026)) {
+        expect(m.eventsByDay.size).toBe(0);
+        expect(m.totalEvents).toBe(0);
+      }
+    });
+
+    it('records single-day events on the correct day of the correct month', () => {
+      const event = makeCalEvent({
+        startDate: new Date(2026, 2, 15, 10, 0),
+        endDate: new Date(2026, 2, 15, 11, 0),
+      });
+
+      const months = generateYearMonths(2026, [event]);
+
+      expect(months[2].eventsByDay.get(15)).toEqual([event]);
+      expect(months[2].totalEvents).toBe(1);
+      expect(months[0].totalEvents).toBe(0);
+    });
+
+    it('spans multi-day events across days and months, counting once per month', () => {
+      const event = makeCalEvent({
+        startDate: new Date(2026, 0, 30, 9, 0),
+        endDate: new Date(2026, 1, 2, 17, 0),
+      });
+
+      const months = generateYearMonths(2026, [event]);
+
+      expect(months[0].eventsByDay.get(30)).toEqual([event]);
+      expect(months[0].eventsByDay.get(31)).toEqual([event]);
+      expect(months[1].eventsByDay.get(1)).toEqual([event]);
+      expect(months[1].eventsByDay.get(2)).toEqual([event]);
+      expect(months[0].totalEvents).toBe(1);
+      expect(months[1].totalEvents).toBe(1);
+    });
+
+    it('deduplicates recurring instances by instance key but keeps distinct occurrences', () => {
+      const a = makeCalEvent({
+        id: 'rec-1',
+        startDate: new Date(2026, 4, 10, 10, 0),
+        endDate: new Date(2026, 4, 10, 11, 0),
+      });
+      const aDuplicate = { ...a }; // same id + start → same instance key
+      const b: CalendarEvent = {
+        ...a,
+        startDate: new Date(2026, 4, 17, 10, 0),
+        endDate: new Date(2026, 4, 17, 11, 0),
+      };
+
+      const months = generateYearMonths(2026, [a, aDuplicate, b]);
+
+      expect(months[4].eventsByDay.get(10)).toHaveLength(1);
+      expect(months[4].eventsByDay.get(17)).toHaveLength(1);
+      expect(months[4].totalEvents).toBe(2); // two distinct instances, dup dropped
+    });
+
+    it('ignores events that fall entirely outside the requested year', () => {
+      const event = makeCalEvent({
+        startDate: new Date(2025, 11, 31, 10, 0),
+        endDate: new Date(2025, 11, 31, 11, 0),
+      });
+
+      const months = generateYearMonths(2026, [event]);
+
+      expect(months[11].totalEvents).toBe(0);
+    });
+
+    it('clips events that start before the year to Jan 1', () => {
+      const event = makeCalEvent({
+        startDate: new Date(2025, 11, 30, 10, 0),
+        endDate: new Date(2026, 0, 3, 10, 0),
+      });
+
+      const months = generateYearMonths(2026, [event]);
+
+      expect(months[0].eventsByDay.get(1)).toEqual([event]);
+      expect(months[0].eventsByDay.get(3)).toEqual([event]);
+      expect(months[0].totalEvents).toBe(1);
+      expect(months[1].totalEvents).toBe(0); // ends Jan 3 — not in February
+    });
+
+    it('skips events with invalid dates', () => {
+      const event = makeCalEvent({
+        startDate: new Date('not-a-date'),
+        endDate: new Date('nope'),
+      });
+
+      const months = generateYearMonths(2026, [event]);
+
+      for (const m of months) {
+        expect(m.totalEvents).toBe(0);
+      }
     });
   });
 });

@@ -1,7 +1,7 @@
 import prisma from './db';
 import { getCurrentOrgId } from './tenant-context';
 
-const TENANT_SCOPED_MODELS = ['Role', 'RolePermission', 'MemberRole', 'Member', 'Invitation', 'SentInvitation', 'Team', 'TeamMember', 'TeamRole'] as const;
+const TENANT_SCOPED_MODELS = ['Role', 'RolePermission', 'MemberRole', 'Member', 'Invitation', 'SentInvitation', 'Team', 'TeamMember', 'TeamRole', 'Calendar', 'CalendarEvent', 'CalendarRecurrence'] as const;
 
 /** Structural type for Prisma extension query callbacks. */
 type QueryArgs = Record<string, unknown>;

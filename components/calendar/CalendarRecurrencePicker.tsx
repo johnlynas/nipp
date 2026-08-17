@@ -22,6 +22,21 @@ export default function CalendarRecurrencePicker({ value, onChange }: Recurrence
     });
   };
 
+  // Build a human-readable preview of the current recurrence rule
+  const getPreviewText = (): string => {
+    if (!value) return 'Never';
+    const freqLabel = RECURRENCE_FREQUENCIES.find(f => f.value === frequency)?.label || frequency;
+    const intervalText = interval > 1 ? `${interval} ` : '';
+    
+    if (hasCount) {
+      return `Every ${intervalText}${freqLabel.toLowerCase()} for ${value.count} occurrences`;
+    }
+    if (hasEndDate) {
+      return `Every ${intervalText}${freqLabel.toLowerCase()} until ${value.endDate?.toLocaleDateString()}`;
+    }
+    return `Every ${intervalText}${freqLabel.toLowerCase()} (never ends)`;
+  };
+
   const handleIntervalChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const val = parseInt(e.target.value, 10) || 1;
     onChange({
@@ -85,6 +100,19 @@ export default function CalendarRecurrencePicker({ value, onChange }: Recurrence
             style={{ borderColor: '#dee2e6' }}
           />
         </div>
+        {value && (
+          <div className="mt-1">
+            <p className="text-xs" style={{ color: '#6c757d' }}>
+              {getPreviewText()}
+            </p>
+            {/* Warning: interval > 1 without end rule likely means user wants "After X times" */}
+            {interval > 1 && !hasEndDate && !hasCount && (
+              <p className="text-xs mt-0.5" style={{ color: '#e76f51' }}>
+                ⚠ This repeats every {interval} {frequency.toLowerCase()}. Did you mean "After 3 times" instead?
+              </p>
+            )}
+          </div>
+        )}
       </div>
 
       {/* End rule */}

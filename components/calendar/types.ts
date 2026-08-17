@@ -71,7 +71,7 @@ export interface CalendarRecurrence {
 // View Types
 // ---------------------------------------------------------------------------
 
-export type CalendarView = 'month' | 'week' | 'day';
+export type CalendarView = 'month' | 'week' | 'day' | 'year';
 
 // ---------------------------------------------------------------------------
 // Component Props

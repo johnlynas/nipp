@@ -155,7 +155,7 @@ export async function getCalendarById(
   calendarId: string,
 ): Promise<CalendarWithCount> {
   const calendar = await globalDb.calendar.findFirst({
-    where: { id: calendarId },
+    where: { id: calendarId, organizationId: ctx.organizationId! },
   });
 
   if (!calendar) {
@@ -184,7 +184,7 @@ export async function updateCalendar(
   requireAnyAdmin(ctx);
 
   const calendar = await globalDb.calendar.findFirst({
-    where: { id: calendarId },
+    where: { id: calendarId, organizationId: ctx.organizationId! },
   });
 
   if (!calendar) {
@@ -209,7 +209,7 @@ export async function updateCalendar(
   }
 
   const updated = await globalDb.calendar.update({
-    where: { id: calendarId },
+    where: { id: calendarId, organizationId: ctx.organizationId! },
     data: updateData,
   });
 
@@ -239,7 +239,7 @@ export async function deleteCalendar(
   requireAnyAdmin(ctx);
 
   const calendar = await globalDb.calendar.findFirst({
-    where: { id: calendarId },
+    where: { id: calendarId, organizationId: ctx.organizationId! },
   });
 
   if (!calendar) {
@@ -252,7 +252,7 @@ export async function deleteCalendar(
   }
 
   await globalDb.calendar.delete({
-    where: { id: calendarId },
+    where: { id: calendarId, organizationId: ctx.organizationId! },
   });
 
   logger.info(

@@ -16,35 +16,53 @@ export default function CalendarPage() {
 
   useEffect(() => {
     async function init() {
+      console.log('[CalendarPage] init() starting');
+
       // Fetch available organizations for the selector (super admin only)
       try {
         const res = await fetch("/api/dashboard/admin/organizations");
         if (res.ok) {
           const data = await res.json();
           setOrgs(data.organizations || []);
+          console.log('[CalendarPage] Fetched orgs:', data.organizations);
         }
       } catch {
         // Silently fail — org selector will just be empty
       }
 
       // Try to get active org from session first, then localStorage fallback
+      let gotOrgFromApi = false;
       try {
         const meRes = await fetch("/api/auth/me");
         if (meRes.ok) {
           const me = await meRes.json();
+          console.log('[CalendarPage] /api/auth/me response:', me);
           if (me.activeOrganizationId) {
+            console.log('[CalendarPage] Setting orgId from /api/auth/me:', me.activeOrganizationId);
             setOrgId(me.activeOrganizationId);
+            gotOrgFromApi = true;
+          } else {
+            console.log('[CalendarPage] /api/auth/me returned NO activeOrganizationId');
           }
+        } else {
+          console.log('[CalendarPage] /api/auth/me returned non-OK status:', meRes.status);
         }
-      } catch {
-        // Fall through to localStorage
+      } catch (err) {
+        console.log('[CalendarPage] /api/auth/me error:', err);
       }
 
-      const stored = localStorage.getItem("nipp-active-org-id");
-      if (stored) {
-        setOrgId(stored);
+      // Only use localStorage as fallback if API didn't return an orgId
+      if (!gotOrgFromApi) {
+        const stored = localStorage.getItem("nipp-active-org-id");
+        if (stored) {
+          console.log('[CalendarPage] Setting orgId from localStorage:', stored);
+          setOrgId(stored);
+        }
+      } else {
+        console.log('[CalendarPage] Skipping localStorage — already got orgId from API');
       }
 
+      console.log('[CalendarPage] Final orgId:', orgId);
       setLoading(false);
     }
 

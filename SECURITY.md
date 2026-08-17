@@ -142,13 +142,13 @@ The interactive calendar (`components/calendar/`, `services/calendar*-service.ts
 - **Service layer:** Mutations (`createEvent`, `updateEvent`, `deleteEvent`, calendar create/update/delete) call `requireAnyAdmin(ctx)` — only tenant admins can modify data; members are read-only.
 - **Permissions:** `calendar:read`, `calendar:create`, `calendar:update`, `calendar:delete` are seeded into the permission catalog (resource `calendars`) for role-based assignment.
 
-### Tenant Isolation — ⚠️ Known Gap (Open)
-The calendar models are **not** in the Prisma extension's `TENANT_SCOPED_MODELS` list (`lib/tenant-db.ts`), and the event service queries do not filter by `organizationId`:
-- `getEventsWithRecurrences` — no org filter (only an optional `calendarId`)
-- `getEventById`, `updateEvent`, `deleteEvent` — lookup by event `id` only
-- `getUpcomingEvents` — computes a target org id but never applies it to the queries
+### Tenant Isolation — ✅ Resolved
+Calendar models are now fully tenant-isolated via defense-in-depth:
+- **Application layer (Prisma `$extends`):** `Calendar`, `CalendarEvent`, and `CalendarRecurrence` are registered in the `TENANT_SCOPED_MODELS` list (`lib/tenant-db.ts`). Any query on these models through the tenant-scoped client is automatically filtered by `organizationId`, and fails closed (throws) if no tenant context is active.
+- **Service layer (explicit filters):** Every calendar service query filters by `organizationId` derived from the verified route context (`ctx.organizationId`) — including `getEventsWithRecurrences`, `getEventById`, `updateEvent`, `deleteEvent`, and `getUpcomingEvents` (which now applies its target org id to both the single-event and recurring-event queries). By-ID lookups (`getCalendarById`, `updateCalendar`, `deleteCalendar`) are likewise org-scoped.
+- **Tests:** Calendar-specific isolation tests live in `tests/isolation/application/calendar-isolation.test.ts` (see `ISOLATION_TEST_STRATEGY.md`), verifying that reads/writes are scoped to the active organization and that cross-org access is blocked.
 
-Because routes only verify membership in the URL's organization, an authenticated member of Org A could read or modify Org B events by supplying their IDs/calendarId. **Follow-up (required before broader rollout):** add `organizationId` filters to these service queries and/or register the calendar models in the tenant extension, then add calendar-specific isolation tests (see `ISOLATION_TEST_STRATEGY.md`).
+Because routes verify membership in the URL's organization **and** every service query filters by that same `organizationId`, an authenticated member of Org A can no longer read or modify Org B events by supplying their IDs/calendarId.
 
 ### API Endpoints
 | Route | Methods | Access |

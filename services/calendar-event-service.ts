@@ -209,9 +209,9 @@ export async function createEvent(
     throw new ValidationError('Event title is required');
   }
 
-  // Verify calendar exists (tenant isolation via Prisma Extension)
+  // Verify calendar exists in the caller's organization (tenant isolation)
   const calendar = await globalDb.calendar.findFirst({
-    where: { id: input.calendarId },
+    where: { id: input.calendarId, organizationId: ctx.organizationId! },
   });
 
   if (!calendar) {
@@ -274,7 +274,7 @@ export async function createEvent(
 
     // Keep the event's scalar in sync so filters and lookups by recurrenceId work
     await globalDb.calendarEvent.update({
-      where: { id: event.id },
+      where: { id: event.id, organizationId: ctx.organizationId! },
       data: { recurrenceId },
     });
   }
@@ -309,6 +309,7 @@ export async function getEvents(
   input: GetEventsInput,
 ): Promise<CalendarEventWithDetails[]> {
   const where: Record<string, unknown> = {
+    organizationId: ctx.organizationId!,
     startDate: { lte: input.endDate },
     endDate: { gte: input.startDate },
   };
@@ -349,6 +350,7 @@ export async function getEventsWithRecurrences(
   // active as long as the series has started by range end — expandRecurrence
   // applies the rule's own end date/count and per-instance overlap check.
   const where: Record<string, unknown> = {
+    organizationId: ctx.organizationId!,
     OR: [
       { recurrence: null, startDate: { lte: input.endDate }, endDate: { gte: input.startDate } },
       { recurrence: { isNot: null }, startDate: { lte: input.endDate } },
@@ -368,8 +370,12 @@ export async function getEventsWithRecurrences(
   // Expand recurring events and flatten into instances
   const allInstances: CalendarEventWithDetails[] = [];
 
+  console.log('[CalendarService] getEventsWithRecurrences: fetched', events.length, 'base events for range:', input.startDate.toISOString(), '-', input.endDate.toISOString());
+
   for (const event of events) {
     const recurrenceDetails = mapRecurrence(event.recurrence);
+
+    console.log('[CalendarService] Expanding event:', event.id, event.title, 'recurrence:', recurrenceDetails ? JSON.stringify(recurrenceDetails) : 'none');
 
     const expanded = expandRecurrence(
       { ...event, recurrence: event.recurrence ? {
@@ -381,6 +387,8 @@ export async function getEventsWithRecurrences(
       input.startDate,
       input.endDate,
     );
+
+    console.log('[CalendarService] Expanded to', expanded.length, 'instances:', JSON.stringify(expanded.map(i => ({ id: i.id, startDate: i.startDate }))));
 
     // Attach recurrence details to each instance so clients can display/edit the rule
     allInstances.push(...expanded.map((instance) => ({ ...instance, recurrence: recurrenceDetails })));
@@ -400,7 +408,7 @@ export async function getEventById(
   eventId: string,
 ): Promise<CalendarEventWithDetails> {
   const event = await globalDb.calendarEvent.findFirst({
-    where: { id: eventId },
+    where: { id: eventId, organizationId: ctx.organizationId! },
     include: { recurrence: true },
   });
 
@@ -436,7 +444,7 @@ export async function updateEvent(
   requireAnyAdmin(ctx);
 
   const event = await globalDb.calendarEvent.findFirst({
-    where: { id: eventId },
+    where: { id: eventId, organizationId: ctx.organizationId! },
     include: { recurrence: true },
   });
 
@@ -492,7 +500,7 @@ export async function updateEvent(
       // Remove recurrence — delete the rule and set recurrenceId to null
       if (event.recurrence) {
         await globalDb.calendarRecurrence.delete({
-          where: { id: event.recurrence.id },
+          where: { id: event.recurrence.id, organizationId: ctx.organizationId! },
         });
       }
       updateData.recurrenceId = null;
@@ -516,7 +524,7 @@ export async function updateEvent(
       if (event.recurrence) {
         // Update existing recurrence rule
         await globalDb.calendarRecurrence.update({
-          where: { id: event.recurrence.id },
+          where: { id: event.recurrence.id, organizationId: ctx.organizationId! },
           data: recurrenceData,
         });
       } else {
@@ -539,7 +547,7 @@ export async function updateEvent(
   }
 
   const updated = await globalDb.calendarEvent.update({
-    where: { id: eventId },
+    where: { id: eventId, organizationId: ctx.organizationId! },
     data: updateData,
     include: { recurrence: true },
   });
@@ -576,7 +584,7 @@ export async function deleteEvent(
   requireAnyAdmin(ctx);
 
   const event = await globalDb.calendarEvent.findFirst({
-    where: { id: eventId },
+    where: { id: eventId, organizationId: ctx.organizationId! },
     include: { recurrence: true },
   });
 
@@ -588,12 +596,12 @@ export async function deleteEvent(
   // child row must go first — use the relation id, not just the scalar)
   if (event.recurrence) {
     await globalDb.calendarRecurrence.delete({
-      where: { id: event.recurrence.id },
+      where: { id: event.recurrence.id, organizationId: ctx.organizationId! },
     });
   }
 
   await globalDb.calendarEvent.delete({
-    where: { id: eventId },
+    where: { id: eventId, organizationId: ctx.organizationId! },
   });
 
   logger.info(
@@ -625,6 +633,7 @@ export async function getUpcomingEvents(
   // expanded below, which would otherwise double-count them)
   const singleEvents = await globalDb.calendarEvent.findMany({
     where: {
+      organizationId: targetOrgId,
       recurrence: null,
       startDate: { gte: today },
     },
@@ -637,6 +646,7 @@ export async function getUpcomingEvents(
   // applies the rule's own end date/count and per-instance overlap check.
   const recurringEvents = await globalDb.calendarEvent.findMany({
     where: {
+      organizationId: targetOrgId,
       recurrence: { isNot: null },
       startDate: { lte: upcomingWindowEnd },
     },

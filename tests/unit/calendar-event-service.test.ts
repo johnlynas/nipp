@@ -390,7 +390,7 @@ describe('CalendarEventService', () => {
       // Regression: the event row's recurrenceId scalar must be persisted so
       // later updates/deletes can find the rule via the event row.
       expect(globalDb.calendarEvent.update).toHaveBeenCalledWith({
-        where: { id: 'event-1' },
+        where: { id: 'event-1', organizationId: 'org-1' },
         data: { recurrenceId: 'rec-1' },
       });
 
@@ -440,7 +440,7 @@ describe('CalendarEventService', () => {
 
       expect(globalDb.calendarEvent.findMany).toHaveBeenCalledWith(
         expect.objectContaining({
-          where: { startDate: { lte: new Date('2026-08-31T23:59:59') }, endDate: { gte: new Date('2026-08-01T00:00:00') } },
+          where: { organizationId: 'org-1', startDate: { lte: new Date('2026-08-31T23:59:59') }, endDate: { gte: new Date('2026-08-01T00:00:00') } },
         })
       );
       expect(result).toHaveLength(1);
@@ -457,7 +457,7 @@ describe('CalendarEventService', () => {
       });
 
       expect(globalDb.calendarEvent.findMany).toHaveBeenCalledWith(
-        expect.objectContaining({ where: expect.objectContaining({ calendarId: 'cal-2' }) })
+        expect.objectContaining({ where: expect.objectContaining({ calendarId: 'cal-2', organizationId: 'org-1' }) })
       );
     });
   });
@@ -641,7 +641,7 @@ describe('CalendarEventService', () => {
       });
 
       expect(globalDb.calendarRecurrence.update).toHaveBeenCalledWith({
-        where: { id: 'rec-1' },
+        where: { id: 'rec-1', organizationId: 'org-1' },
         data: expect.objectContaining({ frequency: 'ANNUALLY', interval: 1 }),
       });
       expect(globalDb.calendarRecurrence.create).not.toHaveBeenCalled();
@@ -657,7 +657,7 @@ describe('CalendarEventService', () => {
         recurrence: null,
       });
 
-      expect(globalDb.calendarRecurrence.delete).toHaveBeenCalledWith({ where: { id: 'rec-1' } });
+      expect(globalDb.calendarRecurrence.delete).toHaveBeenCalledWith({ where: { id: 'rec-1', organizationId: 'org-1' } });
       expect(result.recurrence).toBeNull();
     });
 
@@ -670,7 +670,7 @@ describe('CalendarEventService', () => {
 
       await CalendarEventService.updateEvent(mockCtx('TENANT_ADMIN'), 'event-1', { recurrence: null });
 
-      expect(globalDb.calendarRecurrence.delete).toHaveBeenCalledWith({ where: { id: 'rec-1' } });
+      expect(globalDb.calendarRecurrence.delete).toHaveBeenCalledWith({ where: { id: 'rec-1', organizationId: 'org-1' } });
     });
   });
 
@@ -696,8 +696,8 @@ describe('CalendarEventService', () => {
 
       await CalendarEventService.deleteEvent(mockCtx('TENANT_ADMIN'), 'event-1');
 
-      expect(globalDb.calendarRecurrence.delete).toHaveBeenCalledWith({ where: { id: 'rec-1' } });
-      expect(globalDb.calendarEvent.delete).toHaveBeenCalledWith({ where: { id: 'event-1' } });
+      expect(globalDb.calendarRecurrence.delete).toHaveBeenCalledWith({ where: { id: 'rec-1', organizationId: 'org-1' } });
+      expect(globalDb.calendarEvent.delete).toHaveBeenCalledWith({ where: { id: 'event-1', organizationId: 'org-1' } });
 
       // The child row must be removed first (the relation is Restrict)
       const deleteOrder = [
@@ -713,7 +713,7 @@ describe('CalendarEventService', () => {
       await CalendarEventService.deleteEvent(mockCtx('TENANT_ADMIN'), 'event-1');
 
       expect(globalDb.calendarRecurrence.delete).not.toHaveBeenCalled();
-      expect(globalDb.calendarEvent.delete).toHaveBeenCalledWith({ where: { id: 'event-1' } });
+      expect(globalDb.calendarEvent.delete).toHaveBeenCalledWith({ where: { id: 'event-1', organizationId: 'org-1' } });
     });
   });
 

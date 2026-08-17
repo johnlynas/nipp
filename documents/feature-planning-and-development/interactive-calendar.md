@@ -15,12 +15,12 @@ The calendar is integrated into the **Integrated Super Admin Dashboard** (`/dash
 ### Current Status (as of August 2026)
 
 - **Implemented & integrated**: live at `/dashboard/admin/calendar` (sidebar nav item with `CalendarDays` icon in `app/dashboard/admin/layout.tsx`); the page renders `<Calendar organizationId={...} />`.
-- **Views**: month, week, day. The multi-year view from FR-1 is **not implemented** (deferred).
+- **Views**: month, week, day, year. The multi-year view from FR-1 is implemented as a 12-month Year grid (clicking a month drills into the Month view).
 - **Recurring events**: fully supported end-to-end — `DAILY`, `WEEKLY`, `MONTHLY`, `QUARTERLY`, `SEMI_ANNUALLY`, `ANNUALLY` with interval, end-date and occurrence-count limits. Expansion is computed server-side; a frontend mirror exists in `calendar-utils.ts` for client-side merging.
 - **Drag-and-drop rescheduling**: implemented (HTML5 drag events, persisted via PATCH).
 - **Calendar notifications**: email notification service for today's events is implemented (`services/calendar-notification-service.ts` + `/calendar-notifications/*` routes).
-- **Test coverage**: 113 calendar-specific tests (86 unit + 27 integration), all passing. Full suite green: 902 unit / 181 integration tests, `tsc --noEmit` clean, ESLint (`--max-warnings=0`) clean, production build succeeds.
-- **Known gaps**: service-level org filtering for several event queries is incomplete (security-relevant — see §11).
+- **Test coverage**: 145 calendar-specific tests (95 unit + 27 integration + 23 tenant-isolation), all passing. Full suite green: 911 unit / 181 integration tests, `tsc --noEmit` clean, ESLint (`--max-warnings=0`) clean, production build succeeds.
+- **Tenant isolation**: fully enforced — calendar models registered in the Prisma tenant extension plus explicit `organizationId` filters on every service query (former gap resolved, see §11).
 
 ---
 
@@ -30,7 +30,7 @@ The calendar is integrated into the **Integrated Super Admin Dashboard** (`/dash
 
 | ID | Requirement | Priority | Status |
 |----|-------------|----------|--------|
-| FR-1 | Month, Week, Day views with toggle navigation (multi-year deferred) | Must Have | ✅ month/week/day; multi-year not implemented |
+| FR-1 | Month, Week, Day views with toggle navigation (multi-year deferred) | Must Have | ✅ month/week/day/year — Year view implemented as a 12-month grid |
 | FR-2 | Color-coded event cards on calendar dates with type-specific icons | Must Have | ✅ |
 | FR-3 | Upcoming Events sidebar that slides in/out to maximize screen real estate | Must Have | ✅ |
 | FR-4 | Full CRUD for events (Create, Read, Update, Delete) | Must Have | ✅ |
@@ -40,7 +40,7 @@ The calendar is integrated into the **Integrated Super Admin Dashboard** (`/dash
 | FR-8 | Multiple events per date, expandable/compressible display | Must Have | ✅ |
 | FR-9 | Recurring events: weekly, monthly, quarterly, semi-annually, annually | Should Have | ✅ (also DAILY; interval + endDate/count limits) |
 | FR-10 | Standalone reusable component in `components/calendar/` | Must Have | ✅ |
-| FR-11 | Organization-scoped events via `organizationId` (tenant isolation) | Must Have | ⚠️ data model is org-scoped; service-level org filtering incomplete (see §11) |
+| FR-11 | Organization-scoped events via `organizationId` (tenant isolation) | Must Have | ✅ models in tenant extension + org filters on all service queries (see §11) |
 | FR-12 | Integration into Integrated Super Admin Dashboard sidebar navigation | Should Have | ✅ (`/dashboard/admin/calendar`) |
 
 ### 2.2 Non-Functional Requirements
@@ -49,7 +49,7 @@ The calendar is integrated into the **Integrated Super Admin Dashboard** (`/dash
 |----|-------------|
 | NFR-1 | Must use Property NI standard UI elements and color scheme (Navy `#1B2A4A`, Amber `#F5A623`) |
 | NFR-2 | Must respect existing RBAC permissions (`calendar:read`, `calendar:create`, `calendar:update`, `calendar:delete`) |
-| NFR-3 | Must comply with tenant isolation (Prisma Extension + RLS) — **partially met, see §11** |
+| NFR-3 | Must comply with tenant isolation (Prisma Extension + RLS) — **met, see §11** |
 | NFR-4 | Must be fully tested: unit tests for services, API routes, and UI components — **unit + integration done; component tests deferred** |
 | NFR-5 | Must follow existing service layer patterns (`ServiceContext`, typed errors, pagination) |
 | NFR-6 | Must integrate with existing notification system (SSE) for event reminders — **email path implemented; SSE deferred** |
@@ -458,7 +458,7 @@ class CalendarNotificationService {
 - **Month**: Standard calendar grid (Sun–Sat), event cards with color coding
 - **Week**: 7-column layout with hourly time slots
 - **Day**: Single column with hourly time slots, detailed view
-- **Multi-Year**: *not implemented* (deferred — see §11)
+- **Year**: 12-month mini grid with per-day event dots and monthly counts; clicking a month drills into the Month view
 
 ### 7.4 Sidebar Behavior
 
@@ -541,7 +541,7 @@ The generic app-layer isolation suite (`tests/isolation/application/`) covers th
 22. ⏳ Component unit tests — deferred (see §8.2)
 23. ✅ Full test suite, build, lint, type-check all green
 
-**Deferred**: multi-year view (FR-1), component tests (§8.2), calendar-specific isolation tests (§8.4).
+**Deferred**: component tests (§8.2).
 
 ---
 
@@ -554,19 +554,16 @@ The generic app-layer isolation suite (`tests/isolation/application/`) covers th
 | Multi-event display clutter on busy dates | Medium | Implement expand/collapse; show "N more" overflow indicator |
 | Calendar component reusability vs. dashboard coupling | Medium | Keep calendar as pure presentational + data-fetching component; pass data via props or SWR hooks |
 | RLS policy performance on large event tables | Medium | Ensure `organizationId` index exists; test with realistic data volumes |
-| Cross-tenant exposure via unfiltered service queries | High | **Open** — see §11; add org filters to event-service queries and register calendar models in the tenant extension |
+| Cross-tenant exposure via unfiltered service queries | High | **Resolved** — org filters on all event-service queries + calendar models registered in the tenant extension (see §11) |
 
 ---
 
 ## 11. Known Gaps & Follow-ups
 
-1. **Service-level org isolation for event queries (security-relevant, open).**
-   The calendar models are **not** in `TENANT_SCOPED_MODELS` (`lib/tenant-db.ts`), and the event service queries by `id` / `calendarId` without an `organizationId` filter:
-   - `getEventsWithRecurrences` — no org filter (only optional `calendarId`)
-   - `getEventById`, `updateEvent`, `deleteEvent` — lookup by `id` only
-   - `getUpcomingEvents` — computes a target org id but never uses it in the queries
-   Routes verify membership in the URL's organization, so a member of Org A could read or modify Org B events by supplying their IDs/calendarId. **Follow-up**: add `organizationId` filters to these queries (and/or register the calendar models in the tenant extension), then add calendar-specific isolation tests (§8.4).
-2. **Multi-year view** (FR-1) not implemented — views are month/week/day only.
+1. ~~**Service-level org isolation for event queries (security-relevant, open).**~~ — **Resolved.**
+   `Calendar`, `CalendarEvent`, and `CalendarRecurrence` are registered in `TENANT_SCOPED_MODELS` (`lib/tenant-db.ts`), and every event-service query filters by `organizationId` from the verified route context — including `getEventsWithRecurrences`, `getEventById`, `updateEvent`, `deleteEvent`, and `getUpcomingEvents` (target org id now applied to both single-event and recurring queries). Calendar-specific isolation tests live in `tests/isolation/application/calendar-isolation.test.ts` (§8.4).
+2. ~~**Multi-year view** (FR-1) not implemented~~ — **Resolved.**
+   Year view implemented: 12-month mini grid with per-day event dots and monthly counts; clicking a month drills into the Month view.
 3. **Component-level tests** (§8.2) not yet written.
 4. **No unit test file for `calendar-service.ts`** (event service + utils are covered).
 5. **Seed legacy rows**: `ensureRecurringEvent` does not set the event's `recurrenceId` scalar. The service handles these rows (branches on the relation), but the seed helper should be updated to keep dev data consistent.

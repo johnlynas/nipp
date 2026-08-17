@@ -2,7 +2,7 @@
  * Pure utility functions for date math, recurrence expansion, and event type mapping.
  */
 
-import { CalendarEventType } from './types';
+import { CalendarEvent, CalendarEventType } from './types';
 
 // ---------------------------------------------------------------------------
 // Event type to icon mapping (lucide-react component names)
@@ -321,6 +321,82 @@ export function getEventInstanceKey(event: { id: string; startDate: Date | strin
 }
 
 // ---------------------------------------------------------------------------
+// Year view generation
+// ---------------------------------------------------------------------------
+
+export interface YearMonthSummary {
+  /** 0-based month index (0 = January). */
+  month: number;
+  name: string;
+  daysInMonth: number;
+  /** Day of week the month starts on (0 = Sunday). */
+  firstDayOfWeek: number;
+  /** Day-of-month (1-based) → events occurring on that day. */
+  eventsByDay: Map<number, CalendarEvent[]>;
+  /** Number of unique event instances overlapping this month. */
+  totalEvents: number;
+}
+
+/**
+ * Build per-month summaries for a year view. Events are deduplicated by
+ * instance key (recurring instances share the base event id) and each day an
+ * event spans within `year` is recorded in that month's summary. Events are
+ * clipped to the requested year (an event starting before Jan 1 counts from
+ * Jan 1).
+ */
+export function generateYearMonths(year: number, events: CalendarEvent[] = []): YearMonthSummary[] {
+  const seen = new Set<string>();
+  const validEvents: Array<{ event: CalendarEvent; start: Date; end: Date }> = [];
+  for (const event of events) {
+    const start = new Date(event.startDate);
+    const end = new Date(event.endDate);
+    // Skip events with invalid dates before computing the instance key
+    if (isNaN(start.getTime()) || isNaN(end.getTime())) continue;
+
+    const key = getEventInstanceKey(event);
+    if (!seen.has(key)) {
+      seen.add(key);
+      validEvents.push({ event, start, end });
+    }
+  }
+
+  const summaries: YearMonthSummary[] = Array.from({ length: 12 }, (_, month) => ({
+    month,
+    name: getMonthName(month),
+    daysInMonth: getDaysInMonth(year, month),
+    firstDayOfWeek: getFirstDayOfMonth(year, month),
+    eventsByDay: new Map<number, CalendarEvent[]>(),
+    totalEvents: 0,
+  }));
+
+  const monthKeys: Set<string>[] = Array.from({ length: 12 }, () => new Set());
+  const yearStart = new Date(year, 0, 1);
+
+  for (const { event, start, end } of validEvents) {
+    const key = getEventInstanceKey(event);
+    let cursor = new Date(start.getFullYear(), start.getMonth(), start.getDate());
+    if (cursor < yearStart) cursor = new Date(year, 0, 1);
+
+    // Cap iteration so a malformed multi-year event cannot hang the view
+    let steps = 0;
+    while (cursor <= end && cursor.getFullYear() === year && steps < 366) {
+      const summary = summaries[cursor.getMonth()];
+      const dayEvents = summary.eventsByDay.get(cursor.getDate());
+      if (dayEvents) {
+        dayEvents.push(event);
+      } else {
+        summary.eventsByDay.set(cursor.getDate(), [event]);
+      }
+      monthKeys[cursor.getMonth()].add(key);
+      cursor = new Date(cursor.getFullYear(), cursor.getMonth(), cursor.getDate() + 1);
+      steps += 1;
+    }
+  }
+
+  return summaries.map((summary, i) => ({ ...summary, totalEvents: monthKeys[i].size }));
+}
+
+// ---------------------------------------------------------------------------
 // Recurrence display helpers
 // ---------------------------------------------------------------------------
 
@@ -411,6 +487,7 @@ export const CalendarUtils = {
   getDaysInMonth,
   getFirstDayOfMonth,
   getEventInstanceKey,
+  generateYearMonths,
   getRecurrenceLabel,
   getRecurrenceEndDateLabel,
   getEventPosition,

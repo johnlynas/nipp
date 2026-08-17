@@ -44,6 +44,7 @@ export default function CalendarMonthView({
   const days = useMemo(() => generateMonthDays(year, month), [year, month]);
 
   // Group events by date and determine position (start/middle/end/single)
+  console.log('[MonthView] events received:', events.length, JSON.stringify(events.map(e => ({ id: e.id, title: e.title, startDate: e.startDate }))));
   const eventsByDate = useMemo(() => {
     // For each event, determine which days it spans and its position on each day
     const map: Record<string, Array<CalendarEvent & { position: 'start' | 'middle' | 'end' | 'single' }>> = {};
