@@ -13,6 +13,10 @@ import {
   NotFoundError,
 } from '@/lib/services/types';
 import { requireAnyAdmin } from '@/lib/services/base-service';
+import { expandRecurrence as _expandRecurrence, RecurrenceRuleWithFilters } from '@/lib/recurrence';
+
+// Re-export for backwards compatibility (tests and other consumers import directly)
+export { expandRecurrence } from '@/lib/recurrence';
 
 // ---------------------------------------------------------------------------
 // Input / Output Types
@@ -34,6 +38,7 @@ export interface CreateEventInput {
     count?: number;
     byDay?: string | null;
     byMonthDay?: number | null;
+    excludedDates?: string[];
   } | null;
 }
 
@@ -45,6 +50,8 @@ export interface UpdateEventInput {
   eventType?: 'VIEWING' | 'INSPECTION' | 'MAINTENANCE' | 'LEASE_SIGNING' | 'LEASE_RENEWAL' | 'KEY_EXCHANGE' | 'OTHER';
   color?: string | null;
   propertyId?: string | null;
+  /** Single date to exclude from recurrence expansion (YYYY-MM-DD). Appended to existing excludedDates. */
+  excludedDate?: string;
   recurrence?: {
     frequency: 'DAILY' | 'WEEKLY' | 'MONTHLY' | 'QUARTERLY' | 'SEMI_ANNUALLY' | 'ANNUALLY';
     interval?: number;
@@ -52,6 +59,7 @@ export interface UpdateEventInput {
     count?: number;
     byDay?: string | null;
     byMonthDay?: number | null;
+    excludedDates?: string[];
   } | null;
 }
 
@@ -61,12 +69,7 @@ export interface GetEventsInput {
   calendarId?: string;
 }
 
-export interface CalendarEventRecurrenceDetails {
-  frequency: 'DAILY' | 'WEEKLY' | 'MONTHLY' | 'QUARTERLY' | 'SEMI_ANNUALLY' | 'ANNUALLY';
-  interval: number;
-  endDate?: Date | null;
-  count?: number | null;
-}
+export interface CalendarEventRecurrenceDetails extends RecurrenceRuleWithFilters {}
 
 export interface CalendarEventWithDetails {
   id: string;
@@ -94,109 +97,23 @@ function mapRecurrence(
     interval: number;
     endDate?: Date | null;
     count?: number | null;
+    byDay?: string | null;
+    byMonthDay?: number | null;
+    excludedDates?: unknown;
   } | null | undefined,
 ): CalendarEventRecurrenceDetails | null {
   if (!r) return null;
+  const excluded = r.excludedDates;
+  const excludedDates: string[] = Array.isArray(excluded) ? (excluded as string[]) : [];
   return {
     frequency: r.frequency as CalendarEventRecurrenceDetails['frequency'],
     interval: r.interval,
     endDate: r.endDate ?? null,
     count: r.count ?? null,
+    byDay: r.byDay ?? null,
+    byMonthDay: r.byMonthDay ?? null,
+    excludedDates,
   };
-}
-
-// ---------------------------------------------------------------------------
-// Recurrence expansion (pure function)
-// ---------------------------------------------------------------------------
-
-/**
- * Expand a recurring event into individual instances within the given date range.
- */
-export function expandRecurrence(
-  event: CalendarEventWithDetails,
-  rangeStart: Date,
-  rangeEnd: Date,
-): CalendarEventWithDetails[] {
-  const instances: CalendarEventWithDetails[] = [];
-
-  if (!event.recurrence) {
-    // Single event — check if it overlaps the range
-    if (event.startDate <= rangeEnd && event.endDate >= rangeStart) {
-      instances.push({ ...event });
-    }
-    return instances;
-  }
-
-  const { frequency, interval: freqInterval, endDate, count } = event.recurrence;
-  let current = new Date(event.startDate);
-  const maxOccurrences = 52 * 12; // Cap at ~10 years of weekly events
-  let occurrenceCount = 0;
-
-  // Each instance keeps the base event's duration (end - start)
-  const durationMs = event.endDate.getTime() - event.startDate.getTime();
-
-  while (current <= rangeEnd && occurrenceCount < maxOccurrences) {
-    // Stop if past recurrence end date or count limit
-    if (endDate && current > endDate) break;
-    if (count != null && occurrenceCount >= count) break;
-
-    // Check overlap with range — the instance end is shifted by duration so
-    // later occurrences are not compared against the base event's absolute end
-    const instanceEnd = new Date(current.getTime() + durationMs);
-    if (current <= rangeEnd && instanceEnd >= rangeStart) {
-      instances.push({ ...event, startDate: new Date(current), endDate: instanceEnd });
-      console.log(`[CAL-DEBUG] expandRecurrence: event=${event.id} occ#${occurrenceCount} start=${current.toISOString()} end=${instanceEnd.toISOString()}`);
-    }
-
-    // Advance by frequency + interval
-    current = advanceDate(current, frequency, freqInterval);
-    occurrenceCount++;
-  }
-
-  // [CAL-DEBUG] detect duplicate instances produced by expansion itself
-  {
-    const keys = new Map<string, number>();
-    for (const i of instances) {
-      const k = `${i.id}:${new Date(i.startDate).toISOString()}`;
-      keys.set(k, (keys.get(k) || 0) + 1);
-    }
-    const dups = [...keys.entries()].filter(([, n]) => n > 1);
-    if (dups.length) console.log(`[CAL-DEBUG] expandRecurrence: DUPLICATE instances for event=${event.id}:`, dups);
-  }
-
-  return instances;
-}
-
-/**
- * Advance a date by the given frequency and interval.
- */
-function advanceDate(date: Date, frequency: string, interval: number): Date {
-  const result = new Date(date);
-
-  switch (frequency) {
-    case 'DAILY':
-      result.setDate(result.getDate() + interval);
-      break;
-    case 'WEEKLY':
-      result.setDate(result.getDate() + interval * 7);
-      break;
-    case 'MONTHLY':
-      result.setMonth(result.getMonth() + interval);
-      break;
-    case 'QUARTERLY':
-      result.setMonth(result.getMonth() + interval * 3);
-      break;
-    case 'SEMI_ANNUALLY':
-      result.setMonth(result.getMonth() + interval * 6);
-      break;
-    case 'ANNUALLY':
-      result.setFullYear(result.getFullYear() + interval);
-      break;
-    default:
-      result.setDate(result.getDate() + 1);
-  }
-
-  return result;
 }
 
 // ---------------------------------------------------------------------------
@@ -269,6 +186,10 @@ export async function createEvent(
       recurrenceData.count = input.recurrence.count;
     }
 
+    if (input.recurrence.excludedDates != null && input.recurrence.excludedDates.length > 0) {
+      recurrenceData.excludedDates = input.recurrence.excludedDates;
+    }
+
     recurrence = await globalDb.calendarRecurrence.create({
       data: {
         frequency: input.recurrence.frequency,
@@ -277,6 +198,7 @@ export async function createEvent(
         byMonthDay: input.recurrence.byMonthDay ?? null,
         endDate: recurrenceData.endDate as Date | undefined,
         count: recurrenceData.count as number | undefined,
+        excludedDates: (recurrenceData.excludedDates as string[]) ?? [],
         eventId: event.id,
         organizationId: ctx.organizationId!,
       },
@@ -382,25 +304,26 @@ export async function getEventsWithRecurrences(
   // Expand recurring events and flatten into instances
   const allInstances: CalendarEventWithDetails[] = [];
 
-  console.log('[CalendarService] getEventsWithRecurrences: fetched', events.length, 'base events for range:', input.startDate.toISOString(), '-', input.endDate.toISOString());
-
   for (const event of events) {
     const recurrenceDetails = mapRecurrence(event.recurrence);
 
-    console.log('[CalendarService] Expanding event:', event.id, event.title, 'recurrence:', recurrenceDetails ? JSON.stringify(recurrenceDetails) : 'none');
+    // Build the rule for expandRecurrence (4th arg)
+    const rule: RecurrenceRuleWithFilters | null = event.recurrence ? {
+      frequency: event.recurrence.frequency as RecurrenceRuleWithFilters['frequency'],
+      interval: event.recurrence.interval,
+      endDate: event.recurrence.endDate ?? null,
+      count: event.recurrence.count ?? null,
+      byDay: (event.recurrence as any).byDay ?? null,
+      byMonthDay: (event.recurrence as any).byMonthDay ?? null,
+      excludedDates: (event.recurrence as any).excludedDates ?? [],
+    } : null;
 
-    const expanded = expandRecurrence(
-      { ...event, recurrence: event.recurrence ? {
-        frequency: event.recurrence.frequency,
-        interval: event.recurrence.interval,
-        endDate: event.recurrence.endDate ?? undefined,
-        count: event.recurrence.count ?? undefined,
-      } : undefined },
+    const expanded = _expandRecurrence(
+      { ...event } as CalendarEventWithDetails,
       input.startDate,
       input.endDate,
+      rule,
     );
-
-    console.log('[CalendarService] Expanded to', expanded.length, 'instances:', JSON.stringify(expanded.map(i => ({ id: i.id, startDate: i.startDate }))));
 
     // Attach recurrence details to each instance so clients can display/edit the rule
     allInstances.push(...expanded.map((instance) => ({ ...instance, recurrence: recurrenceDetails })));
@@ -408,17 +331,6 @@ export async function getEventsWithRecurrences(
 
   // Sort by start date and deduplicate (same event may appear in overlapping ranges)
   allInstances.sort((a, b) => a.startDate.getTime() - b.startDate.getTime());
-
-  // [CAL-DEBUG] detect duplicates in the final list returned to the client
-  {
-    const keys = new Map<string, number>();
-    for (const i of allInstances) {
-      const k = `${i.id}:${new Date(i.startDate).toISOString()}`;
-      keys.set(k, (keys.get(k) || 0) + 1);
-    }
-    const dups = [...keys.entries()].filter(([, n]) => n > 1);
-    console.log(`[CAL-DEBUG] getEventsWithRecurrences: returning ${allInstances.length} instances, duplicates=${dups.length ? JSON.stringify(dups) : 'none'}`);
-  }
 
   return allInstances;
 }
@@ -518,39 +430,57 @@ export async function updateEvent(
 
   // Handle recurrence changes — branch on the relation (robust even if the
   // event's recurrenceId scalar is stale from legacy rows)
-  if (input.recurrence !== undefined) {
-    if (input.recurrence === null) {
-      // Remove recurrence — delete the rule and set recurrenceId to null
-      if (event.recurrence) {
-        await globalDb.calendarRecurrence.delete({
-          where: { id: event.recurrence.id, organizationId: ctx.organizationId! },
-        });
-      }
-      updateData.recurrenceId = null;
-    } else {
-      // Update or create recurrence rule
-      const recurrenceData: Record<string, unknown> = {
-        frequency: input.recurrence.frequency,
-        interval: input.recurrence.interval || 1,
-        byDay: input.recurrence.byDay ?? null,
-        byMonthDay: input.recurrence.byMonthDay ?? null,
-      };
-
-      if (input.recurrence.endDate) {
-        recurrenceData.endDate = input.recurrence.endDate;
-      }
-
-      if (input.recurrence.count !== undefined) {
-        recurrenceData.count = input.recurrence.count;
-      }
-
-      if (event.recurrence) {
-        // Update existing recurrence rule
+  if (input.recurrence !== undefined || input.excludedDate !== undefined) {
+    // Handle excludedDate (top-level single-date exclusion for drag-and-drop)
+    if (input.excludedDate !== undefined && event.recurrence) {
+      const existingExcluded = (event.recurrence as any).excludedDates ?? [];
+      if (!existingExcluded.includes(input.excludedDate)) {
         await globalDb.calendarRecurrence.update({
           where: { id: event.recurrence.id, organizationId: ctx.organizationId! },
-          data: recurrenceData,
+          data: { excludedDates: [...existingExcluded, input.excludedDate] },
         });
+      }
+    }
+
+    if (input.recurrence !== undefined) {
+      if (input.recurrence === null) {
+        // Remove recurrence — delete the rule and set recurrenceId to null
+        if (event.recurrence) {
+          await globalDb.calendarRecurrence.delete({
+            where: { id: event.recurrence.id, organizationId: ctx.organizationId! },
+          });
+        }
+        updateData.recurrenceId = null;
       } else {
+        // Update or create recurrence rule
+        const recurrenceData: Record<string, unknown> = {
+          frequency: input.recurrence.frequency,
+          interval: input.recurrence.interval || 1,
+          byDay: input.recurrence.byDay ?? null,
+          byMonthDay: input.recurrence.byMonthDay ?? null,
+        };
+
+        if (input.recurrence.endDate) {
+          recurrenceData.endDate = input.recurrence.endDate;
+        }
+
+        if (input.recurrence.count !== undefined) {
+          recurrenceData.count = input.recurrence.count;
+        }
+
+        if (event.recurrence) {
+          // Update existing recurrence rule — append excludedDates to existing ones
+          if (input.recurrence?.excludedDates != null && input.recurrence.excludedDates.length > 0) {
+            const existingExcluded = (event.recurrence as any).excludedDates ?? [];
+            const merged = Array.from(new Set([...existingExcluded, ...input.recurrence.excludedDates]));
+            (recurrenceData as Record<string, unknown>).excludedDates = merged;
+          }
+
+          await globalDb.calendarRecurrence.update({
+            where: { id: event.recurrence.id, organizationId: ctx.organizationId! },
+            data: recurrenceData,
+          });
+        } else {
         // Create new recurrence rule
         const recurrence = await globalDb.calendarRecurrence.create({
           data: {
@@ -565,7 +495,7 @@ export async function updateEvent(
           },
         });
         updateData.recurrenceId = recurrence.id;
-      }
+      }}
     }
   }
 
@@ -679,15 +609,21 @@ export async function getUpcomingEvents(
   const recurringInstances: CalendarEventWithDetails[] = [];
 
   for (const event of recurringEvents) {
-    const expanded = expandRecurrence(
-      { ...event, recurrence: event.recurrence ? {
-        frequency: event.recurrence.frequency,
-        interval: event.recurrence.interval,
-        endDate: event.recurrence.endDate ?? undefined,
-        count: event.recurrence.count ?? undefined,
-      } : undefined },
+    const rule: RecurrenceRuleWithFilters | null = event.recurrence ? {
+      frequency: event.recurrence.frequency as RecurrenceRuleWithFilters['frequency'],
+      interval: event.recurrence.interval,
+      endDate: event.recurrence.endDate ?? null,
+      count: event.recurrence.count ?? null,
+      byDay: (event.recurrence as any).byDay ?? null,
+      byMonthDay: (event.recurrence as any).byMonthDay ?? null,
+      excludedDates: (event.recurrence as any).excludedDates ?? [],
+    } : null;
+
+    const expanded = _expandRecurrence(
+      { ...event } as CalendarEventWithDetails,
       today,
       upcomingWindowEnd,
+      rule,
     );
 
     recurringInstances.push(...expanded);

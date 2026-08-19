@@ -98,7 +98,7 @@ export async function PATCH(
   }
 
   const body = await req.json();
-  const { title, description, startDate, endDate, eventType, color, propertyId, recurrence } = body as {
+  const { title, description, startDate, endDate, eventType, color, propertyId, recurrence, excludedDate } = body as {
     title?: string;
     description?: string | null;
     startDate?: string;
@@ -114,6 +114,7 @@ export async function PATCH(
       byDay?: string | null;
       byMonthDay?: number | null;
     } | null;
+    excludedDate?: string; // Single date to exclude from recurrence expansion (YYYY-MM-DD)
   };
 
   try {
@@ -125,13 +126,14 @@ export async function PATCH(
       eventType,
       color,
       propertyId,
+      excludedDate: excludedDate ?? undefined,
       recurrence: recurrence === null ? null : (recurrence ? {
         frequency: recurrence.frequency,
-        interval: recurrence.interval || 1,
+        interval: parseInt(String(recurrence.interval ?? 1), 10) || 1,
         endDate: recurrence.endDate ? new Date(recurrence.endDate) : undefined,
-        count: recurrence.count,
+        count: recurrence.count != null ? parseInt(String(recurrence.count), 10) || undefined : undefined,
         byDay: recurrence.byDay ?? null,
-        byMonthDay: recurrence.byMonthDay ?? null,
+        byMonthDay: recurrence.byMonthDay != null ? parseInt(String(recurrence.byMonthDay), 10) || undefined : undefined,
       } : undefined),
     });
     return NextResponse.json({ event });

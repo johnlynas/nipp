@@ -131,6 +131,7 @@ export async function POST(
       count?: number;
       byDay?: string | null;
       byMonthDay?: number | null;
+      excludedDates?: string[];
     } | null;
   };
 
@@ -150,11 +151,12 @@ export async function POST(
       propertyId,
       recurrence: recurrence ? {
         frequency: recurrence.frequency,
-        interval: recurrence.interval || 1,
+        interval: parseInt(String(recurrence.interval ?? 1), 10) || 1,
         endDate: recurrence.endDate ? new Date(recurrence.endDate) : undefined,
-        count: recurrence.count,
+        count: recurrence.count != null ? parseInt(String(recurrence.count), 10) || undefined : undefined,
         byDay: recurrence.byDay ?? null,
-        byMonthDay: recurrence.byMonthDay ?? null,
+        byMonthDay: recurrence.byMonthDay != null ? parseInt(String(recurrence.byMonthDay), 10) || undefined : undefined,
+        excludedDates: recurrence.excludedDates ?? [],
       } : null,
     });
     return NextResponse.json({ event }, { status: 201 });

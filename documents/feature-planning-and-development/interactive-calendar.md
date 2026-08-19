@@ -6,7 +6,7 @@
 
 ## 1. Overview
 
-An interactive, multi-view calendar component for the Property NI portal that enables all user classes to view, create, edit, and manage organization-scoped calendar events. The calendar supports month, week, and day views with drag-and-drop rescheduling, event detail modals, quick-add via sidebar or right-click context menu, and recurring events (daily through annually).
+An interactive, multi-view calendar component for the Property NI portal that enables all user classes to view, create, edit, and manage organization-scoped calendar events. The calendar supports month, week, day, and year views with drag-and-drop rescheduling, event detail modals, quick-add via sidebar or right-click context menu, and recurring events (daily through annually).
 
 The calendar is a **standalone shared component** (`components/calendar/`) usable across any organization context, with events scoped per `organizationId` at the data-model level (see [Known Gaps](#11-known-gaps--follow-ups) for the current state of service-level tenant isolation).
 
@@ -17,9 +17,9 @@ The calendar is integrated into the **Integrated Super Admin Dashboard** (`/dash
 - **Implemented & integrated**: live at `/dashboard/admin/calendar` (sidebar nav item with `CalendarDays` icon in `app/dashboard/admin/layout.tsx`); the page renders `<Calendar organizationId={...} />`.
 - **Views**: month, week, day, year. The multi-year view from FR-1 is implemented as a 12-month Year grid (clicking a month drills into the Month view).
 - **Recurring events**: fully supported end-to-end — `DAILY`, `WEEKLY`, `MONTHLY`, `QUARTERLY`, `SEMI_ANNUALLY`, `ANNUALLY` with interval, end-date and occurrence-count limits. Expansion is computed server-side; a frontend mirror exists in `calendar-utils.ts` for client-side merging.
-- **Drag-and-drop rescheduling**: implemented (HTML5 drag events, persisted via PATCH).
+- **Drag-and-drop rescheduling**: implemented (HTML5 drag events). For recurring events, the original date is added to `excludedDates` on the recurrence rule (so expansion skips it) and a one-off event is created at the dragged-to date — only the dragged instance moves, all other instances stay in place.
 - **Calendar notifications**: email notification service for today's events is implemented (`services/calendar-notification-service.ts` + `/calendar-notifications/*` routes).
-- **Test coverage**: 145 calendar-specific tests (95 unit + 27 integration + 23 tenant-isolation), all passing. Full suite green: 911 unit / 181 integration tests, `tsc --noEmit` clean, ESLint (`--max-warnings=0`) clean, production build succeeds.
+- **Test coverage**: 148 calendar-specific tests (98 unit + 27 integration + 23 tenant-isolation), all passing. Full suite green: 1118 tests across 66 test files, `tsc --noEmit` clean, ESLint (`--max-warnings=0`) clean, production build succeeds.
 - **Tenant isolation**: fully enforced — calendar models registered in the Prisma tenant extension plus explicit `organizationId` filters on every service query (former gap resolved, see §11).
 
 ---
@@ -30,7 +30,7 @@ The calendar is integrated into the **Integrated Super Admin Dashboard** (`/dash
 
 | ID | Requirement | Priority | Status |
 |----|-------------|----------|--------|
-| FR-1 | Month, Week, Day views with toggle navigation (multi-year deferred) | Must Have | ✅ month/week/day/year — Year view implemented as a 12-month grid |
+| FR-1 | Month, Week, Day views with toggle navigation (multi-year deferred) | Must Have | ✅ month/week/day/year — Year view implemented as a 12-month grid with per-day event dots and monthly counts |
 | FR-2 | Color-coded event cards on calendar dates with type-specific icons | Must Have | ✅ |
 | FR-3 | Upcoming Events sidebar that slides in/out to maximize screen real estate | Must Have | ✅ |
 | FR-4 | Full CRUD for events (Create, Read, Update, Delete) | Must Have | ✅ |
@@ -138,6 +138,8 @@ model CalendarRecurrence {
   count      Int?     // Max occurrence count (mutually exclusive with endDate)
   byDay      String?  // iCal-style by-day rules (e.g., "MO,WE,FR" for Mon/Wed/Fri)
   byMonthDay Int?     // Specific day of month for monthly recurrences (1-31)
+  /** Dates excluded from expansion — used when a single instance is moved via drag-and-drop. */
+  excludedDates Json @default("[]") @db.Json
 
   eventId    String   @unique
   event      CalendarEvent @relation(fields: [eventId], references: [id])
@@ -230,11 +232,14 @@ app/api/organizations/[orgId]/
 app/dashboard/admin/calendar/page.tsx # Dashboard page wiring <Calendar organizationId={...} />
 
 tests/unit/
-├── calendar-event-service.test.ts    # 45 tests (service CRUD, expansion, upcoming)
-└── calendar-utils.test.ts            # 41 tests (date math, grids, frontend expansion)
+├── calendar-event-service.test.ts    # 48 tests (service CRUD, expansion, upcoming)
+└── calendar-utils.test.ts            # 50 tests (date math, grids, frontend expansion)
 
 tests/integration/
 └── calendar-events.test.ts           # 27 tests (service-level against real DB)
+
+tests/isolation/application/
+└── calendar-isolation.test.ts        # 23 tests (tenant isolation for calendar models)
 
 prisma/seed.ts                        # Idempotent calendar seed data (ensureCalendar / ensureEvent / ensureRecurringEvent)
 ```
@@ -292,10 +297,11 @@ export interface CreateEventInput {
     count?: number;
     byDay?: string | null;
     byMonthDay?: number | null;
+    excludedDates?: string[]; // ISO date strings (YYYY-MM-DD) to exclude from expansion
   } | null;
 }
 
-export interface UpdateEventInput { /* same fields, all optional; recurrence: null clears the rule */ }
+export interface UpdateEventInput { /* same fields, all optional; recurrence: null clears the rule; excludedDate?: string appends to existing excludedDates */ }
 export interface GetEventsInput { startDate: Date; endDate: Date; calendarId?: string; }
 export interface CalendarEventWithDetails { /* event fields + recurrence: CalendarEventRecurrenceDetails | null */ }
 
@@ -334,6 +340,11 @@ The `getEventsWithRecurrences` where-clause selects (a) non-recurring events ove
 
 - **End-to-end flow**: `CalendarRecurrencePicker` (in the event modal) → POST/PATCH with a `recurrence` object → service creates/updates the `CalendarRecurrence` row and syncs the event's `recurrenceId` scalar → GET range queries return expanded instances.
 - **Clearing a rule**: PATCH with `recurrence: null` deletes the recurrence row and nulls the scalar.
+- **Drag-and-drop for recurring events**: When a user drags one instance of a recurring event to a new date, the system does NOT shift the base event's dates (which would shift ALL instances). Instead:
+  1. The original date is added to `excludedDates` on the `CalendarRecurrence` row (via PATCH with `excludedDate: "YYYY-MM-DD"`).
+  2. A new one-off event is created at the dragged-to date (via POST).
+  3. `expandRecurrence()` filters out any instance whose date matches an entry in `excludedDates`.
+  This ensures only the dragged instance moves — all other instances stay in place.
 - **Frontend mirror**: `calendar-utils.ts` contains its own `expandRecurrence` plus `getEventInstanceKey` (`id + startDate`) used to dedupe/merge instances when navigating between views.
 - **Legacy rows**: `prisma/seed.ts`'s `ensureRecurringEvent` does not set the event's `recurrenceId` scalar, so "legacy" rows (rule exists, scalar null) exist in dev databases. The service branches on the `recurrence` relation rather than the scalar, so legacy rows work; update/delete handle both shapes.
 - **Bugs found & fixed during test development (August 2026)** — all covered by regression tests:
@@ -475,8 +486,8 @@ class CalendarNotificationService {
 
 | Test File | Tests | Coverage |
 |-----------|-------|----------|
-| `tests/unit/calendar-event-service.test.ts` | 45 | `expandRecurrence` (all frequencies, intervals, endDate/count bounds, duration shift, 10-year cap), event CRUD with role checks (MEMBER forbidden on mutations), recurrence rule persistence/clearing incl. legacy rows, `getEventsWithRecurrences` query shape + expansion, `getUpcomingEvents` dedupe/sort/limit/validation |
-| `tests/unit/calendar-utils.test.ts` | 41 | Date math (month grid generation, week boundaries), frontend recurrence expansion mirror, event instance keying, formatting |
+| `tests/unit/calendar-event-service.test.ts` | 48 | `expandRecurrence` (all frequencies, intervals, endDate/count bounds, duration shift, 10-year cap), event CRUD with role checks (MEMBER forbidden on mutations), recurrence rule persistence/clearing incl. legacy rows, `getEventsWithRecurrences` query shape + expansion, `getUpcomingEvents` dedupe/sort/limit/validation |
+| `tests/unit/calendar-utils.test.ts` | 50 | Date math (month grid generation, week boundaries), frontend recurrence expansion mirror, event instance keying, formatting |
 
 Note: `calendar-service.ts` has no dedicated unit test file (gap — see §11).
 
@@ -496,14 +507,14 @@ Note: `calendar-service.ts` has no dedicated unit test file (gap — see §11).
 |-----------|-------|----------|
 | `tests/integration/calendar-events.test.ts` | 27 | Service-level tests via `CalendarEventService` + mocked `ServiceContext` (no HTTP/auth layer, matching existing integration conventions). Org created per test in `beforeEach`, all orgs cleaned up in `afterAll`. Covers: createEvent (MEMBER forbidden; non-recurring → no rule row; recurring → `recurrenceId` scalar persisted [regression]; endDate+count stored), getEventsWithRecurrences (later occurrences of a May-started weekly series queried in August with shifted end dates [regression]; count limit; rule endDate bound; non-recurring in/out of range; sorting), getEventById (rule details / null / NotFoundError), updateEvent (in-place rule update without a second row [regression]; add rule + scalar sync; clear via `null` → row deleted + scalar nulled; legacy null-scalar rows [regression]; MEMBER forbidden), deleteEvent (recurring → both rows gone [regression: FK Restrict]; non-recurring; MEMBER forbidden; NotFoundError), getUpcomingEvents (mixed single+recurring: no duplicate instances by `id + start` key, sorted, limit; ValidationError without org), DB constraints (unique `eventId` violation; direct delete of event with recurrence throws Restrict) |
 
-### 8.4 Isolation Tests — *No calendar-specific tests yet*
+### 8.4 Isolation Tests
 
-The generic app-layer isolation suite (`tests/isolation/application/`) covers the Prisma extension, tenant context propagation, and global-DB guard. Calendar models are **not** in the extension's `TENANT_SCOPED_MODELS` list, so calendar-specific isolation tests are blocked on the service-level org filtering work in §11.
+The generic app-layer isolation suite (`tests/isolation/application/`) covers the Prisma extension, tenant context propagation, and global-DB guard. Calendar-specific isolation tests (`tests/isolation/application/calendar-isolation.test.ts`, 23 tests) verify that calendar queries are properly scoped to the requesting organization via both the Prisma tenant extension and explicit service-level filters.
 
 ### 8.5 Test Environment Notes & Results Snapshot (August 2026)
 
 - **Timezone**: `tests/setup.ts` pins `process.env.TZ = 'UTC'` so `toISOString`-based assertions are deterministic regardless of the developer's local zone (verified: no pre-existing test depends on the local zone).
-- **Results**: `npm test` → 48 files / 902 tests passing; `npm run test:integration` (integration + isolation) → 17 files / 181 tests passing; `npx tsc --noEmit` clean; `npx eslint . --max-warnings=0` clean; `npm run build` succeeds.
+- **Results**: `npm test` → 66 files / 1118 tests passing; `npm run test:integration` (integration + isolation) → 17 files / 181 tests passing; `npx tsc --noEmit` clean; `npx eslint . --max-warnings=0` clean; `npm run build` succeeds.
 - **Seed data**: `prisma/seed.ts` seeds calendar data idempotently (`ensureCalendar` / `ensureEvent` / `ensureRecurringEvent`) for both dev and test profiles — Platform org default calendar; dev tenant: 5 events (today's inspection, tomorrow's viewing, weekly + monthly recurring series, 3-day maintenance window); test tenant: today's inspection + weekly recurring review. No seed changes were needed for the test suites (tests are self-contained).
 
 ---

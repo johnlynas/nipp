@@ -2,40 +2,27 @@
 
 import type { RecurrencePickerProps, CalendarRecurrenceFrequency } from './types';
 import { RECURRENCE_FREQUENCIES } from './types';
-import { toLocalDateInputValue, parseLocalDateInputValue } from './calendar-utils';
 
 // ---------------------------------------------------------------------------
 // Component
 // ---------------------------------------------------------------------------
 
 export default function CalendarRecurrencePicker({ value, onChange }: RecurrencePickerProps) {
-  const frequency = value?.frequency || 'DAILY';
+  const hasRecurrence = !!value;
+  const frequency = value?.frequency || 'WEEKLY';
   const interval = value?.interval ?? 1;
-  const hasEndDate = !!value?.endDate;
-  const hasCount = value?.count != null && value.count > 0;
+  const count = value?.count != null && value.count > 0 ? value.count : 1;
 
-  const handleFrequencyChange = (freq: CalendarRecurrenceFrequency) => {
+  const handleFrequencyChange = (freq: string) => {
+    if (!freq || freq === 'NONE') {
+      onChange(null);
+      return;
+    }
     onChange({
-      frequency: freq,
+      frequency: freq as CalendarRecurrenceFrequency,
       interval: 1,
-      endDate: null,
-      count: undefined,
+      count: Math.max(1, count),
     });
-  };
-
-  // Build a human-readable preview of the current recurrence rule
-  const getPreviewText = (): string => {
-    if (!value) return 'Never';
-    const freqLabel = RECURRENCE_FREQUENCIES.find(f => f.value === frequency)?.label || frequency;
-    const intervalText = interval > 1 ? `${interval} ` : '';
-    
-    if (hasCount) {
-      return `Every ${intervalText}${freqLabel.toLowerCase()} for ${value.count} occurrences`;
-    }
-    if (hasEndDate) {
-      return `Every ${intervalText}${freqLabel.toLowerCase()} until ${value.endDate?.toLocaleDateString()}`;
-    }
-    return `Every ${intervalText}${freqLabel.toLowerCase()} (never ends)`;
   };
 
   const handleIntervalChange = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -43,34 +30,17 @@ export default function CalendarRecurrencePicker({ value, onChange }: Recurrence
     onChange({
       frequency,
       interval: Math.max(1, val),
-      endDate: value?.endDate ?? null,
-      count: value?.count,
-    });
-  };
-
-  const handleEndDateChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    onChange({
-      frequency,
-      interval,
-      // Parse as LOCAL midnight — new Date('YYYY-MM-DD') parses as UTC and
-      // shifts the day in negative-UTC-offset timezones.
-      endDate: e.target.value ? parseLocalDateInputValue(e.target.value) : null,
-      count: undefined,
+      count: Math.max(1, count),
     });
   };
 
   const handleCountChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const val = parseInt(e.target.value, 10) || undefined;
+    const val = parseInt(e.target.value, 10) || 1;
     onChange({
       frequency,
       interval,
-      endDate: null,
-      count: val && val > 0 ? val : undefined,
+      count: Math.max(1, val),
     });
-  };
-
-  const handleNone = () => {
-    onChange(null);
   };
 
   return (
@@ -82,11 +52,12 @@ export default function CalendarRecurrencePicker({ value, onChange }: Recurrence
         </label>
         <div className="flex gap-2">
           <select
-            value={frequency}
+            value={hasRecurrence ? frequency : ('NONE' as CalendarRecurrenceFrequency)}
             onChange={(e) => handleFrequencyChange(e.target.value as CalendarRecurrenceFrequency)}
             className="flex-1 px-3 py-2 rounded border text-sm"
             style={{ borderColor: '#dee2e6' }}
           >
+            <option value="NONE">Does not repeat</option>
             {RECURRENCE_FREQUENCIES.map((freq) => (
               <option key={freq.value} value={freq.value}>
                 {freq.label}
@@ -94,80 +65,29 @@ export default function CalendarRecurrencePicker({ value, onChange }: Recurrence
             ))}
           </select>
 
-          <input
-            type="number"
-            min={1}
-            value={interval}
-            onChange={handleIntervalChange}
-            className="w-16 px-2 py-2 rounded border text-sm"
-            style={{ borderColor: '#dee2e6' }}
-          />
+          {hasRecurrence && (
+            <>
+              <input
+                type="number"
+                min={1}
+                value={interval}
+                onChange={handleIntervalChange}
+                title={`Every ${frequency.toLowerCase()} (e.g. 2 = every other ${RECURRENCE_FREQUENCIES.find(f => f.value === frequency)?.label?.toLowerCase() || 'week'})`}
+                className="w-16 px-2 py-2 rounded border text-sm"
+                style={{ borderColor: '#dee2e6' }}
+              />
+              <input
+                type="number"
+                min={1}
+                value={count}
+                onChange={handleCountChange}
+                title="Number of times the event will repeat"
+                className="w-20 px-2 py-2 rounded border text-sm"
+                style={{ borderColor: '#dee2e6' }}
+              />
+            </>
+          )}
         </div>
-        {value && (
-          <div className="mt-1">
-            <p className="text-xs" style={{ color: '#6c757d' }}>
-              {getPreviewText()}
-            </p>
-            {/* Warning: interval > 1 without end rule likely means user wants "After X times" */}
-            {interval > 1 && !hasEndDate && !hasCount && (
-              <p className="text-xs mt-0.5" style={{ color: '#e76f51' }}>
-                ⚠ This repeats every {interval} {frequency.toLowerCase()}. Did you mean "After 3 times" instead?
-              </p>
-            )}
-          </div>
-        )}
-      </div>
-
-      {/* End rule */}
-      <div className="flex items-center gap-3">
-        <label className="text-sm" style={{ color: '#6c757d' }}>
-          <input
-            type="radio"
-            name="endRule"
-            checked={!hasEndDate && !hasCount}
-            onChange={handleNone}
-            className="mr-1"
-          />
-          Never
-        </label>
-
-        <label className="text-sm" style={{ color: '#6c757d' }}>
-          <input
-            type="radio"
-            name="endRule"
-            checked={hasCount}
-            onChange={() => {}}
-            className="mr-1"
-          />
-          After{' '}
-          <input
-            type="number"
-            min={1}
-            value={value?.count ?? 1}
-            onChange={handleCountChange}
-            className="w-16 px-2 py-1 rounded border text-sm inline"
-            style={{ borderColor: '#dee2e6' }}
-          />{' '}
-          times
-        </label>
-
-        <label className="text-sm" style={{ color: '#6c757d' }}>
-          <input
-            type="radio"
-            name="endRule"
-            checked={hasEndDate}
-            onChange={() => {}}
-            className="mr-1"
-          />
-          By{' '}
-          <input
-            type="date"
-            value={value?.endDate ? toLocalDateInputValue(new Date(value.endDate)) : ''}
-            onChange={handleEndDateChange}
-            className="px-2 py-1 rounded border text-sm"
-            style={{ borderColor: '#dee2e6' }}
-          />
-        </label>
       </div>
     </div>
   );

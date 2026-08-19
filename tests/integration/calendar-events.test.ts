@@ -100,7 +100,7 @@ describe('Calendar Events Integration', () => {
       });
 
       expect(result.recurrenceId).not.toBeNull();
-      expect(result.recurrence).toEqual({ frequency: 'WEEKLY', interval: 1, endDate: null, count: null });
+      expect(result.recurrence).toEqual({ frequency: 'WEEKLY', interval: 1, endDate: null, count: null, byDay: null, byMonthDay: null, excludedDates: [] });
 
       // The event row's scalar must point at the recurrence row — without it,
       // later updates would create a second rule (unique violation) and deletes
@@ -155,7 +155,7 @@ describe('Calendar Events Integration', () => {
       expect(result[0].startDate.toISOString()).toBe('2026-08-17T10:00:00.000Z');
       // The instance end is the base duration shifted onto the occurrence date
       expect(result[0].endDate.toISOString()).toBe('2026-08-17T11:30:00.000Z');
-      expect(result[0].recurrence).toEqual({ frequency: 'WEEKLY', interval: 1, endDate: null, count: null });
+      expect(result[0].recurrence).toEqual({ frequency: 'WEEKLY', interval: 1, endDate: null, count: null, byDay: null, byMonthDay: null, excludedDates: [] });
     });
 
     it('respects the recurrence count limit', async () => {
@@ -268,7 +268,7 @@ describe('Calendar Events Integration', () => {
       const result = await CalendarEventService.getEventById(makeCtx('MEMBER'), created.id);
 
       expect(result.recurrenceId).toBe(created.recurrenceId);
-      expect(result.recurrence).toEqual({ frequency: 'MONTHLY', interval: 1, endDate: null, count: null });
+      expect(result.recurrence).toEqual({ frequency: 'MONTHLY', interval: 1, endDate: null, count: null, byDay: null, byMonthDay: null, excludedDates: [] });
     });
 
     it('returns recurrence: null for non-recurring events', async () => {

@@ -135,7 +135,7 @@ The interactive calendar (`components/calendar/`, `services/calendar*-service.ts
 |---|---|---|
 | `Calendar` | Organization-scoped (`organizationId`) | Container/namespace for events (one default per org) |
 | `CalendarEvent` | Organization-scoped (`organizationId`) | Individual events (local datetimes, optional property association) |
-| `CalendarRecurrence` | Organization-scoped (`organizationId`) | 1:1 recurrence rule per event (`eventId @unique`, iCal-inspired fields) |
+| `CalendarRecurrence` | Organization-scoped (`organizationId`) | 1:1 recurrence rule per event (`eventId @unique`, iCal-inspired fields, `excludedDates` JSON array for drag-and-drop instance exclusion) |
 
 ### Authorization (RBAC)
 - **Route layer:** Every `/api/organizations/[orgId]/calendar*` route verifies the session (401) and membership in the URL's organization via `globalDb.member.findFirst` (403 for non-members), then derives `TENANT_ADMIN` / `MEMBER` from the member record.

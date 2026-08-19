@@ -102,7 +102,7 @@ describe('CalendarEventService', () => {
   describe('expandRecurrence', () => {
     it('returns the event itself when non-recurring and overlapping the range', () => {
       const event = makeEvent();
-      const instances = expandRecurrence(event, new Date('2026-08-01T00:00:00'), new Date('2026-08-31T23:59:59'));
+      const instances = expandRecurrence(event, new Date('2026-08-01T00:00:00'), new Date('2026-08-31T23:59:59'), event.recurrence);
 
       expect(instances).toHaveLength(1);
       expect(instances[0].id).toBe('event-1');
@@ -110,7 +110,7 @@ describe('CalendarEventService', () => {
 
     it('returns nothing for a non-recurring event outside the range', () => {
       const event = makeEvent();
-      const instances = expandRecurrence(event, new Date('2026-09-01T00:00:00'), new Date('2026-09-30T23:59:59'));
+      const instances = expandRecurrence(event, new Date('2026-09-01T00:00:00'), new Date('2026-09-30T23:59:59'), event.recurrence);
 
       expect(instances).toHaveLength(0);
     });
@@ -122,7 +122,7 @@ describe('CalendarEventService', () => {
         recurrence: { frequency: 'DAILY', interval: 1, endDate: null, count: undefined },
       });
 
-      const instances = expandRecurrence(event as never, new Date('2026-08-17T00:00:00'), new Date('2026-08-19T23:59:59'));
+      const instances = expandRecurrence(event as never, new Date('2026-08-17T00:00:00'), new Date('2026-08-19T23:59:59'), event.recurrence);
 
       expect(instances).toHaveLength(3);
       for (const instance of instances) {
@@ -138,7 +138,7 @@ describe('CalendarEventService', () => {
         recurrence: { frequency: 'DAILY', interval: 2, endDate: null, count: undefined },
       });
 
-      const instances = expandRecurrence(event as never, new Date('2026-08-17T00:00:00'), new Date('2026-08-24T23:59:59'));
+      const instances = expandRecurrence(event as never, new Date('2026-08-17T00:00:00'), new Date('2026-08-24T23:59:59'), event.recurrence);
 
       expect(instances.map((i) => i.startDate.toISOString())).toEqual([
         '2026-08-17T10:00:00.000Z',
@@ -157,7 +157,7 @@ describe('CalendarEventService', () => {
         recurrence: { frequency: 'WEEKLY', interval: 1, endDate: null, count: undefined },
       });
 
-      const instances = expandRecurrence(event as never, new Date('2026-08-17T00:00:00'), new Date('2026-08-23T23:59:59'));
+      const instances = expandRecurrence(event as never, new Date('2026-08-17T00:00:00'), new Date('2026-08-23T23:59:59'), event.recurrence);
 
       expect(instances).toHaveLength(1);
       expect(instances[0].startDate.toISOString()).toBe('2026-08-17T10:00:00.000Z');
@@ -169,7 +169,7 @@ describe('CalendarEventService', () => {
         recurrence: { frequency: 'WEEKLY', interval: 2, endDate: null, count: undefined },
       });
 
-      const instances = expandRecurrence(event as never, new Date('2026-08-17T00:00:00'), new Date('2026-09-14T23:59:59'));
+      const instances = expandRecurrence(event as never, new Date('2026-08-17T00:00:00'), new Date('2026-09-14T23:59:59'), event.recurrence);
 
       expect(instances.map((i) => i.startDate.toISOString())).toEqual([
         '2026-08-17T10:00:00.000Z',
@@ -186,7 +186,7 @@ describe('CalendarEventService', () => {
         recurrence: { frequency: 'MONTHLY', interval: 1, endDate: null, count: undefined },
       });
 
-      const instances = expandRecurrence(event as never, new Date('2027-01-01T00:00:00'), new Date('2027-04-30T23:59:59'));
+      const instances = expandRecurrence(event as never, new Date('2027-01-01T00:00:00'), new Date('2027-04-30T23:59:59'), event.recurrence);
 
       expect(instances.map((i) => i.startDate.toISOString())).toEqual([
         '2027-01-31T09:00:00.000Z',
@@ -205,6 +205,7 @@ describe('CalendarEventService', () => {
         { ...base, recurrence: { frequency: 'QUARTERLY', interval: 1, endDate: null, count: undefined } } as never,
         new Date('2026-01-01T00:00:00'),
         new Date('2027-12-31T23:59:59'),
+        { frequency: 'QUARTERLY', interval: 1, endDate: null, count: undefined },
       );
       expect(quarterly.map((i) => i.startDate.toISOString())).toEqual([
         '2026-01-15T10:00:00.000Z',
@@ -221,6 +222,7 @@ describe('CalendarEventService', () => {
         { ...base, recurrence: { frequency: 'SEMI_ANNUALLY', interval: 1, endDate: null, count: undefined } } as never,
         new Date('2026-01-01T00:00:00'),
         new Date('2027-12-31T23:59:59'),
+        { frequency: 'SEMI_ANNUALLY', interval: 1, endDate: null, count: undefined },
       );
       expect(semiAnnual.map((i) => i.startDate.toISOString())).toEqual([
         '2026-01-15T10:00:00.000Z',
@@ -233,6 +235,7 @@ describe('CalendarEventService', () => {
         { ...base, recurrence: { frequency: 'ANNUALLY', interval: 1, endDate: null, count: undefined } } as never,
         new Date('2026-01-01T00:00:00'),
         new Date('2029-12-31T23:59:59'),
+        { frequency: 'ANNUALLY', interval: 1, endDate: null, count: undefined },
       );
       expect(annual.map((i) => i.startDate.toISOString())).toEqual([
         '2026-01-15T10:00:00.000Z',
@@ -247,7 +250,7 @@ describe('CalendarEventService', () => {
         recurrence: { frequency: 'DAILY', interval: 1, endDate: null, count: 3 },
       });
 
-      const instances = expandRecurrence(event as never, new Date('2026-08-17T00:00:00'), new Date('2026-09-30T23:59:59'));
+      const instances = expandRecurrence(event as never, new Date('2026-08-17T00:00:00'), new Date('2026-09-30T23:59:59'), event.recurrence);
 
       expect(instances).toHaveLength(3);
     });
@@ -257,7 +260,7 @@ describe('CalendarEventService', () => {
         recurrence: { frequency: 'DAILY', interval: 1, endDate: new Date('2026-08-19T23:59:59'), count: undefined },
       });
 
-      const instances = expandRecurrence(event as never, new Date('2026-08-17T00:00:00'), new Date('2026-09-30T23:59:59'));
+      const instances = expandRecurrence(event as never, new Date('2026-08-17T00:00:00'), new Date('2026-09-30T23:59:59'), event.recurrence);
 
       expect(instances.map((i) => i.startDate.toISOString())).toEqual([
         '2026-08-17T10:00:00.000Z',
@@ -271,9 +274,29 @@ describe('CalendarEventService', () => {
         recurrence: { frequency: 'DAILY', interval: 1, endDate: null, count: undefined },
       });
 
-      const instances = expandRecurrence(event as never, new Date('2026-08-17T10:00:00'), new Date('2026-08-17T23:59:59'));
+      const instances = expandRecurrence(event as never, new Date('2026-08-17T10:00:00'), new Date('2026-08-17T23:59:59'), event.recurrence);
 
       expect(instances).toHaveLength(1);
+    });
+
+    it('skips excluded dates in recurrence expansion', () => {
+      const event = makeEvent({
+        startDate: new Date('2026-08-17T10:00:00'),
+        endDate: new Date('2026-08-17T11:00:00'),
+        recurrence: { frequency: 'DAILY', interval: 1, endDate: null, count: undefined },
+      });
+
+      const rule = { ...event.recurrence, excludedDates: ['2026-08-18', '2026-08-19'] };
+
+      const instances = expandRecurrence(event as never, new Date('2026-08-17T00:00:00'), new Date('2026-08-21T23:59:59'), rule as never);
+
+      // 4 instances (17, 20, 21) — 18 and 19 are excluded
+      expect(instances).toHaveLength(3);
+      expect(instances.map((i) => i.startDate.toISOString().slice(0, 10))).toEqual([
+        '2026-08-17',
+        '2026-08-20',
+        '2026-08-21',
+      ]);
     });
 
     it('caps expansion at a bounded number of occurrences', () => {
@@ -284,7 +307,7 @@ describe('CalendarEventService', () => {
       });
 
       // Range spanning decades — must terminate and stay under the cap (52*12)
-      const instances = expandRecurrence(event as never, new Date('2000-01-01T00:00:00'), new Date('2035-01-01T00:00:00'));
+      const instances = expandRecurrence(event as never, new Date('2000-01-01T00:00:00'), new Date('2035-01-01T00:00:00'), event.recurrence);
 
       expect(instances.length).toBeLessThanOrEqual(52 * 12);
     });
@@ -395,7 +418,7 @@ describe('CalendarEventService', () => {
       });
 
       expect(result.recurrenceId).toBe('rec-1');
-      expect(result.recurrence).toEqual({ frequency: 'WEEKLY', interval: 2, endDate: null, count: null });
+      expect(result.recurrence).toEqual({ frequency: 'WEEKLY', interval: 2, endDate: null, count: null, byDay: null, byMonthDay: null, excludedDates: [] });
     });
 
     it('stores the recurrence end date and count when provided', async () => {
@@ -508,7 +531,7 @@ describe('CalendarEventService', () => {
       expect(result).toHaveLength(1);
       expect(result[0].startDate.toISOString()).toBe('2026-08-17T10:00:00.000Z');
       expect(result[0].endDate.toISOString()).toBe('2026-08-17T11:30:00.000Z');
-      expect(result[0].recurrence).toEqual({ frequency: 'WEEKLY', interval: 1, endDate: null, count: null });
+      expect(result[0].recurrence).toEqual({ frequency: 'WEEKLY', interval: 1, endDate: null, count: null, byDay: null, byMonthDay: null, excludedDates: [] });
     });
 
     it('sorts instances by start date', async () => {
@@ -544,7 +567,7 @@ describe('CalendarEventService', () => {
 
       const result = await CalendarEventService.getEventById(mockCtx('MEMBER'), 'event-1');
 
-      expect(result.recurrence).toEqual({ frequency: 'WEEKLY', interval: 1, endDate: null, count: null });
+      expect(result.recurrence).toEqual({ frequency: 'WEEKLY', interval: 1, endDate: null, count: null, byDay: null, byMonthDay: null, excludedDates: [] });
     });
 
     it('returns recurrence: null when the rule does not exist', async () => {
@@ -671,6 +694,46 @@ describe('CalendarEventService', () => {
       await CalendarEventService.updateEvent(mockCtx('TENANT_ADMIN'), 'event-1', { recurrence: null });
 
       expect(globalDb.calendarRecurrence.delete).toHaveBeenCalledWith({ where: { id: 'rec-1', organizationId: 'org-1' } });
+    });
+
+    it('appends an excluded date to the recurrence rule via top-level excludedDate', async () => {
+      vi.mocked(globalDb.calendarEvent.findFirst).mockResolvedValue(
+        makeDbEvent({ recurrenceId: 'rec-1', recurrence: makeRecurrenceRow() }) as never
+      );
+      vi.mocked(globalDb.calendarEvent.update).mockResolvedValue(
+        makeDbEvent({ recurrenceId: 'rec-1', recurrence: makeRecurrenceRow() }) as never
+      );
+
+      await CalendarEventService.updateEvent(mockCtx('TENANT_ADMIN'), 'event-1', {
+        excludedDate: '2026-08-24',
+      });
+
+      expect(globalDb.calendarRecurrence.update).toHaveBeenCalledWith({
+        where: { id: 'rec-1', organizationId: 'org-1' },
+        data: { excludedDates: ['2026-08-24'] },
+      });
+    });
+
+    it('deduplicates excluded dates when the same date is added twice', async () => {
+      vi.mocked(globalDb.calendarEvent.findFirst).mockResolvedValue(
+        makeDbEvent({ recurrenceId: 'rec-1', recurrence: makeRecurrenceRow() }) as never
+      );
+      vi.mocked(globalDb.calendarEvent.update).mockResolvedValue(
+        makeDbEvent({ recurrenceId: 'rec-1', recurrence: makeRecurrenceRow() }) as never
+      );
+
+      await CalendarEventService.updateEvent(mockCtx('TENANT_ADMIN'), 'event-1', {
+        excludedDate: '2026-08-24',
+      });
+      // Second call with same date — should not duplicate
+      await CalendarEventService.updateEvent(mockCtx('TENANT_ADMIN'), 'event-1', {
+        excludedDate: '2026-08-24',
+      });
+
+      const calls = (globalDb.calendarRecurrence.update as any).mock.calls;
+      expect(calls).toHaveLength(2);
+      // Second call should still only have the one date (no duplicate)
+      expect(calls[1][0].data.excludedDates).toEqual(['2026-08-24']);
     });
   });
 

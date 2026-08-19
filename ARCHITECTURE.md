@@ -398,7 +398,7 @@ The Resources page provides a Super Admin interface for managing the global reso
 - **ResourceRole:** Global junction table linking Resources to org-scoped Roles. Enables feature-level access control: a role must be assigned to a resource for users with that role to access the feature.
 - **Calendar:** Organization-scoped container/namespace for calendar events (one default per org, multiple supported).
 - **CalendarEvent:** Organization-scoped event within a calendar (local datetimes, optional property association). Recurring events reference a `CalendarRecurrence`.
-- **CalendarRecurrence:** 1:1 recurrence rule for an event (`eventId @unique`), iCal-inspired fields (frequency, interval, endDate/count, byDay, byMonthDay). Organization-scoped.
+- **CalendarRecurrence:** 1:1 recurrence rule for an event (`eventId @unique`), iCal-inspired fields (frequency, interval, endDate/count, byDay, byMonthDay, `excludedDates` JSON array for drag-and-drop instance exclusion). Organization-scoped.
 
 ### Relationships
 - `User` ↔ `Organization`: Via `Member` (many-to-many)

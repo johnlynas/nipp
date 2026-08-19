@@ -526,6 +526,8 @@ model CalendarRecurrence {
   count      Int?     // Max occurrence count (mutually exclusive with endDate)
   byDay      String?  // iCal-style by-day rules (e.g., "MO,WE,FR" for Mon/Wed/Fri)
   byMonthDay Int?     // Specific day of month for monthly recurrences (1-31)
+  /** Dates excluded from expansion — used when a single instance is moved via drag-and-drop. */
+  excludedDates Json @default("[]") @db.Json
 
   eventId    String   @unique
   event      CalendarEvent @relation(fields: [eventId], references: [id])

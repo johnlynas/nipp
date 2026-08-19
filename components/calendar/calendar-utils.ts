@@ -1,8 +1,62 @@
 /**
  * Pure utility functions for date math, recurrence expansion, and event type mapping.
+ *
+ * Recurrence logic is consolidated in lib/recurrence.ts — this file re-exports
+ * those helpers and provides calendar-specific utilities (grid generation, drag-and-drop).
  */
 
 import { CalendarEvent, CalendarEventType } from './types';
+import * as recurrence from '@/lib/recurrence';
+
+// Re-export for backwards compatibility — consumers can import directly from here.
+export {
+  advanceDate,
+  formatDate,
+  formatDateTime,
+  formatTime,
+  isSameDay,
+  isToday,
+  toLocalDateTimeInputValue,
+  toLocalDateInputValue,
+  parseLocalDateInputValue,
+  getRecurrenceLabel,
+  getRecurrenceEndDateLabel,
+  getEventInstanceKey,
+} from '@/lib/recurrence';
+
+// Local bindings for use in CalendarUtils object and internally.
+const {
+  advanceDate: _advanceDate,
+  expandRecurrence: _expandRecurrence,
+  formatDate: _formatDate,
+  formatDateTime: _formatDateTime,
+  formatTime: _formatTime,
+  isSameDay: _isSameDay,
+  isToday: _isToday,
+  toLocalDateTimeInputValue: _toLocalDateTimeInputValue,
+  toLocalDateInputValue: _toLocalDateInputValue,
+  parseLocalDateInputValue: _parseLocalDateInputValue,
+  getRecurrenceLabel: _getRecurrenceLabel,
+  getRecurrenceEndDateLabel: _getRecurrenceEndDateLabel,
+  getEventInstanceKey: _getEventInstanceKey,
+} = recurrence;
+
+// ---------------------------------------------------------------------------
+// Adapter: old calendar-utils expandRecurrence signature (rule on event) → lib
+// ---------------------------------------------------------------------------
+
+/**
+ * Adapter for the old expandRecurrence signature where the recurrence rule was
+ * embedded in `event.recurrence`.  The lib version takes a separate 4th arg.
+ */
+export function expandRecurrence<T extends { startDate: Date; endDate: Date }>(
+  event: T,
+  rangeStart: Date,
+  rangeEnd: Date,
+): T[] {
+  const rule = (event as any).recurrence ?? undefined;
+  return _expandRecurrence(event, rangeStart, rangeEnd, rule);
+}
 
 // ---------------------------------------------------------------------------
 // Event type to icon mapping (lucide-react component names)
@@ -141,16 +195,6 @@ export function generateHourlySlots(): number[] {
 }
 
 // ---------------------------------------------------------------------------
-// Recurrence expansion (pure function — mirrors service layer)
-// ---------------------------------------------------------------------------
-
-export interface RecurrenceRule {
-  frequency: string;
-  interval: number;
-  endDate?: Date | null;
-  count?: number | null;
-}
-
 export interface RecurringEvent {
   id: string;
   title: string;
@@ -163,150 +207,7 @@ export interface RecurringEvent {
   propertyId?: string | null;
   createdAt: Date;
   updatedAt: Date;
-  recurrence?: RecurrenceRule | null;
-}
-
-/**
- * Expand a recurring event into individual instances within the given date range.
- */
-export function expandRecurrence(
-  event: RecurringEvent,
-  rangeStart: Date,
-  rangeEnd: Date,
-): RecurringEvent[] {
-  const instances: RecurringEvent[] = [];
-
-  if (!event.recurrence) {
-    // Single event — check if it overlaps the range
-    if (event.startDate <= rangeEnd && event.endDate >= rangeStart) {
-      instances.push({ ...event });
-    }
-    return instances;
-  }
-
-  const { frequency, interval: freqInterval, endDate, count } = event.recurrence;
-  let current = new Date(event.startDate);
-  const maxOccurrences = 52 * 12; // Cap at ~10 years of weekly events
-  let occurrenceCount = 0;
-
-  // Each instance keeps the base event's duration (end - start)
-  const durationMs = event.endDate.getTime() - event.startDate.getTime();
-
-  while (current <= rangeEnd && occurrenceCount < maxOccurrences) {
-    // Stop if past recurrence end date or count limit
-    if (endDate && current > endDate) break;
-    if (count != null && occurrenceCount >= count) break;
-
-    // Check overlap with range — the instance end is shifted by duration so
-    // later occurrences are not compared against the base event's absolute end
-    const instanceEnd = new Date(current.getTime() + durationMs);
-    if (current <= rangeEnd && instanceEnd >= rangeStart) {
-      instances.push({ ...event, startDate: new Date(current), endDate: instanceEnd });
-    }
-
-    // Advance by frequency + interval
-    current = advanceDate(current, frequency, freqInterval);
-    occurrenceCount++;
-  }
-
-  return instances;
-}
-
-/**
- * Advance a date by the given frequency and interval.
- */
-function advanceDate(date: Date, frequency: string, interval: number): Date {
-  const result = new Date(date);
-
-  switch (frequency) {
-    case 'DAILY':
-      result.setDate(result.getDate() + interval);
-      break;
-    case 'WEEKLY':
-      result.setDate(result.getDate() + interval * 7);
-      break;
-    case 'MONTHLY':
-      result.setMonth(result.getMonth() + interval);
-      break;
-    case 'QUARTERLY':
-      result.setMonth(result.getMonth() + interval * 3);
-      break;
-    case 'SEMI_ANNUALLY':
-      result.setMonth(result.getMonth() + interval * 6);
-      break;
-    case 'ANNUALLY':
-      result.setFullYear(result.getFullYear() + interval);
-      break;
-    default:
-      result.setDate(result.getDate() + 1);
-  }
-
-  return result;
-}
-
-// ---------------------------------------------------------------------------
-// Date formatting helpers
-// ---------------------------------------------------------------------------
-
-export function formatDate(date: Date): string {
-  return date.toLocaleDateString('en-GB', { day: 'numeric', month: 'short' });
-}
-
-export function formatDateTime(date: Date): string {
-  return date.toLocaleDateString('en-GB', {
-    weekday: 'short',
-    day: 'numeric',
-    month: 'short',
-    year: 'numeric',
-  });
-}
-
-export function formatTime(date: Date): string {
-  return date.toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' });
-}
-
-/**
- * Format a Date as `YYYY-MM-DDTHH:mm` in LOCAL time for <input type="datetime-local">.
- * toISOString() returns UTC and shifts the displayed day/time in non-UTC timezones.
- */
-export function toLocalDateTimeInputValue(date: Date): string {
-  const y = date.getFullYear();
-  const m = String(date.getMonth() + 1).padStart(2, '0');
-  const d = String(date.getDate()).padStart(2, '0');
-  const h = String(date.getHours()).padStart(2, '0');
-  const min = String(date.getMinutes()).padStart(2, '0');
-  return `${y}-${m}-${d}T${h}:${min}`;
-}
-
-/**
- * Format a Date as `YYYY-MM-DD` in LOCAL time for <input type="date">.
- */
-export function toLocalDateInputValue(date: Date): string {
-  const y = date.getFullYear();
-  const m = String(date.getMonth() + 1).padStart(2, '0');
-  const d = String(date.getDate()).padStart(2, '0');
-  return `${y}-${m}-${d}`;
-}
-
-/**
- * Parse a `YYYY-MM-DD` date-input value as LOCAL midnight.
- * (new Date('YYYY-MM-DD') parses as UTC and shifts the day in negative-offset timezones.)
- */
-export function parseLocalDateInputValue(value: string): Date {
-  return new Date(`${value}T00:00`);
-}
-
-export function isSameDay(a: Date, b: Date): boolean {
-  return (
-    a.getFullYear() === b.getFullYear() &&
-    a.getMonth() === b.getMonth() &&
-    a.getDate() === b.getDate()
-  );
-}
-
-export function isToday(date: Date): boolean {
-  const today = new Date();
-  return isSameDay(date, today);
+  recurrence?: { frequency: string; interval: number; endDate?: Date | null; count?: number | null } | null;
 }
 
 // ---------------------------------------------------------------------------
@@ -331,21 +232,6 @@ export function getDaysInMonth(year: number, month: number): number {
 
 export function getFirstDayOfMonth(year: number, month: number): number {
   return new Date(year, month, 1).getDay();
-}
-
-// ---------------------------------------------------------------------------
-// Instance identity (recurring events expand into multiple instances that
-// share the base event id — use this key to dedupe and render them)
-// ---------------------------------------------------------------------------
-
-/**
- * Stable per-instance key for an event. For recurring events the API returns
- * one instance per occurrence, all sharing the base event id; combining the
- * id with the instance start date makes each occurrence unique.
- */
-export function getEventInstanceKey(event: { id: string; startDate: Date | string }): string {
-  const start = event.startDate instanceof Date ? event.startDate : new Date(event.startDate);
-  return `${event.id}:${start.toISOString()}`;
 }
 
 // ---------------------------------------------------------------------------
@@ -381,7 +267,7 @@ export function generateYearMonths(year: number, events: CalendarEvent[] = []): 
     // Skip events with invalid dates before computing the instance key
     if (isNaN(start.getTime()) || isNaN(end.getTime())) continue;
 
-    const key = getEventInstanceKey(event);
+    const key = _getEventInstanceKey(event);
     if (!seen.has(key)) {
       seen.add(key);
       validEvents.push({ event, start, end });
@@ -401,7 +287,7 @@ export function generateYearMonths(year: number, events: CalendarEvent[] = []): 
   const yearStart = new Date(year, 0, 1);
 
   for (const { event, start, end } of validEvents) {
-    const key = getEventInstanceKey(event);
+    const key = _getEventInstanceKey(event);
     let cursor = new Date(start.getFullYear(), start.getMonth(), start.getDate());
     if (cursor < yearStart) cursor = new Date(year, 0, 1);
 
@@ -422,37 +308,6 @@ export function generateYearMonths(year: number, events: CalendarEvent[] = []): 
   }
 
   return summaries.map((summary, i) => ({ ...summary, totalEvents: monthKeys[i].size }));
-}
-
-// ---------------------------------------------------------------------------
-// Recurrence display helpers
-// ---------------------------------------------------------------------------
-
-export function getRecurrenceLabel(frequency: string, interval: number): string {
-  const labels: Record<string, string> = {
-    DAILY: 'Daily',
-    WEEKLY: 'Weekly',
-    MONTHLY: 'Monthly',
-    QUARTERLY: 'Quarterly',
-    SEMI_ANNUALLY: 'Semi-Annually',
-    ANNUALLY: 'Annually',
-  };
-
-  if (interval === 1) {
-    return labels[frequency] || frequency;
-  }
-
-  return `Every ${interval} ${labels[frequency]?.toLowerCase() || frequency}`;
-}
-
-export function getRecurrenceEndDateLabel(endDate?: Date | null, count?: number | null): string {
-  if (endDate) {
-    return `Ends ${formatDate(endDate)}`;
-  }
-  if (count != null && count > 0) {
-    return `Ends after ${count} occurrences`;
-  }
-  return '';
 }
 
 // ---------------------------------------------------------------------------
@@ -503,26 +358,26 @@ export const CalendarUtils = {
   generateMonthDays,
   generateWeekGrid,
   generateHourlySlots,
-  expandRecurrence,
-  formatDate,
-  formatDateTime,
-  formatTime,
-  isSameDay,
-  isToday,
+  expandRecurrence: expandRecurrence,
+  formatDate: _formatDate,
+  formatDateTime: _formatDateTime,
+  formatTime: _formatTime,
+  isSameDay: _isSameDay,
+  isToday: _isToday,
   getMonthName,
   getYear,
   getDayName,
   getDaysInMonth,
   getFirstDayOfMonth,
-  getEventInstanceKey,
+  getEventInstanceKey: _getEventInstanceKey,
   generateYearMonths,
-  getRecurrenceLabel,
-  getRecurrenceEndDateLabel,
+  getRecurrenceLabel: _getRecurrenceLabel,
+  getRecurrenceEndDateLabel: _getRecurrenceEndDateLabel,
   getEventPosition,
   getEventSpan,
-  toLocalDateTimeInputValue,
-  toLocalDateInputValue,
-  parseLocalDateInputValue,
+  toLocalDateTimeInputValue: _toLocalDateTimeInputValue,
+  toLocalDateInputValue: _toLocalDateInputValue,
+  parseLocalDateInputValue: _parseLocalDateInputValue,
 };
 
 export default CalendarUtils;

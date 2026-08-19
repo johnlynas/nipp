@@ -7,7 +7,7 @@ Property NI provides a secure, multi-tenant platform for managing property portf
 **Key features:**
 - **Multi-tenant architecture** with defense-in-depth isolation (Prisma extension + PostgreSQL Row Level Security)
 - **Super Admin dashboard** for managing organizations, roles, permissions, and cross-tenant audit logs
-- **Interactive Calendar** — multi-view (month/week/day) calendar component with drag-and-drop rescheduling, recurring events (weekly through annually), event detail modals, quick-add via sidebar or right-click context menu, and color-coded event types (viewings, inspections, maintenance, lease events)
+- **Interactive Calendar** — multi-view (month/week/day/year) calendar component with drag-and-drop rescheduling, recurring events (daily through annually), event detail modals, quick-add via sidebar or right-click context menu, and color-coded event types (viewings, inspections, maintenance, lease events)
 - **Calendar Notifications** — email notification service that alerts users or entire organizations about events happening today, with rate limiting via Redis and delivery logging to NotificationLog
 - **Granular RBAC** with organization-scoped roles, member-role assignments, and a catalog of ~50 atomic permissions
 - **Teams** — sub-organizational groupings with role inheritance, managed via dedicated REST API
@@ -58,7 +58,7 @@ See [ARCHITECTURE.md#teams-architecture](./ARCHITECTURE.md#teams-architecture) f
 
 ### Interactive Calendar (Tenant Admin)
 
-The calendar is a standalone, reusable component (`components/calendar/`) that can be integrated into any organization context. It supports month, week, and day views with drag-and-drop rescheduling, recurring events (weekly through annually), event detail modals, and quick-add via sidebar or right-click context menu.
+The calendar is a standalone, reusable component (`components/calendar/`) that can be integrated into any organization context. It supports month, week, day, and year views with drag-and-drop rescheduling (for recurring events, the original date is excluded from expansion and a one-off event is created at the new location), recurring events (daily through annually with interval, end-date and occurrence-count limits), event detail modals, and quick-add via sidebar or right-click context menu.
 
 | Route | Methods | Description |
 |-------|---------|-------------|

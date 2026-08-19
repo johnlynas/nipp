@@ -28,6 +28,8 @@ export interface CalendarEventRecurrence {
   interval: number;
   endDate?: Date | null;
   count?: number | null;
+  /** ISO date strings (YYYY-MM-DD) excluded from expansion. */
+  excludedDates?: string[];
 }
 
 export interface CalendarEvent {
@@ -65,6 +67,8 @@ export interface CalendarRecurrence {
   count?: number | null;
   byDay?: string | null;
   byMonthDay?: number | null;
+  /** ISO date strings (YYYY-MM-DD) excluded from expansion. */
+  excludedDates?: string[];
 }
 
 // ---------------------------------------------------------------------------
@@ -164,14 +168,8 @@ export interface RecurrencePickerProps {
   onChange: (value: RecurrencePickerValue | null) => void;
 }
 
-export const RECURRENCE_FREQUENCIES: { value: CalendarRecurrenceFrequency; label: string }[] = [
-  { value: 'DAILY', label: 'Daily' },
-  { value: 'WEEKLY', label: 'Weekly' },
-  { value: 'MONTHLY', label: 'Monthly' },
-  { value: 'QUARTERLY', label: 'Quarterly' },
-  { value: 'SEMI_ANNUALLY', label: 'Semi-Annually' },
-  { value: 'ANNUALLY', label: 'Annually' },
-];
+// Re-export from lib for convenience — components can import directly from either place.
+export { RECURRENCE_FREQUENCIES } from '@/lib/recurrence';
 
 export const EVENT_TYPES: { value: CalendarEventType; label: string }[] = [
   { value: 'VIEWING', label: 'Viewing' },

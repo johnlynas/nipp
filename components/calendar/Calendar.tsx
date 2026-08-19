@@ -326,8 +326,13 @@ export default function Calendar({
     setContextMenuDate(date);
   }, []);
 
-  const handleEventDragStart = useCallback((event: CalendarEvent, _e: React.DragEvent) => {
+  const handleEventDragStart = useCallback((event: CalendarEvent, e: React.DragEvent) => {
     setDraggingEventId(event.id);
+    // Attach recurrence info to drag data for use in handleDrop
+    e.dataTransfer.setData(
+      'application/recurrence',
+      JSON.stringify(event.recurrence ?? null),
+    );
   }, []);
 
   const handleDrop = useCallback(async (date: Date, eventId: string) => {
@@ -344,9 +349,8 @@ export default function Calendar({
     newStart.setHours(start.getHours(), start.getMinutes());
     const newEnd = new Date(newStart.getTime() + duration);
 
-    // Recurring events: moving an instance moves the whole series (the base start
-    // date), so skip the optimistic single-instance update and refresh all
-    // instances from the server after a successful PATCH.
+    // Recurring events: moving an instance excludes the original date and
+    // creates a one-off at the new location — this avoids shifting the whole series.
     const isRecurring = !!existing.recurrence;
 
     if (!isRecurring) {
@@ -361,37 +365,68 @@ export default function Calendar({
 
     // Persist to API in the background
     try {
-      const res = await fetch(
-        `/api/organizations/${organizationId}/calendar-events/${eventId}`,
-        {
-          method: 'PATCH',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            startDate: newStart.toISOString(),
-            endDate: newEnd.toISOString(),
-          }),
-        }
-      );
-
-      if (!res.ok) {
-        const err = await res.json().catch(() => ({ error: 'Failed to move event' }));
-        console.error('Failed to move event:', err);
-        // Revert on failure
-        if (!isRecurring) {
-          setEvents((prev) => prev.map((e) => (e.id === eventId ? existing : e)));
-        }
-        return;
-      }
-
-      const { event: updatedEvent }: { event: CalendarEvent } = await res.json();
-
       if (isRecurring) {
-        // Drop all instances of this series and re-fetch the visible range so
-        // every occurrence reflects the new schedule (instances share base id)
-        setEvents((prev) => prev.filter((e) => e.id !== updatedEvent.id));
-        const { start, end } = getDateRange();
-        await fetchEvents(selectedOrgId || organizationId, start, end);
+        // Step 1: PATCH the base event to exclude the original date from expansion
+        const patchRes = await fetch(
+          `/api/organizations/${organizationId}/calendar-events/${eventId}`,
+          {
+            method: 'PATCH',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ excludedDate: toLocalDateInputValue(start) }),
+          }
+        );
+
+        if (!patchRes.ok) {
+          const err = await patchRes.json().catch(() => ({ error: 'Failed to move event' }));
+          console.error('Failed to exclude original date:', err);
+          return;
+        }
+
+        // Step 2: Create a one-off event at the new location
+        const createRes = await fetch(
+          `/api/organizations/${organizationId}/calendar-events`,
+          {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              title: existing.title,
+              description: existing.description ?? null,
+              startDate: newStart.toISOString(),
+              endDate: newEnd.toISOString(),
+              calendarId: existing.calendarId,
+              eventType: existing.eventType,
+              color: existing.color ?? undefined,
+              propertyId: existing.propertyId ?? undefined,
+            }),
+          }
+        );
+
+        if (createRes.ok) {
+          const { event: oneOff } = await createRes.json();
+          setEvents((prev) => [...prev, oneOff]);
+        }
       } else {
+        const res = await fetch(
+          `/api/organizations/${organizationId}/calendar-events/${eventId}`,
+          {
+            method: 'PATCH',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              startDate: newStart.toISOString(),
+              endDate: newEnd.toISOString(),
+            }),
+          }
+        );
+
+        if (!res.ok) {
+          const err = await res.json().catch(() => ({ error: 'Failed to move event' }));
+          console.error('Failed to move event:', err);
+          // Revert on failure
+          setEvents((prev) => prev.map((e) => (e.id === eventId ? existing : e)));
+          return;
+        }
+
+        const { event: updatedEvent }: { event: CalendarEvent } = await res.json();
         setEvents((prev) => prev.map((e) => (e.id === updatedEvent.id ? updatedEvent : e)));
       }
     } catch {
@@ -504,38 +539,84 @@ export default function Calendar({
     const recurrencePayload = eventData.recurrence ?? null;
 
     if (isExisting) {
-      // Update existing event via PATCH
-      const res = await fetch(
-        `/api/organizations/${organizationId}/calendar-events/${selectedEvent.id}`,
-        {
-          method: 'PATCH',
+      const oldStart = selectedEvent.startDate instanceof Date ? selectedEvent.startDate : new Date(selectedEvent.startDate);
+      const oldEnd = selectedEvent.endDate instanceof Date ? selectedEvent.endDate : new Date(selectedEvent.endDate);
+      const newStart = eventData.startDate as Date;
+      const newEnd = eventData.endDate as Date;
+      const dateChanged = oldStart.getTime() !== newStart.getTime();
+
+      if (selectedEvent.recurrence && dateChanged) {
+        // Recurring event with changed dates: exclude original, create one-off at new location
+        const patchRes = await fetch(
+          `/api/organizations/${organizationId}/calendar-events/${selectedEvent.id}`,
+          {
+            method: 'PATCH',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ excludedDate: toLocalDateInputValue(oldStart) }),
+          }
+        );
+
+        if (!patchRes.ok) {
+          const err = await patchRes.json().catch(() => ({ error: 'Failed to update event' }));
+          throw new Error(err.error || 'Failed to update event');
+        }
+
+        const createRes = await fetch(`/api/organizations/${organizationId}/calendar-events`, {
+          method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
-            title: eventData.title,
-            description: eventData.description,
-            startDate: (eventData.startDate as Date).toISOString(),
-            endDate: (eventData.endDate as Date).toISOString(),
-            eventType: eventData.eventType,
-            recurrence: recurrencePayload,
+            title: eventData.title ?? selectedEvent.title,
+            description: eventData.description ?? null,
+            startDate: newStart.toISOString(),
+            endDate: newEnd.toISOString(),
+            calendarId: defaultCalendarId || selectedEvent.calendarId,
+            eventType: eventData.eventType ?? selectedEvent.eventType,
+            color: (eventData.color as string | undefined) ?? undefined,
+            propertyId: (eventData.propertyId as string | undefined) ?? undefined,
           }),
+        });
+
+        if (createRes.ok) {
+          const { event: oneOff } = await createRes.json();
+          setEvents((prev) => prev.map((e) => (e.id === selectedEvent.id ? oneOff : e)));
+        } else {
+          const err = await createRes.json().catch(() => ({ error: 'Failed to create moved event' }));
+          throw new Error(err.error || 'Failed to create moved event');
         }
-      );
-
-      if (!res.ok) {
-        const err = await res.json().catch(() => ({ error: 'Failed to update event' }));
-        throw new Error(err.error || 'Failed to update event');
-      }
-
-      const { event: updatedEvent }: { event: CalendarEvent } = await res.json();
-
-      if (updatedEvent.recurrence) {
-        // Recurring series changed — drop all instances and re-fetch the visible
-        // range so every occurrence reflects the new rule (instances share base id)
-        setEvents((prev) => prev.filter((e) => e.id !== updatedEvent.id));
-        const { start, end } = getDateRange();
-        await fetchEvents(selectedOrgId || organizationId, start, end);
       } else {
-        setEvents((prev) => prev.map((e) => (e.id === updatedEvent.id ? updatedEvent : e)));
+        // Update existing event via PATCH (non-recurring or same dates)
+        const res = await fetch(
+          `/api/organizations/${organizationId}/calendar-events/${selectedEvent.id}`,
+          {
+            method: 'PATCH',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              title: eventData.title,
+              description: eventData.description,
+              startDate: newStart.toISOString(),
+              endDate: newEnd.toISOString(),
+              eventType: eventData.eventType,
+              recurrence: recurrencePayload,
+            }),
+          }
+        );
+
+        if (!res.ok) {
+          const err = await res.json().catch(() => ({ error: 'Failed to update event' }));
+          throw new Error(err.error || 'Failed to update event');
+        }
+
+        const { event: updatedEvent }: { event: CalendarEvent } = await res.json();
+
+        if (updatedEvent.recurrence) {
+          // Re-fetch the visible range so every occurrence reflects the new rule.
+          // The merge logic in fetchEvents preserves instances outside the range,
+          // so events in other months are not lost.
+          const { start, end } = getDateRange();
+          await fetchEvents(selectedOrgId || organizationId, start, end);
+        } else {
+          setEvents((prev) => prev.map((e) => (e.id === updatedEvent.id ? updatedEvent : e)));
+        }
       }
     } else {
       // Create new event via POST
