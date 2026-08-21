@@ -189,7 +189,7 @@ export default function CalendarEventModal({
             </label>
             {isViewMode ? (
               <div className="w-full px-3 py-2 rounded border text-sm" style={{ borderColor: '#dee2e6', color: '#1a1a2e' }}>
-                {event.startDate.toLocaleString()}
+                {(event.startDate instanceof Date ? event.startDate : new Date(event.startDate)).toLocaleString()}
               </div>
             ) : (
               <input
@@ -207,7 +207,7 @@ export default function CalendarEventModal({
             </label>
             {isViewMode ? (
               <div className="w-full px-3 py-2 rounded border text-sm" style={{ borderColor: '#dee2e6', color: '#1a1a2e' }}>
-                {event.endDate.toLocaleString()}
+                {(event.endDate instanceof Date ? event.endDate : new Date(event.endDate)).toLocaleString()}
               </div>
             ) : (
               <input

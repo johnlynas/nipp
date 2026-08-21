@@ -2,102 +2,39 @@
 
 import { useState, useEffect } from "react";
 import Calendar from "@/components/calendar/Calendar";
-
-interface Organization {
-  id: string;
-  name: string;
-}
-
 export default function CalendarPage() {
   const [orgId, setOrgId] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
-  const [orgs, setOrgs] = useState<Organization[]>([]);
   const [selectedOrgName, setSelectedOrgName] = useState<string>('');
 
   useEffect(() => {
     async function init() {
-      console.log('[CalendarPage] init() starting');
-
-      // Fetch available organizations for the selector (super admin only)
-      try {
-        const res = await fetch("/api/dashboard/admin/organizations");
-        if (res.ok) {
-          const data = await res.json();
-          setOrgs(data.organizations || []);
-          console.log('[CalendarPage] Fetched orgs:', data.organizations);
-        }
-      } catch {
-        // Silently fail — org selector will just be empty
-      }
-
       // Try to get active org from session first, then localStorage fallback
       let gotOrgFromApi = false;
       try {
         const meRes = await fetch("/api/auth/me");
         if (meRes.ok) {
           const me = await meRes.json();
-          console.log('[CalendarPage] /api/auth/me response:', me);
           if (me.activeOrganizationId) {
-            console.log('[CalendarPage] Setting orgId from /api/auth/me:', me.activeOrganizationId);
             setOrgId(me.activeOrganizationId);
+            setSelectedOrgName(me.organizationName || '');
             gotOrgFromApi = true;
-          } else {
-            console.log('[CalendarPage] /api/auth/me returned NO activeOrganizationId');
           }
-        } else {
-          console.log('[CalendarPage] /api/auth/me returned non-OK status:', meRes.status);
         }
-      } catch (err) {
-        console.log('[CalendarPage] /api/auth/me error:', err);
-      }
+      } catch { /* silently fail */ }
 
-      // Only use localStorage as fallback if API didn't return an orgId
       if (!gotOrgFromApi) {
         const stored = localStorage.getItem("nipp-active-org-id");
         if (stored) {
-          console.log('[CalendarPage] Setting orgId from localStorage:', stored);
           setOrgId(stored);
         }
-      } else {
-        console.log('[CalendarPage] Skipping localStorage — already got orgId from API');
       }
 
-      console.log('[CalendarPage] Final orgId:', orgId);
       setLoading(false);
     }
 
     init();
   }, []);
-
-  // Fetch organization name directly when orgId is available
-  useEffect(() => {
-    if (!orgId) return;
-
-    let cancelled = false;
-    async function fetchOrgName() {
-      try {
-        const res = await fetch(`/api/organizations/${orgId}`);
-        if (res.ok && !cancelled) {
-          const data = await res.json();
-          setSelectedOrgName(data.name || '');
-        }
-      } catch {
-        // Silently fail — fall back to org list lookup
-      }
-    }
-
-    fetchOrgName();
-
-    // Fallback: if direct fetch failed, try the org list
-    if (orgs.length > 0 && !selectedOrgName) {
-      const current = orgs.find((o) => o.id === orgId);
-      if (current?.name) {
-        setSelectedOrgName(current.name);
-      }
-    }
-
-    return () => { cancelled = true; };
-  }, [orgId, orgs, selectedOrgName]);
 
   if (loading) {
     return (
@@ -107,33 +44,10 @@ export default function CalendarPage() {
     );
   }
 
-  if (!orgId || orgs.length === 0) {
+  if (!orgId) {
     return (
-      <div className="flex flex-col items-center justify-center h-full gap-4">
-        <p style={{ color: "#1B2A4A", fontSize: "1.1rem" }}>
-          Select an organization to view its calendar
-        </p>
-        <select
-          value={orgId || ""}
-          onChange={(e) => {
-            const id = e.target.value;
-            setOrgId(id || null);
-            if (id) {
-              localStorage.setItem("nipp-active-org-id", id);
-            } else {
-              localStorage.removeItem("nipp-active-org-id");
-            }
-          }}
-          className="px-4 py-2 rounded border text-sm min-w-[280px]"
-          style={{ borderColor: "#dee2e6", color: "#1B2A4A" }}
-        >
-          <option value="">— Select organization —</option>
-          {orgs.map((o) => (
-            <option key={o.id} value={o.id}>
-              {o.name}
-            </option>
-          ))}
-        </select>
+      <div className="flex items-center justify-center h-full">
+        <p style={{ color: "#1B2A4A" }}>No organization selected</p>
       </div>
     );
   }

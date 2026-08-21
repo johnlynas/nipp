@@ -50,11 +50,10 @@ export default function CalendarRecurrencePicker({ value, onChange }: Recurrence
         <label className="block text-sm font-medium mb-1" style={{ color: '#1B2A4A' }}>
           Repeat
         </label>
-        <div className="flex gap-2">
           <select
             value={hasRecurrence ? frequency : ('NONE' as CalendarRecurrenceFrequency)}
             onChange={(e) => handleFrequencyChange(e.target.value as CalendarRecurrenceFrequency)}
-            className="flex-1 px-3 py-2 rounded border text-sm"
+            className="w-full px-3 py-2 rounded border text-sm"
             style={{ borderColor: '#dee2e6' }}
           >
             <option value="NONE">Does not repeat</option>
@@ -66,28 +65,37 @@ export default function CalendarRecurrencePicker({ value, onChange }: Recurrence
           </select>
 
           {hasRecurrence && (
-            <>
-              <input
-                type="number"
-                min={1}
-                value={interval}
-                onChange={handleIntervalChange}
-                title={`Every ${frequency.toLowerCase()} (e.g. 2 = every other ${RECURRENCE_FREQUENCIES.find(f => f.value === frequency)?.label?.toLowerCase() || 'week'})`}
-                className="w-16 px-2 py-2 rounded border text-sm"
-                style={{ borderColor: '#dee2e6' }}
-              />
-              <input
-                type="number"
-                min={1}
-                value={count}
-                onChange={handleCountChange}
-                title="Number of times the event will repeat"
-                className="w-20 px-2 py-2 rounded border text-sm"
-                style={{ borderColor: '#dee2e6' }}
-              />
-            </>
+            <div className="flex gap-2">
+              <div>
+                <label className="block text-xs font-medium mb-1" style={{ color: '#6c757d' }}>
+                  Every
+                </label>
+                <input
+                  type="number"
+                  min={1}
+                  value={interval}
+                  onChange={handleIntervalChange}
+                  title={`Every ${frequency.toLowerCase()} (e.g. 2 = every other ${RECURRENCE_FREQUENCIES.find(f => f.value === frequency)?.label?.toLowerCase() || 'week'})`}
+                  className="w-16 px-2 py-2 rounded border text-sm"
+                  style={{ borderColor: '#dee2e6' }}
+                />
+              </div>
+              <div>
+                <label className="block text-xs font-medium mb-1" style={{ color: '#6c757d' }}>
+                  Count
+                </label>
+                <input
+                  type="number"
+                  min={1}
+                  value={count}
+                  onChange={handleCountChange}
+                  title="Number of times the event will repeat"
+                  className="w-20 px-2 py-2 rounded border text-sm"
+                  style={{ borderColor: '#dee2e6' }}
+                />
+              </div>
+            </div>
           )}
-        </div>
       </div>
     </div>
   );

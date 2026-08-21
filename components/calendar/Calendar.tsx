@@ -64,9 +64,6 @@ export default function Calendar({
   const [deleteConfirmOpen, setDeleteConfirmOpen] = useState(false);
   const [eventToDelete, setEventToDelete] = useState<CalendarEvent | null>(null);
 
-  // Selected calendar cell date (for border highlight)
-  const [selectedCalendarDate, setSelectedCalendarDate] = useState<Date | null>(null);
-
   // Organizations for switcher (super admin only)
   const [organizations, setOrganizations] = useState<{ id: string; name: string }[]>([]);
   const [selectedOrgId, setSelectedOrgId] = useState<string | null>(organizationId);
@@ -292,7 +289,6 @@ export default function Calendar({
   const navigateToday = useCallback(() => {
     const today = new Date();
     setCurrentDate(today);
-    setSelectedCalendarDate(today);
   }, []);
 
   // Drill from the Year view into a specific month (switches to Month view)
@@ -318,7 +314,6 @@ export default function Calendar({
 
   const handleDateClick = useCallback((date: Date) => {
     setCurrentDate(date);
-    setSelectedCalendarDate(date);
   }, []);
 
   const handleDateRightClick = useCallback((date: Date, e: React.MouseEvent) => {
@@ -428,20 +423,56 @@ export default function Calendar({
   }, []);
 
   const handleQuickAdd = useCallback(async (input: QuickAddInput) => {
-    // In production, call POST API to create event
-    const newEvent: CalendarEvent = {
-      id: `temp-${Date.now()}`,
-      title: `${input.eventType} Event`,
-      startDate: new Date(`${input.date}T10:00`),
-      endDate: new Date(`${input.date}T11:00`),
-      eventType: input.eventType,
-      calendarId: '',
-      createdAt: new Date(),
-      updatedAt: new Date(),
-    };
+    // Ensure we have a calendar ID before creating the event
+    let targetCalendarId = defaultCalendarId;
+    if (!targetCalendarId) {
+      try {
+        const calRes = await fetch(`/api/organizations/${organizationId}/calendar`);
+        if (calRes.ok) {
+          const calendars = await calRes.json();
+          const def = calendars.find((c: { isDefault: boolean }) => c.isDefault);
+          if (def) {
+            targetCalendarId = def.id;
+            setDefaultCalendarId(def.id);
+          } else if (calendars.length > 0) {
+            targetCalendarId = calendars[0].id;
+            setDefaultCalendarId(calendars[0].id);
+          }
+        }
+      } catch { /* silently fail — will use fallback below */ }
+    }
 
-    setEvents((prev) => [...prev, newEvent]);
-  }, []);
+    if (!targetCalendarId) {
+      throw new Error('No calendar available. Please contact an admin.');
+    }
+
+    const startDate = new Date(`${input.date}T10:00`);
+    const endDate = new Date(`${input.date}T11:00`);
+
+    const res = await fetch(`/api/organizations/${organizationId}/calendar-events`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        title: `${input.eventType} Event`,
+        description: null,
+        startDate: startDate.toISOString(),
+        endDate: endDate.toISOString(),
+        calendarId: targetCalendarId,
+        eventType: input.eventType,
+      }),
+    });
+
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({ error: 'Failed to create event' }));
+      throw new Error(err.error || 'Failed to create event');
+    }
+
+    await res.json();
+
+    // Refresh the visible range so the new event appears immediately
+    const { start, end } = getDateRange();
+    await fetchEvents(selectedOrgId || organizationId, start, end);
+  }, [organizationId, defaultCalendarId, selectedOrgId, getDateRange, fetchEvents]);
 
   const handleSaveEvent = useCallback(async (eventData: Partial<CalendarEvent>, saveOptions?: { editScope?: string; clickedDate?: string }) => {
     if (!selectedEvent) return;
@@ -734,9 +765,14 @@ export default function Calendar({
         const key = getEventInstanceKey(e);
         if (seen.has(key)) return false;
         seen.add(key);
-        return e.startDate >= now;
+        const start = e.startDate instanceof Date ? e.startDate : new Date(e.startDate);
+        return !isNaN(start.getTime()) && start >= now;
       })
-      .sort((a, b) => a.startDate.getTime() - b.startDate.getTime())
+      .sort((a, b) => {
+        const aStart = a.startDate instanceof Date ? a.startDate : new Date(a.startDate);
+        const bStart = b.startDate instanceof Date ? b.startDate : new Date(b.startDate);
+        return aStart.getTime() - bStart.getTime();
+      })
       .slice(0, 15);
   }, [events]);
 
@@ -754,12 +790,7 @@ export default function Calendar({
     }
 
     if (view === 'week') {
-      const weekStart = new Date(currentDate);
-      weekStart.setDate(weekStart.getDate() - weekStart.getDay());
-      const weekEnd = new Date(weekStart);
-      weekEnd.setDate(weekEnd.getDate() + 6);
-
-      return `${getMonthName(weekStart.getMonth())} ${weekStart.getFullYear()} – ${getMonthName(weekEnd.getMonth())} ${weekEnd.getDate()}, ${weekEnd.getFullYear()}`;
+      return `${getMonthName(currentDate.getMonth())} ${currentDate.getFullYear()}`;
     }
 
     return currentDate.toLocaleDateString('en-GB', {
@@ -780,7 +811,6 @@ export default function Calendar({
         <CalendarMonthView
           year={currentDate.getFullYear()}
           month={currentDate.getMonth()}
-          selectedDate={selectedCalendarDate}
           events={events}
           onDateClick={handleDateClick}
           onEventClick={handleEventClick}

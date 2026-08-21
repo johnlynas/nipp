@@ -55,10 +55,15 @@ export async function GET(req: NextRequest) {
     '[/api/auth/me] Returning response',
   );
 
+  const organization = activeOrgId
+    ? await globalDb.organization.findUnique({ where: { id: activeOrgId }, select: { name: true } })
+    : null;
+
   return NextResponse.json({
     userId: session.user.id,
     email: session.user.email,
     name: session.user.name,
     activeOrganizationId: activeOrgId,
+    organizationName: organization?.name || '',
   });
 }

@@ -184,8 +184,11 @@ export default function CalendarWeekView({
 
               {/* Event overlays */}
               {dayEvents.map((event) => {
-                const startHour = event.startDate.getHours() + event.startDate.getMinutes() / 60;
-                const endHour = event.endDate.getHours() + event.endDate.getMinutes() / 60;
+                const start = event.startDate instanceof Date ? event.startDate : new Date(event.startDate);
+                const end = event.endDate instanceof Date ? event.endDate : new Date(event.endDate);
+                if (isNaN(start.getTime()) || isNaN(end.getTime())) return null;
+                const startHour = start.getHours() + start.getMinutes() / 60;
+                const endHour = end.getHours() + end.getMinutes() / 60;
                 const duration = Math.max(endHour - startHour, 0.5);
 
                 // Multi-day events: render differently based on position
@@ -244,7 +247,7 @@ export default function CalendarWeekView({
                           ▸ {event.recurrence && <span title="Recurring event">↻</span>} {event.title}
                         </div>
                         <div className="text-[10px] text-gray-500">
-                          {formatTime(event.startDate)} – {formatTime(event.endDate)}
+                          {formatTime(start)} – {formatTime(end)}
                         </div>
                       </div>
                     </div>
@@ -280,7 +283,7 @@ export default function CalendarWeekView({
                           {event.recurrence && <span title="Recurring event">↻</span>} {event.title} ◂
                         </div>
                         <div className="text-[10px] text-gray-500">
-                          {formatTime(event.startDate)} – {formatTime(event.endDate)}
+                          {formatTime(start)} – {formatTime(end)}
                         </div>
                       </div>
                     </div>
@@ -316,7 +319,7 @@ export default function CalendarWeekView({
                         {event.recurrence && <span title="Recurring event">↻</span>} {event.title}
                       </div>
                       <div className="text-[10px] text-gray-500">
-                        {formatTime(event.startDate)} – {formatTime(event.endDate)}
+                        {formatTime(start)} – {formatTime(end)}
                       </div>
                     </div>
                   </div>

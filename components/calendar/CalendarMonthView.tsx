@@ -13,7 +13,6 @@ interface CalendarMonthViewProps {
   year: number;
   month: number;
   events: CalendarEvent[];
-  selectedDate?: Date | null;
   onDateClick?: (date: Date) => void;
   onEventClick?: (event: CalendarEvent) => void;
   onDateRightClick?: (date: Date, e: React.MouseEvent) => void;
@@ -32,7 +31,6 @@ export default function CalendarMonthView({
   year,
   month,
   events,
-  selectedDate,
   onDateClick,
   onEventClick,
   onDateRightClick,
@@ -168,17 +166,12 @@ export default function CalendarMonthView({
           const todayClass = isToday(date) ? 'bg-[#F5A623]/10' : '';
           const currentMonthClass = isCurrentMonth ? 'text-[#1B2A4A]' : 'text-gray-400';
 
-          const isSelected = selectedDate && formatDateKey(selectedDate) === dayStr;
-
           return (
             <div
               key={index}
               className={`min-h-[100px] p-1 transition-all ${
                 isCurrentMonth ? 'bg-white' : 'bg-gray-50'
-              } ${todayClass} ${
-                isSelected ? '!border-[3px] !border-[#F5A623]' : 'border border-[#f0f0f0]'
-              }`}
-              style={{ borderColor: isSelected ? '#F5A623' : undefined }}
+              } ${todayClass} border border-[#f0f0f0]`}
               onClick={() => handleDateClick(date)}
               onContextMenu={(e) => handleDateRightClick(e, date)}
               onDrop={(e) => handleDrop(e, date)}

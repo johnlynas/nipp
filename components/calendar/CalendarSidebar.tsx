@@ -73,7 +73,11 @@ export default function CalendarSidebar({
 
   // Format event date/time for display in upcoming events list
   const formatEventDateTime = (event: UpcomingEvent): string => {
-    const isMultiDay = event.startDate.toDateString() !== event.endDate.toDateString();
+    const start = event.startDate instanceof Date ? event.startDate : new Date(event.startDate);
+    const end = event.endDate instanceof Date ? event.endDate : new Date(event.endDate);
+    if (isNaN(start.getTime()) || isNaN(end.getTime())) return '';
+
+    const isMultiDay = start.toDateString() !== end.toDateString();
 
     if (isMultiDay) {
       // Multi-day: show date range with times
@@ -83,13 +87,13 @@ export default function CalendarSidebar({
       const endOpts: Intl.DateTimeFormatOptions = {
         day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit'
       };
-      return `${event.startDate.toLocaleDateString('en-GB', startOpts)} – ${event.endDate.toLocaleDateString('en-GB', endOpts)}`;
+      return `${start.toLocaleDateString('en-GB', startOpts)} – ${end.toLocaleDateString('en-GB', endOpts)}`;
     }
 
     // Single day with time range: show date and both times
     const dateOpts: Intl.DateTimeFormatOptions = { day: 'numeric', month: 'short' };
     const timeOpts: Intl.DateTimeFormatOptions = { hour: '2-digit', minute: '2-digit' };
-    return `${event.startDate.toLocaleDateString('en-GB', dateOpts)} ${event.startDate.toLocaleTimeString('en-GB', timeOpts)} – ${event.endDate.toLocaleTimeString('en-GB', timeOpts)}`;
+    return `${start.toLocaleDateString('en-GB', dateOpts)} ${start.toLocaleTimeString('en-GB', timeOpts)} – ${end.toLocaleTimeString('en-GB', timeOpts)}`;
   };
 
   return (

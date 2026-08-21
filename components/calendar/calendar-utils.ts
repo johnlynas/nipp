@@ -292,8 +292,11 @@ export function generateYearMonths(year: number, events: CalendarEvent[] = []): 
 // ---------------------------------------------------------------------------
 
 export function getEventPosition(event: RecurringEvent): { top: number; height: number } {
-  const startHour = event.startDate.getHours() + event.startDate.getMinutes() / 60;
-  const endHour = event.endDate.getHours() + event.endDate.getMinutes() / 60;
+  const start = event.startDate instanceof Date ? event.startDate : new Date(event.startDate);
+  const end = event.endDate instanceof Date ? event.endDate : new Date(event.endDate);
+  if (isNaN(start.getTime()) || isNaN(end.getTime())) return { top: 0, height: 64 };
+  const startHour = start.getHours() + start.getMinutes() / 60;
+  const endHour = end.getHours() + end.getMinutes() / 60;
   const duration = Math.max(endHour - startHour, 0.5); // Minimum 30 min
 
   return {
