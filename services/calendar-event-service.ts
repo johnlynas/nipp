@@ -1,7 +1,7 @@
 /**
  * CalendarEventService — CRUD operations for organization-scoped calendar events.
  *
- * Includes recurrence expansion, date range queries, and upcoming events.
+ * Recurrence is stored as rrule JSON (RFC 5545) on CalendarEvent.rrule.
  * Tenant isolation is enforced by the Prisma Extension (lib/tenant-db.ts) + PostgreSQL RLS.
  */
 
@@ -13,10 +13,8 @@ import {
   NotFoundError,
 } from '@/lib/services/types';
 import { requireAnyAdmin } from '@/lib/services/base-service';
-import { expandRecurrence as _expandRecurrence, RecurrenceRuleWithFilters } from '@/lib/recurrence';
-
-// Re-export for backwards compatibility (tests and other consumers import directly)
-export { expandRecurrence } from '@/lib/recurrence';
+import { expandRecurrenceWithRrule, RruleJson } from '@/lib/recurrence-rrule';
+import { RecurrenceRuleWithFilters } from '@/lib/recurrence';
 
 // ---------------------------------------------------------------------------
 // Input / Output Types
@@ -69,7 +67,7 @@ export interface GetEventsInput {
   calendarId?: string;
 }
 
-export interface CalendarEventRecurrenceDetails extends RecurrenceRuleWithFilters {}
+export type CalendarEventRecurrenceDetails = RecurrenceRuleWithFilters;
 
 export interface CalendarEventWithDetails {
   id: string;
@@ -80,39 +78,110 @@ export interface CalendarEventWithDetails {
   eventType: 'VIEWING' | 'INSPECTION' | 'MAINTENANCE' | 'LEASE_SIGNING' | 'LEASE_RENEWAL' | 'KEY_EXCHANGE' | 'OTHER';
   color?: string | null;
   calendarId: string;
-  recurrenceId?: string | null;
   /** Recurrence rule details (present when the event repeats). */
   recurrence?: CalendarEventRecurrenceDetails | null;
+  /** RFC 5545 rrule JSON (raw, for API consumers that need it). */
+  rrule?: unknown;
+  /** Excluded dates from expansion. */
+  exdates?: string[];
   propertyId?: string | null;
   createdAt: Date;
   updatedAt: Date;
+  [key: string]: unknown; // Allow arbitrary extra fields (passed through expansion)
 }
 
 /**
- * Map a Prisma CalendarRecurrence relation (or null) to the API output shape.
+ * Map rrule JSON to the API output shape.
  */
-function mapRecurrence(
-  r: {
-    frequency: string;
-    interval: number;
-    endDate?: Date | null;
-    count?: number | null;
-    byDay?: string | null;
-    byMonthDay?: number | null;
-    excludedDates?: unknown;
-  } | null | undefined,
-): CalendarEventRecurrenceDetails | null {
-  if (!r) return null;
-  const excluded = r.excludedDates;
-  const excludedDates: string[] = Array.isArray(excluded) ? (excluded as string[]) : [];
+function mapRecurrenceFromRrule(rruleJson: RruleJson | null): CalendarEventRecurrenceDetails | null {
+  if (!rruleJson) return null;
+
+  // Map rrule freq back to our frequency enum values
+  const freqMap: Record<string, string> = {
+    DAILY: 'DAILY',
+    WEEKLY: 'WEEKLY',
+    MONTHLY: 'MONTHLY',
+    QUARTERLY: 'QUARTERLY',
+    SEMI_ANNUALLY: 'SEMI_ANNUALLY',
+    YEARLY: 'ANNUALLY', // rrule stores as YEARLY, our enum uses ANNUALLY
+  };
+
+  // Reverse the QUARTERLY/SEMI_ANNUALLY mapping for display
+  let frequency = freqMap[rruleJson.freq] ?? 'DAILY';
+  let interval = rruleJson.interval;
+
+  if (frequency === 'MONTHLY' && rruleJson.freq === 'QUARTERLY') {
+    frequency = 'QUARTERLY';
+    interval = Math.round(rruleJson.interval / 3);
+  } else if (frequency === 'MONTHLY' && rruleJson.freq === 'SEMI_ANNUALLY') {
+    frequency = 'SEMI_ANNUALLY';
+    interval = Math.round(rruleJson.interval / 6);
+  }
+
+  // Map byweekday array back to comma-separated string
+  const byDay = rruleJson.byweekday && rruleJson.byweekday.length > 0
+    ? rruleJson.byweekday.join(',')
+    : null;
+
+  // Map bymonthday array back to single value (legacy only supports one)
+  const byMonthDay = rruleJson.bymonthday && rruleJson.bymonthday.length > 0
+    ? rruleJson.bymonthday[0]
+    : null;
+
   return {
-    frequency: r.frequency as CalendarEventRecurrenceDetails['frequency'],
-    interval: r.interval,
-    endDate: r.endDate ?? null,
-    count: r.count ?? null,
-    byDay: r.byDay ?? null,
-    byMonthDay: r.byMonthDay ?? null,
-    excludedDates,
+    frequency: frequency as CalendarEventRecurrenceDetails['frequency'],
+    interval,
+    endDate: rruleJson.until,
+    count: rruleJson.count,
+    byDay,
+    byMonthDay,
+    excludedDates: [], // exdates are stored on the event, not in recurrence details
+  };
+}
+
+/** Helper: parse rrule JSON field from a Prisma event row. */
+function getRruleJson(event: { rrule?: unknown }): RruleJson | null {
+  if (!event.rrule) return null;
+  const raw = event.rrule;
+  if (typeof raw === 'string') {
+    try { return JSON.parse(raw) as RruleJson; } catch { return null; }
+  }
+  if (typeof raw === 'object') return raw as RruleJson;
+  return null;
+}
+
+/** Helper: parse exdates JSON field from a Prisma event row. */
+function getExdates(event: { exdates?: unknown }): string[] {
+  if (!event.exdates) return [];
+  const raw = event.exdates;
+  if (typeof raw === 'string') {
+    try { return JSON.parse(raw) as string[]; } catch { return []; }
+  }
+  if (Array.isArray(raw)) return raw as string[];
+  return [];
+}
+
+/** Helper: build rrule JSON from CreateEventInput recurrence. */
+function buildRruleJson(inputRecurrence: NonNullable<CreateEventInput['recurrence']>, startDate: Date): RruleJson {
+  let rruleFreq = inputRecurrence.frequency;
+  let rruleInterval = inputRecurrence.interval || 1;
+
+  if (inputRecurrence.frequency === 'QUARTERLY') {
+    rruleFreq = 'MONTHLY';
+    rruleInterval = (inputRecurrence.interval || 1) * 3;
+  } else if (inputRecurrence.frequency === 'SEMI_ANNUALLY') {
+    rruleFreq = 'MONTHLY';
+    rruleInterval = (inputRecurrence.interval || 1) * 6;
+  }
+
+  return {
+    freq: rruleFreq as RruleJson['freq'],
+    interval: rruleInterval,
+    dtstart: startDate,
+    until: inputRecurrence.endDate ?? null,
+    count: inputRecurrence.count ?? null,
+    byweekday: inputRecurrence.byDay ? inputRecurrence.byDay.split(',').map((d) => d.trim().toUpperCase()) : null,
+    bymonthday: inputRecurrence.byMonthDay != null ? [inputRecurrence.byMonthDay] : null,
   };
 }
 
@@ -129,7 +198,6 @@ export async function createEvent(
 ): Promise<CalendarEventWithDetails> {
   requireAnyAdmin(ctx);
 
-  // Validate date range
   if (input.endDate < input.startDate) {
     throw new ValidationError('End date must be after start date');
   }
@@ -138,7 +206,6 @@ export async function createEvent(
     throw new ValidationError('Event title is required');
   }
 
-  // Verify calendar exists in the caller's organization (tenant isolation)
   const calendar = await globalDb.calendar.findFirst({
     where: { id: input.calendarId, organizationId: ctx.organizationId! },
   });
@@ -147,76 +214,42 @@ export async function createEvent(
     throw new NotFoundError(`Calendar with ID "${input.calendarId}" not found`);
   }
 
-  const event = await globalDb.calendarEvent.create({
-    data: {
-      title: input.title.trim(),
-      description: input.description,
-      startDate: input.startDate,
-      endDate: input.endDate,
-      eventType: input.eventType || 'OTHER',
-      color: input.color ?? null,
-      propertyId: input.propertyId ?? null,
-      calendarId: input.calendarId,
-      organizationId: ctx.organizationId!,
-    },
-  });
+  const eventData: Record<string, unknown> = {
+    title: input.title.trim(),
+    description: input.description,
+    startDate: input.startDate,
+    endDate: input.endDate,
+    eventType: input.eventType || 'OTHER',
+    color: input.color ?? null,
+    propertyId: input.propertyId ?? null,
+    calendarId: input.calendarId,
+    organizationId: ctx.organizationId!,
+  };
 
-  // Create recurrence rule if provided
-  let recurrenceId: string | null = null;
-  let recurrence: {
-    id: string;
-    frequency: string;
-    interval: number;
-    endDate?: Date | null;
-    count?: number | null;
-  } | null = null;
   if (input.recurrence) {
-    const recurrenceData: Record<string, unknown> = {
-      frequency: input.recurrence.frequency,
-      interval: input.recurrence.interval || 1,
-      byDay: input.recurrence.byDay ?? null,
-      byMonthDay: input.recurrence.byMonthDay ?? null,
-    };
-
-    if (input.recurrence.endDate) {
-      recurrenceData.endDate = input.recurrence.endDate;
-    }
-
-    if (input.recurrence.count !== undefined) {
-      recurrenceData.count = input.recurrence.count;
-    }
+    const rruleJson = buildRruleJson(input.recurrence, input.startDate);
+    eventData.rrule = rruleJson as unknown as string;
 
     if (input.recurrence.excludedDates != null && input.recurrence.excludedDates.length > 0) {
-      recurrenceData.excludedDates = input.recurrence.excludedDates;
+      eventData.exdates = input.recurrence.excludedDates as unknown as string;
     }
-
-    recurrence = await globalDb.calendarRecurrence.create({
-      data: {
-        frequency: input.recurrence.frequency,
-        interval: input.recurrence.interval || 1,
-        byDay: input.recurrence.byDay ?? null,
-        byMonthDay: input.recurrence.byMonthDay ?? null,
-        endDate: recurrenceData.endDate as Date | undefined,
-        count: recurrenceData.count as number | undefined,
-        excludedDates: (recurrenceData.excludedDates as string[]) ?? [],
-        eventId: event.id,
-        organizationId: ctx.organizationId!,
-      },
-    });
-
-    recurrenceId = recurrence.id;
-
-    // Keep the event's scalar in sync so filters and lookups by recurrenceId work
-    await globalDb.calendarEvent.update({
-      where: { id: event.id, organizationId: ctx.organizationId! },
-      data: { recurrenceId },
-    });
   }
+
+  const event = await globalDb.calendarEvent.create({ data: eventData as unknown as Parameters<typeof globalDb.calendarEvent.create>[0]['data'] });
 
   logger.info(
     { userId: ctx.userId, eventId: event.id },
     `Event created: ${event.title}`,
   );
+
+  // Build recurrence details from the rrule JSON we just wrote
+  let recurrenceDetails: CalendarEventRecurrenceDetails | null = null;
+  if (input.recurrence) {
+    const rruleJson = buildRruleJson(input.recurrence, input.startDate);
+    recurrenceDetails = mapRecurrenceFromRrule(rruleJson);
+  }
+
+  const exdates = input.recurrence?.excludedDates ?? [];
 
   return {
     id: event.id,
@@ -227,8 +260,9 @@ export async function createEvent(
     eventType: event.eventType,
     color: event.color,
     calendarId: event.calendarId,
-    recurrenceId,
-    recurrence: mapRecurrence(recurrence),
+    recurrence: recurrenceDetails,
+    rrule: input.recurrence ? buildRruleJson(input.recurrence, input.startDate) : null,
+    exdates: exdates.length > 0 ? exdates : undefined,
     propertyId: event.propertyId,
     createdAt: event.createdAt,
     updatedAt: event.updatedAt,
@@ -257,20 +291,7 @@ export async function getEvents(
     orderBy: { startDate: 'asc' },
   });
 
-  return events.map((e) => ({
-    id: e.id,
-    title: e.title,
-    description: e.description,
-    startDate: e.startDate,
-    endDate: e.endDate,
-    eventType: e.eventType ,
-    color: e.color,
-    calendarId: e.calendarId,
-    recurrenceId: e.recurrenceId,
-    propertyId: e.propertyId,
-    createdAt: e.createdAt,
-    updatedAt: e.updatedAt,
-  }));
+  return events.map((e) => mapEventToDetails(e));
 }
 
 /**
@@ -280,15 +301,11 @@ export async function getEventsWithRecurrences(
   ctx: ServiceContext,
   input: GetEventsInput,
 ): Promise<CalendarEventWithDetails[]> {
-  // Non-recurring events must overlap the range directly. Recurring events are
-  // active as long as the series has started by range end — expandRecurrence
-  // applies the rule's own end date/count and per-instance overlap check.
+  // Prisma Json columns can't be filtered with { not: null } in the query,
+  // so we fetch all events that could match and filter in code.
   const where: Record<string, unknown> = {
     organizationId: ctx.organizationId!,
-    OR: [
-      { recurrence: null, startDate: { lte: input.endDate }, endDate: { gte: input.startDate } },
-      { recurrence: { isNot: null }, startDate: { lte: input.endDate } },
-    ],
+    startDate: { lte: input.endDate },
   };
 
   if (input.calendarId) {
@@ -298,38 +315,43 @@ export async function getEventsWithRecurrences(
   const events = await globalDb.calendarEvent.findMany({
     where,
     orderBy: { startDate: 'asc' },
-    include: { recurrence: true },
   });
 
-  // Expand recurring events and flatten into instances
+  // Filter non-recurring events for actual date-range overlap.
+  // Recurring events are included as long as the series started by rangeEnd —
+  // expansion handles per-instance overlap via the rule's own end date/count.
+  const candidates = events.filter((event) => {
+    if (getRruleJson(event)) return true; // recurring — expansion handles overlap
+    const eEnd = new Date(event.endDate);
+    return eEnd >= input.startDate; // non-recurring must overlap range
+  });
+
   const allInstances: CalendarEventWithDetails[] = [];
 
-  for (const event of events) {
-    const recurrenceDetails = mapRecurrence(event.recurrence);
+  for (const event of candidates) {
+    const rruleJson = getRruleJson(event);
+    const exdates = getExdates(event);
 
-    // Build the rule for expandRecurrence (4th arg)
-    const rule: RecurrenceRuleWithFilters | null = event.recurrence ? {
-      frequency: event.recurrence.frequency as RecurrenceRuleWithFilters['frequency'],
-      interval: event.recurrence.interval,
-      endDate: event.recurrence.endDate ?? null,
-      count: event.recurrence.count ?? null,
-      byDay: (event.recurrence as any).byDay ?? null,
-      byMonthDay: (event.recurrence as any).byMonthDay ?? null,
-      excludedDates: (event.recurrence as any).excludedDates ?? [],
-    } : null;
+    if (rruleJson) {
+      // Recurring event: expand using rrule JSON
+      const recurrenceDetails = mapRecurrenceFromRrule(rruleJson);
 
-    const expanded = _expandRecurrence(
-      { ...event } as CalendarEventWithDetails,
-      input.startDate,
-      input.endDate,
-      rule,
-    );
+      const expanded = expandRecurrenceWithRrule(
+        { ...event } as CalendarEventWithDetails,
+        input.startDate,
+        input.endDate,
+        rruleJson,
+        exdates.length > 0 ? exdates : undefined,
+      );
 
-    // Attach recurrence details to each instance so clients can display/edit the rule
-    allInstances.push(...expanded.map((instance) => ({ ...instance, recurrence: recurrenceDetails })));
+      allInstances.push(...(expanded.map((instance) => ({ ...instance, recurrence: recurrenceDetails })) as CalendarEventWithDetails[]));
+    } else {
+      // Non-recurring event — include as-is
+      allInstances.push(mapEventToDetails(event));
+    }
   }
 
-  // Sort by start date and deduplicate (same event may appear in overlapping ranges)
+  // Sort by start date and deduplicate
   allInstances.sort((a, b) => a.startDate.getTime() - b.startDate.getTime());
 
   return allInstances;
@@ -344,27 +366,47 @@ export async function getEventById(
 ): Promise<CalendarEventWithDetails> {
   const event = await globalDb.calendarEvent.findFirst({
     where: { id: eventId, organizationId: ctx.organizationId! },
-    include: { recurrence: true },
   });
 
   if (!event) {
     throw new NotFoundError(`Event with ID "${eventId}" not found`);
   }
 
+  return mapEventToDetails(event);
+}
+
+/** Map a Prisma event row to CalendarEventWithDetails (non-expanded). */
+function mapEventToDetails(e: {
+  id: string;
+  title: string;
+  description?: string | null;
+  startDate: Date;
+  endDate: Date;
+  eventType: string;
+  color?: string | null;
+  calendarId: string;
+  rrule?: unknown;
+  exdates?: unknown;
+  propertyId?: string | null;
+  createdAt: Date;
+  updatedAt: Date;
+}): CalendarEventWithDetails {
+  const rruleJson = getRruleJson(e);
   return {
-    id: event.id,
-    title: event.title,
-    description: event.description,
-    startDate: event.startDate,
-    endDate: event.endDate,
-    eventType: event.eventType ,
-    color: event.color,
-    calendarId: event.calendarId,
-    recurrenceId: event.recurrenceId,
-    recurrence: mapRecurrence(event.recurrence),
-    propertyId: event.propertyId,
-    createdAt: event.createdAt,
-    updatedAt: event.updatedAt,
+    id: e.id,
+    title: e.title,
+    description: e.description,
+    startDate: e.startDate,
+    endDate: e.endDate,
+    eventType: e.eventType as CalendarEventWithDetails['eventType'],
+    color: e.color,
+    calendarId: e.calendarId,
+    recurrence: mapRecurrenceFromRrule(rruleJson),
+    rrule: e.rrule,
+    exdates: getExdates(e),
+    propertyId: e.propertyId,
+    createdAt: e.createdAt,
+    updatedAt: e.updatedAt,
   };
 }
 
@@ -380,14 +422,12 @@ export async function updateEvent(
 
   const event = await globalDb.calendarEvent.findFirst({
     where: { id: eventId, organizationId: ctx.organizationId! },
-    include: { recurrence: true },
   });
 
   if (!event) {
     throw new NotFoundError(`Event with ID "${eventId}" not found`);
   }
 
-  // Validate date range if dates are being updated
   const newStartDate = input.startDate ?? event.startDate;
   const newEndDate = input.endDate ?? event.endDate;
 
@@ -428,81 +468,40 @@ export async function updateEvent(
     updateData.propertyId = input.propertyId;
   }
 
-  // Handle recurrence changes — branch on the relation (robust even if the
-  // event's recurrenceId scalar is stale from legacy rows)
+  // Handle recurrence changes — write to rrule JSON only
   if (input.recurrence !== undefined || input.excludedDate !== undefined) {
     // Handle excludedDate (top-level single-date exclusion for drag-and-drop)
-    if (input.excludedDate !== undefined && event.recurrence) {
-      const existingExcluded = (event.recurrence as any).excludedDates ?? [];
-      if (!existingExcluded.includes(input.excludedDate)) {
-        await globalDb.calendarRecurrence.update({
-          where: { id: event.recurrence.id, organizationId: ctx.organizationId! },
-          data: { excludedDates: [...existingExcluded, input.excludedDate] },
-        });
+    if (input.excludedDate !== undefined) {
+      const existingExdates = getExdates(event);
+      if (!existingExdates.includes(input.excludedDate)) {
+        updateData.exdates = [...existingExdates, input.excludedDate] as unknown as string;
       }
     }
 
     if (input.recurrence !== undefined) {
       if (input.recurrence === null) {
-        // Remove recurrence — delete the rule and set recurrenceId to null
-        if (event.recurrence) {
-          await globalDb.calendarRecurrence.delete({
-            where: { id: event.recurrence.id, organizationId: ctx.organizationId! },
-          });
-        }
-        updateData.recurrenceId = null;
+        // Remove recurrence — clear rrule JSON and exdates
+        updateData.rrule = null;
+        updateData.exdates = [] as unknown as string;
       } else {
-        // Update or create recurrence rule
-        const recurrenceData: Record<string, unknown> = {
-          frequency: input.recurrence.frequency,
-          interval: input.recurrence.interval || 1,
-          byDay: input.recurrence.byDay ?? null,
-          byMonthDay: input.recurrence.byMonthDay ?? null,
-        };
+        // Build rrule JSON for the new format
+        const useStartDate = input.startDate ?? event.startDate;
+        const rruleJson = buildRruleJson(input.recurrence, useStartDate);
+        updateData.rrule = rruleJson as unknown as string;
 
-        if (input.recurrence.endDate) {
-          recurrenceData.endDate = input.recurrence.endDate;
+        // Merge exdates if provided
+        if (input.recurrence.excludedDates != null && input.recurrence.excludedDates.length > 0) {
+          const existingExdates = getExdates(event);
+          const mergedExdates = Array.from(new Set([...existingExdates, ...input.recurrence.excludedDates]));
+          updateData.exdates = mergedExdates as unknown as string;
         }
-
-        if (input.recurrence.count !== undefined) {
-          recurrenceData.count = input.recurrence.count;
-        }
-
-        if (event.recurrence) {
-          // Update existing recurrence rule — append excludedDates to existing ones
-          if (input.recurrence?.excludedDates != null && input.recurrence.excludedDates.length > 0) {
-            const existingExcluded = (event.recurrence as any).excludedDates ?? [];
-            const merged = Array.from(new Set([...existingExcluded, ...input.recurrence.excludedDates]));
-            (recurrenceData as Record<string, unknown>).excludedDates = merged;
-          }
-
-          await globalDb.calendarRecurrence.update({
-            where: { id: event.recurrence.id, organizationId: ctx.organizationId! },
-            data: recurrenceData,
-          });
-        } else {
-        // Create new recurrence rule
-        const recurrence = await globalDb.calendarRecurrence.create({
-          data: {
-            frequency: input.recurrence!.frequency,
-            interval: input.recurrence!.interval || 1,
-            byDay: input.recurrence!.byDay ?? null,
-            byMonthDay: input.recurrence!.byMonthDay ?? null,
-            endDate: recurrenceData.endDate as Date | undefined,
-            count: recurrenceData.count as number | undefined,
-            eventId,
-            organizationId: ctx.organizationId!,
-          },
-        });
-        updateData.recurrenceId = recurrence.id;
-      }}
+      }
     }
   }
 
   const updated = await globalDb.calendarEvent.update({
     where: { id: eventId, organizationId: ctx.organizationId! },
     data: updateData,
-    include: { recurrence: true },
   });
 
   logger.info(
@@ -510,25 +509,11 @@ export async function updateEvent(
     `Event updated: ${updated.title}`,
   );
 
-  return {
-    id: updated.id,
-    title: updated.title,
-    description: updated.description,
-    startDate: updated.startDate,
-    endDate: updated.endDate,
-    eventType: updated.eventType ,
-    color: updated.color,
-    calendarId: updated.calendarId,
-    recurrenceId: updated.recurrenceId,
-    recurrence: mapRecurrence(updated.recurrence),
-    propertyId: updated.propertyId,
-    createdAt: updated.createdAt,
-    updatedAt: updated.updatedAt,
-  };
+  return mapEventToDetails(updated);
 }
 
 /**
- * Delete an event (including its recurrence rule if applicable).
+ * Delete an event.
  */
 export async function deleteEvent(
   ctx: ServiceContext,
@@ -538,19 +523,10 @@ export async function deleteEvent(
 
   const event = await globalDb.calendarEvent.findFirst({
     where: { id: eventId, organizationId: ctx.organizationId! },
-    include: { recurrence: true },
   });
 
   if (!event) {
     throw new NotFoundError(`Event with ID "${eventId}" not found`);
-  }
-
-  // Delete recurrence rule if it exists (the relation is Restrict, so the
-  // child row must go first — use the relation id, not just the scalar)
-  if (event.recurrence) {
-    await globalDb.calendarRecurrence.delete({
-      where: { id: event.recurrence.id, organizationId: ctx.organizationId! },
-    });
   }
 
   await globalDb.calendarEvent.delete({
@@ -582,88 +558,48 @@ export async function getUpcomingEvents(
 
   const upcomingWindowEnd = new Date(today.getTime() + 30 * 24 * 60 * 60 * 1000);
 
-  // Get non-recurring upcoming events (exclude recurring ones — they are
-  // expanded below, which would otherwise double-count them)
-  const singleEvents = await globalDb.calendarEvent.findMany({
+  // Get non-recurring upcoming events (filter rrule presence in code since Json columns can't be null-filtered easily)
+  const allUpcomingEvents = await globalDb.calendarEvent.findMany({
     where: {
       organizationId: targetOrgId,
-      recurrence: null,
       startDate: { gte: today },
     },
     orderBy: { startDate: 'asc' },
-    take: limit,
   });
 
-  // Get recurring events and expand for upcoming window (next 30 days).
-  // A series is active if it has started by the end of the window; expansion
-  // applies the rule's own end date/count and per-instance overlap check.
+  const singleEvents = allUpcomingEvents.filter((e) => getRruleJson(e) === null).slice(0, limit);
+
+  // Get recurring events and expand for upcoming window (next 30 days)
   const recurringEvents = await globalDb.calendarEvent.findMany({
     where: {
       organizationId: targetOrgId,
-      recurrence: { isNot: null },
       startDate: { lte: upcomingWindowEnd },
     },
-    include: { recurrence: true },
   });
 
   const recurringInstances: CalendarEventWithDetails[] = [];
 
   for (const event of recurringEvents) {
-    const rule: RecurrenceRuleWithFilters | null = event.recurrence ? {
-      frequency: event.recurrence.frequency as RecurrenceRuleWithFilters['frequency'],
-      interval: event.recurrence.interval,
-      endDate: event.recurrence.endDate ?? null,
-      count: event.recurrence.count ?? null,
-      byDay: (event.recurrence as any).byDay ?? null,
-      byMonthDay: (event.recurrence as any).byMonthDay ?? null,
-      excludedDates: (event.recurrence as any).excludedDates ?? [],
-    } : null;
+    const rruleJson = getRruleJson(event);
+    const exdates = getExdates(event);
 
-    const expanded = _expandRecurrence(
-      { ...event } as CalendarEventWithDetails,
-      today,
-      upcomingWindowEnd,
-      rule,
-    );
-
-    recurringInstances.push(...expanded);
+    if (rruleJson) {
+      const expanded = expandRecurrenceWithRrule(
+        { ...event } as CalendarEventWithDetails,
+        today,
+        upcomingWindowEnd,
+        rruleJson,
+        exdates.length > 0 ? exdates : undefined,
+      );
+      recurringInstances.push(...(expanded as CalendarEventWithDetails[]));
+    }
   }
 
   // Combine and sort, then limit
-  const allEvents = [...singleEvents.map(mapEvent), ...recurringInstances];
+  const allEvents = [...singleEvents.map(mapEventToDetails), ...recurringInstances];
   allEvents.sort((a, b) => a.startDate.getTime() - b.startDate.getTime());
 
   return allEvents.slice(0, limit);
-}
-
-function mapEvent(e: {
-  id: string;
-  title: string;
-  description?: string | null;
-  startDate: Date;
-  endDate: Date;
-  eventType: 'VIEWING' | 'INSPECTION' | 'MAINTENANCE' | 'LEASE_SIGNING' | 'LEASE_RENEWAL' | 'KEY_EXCHANGE' | 'OTHER';
-  color?: string | null;
-  calendarId: string;
-  recurrenceId?: string | null;
-  propertyId?: string | null;
-  createdAt: Date;
-  updatedAt: Date;
-}): CalendarEventWithDetails {
-  return {
-    id: e.id,
-    title: e.title,
-    description: e.description,
-    startDate: e.startDate,
-    endDate: e.endDate,
-    eventType: e.eventType ,
-    color: e.color,
-    calendarId: e.calendarId,
-    recurrenceId: e.recurrenceId,
-    propertyId: e.propertyId,
-    createdAt: e.createdAt,
-    updatedAt: e.updatedAt,
-  };
 }
 
 /**

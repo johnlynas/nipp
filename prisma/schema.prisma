@@ -56,7 +56,7 @@ enum CalendarEventType {
   OTHER
 }
 
-/** Recurrence frequency for recurring calendar events */
+/** Recurrence frequency for recurring calendar events (used by frontend/display helpers). */
 enum CalendarRecurrenceFrequency {
   DAILY
   WEEKLY
@@ -159,7 +159,6 @@ model Organization {
   // Calendars: organization-scoped calendar containers and events
   calendars          Calendar[]
   calendarEvents     CalendarEvent[]
-  calendarRecurrences CalendarRecurrence[]
 }
 
 model Member {
@@ -485,7 +484,7 @@ model Calendar {
 
 /**
  * CalendarEvent — Individual events within a calendar.
- * Supports single-day, multi-day, and recurring events via CalendarRecurrence.
+ * Supports single-day, multi-day, and recurring events via rrule JSON.
  */
 model CalendarEvent {
   id          String   @id @default(cuid())
@@ -499,8 +498,10 @@ model CalendarEvent {
   calendarId String
   calendar   Calendar @relation(fields: [calendarId], references: [id], onDelete: Cascade)
 
-  recurrenceId String?
-  recurrence   CalendarRecurrence? @relation
+  /** RFC 5545 recurrence rule stored as JSON (rrule format). */
+  rrule        Json?
+  /** Excluded dates from expansion (YYYY-MM-DD strings). */
+  exdates      Json @default("[]") @db.Json
 
   propertyId String? // Optional property association (nullable for general events)
 
@@ -512,31 +513,4 @@ model CalendarEvent {
 
   @@index([organizationId, startDate]) // Efficient date range queries
   @@index([propertyId])                // Property-based event lookups (future scheduler)
-}
-
-/**
- * CalendarRecurrence — Recurrence rules for recurring calendar events.
- * Uses iCal-inspired fields: frequency, interval, endDate/count, byDay, byMonthDay.
- */
-model CalendarRecurrence {
-  id         String   @id @default(cuid())
-  frequency  CalendarRecurrenceFrequency
-  interval   Int      @default(1) // Every N frequency units (e.g., interval=2 with WEEKLY = every 2 weeks)
-  endDate    DateTime? // Hard end date (mutually exclusive with count)
-  count      Int?     // Max occurrence count (mutually exclusive with endDate)
-  byDay      String?  // iCal-style by-day rules (e.g., "MO,WE,FR" for Mon/Wed/Fri)
-  byMonthDay Int?     // Specific day of month for monthly recurrences (1-31)
-  /** Dates excluded from expansion — used when a single instance is moved via drag-and-drop. */
-  excludedDates Json @default("[]") @db.Json
-
-  eventId    String   @unique
-  event      CalendarEvent @relation(fields: [eventId], references: [id])
-
-  organizationId String
-  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
-
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
-
-  @@index([organizationId])
 }

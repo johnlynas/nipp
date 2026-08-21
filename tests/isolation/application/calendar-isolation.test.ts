@@ -1,13 +1,12 @@
 /**
  * Application-layer tenant isolation tests for calendar models.
  *
- * Verifies that the Prisma extension correctly scopes Calendar, CalendarEvent,
- * and CalendarRecurrence queries to the current organization. Uses mocking to
- * verify extension behaviour without requiring a live database.
+ * Verifies that the Prisma extension correctly scopes Calendar and CalendarEvent
+ * queries to the current organization. Uses mocking to verify extension behaviour
+ * without requiring a live database.
  *
- * This closes the "Tenant Isolation — Known Gap (Open)" documented in SECURITY.md:
- * calendar models are now registered in TENANT_SCOPED_MODELS (lib/tenant-db.ts)
- * and the event/calendar services filter every query by organizationId.
+ * CalendarRecurrence was removed in Phase 5 — recurrence is now stored as rrule JSON
+ * directly on CalendarEvent.rrule, so only Calendar and CalendarEvent need isolation tests.
  */
 
 import { describe, it, expect, vi, beforeEach } from 'vitest';
@@ -27,7 +26,6 @@ vi.mock('@/lib/tenant-context', () => ({
 // ---------------------------------------------------------------------------
 
 vi.mock('@/lib/db', () => {
-  // Create mock model objects with all necessary methods
   const createMockModel = (methods: string[]) => {
     const mock: Record<string, unknown> = {};
     for (const method of methods) {
@@ -38,7 +36,6 @@ vi.mock('@/lib/db', () => {
 
   const calendar = createMockModel(['findUnique', 'findFirst', 'findMany', 'count', 'create', 'update', 'delete', 'deleteMany', 'upsert']);
   const calendarEvent = createMockModel(['findUnique', 'findFirst', 'findMany', 'count', 'create', 'update', 'delete', 'deleteMany']);
-  const calendarRecurrence = createMockModel(['findUnique', 'findFirst', 'findMany', 'count', 'create', 'update', 'delete', 'deleteMany']);
   const role = createMockModel(['findUnique', 'findFirst', 'findMany', 'update', 'delete', 'create']);
   const rolePermission = createMockModel(['findUnique', 'findFirst', 'findMany', 'deleteMany', 'create']);
   const memberRole = createMockModel(['findUnique', 'findFirst', 'findMany', 'create']);
@@ -49,11 +46,9 @@ vi.mock('@/lib/db', () => {
   const teamMember = createMockModel(['findUnique', 'findFirst', 'findMany', 'count', 'create', 'update', 'delete', 'deleteMany']);
   const teamRole = createMockModel(['findUnique', 'findFirst', 'findMany', 'count', 'create', 'update', 'delete', 'deleteMany']);
 
-  // Track the current state of model methods for extension chaining
   const modelState: Record<string, Record<string, unknown>> = {
     calendar: { ...calendar },
     calendarEvent: { ...calendarEvent },
-    calendarRecurrence: { ...calendarRecurrence },
     role: { ...role },
     rolePermission: { ...rolePermission },
     memberRole: { ...memberRole },
@@ -65,29 +60,22 @@ vi.mock('@/lib/db', () => {
     teamRole: { ...teamRole },
   };
 
-  // Create a function that applies an extension to the current model state
   const applyExtension = (client: typeof mockPrisma, ext: { name?: string; model?: Record<string, unknown> }) => {
     if (ext.model) {
       for (const [modelName, modelExt] of Object.entries(ext.model)) {
-        // Handle both PascalCase (schema) and lowercase (client access) model names
         const stateKey = modelState[modelName] ? modelName : modelName.charAt(0).toLowerCase() + modelName.slice(1);
         if (modelState[stateKey] && typeof modelExt === 'object') {
-          // Apply each method from the extension
           for (const [methodName, methodFn] of Object.entries(modelExt as Record<string, unknown>)) {
             const currentMethod = modelState[stateKey][methodName];
             if (typeof methodFn === 'function' && typeof currentMethod === 'function') {
-              // Create a new vi.fn() that wraps the extension logic
               const wrapped = vi.fn(async (...args: unknown[]) => {
-                // Clone args so we can track modifications made by the extension
                 const argsCopy = JSON.parse(JSON.stringify(args[0] as Record<string, unknown>));
-                // Call the extension with args and a query function that calls the original
                 return Promise.resolve()
                   .then(() => (methodFn as (...a: unknown[]) => Promise<unknown>)({
                     args: argsCopy,
                     query: async (a: Record<string, unknown>) => currentMethod(a),
                   }))
                   .then((result) => {
-                    // Update the mock's last call with the modified args
                     const lastCallIndex = wrapped.mock.calls.length - 1;
                     if (lastCallIndex >= 0) {
                       wrapped.mock.calls[lastCallIndex][0] = argsCopy;
@@ -108,7 +96,6 @@ vi.mock('@/lib/db', () => {
     $extends: vi.fn().mockImplementation((ext) => applyExtension(mockPrisma, ext)),
     calendar: modelState.calendar,
     calendarEvent: modelState.calendarEvent,
-    calendarRecurrence: modelState.calendarRecurrence,
     role: modelState.role,
     rolePermission: modelState.rolePermission,
     memberRole: modelState.memberRole,
@@ -265,57 +252,6 @@ describe('Calendar Isolation — Prisma Extension', () => {
     });
   });
 
-  describe('CalendarRecurrence model scoping', () => {
-    it('scopes CalendarRecurrence.findFirst to current organization', async () => {
-      mockState.orgId = 'org-a-id';
-
-      tenantDb = (await import('@/lib/tenant-db')).default;
-
-      await tenantDb.calendarRecurrence.findFirst({ where: { id: 'rec-1' } });
-
-      const callArgs = vi.mocked(tenantDb.calendarRecurrence.findFirst).mock.calls[0][0];
-      expect(callArgs?.where?.organizationId).toBe('org-a-id');
-    });
-
-    it('scopes CalendarRecurrence.create to current organization (injects organizationId)', async () => {
-      mockState.orgId = 'org-a-id';
-
-      tenantDb = (await import('@/lib/tenant-db')).default;
-
-      await tenantDb.calendarRecurrence.create({
-        data: { frequency: 'WEEKLY', eventId: 'evt-1', organizationId: mockState.orgId! },
-      });
-
-      const callArgs = vi.mocked(tenantDb.calendarRecurrence.create).mock.calls[0][0];
-      expect(callArgs?.data?.organizationId).toBe('org-a-id');
-    });
-
-    it('scopes CalendarRecurrence.update to current organization', async () => {
-      mockState.orgId = 'org-a-id';
-
-      tenantDb = (await import('@/lib/tenant-db')).default;
-
-      await tenantDb.calendarRecurrence.update({
-        where: { id: 'rec-1' },
-        data: { interval: 2 },
-      });
-
-      const callArgs = vi.mocked(tenantDb.calendarRecurrence.update).mock.calls[0][0];
-      expect(callArgs?.where?.organizationId).toBe('org-a-id');
-    });
-
-    it('scopes CalendarRecurrence.delete to current organization', async () => {
-      mockState.orgId = 'org-a-id';
-
-      tenantDb = (await import('@/lib/tenant-db')).default;
-
-      await tenantDb.calendarRecurrence.delete({ where: { id: 'rec-1' } });
-
-      const callArgs = vi.mocked(tenantDb.calendarRecurrence.delete).mock.calls[0][0];
-      expect(callArgs?.where?.organizationId).toBe('org-a-id');
-    });
-  });
-
   describe('Cross-org calendar data isolation', () => {
     it('OrgA context cannot read OrgB events (simulated)', async () => {
       mockState.orgId = 'org-a-id';
@@ -378,18 +314,16 @@ describe('Calendar Isolation — Prisma Extension', () => {
   });
 
   describe('Calendar-scoped models list', () => {
-    it('intercepts Calendar, CalendarEvent, and CalendarRecurrence', async () => {
+    it('intercepts Calendar and CalendarEvent (CalendarRecurrence removed in Phase 5)', async () => {
       mockState.orgId = 'org-scoped-id';
 
       tenantDb = (await import('@/lib/tenant-db')).default;
 
       expect(tenantDb.calendar).toBeDefined();
       expect(tenantDb.calendarEvent).toBeDefined();
-      expect(tenantDb.calendarRecurrence).toBeDefined();
 
       expect(typeof tenantDb.calendar.findFirst).toBe('function');
       expect(typeof tenantDb.calendarEvent.findFirst).toBe('function');
-      expect(typeof tenantDb.calendarRecurrence.findFirst).toBe('function');
     });
 
     it('does NOT intercept non-scoped models (e.g., User, Organization)', async () => {
@@ -420,16 +354,6 @@ describe('Calendar Isolation — Prisma Extension', () => {
       tenantDb = (await import('@/lib/tenant-db')).default;
 
       await expect(tenantDb.calendarEvent.findFirst({ where: { id: 'evt-1' } })).rejects.toThrow(
-        'Tenant context missing for scoped query.',
-      );
-    });
-
-    it('throws error when tenant context is missing for CalendarRecurrence queries', async () => {
-      mockState.orgId = null;
-
-      tenantDb = (await import('@/lib/tenant-db')).default;
-
-      await expect(tenantDb.calendarRecurrence.findFirst({ where: { id: 'rec-1' } })).rejects.toThrow(
         'Tenant context missing for scoped query.',
       );
     });

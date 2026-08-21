@@ -1,10 +1,9 @@
 /**
- * Shared recurrence logic — the single source of truth for all calendar
- * recurrence expansion, date advancement, and display helpers.
+ * Shared recurrence logic — display helpers, types, and constants.
  *
- * Both the service layer (services/calendar-event-service.ts) and the
- * frontend utilities (components/calendar/calendar-utils.ts) import from
- * here instead of maintaining their own copies.
+ * Recurrence expansion is handled by lib/recurrence-rrule.ts (rrule library).
+ * This module provides display helpers, type definitions, and constants used
+ * by both the service layer and frontend components.
  */
 
 // ---------------------------------------------------------------------------
@@ -46,137 +45,6 @@ export const RECURRENCE_FREQUENCIES: { value: RecurrenceFrequency; label: string
   { value: 'SEMI_ANNUALLY', label: 'Semi-Annually' },
   { value: 'ANNUALLY', label: 'Annually' },
 ];
-
-/** Maximum number of occurrences to expand (prevents runaway loops). */
-export const MAX_OCCURRENCES = 52 * 12; // ~10 years of weekly events
-
-// ---------------------------------------------------------------------------
-// Date advancement
-// ---------------------------------------------------------------------------
-
-/**
- * Advance a date by the given frequency and interval.
- */
-export function advanceDate(
-  date: Date,
-  frequency: RecurrenceFrequency,
-  interval: number,
-): Date {
-  const result = new Date(date);
-
-  switch (frequency) {
-    case 'DAILY':
-      result.setDate(result.getDate() + interval);
-      break;
-    case 'WEEKLY':
-      result.setDate(result.getDate() + interval * 7);
-      break;
-    case 'MONTHLY':
-      result.setMonth(result.getMonth() + interval);
-      break;
-    case 'QUARTERLY':
-      result.setMonth(result.getMonth() + interval * 3);
-      break;
-    case 'SEMI_ANNUALLY':
-      result.setMonth(result.getMonth() + interval * 6);
-      break;
-    case 'ANNUALLY':
-      result.setFullYear(result.getFullYear() + interval);
-      break;
-    default:
-      result.setDate(result.getDate() + 1);
-  }
-
-  return result;
-}
-
-// ---------------------------------------------------------------------------
-// Recurrence expansion
-// ---------------------------------------------------------------------------
-
-/**
- * Expand a recurring event into individual instances within the given date range.
- */
-export function expandRecurrence<T extends { startDate: Date; endDate: Date }>(
-  event: T,
-  rangeStart: Date,
-  rangeEnd: Date,
-  rule?: RecurrenceRuleWithFilters | null,
-): T[] {
-  const instances: T[] = [];
-
-  if (!rule) {
-    // Single event — check if it overlaps the range
-    if (event.startDate <= rangeEnd && event.endDate >= rangeStart) {
-      instances.push({ ...event });
-    }
-    return instances;
-  }
-
-  const { frequency, interval: freqInterval, endDate, count, byDay, byMonthDay, excludedDates } = rule;
-  let current = new Date(event.startDate);
-  let occurrenceCount = 0;
-
-  // Each instance keeps the base event's duration (end - start)
-  const durationMs = event.endDate.getTime() - event.startDate.getTime();
-
-  while (current <= rangeEnd && occurrenceCount < MAX_OCCURRENCES) {
-    // Stop if past recurrence end date or count limit
-    if (endDate && current > endDate) break;
-    if (count != null && occurrenceCount >= count) break;
-
-    // Apply byDay filter (weekly): only include if the weekday matches
-    if (byDay && frequency === 'WEEKLY') {
-      const targetWeekday = dayAbbreviationToNumber(byDay);
-      if (targetWeekday !== null && current.getDay() !== targetWeekday) {
-        current = advanceDate(current, frequency, freqInterval);
-        occurrenceCount++;
-        continue;
-      }
-    }
-
-    // Apply byMonthDay filter (monthly): only include if the day-of-month matches
-    if (byMonthDay != null && frequency === 'MONTHLY') {
-      // Skip months that don't have this day (e.g. 31st in February)
-      if (current.getDate() !== byMonthDay) {
-        current = advanceDate(current, frequency, freqInterval);
-        occurrenceCount++;
-        continue;
-      }
-    }
-
-    // Skip excluded dates (e.g. when a user drags one instance to a new date)
-    if (excludedDates != null && excludedDates.length > 0) {
-      const instanceDateStr = toLocalDateInputValue(current);
-      if (excludedDates.includes(instanceDateStr)) {
-        current = advanceDate(current, frequency, freqInterval);
-        occurrenceCount++;
-        continue;
-      }
-    }
-
-    // Check overlap with range — the instance end is shifted by duration so
-    // later occurrences are not compared against the base event's absolute end
-    const instanceEnd = new Date(current.getTime() + durationMs);
-    if (current <= rangeEnd && instanceEnd >= rangeStart) {
-      instances.push({ ...event, startDate: new Date(current), endDate: instanceEnd } as T);
-    }
-
-    // Advance by frequency + interval
-    current = advanceDate(current, frequency, freqInterval);
-    occurrenceCount++;
-  }
-
-  return instances;
-}
-
-/** Map an ISO 8601 day abbreviation to a JavaScript weekday number (0=Sunday). */
-function dayAbbreviationToNumber(abbrev: string): number | null {
-  const map: Record<string, number> = {
-    MO: 1, TU: 2, WE: 3, TH: 4, FR: 5, SA: 6, SU: 0,
-  };
-  return map[abbrev.toUpperCase()] ?? null;
-}
 
 // ---------------------------------------------------------------------------
 // Display helpers

@@ -10,7 +10,6 @@ import {
   generateMonthDays,
   generateWeekGrid,
   generateHourlySlots,
-  expandRecurrence,
   getEventInstanceKey,
   formatDate,
   formatDateTime,
@@ -26,6 +25,7 @@ import {
   generateYearMonths,
 } from '@/components/calendar/calendar-utils';
 import type { RecurringEvent } from '@/components/calendar/calendar-utils';
+import type { RecurrenceFrequency } from '@/lib/recurrence';
 import type { CalendarEvent } from '@/components/calendar/types';
 
 // ---------------------------------------------------------------------------
@@ -40,7 +40,6 @@ const makeEvent = (overrides: Partial<RecurringEvent> = {}): RecurringEvent => (
   endDate: new Date('2026-08-17T11:00:00'),
   eventType: 'OTHER',
   color: null,
-  recurrenceId: null,
   propertyId: null,
   createdAt: new Date('2026-01-01T00:00:00'),
   updatedAt: new Date('2026-01-01T00:00:00'),
@@ -57,7 +56,6 @@ const makeCalEvent = (overrides: Partial<CalendarEvent> = {}): CalendarEvent => 
   eventType: 'OTHER',
   color: null,
   calendarId: 'cal-1',
-  recurrenceId: null,
   propertyId: null,
   createdAt: new Date('2026-01-01T00:00:00'),
   updatedAt: new Date('2026-01-01T00:00:00'),
@@ -203,94 +201,6 @@ describe('calendar-utils', () => {
   });
 
   // -------------------------------------------------------------------------
-  // Recurrence expansion (frontend mirror of the service)
-  // -------------------------------------------------------------------------
-
-  describe('expandRecurrence', () => {
-    it('returns the event when non-recurring and overlapping the range', () => {
-      const instances = expandRecurrence(makeEvent(), new Date('2026-08-01T00:00:00'), new Date('2026-08-31T23:59:59'));
-
-      expect(instances).toHaveLength(1);
-    });
-
-    it('returns nothing for a non-recurring event outside the range', () => {
-      const instances = expandRecurrence(makeEvent(), new Date('2026-09-01T00:00:00'), new Date('2026-09-30T23:59:59'));
-
-      expect(instances).toHaveLength(0);
-    });
-
-    it('expands a weekly series with the duration preserved on later occurrences', () => {
-      const event = makeEvent({
-        startDate: new Date('2026-05-18T10:00:00'),
-        endDate: new Date('2026-05-18T11:30:00'),
-        recurrence: { frequency: 'WEEKLY', interval: 1, endDate: null, count: undefined },
-      });
-
-      const instances = expandRecurrence(event, new Date('2026-08-17T00:00:00'), new Date('2026-08-23T23:59:59'));
-
-      expect(instances).toHaveLength(1);
-      expect(instances[0].startDate.toISOString()).toBe('2026-08-17T10:00:00.000Z');
-      expect(instances[0].endDate.toISOString()).toBe('2026-08-17T11:30:00.000Z');
-    });
-
-    it('expands a daily series with count limit', () => {
-      const event = makeEvent({
-        recurrence: { frequency: 'DAILY', interval: 1, endDate: null, count: 3 },
-      });
-
-      const instances = expandRecurrence(event, new Date('2026-08-17T00:00:00'), new Date('2026-09-30T23:59:59'));
-
-      expect(instances).toHaveLength(3);
-    });
-
-    it('expands a daily series bounded by an end date', () => {
-      const event = makeEvent({
-        recurrence: { frequency: 'DAILY', interval: 1, endDate: new Date('2026-08-19T23:59:59'), count: undefined },
-      });
-
-      const instances = expandRecurrence(event, new Date('2026-08-17T00:00:00'), new Date('2026-09-30T23:59:59'));
-
-      expect(instances.map((i) => i.startDate.toISOString())).toEqual([
-        '2026-08-17T10:00:00.000Z',
-        '2026-08-18T10:00:00.000Z',
-        '2026-08-19T10:00:00.000Z',
-      ]);
-    });
-
-    it('expands a monthly series across month boundaries', () => {
-      const event = makeEvent({
-        startDate: new Date('2026-01-31T09:00:00'),
-        endDate: new Date('2026-01-31T10:00:00'),
-        recurrence: { frequency: 'MONTHLY', interval: 1, endDate: null, count: undefined },
-      });
-
-      const instances = expandRecurrence(event, new Date('2026-01-01T00:00:00'), new Date('2026-04-30T23:59:59'));
-
-      expect(instances.map((i) => i.startDate.toISOString())).toEqual([
-        '2026-01-31T09:00:00.000Z',
-        '2026-03-03T09:00:00.000Z', // Jan 31 + 1mo overflows Feb (28 days) -> Mar 3
-        '2026-04-03T09:00:00.000Z',
-      ]);
-    });
-
-    it('expands an annually series across years', () => {
-      const event = makeEvent({
-        startDate: new Date('2026-01-15T10:00:00'),
-        endDate: new Date('2026-01-15T11:00:00'),
-        recurrence: { frequency: 'ANNUALLY', interval: 1, endDate: null, count: undefined },
-      });
-
-      const instances = expandRecurrence(event, new Date('2026-01-01T00:00:00'), new Date('2028-12-31T23:59:59'));
-
-      expect(instances.map((i) => i.startDate.toISOString())).toEqual([
-        '2026-01-15T10:00:00.000Z',
-        '2027-01-15T10:00:00.000Z',
-        '2028-01-15T10:00:00.000Z',
-      ]);
-    });
-  });
-
-  // -------------------------------------------------------------------------
   // Date formatting helpers
   // -------------------------------------------------------------------------
 
@@ -366,7 +276,7 @@ describe('calendar-utils', () => {
     });
 
     it('falls back to the raw frequency for unknown values', () => {
-      expect(getRecurrenceLabel('HOURLY' as string, 1)).toBe('HOURLY');
+      expect(getRecurrenceLabel('HOURLY' as RecurrenceFrequency, 1)).toBe('HOURLY');
     });
   });
 

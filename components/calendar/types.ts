@@ -41,9 +41,18 @@ export interface CalendarEvent {
   eventType: CalendarEventType;
   color?: string | null;
   calendarId: string;
-  recurrenceId?: string | null;
   /** Recurrence rule details (present when the event repeats). */
   recurrence?: CalendarEventRecurrence | null;
+  /** RFC 5545 rrule JSON string (raw, for debugging/API consumers).
+   *  Format: { freq, interval, dtstart, until, count, byweekday?, bymonthday? }
+   *  freq: DAILY|WEEKLY|MONTHLY|YEARLY (QUARTERLY/SEMI_ANNUALLY stored as MONTHLY with interval×3/×6)
+   *  dtstart: ISO date string for the first occurrence
+   *  until: optional end date (ISO string) or null for infinite recurrence
+   *  count: optional occurrence count or null when using until
+   */
+  rrule?: string | null;
+  /** Excluded dates from expansion (YYYY-MM-DD strings). */
+  exdates?: string[];
   propertyId?: string | null;
   createdAt: Date;
   updatedAt: Date;
@@ -57,18 +66,6 @@ export interface Calendar {
   isDefault: boolean;
   createdAt: Date;
   updatedAt: Date;
-}
-
-export interface CalendarRecurrence {
-  id: string;
-  frequency: CalendarRecurrenceFrequency;
-  interval: number;
-  endDate?: Date | null;
-  count?: number | null;
-  byDay?: string | null;
-  byMonthDay?: number | null;
-  /** ISO date strings (YYYY-MM-DD) excluded from expansion. */
-  excludedDates?: string[];
 }
 
 // ---------------------------------------------------------------------------

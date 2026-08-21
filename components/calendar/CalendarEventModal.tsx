@@ -5,6 +5,7 @@ import type { CalendarEvent, CalendarEventType, CalendarEventRecurrence } from '
 import { EVENT_TYPES } from './types';
 import { getRecurrenceLabel, getRecurrenceEndDateLabel, toLocalDateTimeInputValue } from './calendar-utils';
 import CalendarRecurrencePicker from './CalendarRecurrencePicker';
+import RecurrenceEditScopePicker, { type EditScope } from './RecurrenceEditScopePicker';
 import { Modal } from '@/components/dashboard/Modal';
 
 // ---------------------------------------------------------------------------
@@ -15,7 +16,7 @@ interface CalendarEventModalProps {
   event: CalendarEvent | null;
   isOpen: boolean;
   onClose: () => void;
-  onSave?: (event: Partial<CalendarEvent>) => Promise<void>;
+  onSave?: (event: Partial<CalendarEvent>, options?: { editScope?: EditScope; clickedDate?: string }) => Promise<void>;
   isViewMode?: boolean;
 }
 
@@ -38,6 +39,8 @@ export default function CalendarEventModal({
   const [endDate, setEndDate] = useState('');
   // Recurrence state (null = does not repeat)
   const [recurrence, setRecurrence] = useState<CalendarEventRecurrence | null>(null);
+  // Edit scope for recurring instances (this / this & following / all)
+  const [editScope, setEditScope] = useState<EditScope | undefined>(undefined);
 
   // Error state for save failures
   const [saveError, setSaveError] = useState<string | null>(null);
@@ -73,6 +76,9 @@ export default function CalendarEventModal({
       } else {
         setRecurrence(null);
       }
+
+      // Reset edit scope when event changes
+      setEditScope(undefined);
     }
     // Clear error when event changes
     setSaveError(null);
@@ -81,20 +87,27 @@ export default function CalendarEventModal({
   if (!isOpen || !event) return null;
 
   const isExisting = event.id && !event.id.startsWith('temp-');
+  // An event is a recurring instance when it has recurrence set (API returns expanded instances with recurrence details)
+  const isRecurringInstance = !!event.recurrence;
   const modalTitle = isViewMode ? 'Event Details' : (isExisting ? 'Edit Event' : 'Add Event');
 
   const handleSave = async () => {
     if (!title.trim()) return;
 
     try {
-      await onSave?.({
-        title: title.trim(),
-        description: description || null,
-        eventType,
-        startDate: new Date(startDate),
-        endDate: new Date(endDate),
-        recurrence,
-      });
+      await onSave?.(
+        {
+          title: title.trim(),
+          description: description || null,
+          eventType,
+          startDate: new Date(startDate),
+          endDate: new Date(endDate),
+          recurrence,
+          color: event.color ?? null,
+          propertyId: event.propertyId ?? null,
+        },
+        { editScope, clickedDate: toLocalDateTimeInputValue(new Date(startDate)).split('T')[0] },
+      );
 
       onClose();
     } catch (error) {
@@ -207,6 +220,15 @@ export default function CalendarEventModal({
             )}
           </div>
         </div>
+
+        {/* Edit scope — shown only when editing a recurring instance */}
+        {!isViewMode && isRecurringInstance && (
+          <RecurrenceEditScopePicker
+            isRecurringInstance={true}
+            value={editScope}
+            onChange={setEditScope}
+          />
+        )}
 
         {/* Recurrence */}
         {isViewMode ? (

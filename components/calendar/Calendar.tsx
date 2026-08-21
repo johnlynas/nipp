@@ -123,7 +123,7 @@ export default function Calendar({
       }
 
       const data = await res.json();
-      console.log('[Calendar] fetchEvents API returned', data.length, 'events:', JSON.stringify(data.map(e => ({ id: e.id, title: e.title, startDate: e.startDate, recurrence: !!e.recurrence }))));
+      console.log('[Calendar] fetchEvents API returned', data.length, 'events:', JSON.stringify(data.map((e: CalendarEvent) => ({ id: e.id, title: e.title, startDate: e.startDate, recurrence: !!e.recurrence }))));
       // Convert string dates back to Date objects
       const parsed: CalendarEvent[] = data.map((e: Record<string, unknown>) => ({
         ...e,
@@ -153,7 +153,7 @@ export default function Calendar({
 
         // Add/update with fetched events (these are in the current range)
         for (const event of parsed) {
-          console.log('[Calendar] merge: adding fetched event:', getEventInstanceKey(event), new Date(event.startDate as string).toISOString());
+          console.log('[Calendar] merge: adding fetched event:', getEventInstanceKey(event), (event.startDate instanceof Date ? event.startDate : new Date(event.startDate)).toISOString());
           merged.set(getEventInstanceKey(event), event);
         }
 
@@ -366,45 +366,30 @@ export default function Calendar({
     // Persist to API in the background
     try {
       if (isRecurring) {
-        // Step 1: PATCH the base event to exclude the original date from expansion
+        // Use edit scope "this" to create a detached override at the new location.
+        // This is cleaner than the old two-step (exclude + create one-off) flow.
         const patchRes = await fetch(
           `/api/organizations/${organizationId}/calendar-events/${eventId}`,
           {
             method: 'PATCH',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ excludedDate: toLocalDateInputValue(start) }),
+            body: JSON.stringify({
+              startDate: newStart.toISOString(),
+              endDate: newEnd.toISOString(),
+              editScope: 'this',
+              clickedDate: toLocalDateInputValue(start),
+            }),
           }
         );
 
         if (!patchRes.ok) {
           const err = await patchRes.json().catch(() => ({ error: 'Failed to move event' }));
-          console.error('Failed to exclude original date:', err);
+          console.error('Failed to move recurring event:', err);
           return;
         }
 
-        // Step 2: Create a one-off event at the new location
-        const createRes = await fetch(
-          `/api/organizations/${organizationId}/calendar-events`,
-          {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-              title: existing.title,
-              description: existing.description ?? null,
-              startDate: newStart.toISOString(),
-              endDate: newEnd.toISOString(),
-              calendarId: existing.calendarId,
-              eventType: existing.eventType,
-              color: existing.color ?? undefined,
-              propertyId: existing.propertyId ?? undefined,
-            }),
-          }
-        );
-
-        if (createRes.ok) {
-          const { event: oneOff } = await createRes.json();
-          setEvents((prev) => [...prev, oneOff]);
-        }
+        const { event: overrideEvent }: { event: CalendarEvent } = await patchRes.json();
+        setEvents((prev) => prev.map((e) => (e.id === eventId ? overrideEvent : e)));
       } else {
         const res = await fetch(
           `/api/organizations/${organizationId}/calendar-events/${eventId}`,
@@ -436,7 +421,7 @@ export default function Calendar({
         setEvents((prev) => prev.map((e) => (e.id === eventId ? existing : e)));
       }
     }
-  }, [events, organizationId, selectedOrgId, getDateRange, fetchEvents]);
+  }, [events, organizationId]);
 
   const handleDragEnd = useCallback(() => {
     setDraggingEventId(null);
@@ -458,7 +443,7 @@ export default function Calendar({
     setEvents((prev) => [...prev, newEvent]);
   }, []);
 
-  const handleSaveEvent = useCallback(async (eventData: Partial<CalendarEvent>) => {
+  const handleSaveEvent = useCallback(async (eventData: Partial<CalendarEvent>, saveOptions?: { editScope?: string; clickedDate?: string }) => {
     if (!selectedEvent) return;
 
     const isExisting = selectedEvent.id && !selectedEvent.id.startsWith('temp-');
@@ -540,7 +525,6 @@ export default function Calendar({
 
     if (isExisting) {
       const oldStart = selectedEvent.startDate instanceof Date ? selectedEvent.startDate : new Date(selectedEvent.startDate);
-      const oldEnd = selectedEvent.endDate instanceof Date ? selectedEvent.endDate : new Date(selectedEvent.endDate);
       const newStart = eventData.startDate as Date;
       const newEnd = eventData.endDate as Date;
       const dateChanged = oldStart.getTime() !== newStart.getTime();
@@ -585,19 +569,31 @@ export default function Calendar({
         }
       } else {
         // Update existing event via PATCH (non-recurring or same dates)
+        const patchBody: Record<string, unknown> = {
+          title: eventData.title,
+          description: eventData.description,
+          startDate: newStart.toISOString(),
+          endDate: newEnd.toISOString(),
+          eventType: eventData.eventType,
+          recurrence: recurrencePayload,
+          color: (eventData.color as string | undefined) ?? null,
+          propertyId: (eventData.propertyId as string | undefined) ?? null,
+        };
+
+        // Include edit scope for recurring instance edits
+        if (saveOptions?.editScope) {
+          patchBody.editScope = saveOptions.editScope;
+        }
+        if (saveOptions?.clickedDate) {
+          patchBody.clickedDate = saveOptions.clickedDate;
+        }
+
         const res = await fetch(
           `/api/organizations/${organizationId}/calendar-events/${selectedEvent.id}`,
           {
             method: 'PATCH',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-              title: eventData.title,
-              description: eventData.description,
-              startDate: newStart.toISOString(),
-              endDate: newEnd.toISOString(),
-              eventType: eventData.eventType,
-              recurrence: recurrencePayload,
-            }),
+            body: JSON.stringify(patchBody),
           }
         );
 
@@ -606,7 +602,9 @@ export default function Calendar({
           throw new Error(err.error || 'Failed to update event');
         }
 
-        const { event: updatedEvent }: { event: CalendarEvent } = await res.json();
+        const patchResponse = await res.json();
+        // Edit scope handlers return { event, editScope }; plain updates return { event }
+        const updatedEvent: CalendarEvent = patchResponse.event;
 
         if (updatedEvent.recurrence) {
           // Re-fetch the visible range so every occurrence reflects the new rule.

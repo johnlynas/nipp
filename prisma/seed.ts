@@ -672,7 +672,7 @@ async function main() {
     });
   }
 
-  /** Helper to create a recurring event */
+  /** Helper to create a recurring event with rrule JSON. */
   async function ensureRecurringEvent(
     orgId: string,
     calendarId: string,
@@ -687,16 +687,33 @@ async function main() {
     });
     if (existing) return;
 
-    const event = await prisma.calendarEvent.create({
-      data: { title, startDate, endDate, calendarId, organizationId: orgId },
+    // Map frequency to rrule format (QUARTERLY/SEMI_ANNUALLY → MONTHLY with interval×3/×6)
+    let rruleFreq = frequency;
+    let rruleInterval = interval;
+    if (frequency === 'QUARTERLY') {
+      rruleFreq = 'MONTHLY';
+      rruleInterval = interval * 3;
+    } else if (frequency === 'SEMI_ANNUALLY') {
+      rruleFreq = 'MONTHLY';
+      rruleInterval = interval * 6;
+    }
+
+    const rruleJson = JSON.stringify({
+      freq: rruleFreq,
+      interval: rruleInterval,
+      dtstart: startDate.toISOString(),
+      until: null, // No end date — infinite recurrence
+      count: null,
     });
 
-    await prisma.calendarRecurrence.create({
+    await prisma.calendarEvent.create({
       data: {
-        frequency,
-        interval,
+        title,
+        startDate,
+        endDate,
+        calendarId,
         organizationId: orgId,
-        eventId: event.id,
+        rrule: rruleJson,
       },
     });
   }

@@ -11,6 +11,11 @@ import { auth } from '@/lib/auth';
 import globalDb from '@/lib/global-db';
 import { CalendarEventService } from '@/services/calendar-event-service';
 import { isSameSiteRequest } from '@/lib/csrf';
+import {
+  applyEditScopeThis,
+  applyEditScopeFollowing,
+  applyEditScopeAll,
+} from '@/lib/recurrence-scopes';
 
 export const runtime = 'nodejs';
 
@@ -98,7 +103,7 @@ export async function PATCH(
   }
 
   const body = await req.json();
-  const { title, description, startDate, endDate, eventType, color, propertyId, recurrence, excludedDate } = body as {
+  const { title, description, startDate, endDate, eventType, color, propertyId, recurrence, excludedDate, editScope, clickedDate } = body as {
     title?: string;
     description?: string | null;
     startDate?: string;
@@ -115,9 +120,61 @@ export async function PATCH(
       byMonthDay?: number | null;
     } | null;
     excludedDate?: string; // Single date to exclude from recurrence expansion (YYYY-MM-DD)
+    editScope?: 'this' | 'following' | 'all'; // Edit scope for recurring events
+    clickedDate?: string; // The date of the instance being edited (YYYY-MM-DD)
   };
 
   try {
+    // Check if this is a recurring event with an edit scope
+    const existingEvent = await globalDb.calendarEvent.findFirst({
+      where: { id: eventId, organizationId: ctx.organizationId! },
+    });
+
+    if (!existingEvent) {
+      return NextResponse.json({ error: 'Event not found' }, { status: 404 });
+    }
+
+    const hasRecurrence = !!existingEvent.rrule;
+    const scope = editScope as 'this' | 'following' | 'all' | undefined;
+
+    if (scope && hasRecurrence) {
+      // Apply edit scope handler
+      const updates = {
+        title,
+        description,
+        startDate: startDate ? new Date(startDate) : undefined,
+        endDate: endDate ? new Date(endDate) : undefined,
+        eventType,
+        color,
+        propertyId,
+      };
+
+      if (scope === 'this') {
+        const instanceDate = clickedDate ? new Date(clickedDate + 'T00:00:00') : (updates.startDate ?? new Date());
+        const result = await applyEditScopeThis(ctx, eventId, instanceDate, updates);
+        // Fetch the override event to return
+        const overrideEvent = await globalDb.calendarEvent.findFirst({
+          where: { id: result.overrideId, organizationId: ctx.organizationId! },
+        });
+        return NextResponse.json({ event: overrideEvent, editScope: 'this' });
+      } else if (scope === 'following') {
+        const instanceDate = clickedDate ? new Date(clickedDate + 'T00:00:00') : (updates.startDate ?? new Date());
+        const result = await applyEditScopeFollowing(ctx, eventId, instanceDate, updates);
+        // Fetch the new series event to return
+        const newSeriesEvent = await globalDb.calendarEvent.findFirst({
+          where: { id: result.newSeriesId, organizationId: ctx.organizationId! },
+        });
+        return NextResponse.json({ event: newSeriesEvent, editScope: 'following' });
+      } else if (scope === 'all') {
+        await applyEditScopeAll(ctx, eventId, updates);
+        const updatedEvent = await globalDb.calendarEvent.findFirst({
+          where: { id: eventId, organizationId: ctx.organizationId! },
+        });
+        return NextResponse.json({ event: updatedEvent, editScope: 'all' });
+      }
+    }
+
+    // No edit scope or not recurring — apply updates in-place (existing behavior)
     const event = await CalendarEventService.updateEvent(ctx, eventId, {
       title,
       description,

@@ -8,9 +8,8 @@
 import { CalendarEvent, CalendarEventType } from './types';
 import * as recurrence from '@/lib/recurrence';
 
-// Re-export for backwards compatibility — consumers can import directly from here.
+// Re-export display helpers and date utilities for backwards compatibility.
 export {
-  advanceDate,
   formatDate,
   formatDateTime,
   formatTime,
@@ -26,8 +25,6 @@ export {
 
 // Local bindings for use in CalendarUtils object and internally.
 const {
-  advanceDate: _advanceDate,
-  expandRecurrence: _expandRecurrence,
   formatDate: _formatDate,
   formatDateTime: _formatDateTime,
   formatTime: _formatTime,
@@ -40,23 +37,6 @@ const {
   getRecurrenceEndDateLabel: _getRecurrenceEndDateLabel,
   getEventInstanceKey: _getEventInstanceKey,
 } = recurrence;
-
-// ---------------------------------------------------------------------------
-// Adapter: old calendar-utils expandRecurrence signature (rule on event) → lib
-// ---------------------------------------------------------------------------
-
-/**
- * Adapter for the old expandRecurrence signature where the recurrence rule was
- * embedded in `event.recurrence`.  The lib version takes a separate 4th arg.
- */
-export function expandRecurrence<T extends { startDate: Date; endDate: Date }>(
-  event: T,
-  rangeStart: Date,
-  rangeEnd: Date,
-): T[] {
-  const rule = (event as any).recurrence ?? undefined;
-  return _expandRecurrence(event, rangeStart, rangeEnd, rule);
-}
 
 // ---------------------------------------------------------------------------
 // Event type to icon mapping (lucide-react component names)
@@ -145,8 +125,6 @@ export function generateMonthDays(year: number, month: number): { date: Date; is
   const startDate = new Date(firstDay);
   startDate.setDate(startDate.getDate() - startDayOfWeek);
 
-  const lastDayOfMonth = new Date(year, month + 1, 0);
-
   for (let i = 0; i < 42; i++) {
     const cellDate = new Date(startDate);
     cellDate.setDate(cellDate.getDate() + i);
@@ -203,7 +181,6 @@ export interface RecurringEvent {
   endDate: Date;
   eventType: CalendarEventType;
   color?: string | null;
-  recurrenceId?: string | null;
   propertyId?: string | null;
   createdAt: Date;
   updatedAt: Date;
@@ -358,7 +335,6 @@ export const CalendarUtils = {
   generateMonthDays,
   generateWeekGrid,
   generateHourlySlots,
-  expandRecurrence: expandRecurrence,
   formatDate: _formatDate,
   formatDateTime: _formatDateTime,
   formatTime: _formatTime,
