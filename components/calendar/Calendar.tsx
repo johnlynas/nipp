@@ -965,7 +965,7 @@ export default function Calendar({
         </div>
 
         {/* Calendar grid */}
-        <div className="flex-1 overflow-y-auto p-4">
+        <div className="flex-1 flex flex-col overflow-y-auto p-4">
           {loading ? (
             <div className="flex items-center justify-center h-full" style={{ color: '#1B2A4A' }}>
               Loading calendar...
