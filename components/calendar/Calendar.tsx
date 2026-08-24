@@ -347,7 +347,7 @@ export default function Calendar({
     // which is how we tell it apart from the Week/Day views below. Those views
     // map the pointer's Y offset to a new hour instead, so they keep their
     // midnight baseline and adjust it in the block under `if (e)`.
-    let newStart = new Date(date);
+    const newStart = new Date(date);
     if (!e) {
       newStart.setHours(start.getHours(), start.getMinutes(), 0, 0);
     }
