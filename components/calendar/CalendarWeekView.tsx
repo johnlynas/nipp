@@ -1,8 +1,9 @@
 'use client';
 
-import { useMemo } from 'react';
+import { useMemo, useCallback, useRef, type RefObject } from 'react';
 import type { CalendarEvent } from './types';
 import { generateWeekGrid, generateHourlySlots, isToday, formatTime, getEventInstanceKey } from './calendar-utils';
+import { useVerticalDragScroll } from './hooks/useVerticalDragScroll';
 
 // ---------------------------------------------------------------------------
 // Props
@@ -39,6 +40,22 @@ export default function CalendarWeekView({
 }: CalendarWeekViewProps) {
   const weekDays = useMemo(() => generateWeekGrid(referenceDate), [referenceDate]);
   const hours = useMemo(() => generateHourlySlots(), []);
+
+  // Stable ref to the scrollable time-grid wrapper so autoscroll keeps tracking
+  // the same DOM node across renders.
+  const scrollRef = useRef<HTMLDivElement | null>(null);
+
+  // Drive vertical autoscroll during a day/week drag.
+  const { begin: beginAutoscroll, cancel: cancelAutoscroll } = useVerticalDragScroll(
+    scrollRef as RefObject<HTMLElement | null>,
+  );
+
+  const handleDragStart = useCallback(
+    (e: React.DragEvent<HTMLElement>) => {
+      beginAutoscroll(e.clientY);
+    },
+    [beginAutoscroll],
+  );
 
   // Group events by day and determine position (start/middle/end/single)
   const eventsByDay = useMemo(() => {
@@ -153,7 +170,13 @@ export default function CalendarWeekView({
       </div>
 
       {/* Time grid */}
-      <div className="grid grid-cols-8" style={{ maxHeight: '600px', overflowY: 'auto' }}>
+      <div
+        ref={scrollRef}
+        className="grid grid-cols-8"
+        style={{ maxHeight: '600px', overflowY: 'auto' }}
+        onDragStart={handleDragStart}
+        onDragEnd={cancelAutoscroll}
+      >
         {/* Time labels column */}
         <div className="border-r" style={{ borderColor: '#f0f0f0' }}>
           {hours.map((hour) => (

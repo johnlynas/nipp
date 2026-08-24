@@ -1,8 +1,9 @@
 'use client';
 
-import { useMemo } from 'react';
+import { useMemo, useCallback, useRef, type RefObject } from 'react';
 import type { CalendarEvent } from './types';
 import { generateHourlySlots, isToday, formatTime, getEventInstanceKey } from './calendar-utils';
+import { useVerticalDragScroll } from './hooks/useVerticalDragScroll';
 
 // ---------------------------------------------------------------------------
 // Props
@@ -38,6 +39,22 @@ export default function CalendarDayView({
   draggingEventId,
 }: CalendarDayViewProps) {
   const hours = useMemo(() => generateHourlySlots(), []);
+
+  // Stable ref to the scrollable time-grid wrapper so autoscroll keeps tracking
+  // the same DOM node across renders.
+  const scrollRef = useRef<HTMLDivElement | null>(null);
+
+  // Drive vertical autoscroll during a drag.
+  const { begin: beginAutoscroll, cancel: cancelAutoscroll } = useVerticalDragScroll(
+    scrollRef as RefObject<HTMLElement | null>,
+  );
+
+  const handleDragStart = useCallback(
+    (e: React.DragEvent<HTMLElement>) => {
+      beginAutoscroll(e.clientY);
+    },
+    [beginAutoscroll],
+  );
 
   // Filter events for this day
   const dayEvents = useMemo(() => {
@@ -94,7 +111,13 @@ export default function CalendarDayView({
       </div>
 
       {/* Time grid */}
-      <div className="relative" style={{ maxHeight: '600px', overflowY: 'auto' }}>
+      <div
+        ref={scrollRef}
+        className="relative"
+        style={{ maxHeight: '600px', overflowY: 'auto' }}
+        onDragStart={handleDragStart}
+        onDragEnd={cancelAutoscroll}
+      >
         {/* Time labels column */}
         <div className="flex">
           <div className="w-16 flex-shrink-0 border-r" style={{ borderColor: '#f0f0f0' }}>
