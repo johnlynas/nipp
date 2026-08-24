@@ -17,7 +17,7 @@ interface CalendarWeekViewProps {
   onEventRightClick?: (event: CalendarEvent, e: React.MouseEvent) => void;
   onEventDragStart?: (event: CalendarEvent, e: React.DragEvent) => void;
   onDragEnd?: () => void;
-  onDrop?: (date: Date, eventId: string) => void;
+  onDrop?: (date: Date, eventId: string, dragEvent?: React.DragEvent) => void;
   draggingEventId?: string | null;
 }
 
@@ -110,7 +110,15 @@ export default function CalendarWeekView({
     e.preventDefault();
     const eventId = e.dataTransfer.getData('text/plain');
     if (eventId) {
-      onDrop?.(date, eventId);
+      console.log('[WeekView][drop] capture', {
+        id: eventId,
+        draggingEventId,
+        date,
+        clientY: e.clientY,
+        clientX: e.clientX,
+        atTop: e.clientY - (e.currentTarget as HTMLElement).getBoundingClientRect().top,
+      });
+      onDrop?.(date, eventId, e);
     }
   };
 

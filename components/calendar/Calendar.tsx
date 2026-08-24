@@ -2,7 +2,7 @@
 
 import { useState, useCallback, useEffect, useMemo, useRef } from 'react';
 import type { CalendarView, CalendarEvent, QuickAddInput } from './types';
-import { getMonthName, getEventInstanceKey, toLocalDateInputValue } from './calendar-utils';
+import { getMonthName, getEventInstanceKey, getEventPosition, toLocalDateInputValue } from './calendar-utils';
 
 // Sub-components
 import CalendarMonthView from './CalendarMonthView';
@@ -330,7 +330,7 @@ export default function Calendar({
     );
   }, []);
 
-  const handleDrop = useCallback(async (date: Date, eventId: string) => {
+  const handleDrop = useCallback(async (date: Date, eventId: string, e?: React.DragEvent) => {
     // Find the event in local state
     const existing = events.find((e) => e.id === eventId);
     if (!existing || existing.id.startsWith('temp-')) return;
@@ -340,9 +340,37 @@ export default function Calendar({
     if (isNaN(start.getTime()) || isNaN(end.getTime())) return;
 
     const duration = end.getTime() - start.getTime();
-    const newStart = new Date(date);
-    newStart.setHours(start.getHours(), start.getMinutes());
-    const newEnd = new Date(newStart.getTime() + duration);
+    let newStart = new Date(date);
+    let newEnd = new Date(newStart.getTime() + duration);
+
+    // VERTICAL DRAG → change the hour of day. We read the drag event's Y offset
+    // relative to the month-grid container. `getEventPosition` returns the event's
+    // current pixel top (startHour * 64) in the same coordinate space, so the
+    // difference between the drop position and the original position, divided by
+    // 64px per hour, is how many hours the event was dragged vertically. On a
+    // horizontal drag the pointer returns to where it started, so this delta is
+    // ~0 and the hour is preserved.
+    if (e) {
+      const container = e.currentTarget;
+      if (container) {
+        const rect = container.getBoundingClientRect();
+        // Pixel position of the drop, measured from the TOP of the day column
+        // (the same space the event `top` positions use).
+        const dropY = e.clientY - rect.top;
+        // Original top-of-event position, in that same container space.
+        const containerPos = getEventPosition(existing).top;
+        // Whole-hour distance dragged (64px per hour).
+        const hoursMoved = Math.round(dropY / 64) - Math.round(containerPos / 64);
+        let hour = start.getHours() + hoursMoved;
+        // Clamp so an event can't be dragged outside 00:00–23:59 of its day.
+        hour = Math.max(0, Math.min(23, hour));
+        newStart.setHours(hour, start.getMinutes());
+        // Re-derive the end from the new start by the original duration so the
+        // event keeps its length in BOTH directions (forward and backward
+        // dragging) and `end > start` always holds after the move.
+        newEnd = new Date(newStart.getTime() + duration);
+      }
+    }
 
     // Recurring events: moving an instance excludes the original date and
     // creates a one-off at the new location — this avoids shifting the whole series.
