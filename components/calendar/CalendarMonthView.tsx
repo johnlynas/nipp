@@ -144,7 +144,7 @@ export default function CalendarMonthView({
   };
 
   return (
-    <div className="bg-white rounded-lg shadow-sm border" style={{ borderColor: '#dee2e6' }}>
+    <div className="flex-1 flex flex-col min-h-0 bg-white rounded-lg shadow-sm border" style={{ borderColor: '#dee2e6' }}>
       {/* Day headers */}
       <div className="grid grid-cols-7 border-b" style={{ borderColor: '#dee2e6' }}>
         {['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'].map((day) => (
@@ -159,7 +159,7 @@ export default function CalendarMonthView({
       </div>
 
       {/* Calendar grid */}
-      <div className="grid grid-cols-7">
+      <div className="grid grid-cols-7 auto-rows-fr">
         {days.map(({ date, isCurrentMonth }, index) => {
           const dayStr = formatDateKey(date);
           const dayEvents = eventsByDate[dayStr] || [];
