@@ -340,7 +340,17 @@ export default function Calendar({
     if (isNaN(start.getTime()) || isNaN(end.getTime())) return;
 
     const duration = end.getTime() - start.getTime();
+
+    // The Month view lays events out on a 2D week grid, so dragging a chip
+    // between day cells only shifts the DATE — the time-of-day and duration are
+    // preserved. It is the only view that does not forward a drag event (`e`),
+    // which is how we tell it apart from the Week/Day views below. Those views
+    // map the pointer's Y offset to a new hour instead, so they keep their
+    // midnight baseline and adjust it in the block under `if (e)`.
     let newStart = new Date(date);
+    if (!e) {
+      newStart.setHours(start.getHours(), start.getMinutes(), 0, 0);
+    }
     let newEnd = new Date(newStart.getTime() + duration);
 
     // VERTICAL DRAG → change the hour of day. We read the drag event's Y offset
