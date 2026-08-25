@@ -9,7 +9,9 @@ export const revalidate = 0;
 
 /**
  * GET /api/admin/organizations/list
- * Returns a list of all organizations (excluding platform) for the org switcher.
+ * Returns all tenant organizations plus the Platform organization (labeled
+ * "Platform", listed first) for the super-admin org switcher. Including
+ * Platform is what lets a super admin navigate back to it from a tenant.
  */
 export async function GET() {
   try {
@@ -19,19 +21,24 @@ export async function GET() {
     }
 
     const organizations = await globalDb.organization.findMany({
-      where: {
-        slug: { not: 'platform' },
-      },
       select: {
         id: true,
         name: true,
-      },
-      orderBy: {
-        name: 'asc',
+        slug: true,
       },
     });
 
-    return NextResponse.json({ organizations });
+    const platform = organizations.filter((o) => o.slug === 'platform');
+    const tenants = organizations
+      .filter((o) => o.slug !== 'platform')
+      .sort((a, b) => a.name.localeCompare(b.name));
+
+    return NextResponse.json({
+      organizations: [
+        ...platform.map((o) => ({ id: o.id, name: 'Platform' })),
+        ...tenants.map((o) => ({ id: o.id, name: o.name })),
+      ],
+    });
   } catch (error) {
     console.error('Error fetching organizations list:', error);
     return NextResponse.json({ error: 'Failed to fetch organizations' }, { status: 500 });
