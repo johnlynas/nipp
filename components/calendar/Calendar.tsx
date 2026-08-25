@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useCallback, useEffect, useMemo, useRef } from 'react';
-import type { CalendarView, CalendarEvent, QuickAddInput } from './types';
+import type { CalendarView, CalendarEvent } from './types';
 import { getMonthName, getEventInstanceKey, getEventPosition, toLocalDateInputValue } from './calendar-utils';
 
 // Sub-components
@@ -477,58 +477,6 @@ export default function Calendar({
     setDraggingEventId(null);
   }, []);
 
-  const handleQuickAdd = useCallback(async (input: QuickAddInput) => {
-    // Ensure we have a calendar ID before creating the event
-    let targetCalendarId = defaultCalendarId;
-    if (!targetCalendarId) {
-      try {
-        const calRes = await fetch(`/api/organizations/${effectiveOrgId}/calendar`);
-        if (calRes.ok) {
-          const calendars = await calRes.json();
-          const def = calendars.find((c: { isDefault: boolean }) => c.isDefault);
-          if (def) {
-            targetCalendarId = def.id;
-            setDefaultCalendarId(def.id);
-          } else if (calendars.length > 0) {
-            targetCalendarId = calendars[0].id;
-            setDefaultCalendarId(calendars[0].id);
-          }
-        }
-      } catch { /* silently fail — will use fallback below */ }
-    }
-
-    if (!targetCalendarId) {
-      throw new Error('No calendar available. Please contact an admin.');
-    }
-
-    const startDate = new Date(`${input.date}T10:00`);
-    const endDate = new Date(`${input.date}T11:00`);
-
-    const res = await fetch(`/api/organizations/${effectiveOrgId}/calendar-events`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        title: `${input.eventType} Event`,
-        description: null,
-        startDate: startDate.toISOString(),
-        endDate: endDate.toISOString(),
-        calendarId: targetCalendarId,
-        eventType: input.eventType,
-      }),
-    });
-
-    if (!res.ok) {
-      const err = await res.json().catch(() => ({ error: 'Failed to create event' }));
-      throw new Error(err.error || 'Failed to create event');
-    }
-
-    await res.json();
-
-    // Refresh the visible range so the new event appears immediately
-    const { start, end } = getDateRange();
-    await fetchEvents(effectiveOrgId, start, end);
-  }, [effectiveOrgId, defaultCalendarId, getDateRange, fetchEvents]);
-
   const handleSaveEvent = useCallback(async (eventData: Partial<CalendarEvent>, saveOptions?: { editScope?: string; clickedDate?: string }) => {
     if (!selectedEvent) return;
 
@@ -995,7 +943,6 @@ export default function Calendar({
         upcomingEvents={upcomingEvents}
         isExpanded={sidebarOpen}
         onToggle={() => setSidebarOpen(!sidebarOpen)}
-        onQuickAdd={handleQuickAdd}
         organizations={organizations}
         selectedOrgId={selectedOrgId}
         onOrgChange={handleOrgChange}

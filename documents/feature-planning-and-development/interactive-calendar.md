@@ -8,7 +8,7 @@
 
 ## 1. Overview
 
-An interactive, multi-view calendar component for the Property NI portal that enables all user classes to view, create, edit, and manage organization-scoped calendar events. The calendar supports month, week, day, and year views with drag-and-drop rescheduling, event detail modals, quick-add via sidebar or right-click context menu, and recurring events (daily through annually).
+An interactive, multi-view calendar component for the Property NI portal that enables all user classes to view, create, edit, and manage organization-scoped calendar events. The calendar supports month, week, day, and year views with drag-and-drop rescheduling, event detail modals, quick-add via right-click context menu, and recurring events (daily through annually).
 
 The calendar is a **standalone shared component** (`components/calendar/`) usable across any organization context, with events scoped per `organizationId` at the data-model level (see [Known Gaps](#11-known-gaps--follow-ups) for the current state of service-level tenant isolation).
 
@@ -39,7 +39,7 @@ The calendar is integrated into the **Integrated Super Admin Dashboard** (`/dash
 | FR-4 | Full CRUD for events (Create, Read, Update, Delete) | Must Have | ✅ |
 | FR-5 | Drag-and-drop event rescheduling between dates | Should Have | ✅ (HTML5 DnD, persisted via PATCH) |
 | FR-6 | Event detail modal with edit/delete capabilities | Must Have | ✅ (includes recurrence picker) |
-| FR-7 | Quick Add via sidebar form and right-click context menu on calendar dates | Must Have | ✅ (quick-add form lives in the sidebar and context menu; no standalone `CalendarQuickAdd` component) |
+| FR-7 | Quick Add via right-click context menu on calendar dates | Must Have | ✅ (context-menu only — the sidebar quick-add form was removed in favour of opening the full create-event modal; no standalone `CalendarQuickAdd` component) |
 | FR-8 | Multiple events per date, expandable/compressible display | Must Have | ✅ |
 | FR-9 | Recurring events: weekly, monthly, quarterly, semi-annually, annually | Should Have | ✅ (also DAILY; interval + endDate/count limits) |
 | FR-13 | RFC 5545 recurrence compliance (month-end overflow, BYDAY, BYMONTHDAY) | Should Have | 🔄 In progress — migrating from custom expansion to `rrule` library (Phase 0) |
@@ -250,7 +250,7 @@ components/calendar/
 ├── CalendarDayView.tsx           # Day view grid renderer
 ├── CalendarEventCard.tsx         # Individual event card (expandable/compressible)
 ├── CalendarEventModal.tsx        # Event detail/edit modal (includes recurrence picker + scope selector)
-├── CalendarSidebar.tsx           # Upcoming Events sidebar + Quick Add form (slide-in/out)
+├── CalendarSidebar.tsx           # Upcoming Events sidebar (slide-in/out)
 ├── CalendarContextMenu.tsx       # Right-click context menu on dates (quick add)
 ├── CalendarRecurrencePicker.tsx  # Recurrence rule picker UI (frequency/interval/end) → migrating to rrule JSON
 ├── RecurrenceEditScopePicker.tsx # NEW: Scope selector ("this", "following", "all") for recurring event edits
@@ -594,7 +594,7 @@ class CalendarNotificationService {
 ### 7.4 Sidebar Behavior
 
 - Default state: **collapsed** (icon-only, width 64px)
-- Expanded state: full sidebar with Upcoming Events list and Quick Add form (width 320px)
+- Expanded state: full sidebar with Upcoming Events list (width 320px)
 - Toggle button in sidebar header
 - Smooth CSS transition (~200ms)
 
@@ -619,7 +619,7 @@ Note: `calendar-service.ts` has no dedicated unit test file (gap — see §11).
 | `CalendarEventCard.test.tsx` | Expand/collapse, icon rendering, color coding |
 | `CalendarSidebar.test.tsx` | Slide in/out toggle, upcoming events list rendering |
 | `CalendarEventModal.test.tsx` | Open/close, edit form validation, delete confirmation |
-| `CalendarContextMenu.test.tsx` | Right-click trigger, quick-add form in context menu |
+| `CalendarContextMenu.test.tsx` | Right-click trigger, Add Event option opens pre-populated create modal |
 
 ### 8.3 Integration Tests (Implemented — service-level against real PostgreSQL)
 
@@ -690,9 +690,9 @@ test('rrule-json-roundtrip', async () => { ... });
 12. ✅ `CalendarMonthView.tsx` — core grid rendering with event cards
 13. ✅ `CalendarWeekView.tsx` and `CalendarDayView.tsx`
 14. ✅ `CalendarEventCard.tsx` — expandable/compressible event display
-15. ✅ `CalendarSidebar.tsx` — slide-in/out upcoming events panel (quick-add form included)
+15. ✅ `CalendarSidebar.tsx` — slide-in/out upcoming events panel (quick-add form removed in favour of the context-menu create flow)
 16. ✅ `CalendarEventModal.tsx` — event detail/edit modal (with recurrence picker)
-17. ✅ `CalendarContextMenu.tsx` — right-click quick add (no standalone `CalendarQuickAdd.tsx`; the form lives in sidebar + context menu)
+17. ✅ `CalendarContextMenu.tsx` — right-click quick add (no standalone `CalendarQuickAdd` component; "Add Event" opens the create-event modal pre-populated with the clicked date)
 
 ### Phase 4: Integration & Polish — ✅ Complete
 18. ✅ Calendar nav item in Integrated Super Admin Dashboard sidebar (`<CalendarDays />` icon)

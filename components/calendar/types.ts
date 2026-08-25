@@ -113,11 +113,6 @@ export interface UpcomingEvent {
   color?: string | null;
 }
 
-export interface QuickAddInput {
-  eventType: CalendarEventType;
-  date: string; // YYYY-MM-DD format
-}
-
 // ---------------------------------------------------------------------------
 // Modal Types
 // ---------------------------------------------------------------------------

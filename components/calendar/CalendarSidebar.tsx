@@ -1,8 +1,7 @@
 'use client';
 
 import { useState, useRef, useEffect } from 'react';
-import type { UpcomingEvent, QuickAddInput, CalendarEventType } from './types';
-import { EVENT_TYPES } from './types';
+import type { UpcomingEvent } from './types';
 import { getEventInstanceKey } from './calendar-utils';
 
 // ---------------------------------------------------------------------------
@@ -13,7 +12,6 @@ interface CalendarSidebarProps {
   upcomingEvents: UpcomingEvent[];
   isExpanded: boolean;
   onToggle: () => void;
-  onQuickAdd?: (input: QuickAddInput) => Promise<void>;
   organizations?: { id: string; name: string }[];
   selectedOrgId?: string | null;
   onOrgChange?: (orgId: string) => void;
@@ -27,14 +25,10 @@ export default function CalendarSidebar({
   upcomingEvents,
   isExpanded,
   onToggle,
-  onQuickAdd,
   organizations = [],
   selectedOrgId,
   onOrgChange,
 }: CalendarSidebarProps) {
-  const [quickAddType, setQuickAddType] = useState<CalendarEventType>('VIEWING');
-  const [quickAddDate, setQuickAddDate] = useState('');
-  const [isSubmitting, setIsSubmitting] = useState(false);
   const [orgDropdownOpen, setOrgDropdownOpen] = useState(false);
   const orgDropdownRef = useRef<HTMLDivElement>(null);
 
@@ -57,20 +51,6 @@ export default function CalendarSidebar({
   };
 
   const selectedOrgName = organizations.find((o) => o.id === selectedOrgId)?.name || '';
-
-  const handleQuickAddSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
-
-    if (!quickAddDate) return;
-
-    setIsSubmitting(true);
-    try {
-      await onQuickAdd?.({ eventType: quickAddType, date: quickAddDate });
-      setQuickAddDate('');
-    } finally {
-      setIsSubmitting(false);
-    }
-  };
 
   // Format event date/time for display in upcoming events list
   const formatEventDateTime = (event: UpcomingEvent): string => {
@@ -167,45 +147,6 @@ export default function CalendarSidebar({
               </div>
             </div>
           )}
-
-          {/* Quick Add Form */}
-          <div className="px-4 pb-3 border-b flex-shrink-0" style={{ borderColor: '#24355c' }}>
-            <h3 className="text-sm font-semibold mb-2">Quick Add</h3>
-            <form onSubmit={handleQuickAddSubmit} className="space-y-2">
-              {/* Event Type dropdown */}
-              <select
-                value={quickAddType}
-                onChange={(e) => setQuickAddType(e.target.value as CalendarEventType)}
-                className="w-full px-3 py-2 rounded text-sm bg-[#24355c] border text-white"
-                style={{ borderColor: '#3a4f7a' }}
-              >
-                {EVENT_TYPES.map((type) => (
-                  <option key={type.value} value={type.value}>
-                    {type.label}
-                  </option>
-                ))}
-              </select>
-
-              {/* Date input */}
-              <input
-                type="date"
-                value={quickAddDate}
-                onChange={(e) => setQuickAddDate(e.target.value)}
-                className="w-full px-3 py-2 rounded text-sm bg-[#24355c] border text-white"
-                style={{ borderColor: '#3a4f7a' }}
-              />
-
-              {/* Add Event button */}
-              <button
-                type="submit"
-                disabled={isSubmitting || !quickAddDate}
-                className="w-full py-2 rounded text-sm font-semibold text-white transition-colors disabled:opacity-50"
-                style={{ backgroundColor: '#F5A623' }}
-              >
-                {isSubmitting ? 'Adding...' : 'Add Event'}
-              </button>
-            </form>
-          </div>
 
           {/* Upcoming Events List - scrollable container */}
           <div className="flex-1 overflow-y-auto px-4 pb-4">
