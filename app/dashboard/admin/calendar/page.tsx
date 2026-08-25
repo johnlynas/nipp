@@ -1,11 +1,15 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import Calendar from "@/components/calendar/Calendar";
 export default function CalendarPage() {
   const [orgId, setOrgId] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [selectedOrgName, setSelectedOrgName] = useState<string>('');
+
+  // Track latest orgId for the async init closure below.
+  const orgIdRef = useRef<string | null>(null);
+  orgIdRef.current = orgId;
 
   useEffect(() => {
     async function init() {
@@ -29,6 +33,25 @@ export default function CalendarPage() {
           setOrgId(stored);
         }
       }
+
+      // Super admin org switcher: ?org= selects which tenant's calendar to
+      // display. When it names a different org than the session's active one,
+      // resolve its name from the organizations list (super-admin only
+      // endpoint) and display that org instead.
+      try {
+        const urlOrg = new URL(window.location.href).searchParams.get('org');
+        if (urlOrg && urlOrg !== orgIdRef.current) {
+          const listRes = await fetch('/api/admin/organizations/list');
+          if (listRes.ok) {
+            const data = await listRes.json();
+            const match = (data.organizations || []).find((o: { id: string }) => o.id === urlOrg);
+            if (match) {
+              setOrgId(match.id);
+              setSelectedOrgName(match.name);
+            }
+          }
+        }
+      } catch { /* keep the session's org */ }
 
       setLoading(false);
     }
@@ -61,7 +84,13 @@ export default function CalendarPage() {
         </h1>
       </header>
       <div className="flex-1 overflow-hidden">
-        <Calendar organizationId={orgId} />
+        <Calendar
+          organizationId={orgId}
+          onOrganizationSelected={(id, name) => {
+            setOrgId(id);
+            if (name) setSelectedOrgName(name);
+          }}
+        />
       </div>
     </div>
   );

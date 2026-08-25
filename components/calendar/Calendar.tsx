@@ -22,6 +22,8 @@ interface CalendarProps {
   organizationId: string;
   initialView?: CalendarView;
   className?: string;
+  /** Fired when the super admin org switcher picks a different tenant org. */
+  onOrganizationSelected?: (orgId: string, orgName: string) => void;
 }
 
 // ---------------------------------------------------------------------------
@@ -32,6 +34,7 @@ export default function Calendar({
   organizationId,
   initialView = 'month',
   className,
+  onOrganizationSelected,
 }: CalendarProps) {
   // View state
   const [view, setView] = useState<CalendarView>(initialView);
@@ -64,9 +67,14 @@ export default function Calendar({
   const [deleteConfirmOpen, setDeleteConfirmOpen] = useState(false);
   const [eventToDelete, setEventToDelete] = useState<CalendarEvent | null>(null);
 
-  // Organizations for switcher (super admin only)
+  // Organizations for switcher (super admin only). The displayed org is the
+  // one from the ?org= URL param when present (survives refresh), otherwise
+  // the caller's own org.
   const [organizations, setOrganizations] = useState<{ id: string; name: string }[]>([]);
-  const [selectedOrgId, setSelectedOrgId] = useState<string | null>(organizationId);
+  const [selectedOrgId, setSelectedOrgId] = useState<string | null>(() => {
+    if (typeof window === 'undefined') return organizationId;
+    return new URL(window.location.href).searchParams.get('org');
+  });
 
   // Drag-and-drop state
   const [draggingEventId, setDraggingEventId] = useState<string | null>(null);
@@ -192,11 +200,20 @@ export default function Calendar({
 
   const handleOrgChange = useCallback((orgId: string) => {
     setSelectedOrgId(orgId);
-    // Update URL to reflect the selected org
+    // Update URL to reflect the selected org (survives refresh)
     const url = new URL(window.location.href);
     url.searchParams.set('org', orgId);
     window.history.pushState({}, '', url.toString());
-  }, []);
+    // Let the page update the header with the org name
+    onOrganizationSelected?.(orgId, organizations.find((o) => o.id === orgId)?.name || '');
+  }, [onOrganizationSelected, organizations]);
+
+  // The organization currently displayed. For super admins this may differ
+  // from `organizationId` (their own active org) when they use the org switcher.
+  const effectiveOrgId = useMemo(
+    () => selectedOrgId || organizationId,
+    [selectedOrgId, organizationId]
+  );
 
   // Calculate date range based on current view
   const getDateRange = useCallback(() => {
@@ -234,16 +251,16 @@ export default function Calendar({
       if (cancelled) return;
       console.log('[Calendar] Mount/load effect:', { selectedOrgId, organizationId });
       setLoading(true);
-      await fetchCalendars(selectedOrgId || organizationId);
+      await fetchCalendars(effectiveOrgId);
 
       const { start, end } = getDateRange();
-      console.log('[Calendar] Fetching events for org:', selectedOrgId || organizationId, 'range:', start.toISOString(), '-', end.toISOString());
-      await fetchEvents(selectedOrgId || organizationId, start, end, controller.signal);
+      console.log('[Calendar] Fetching events for org:', effectiveOrgId, 'range:', start.toISOString(), '-', end.toISOString());
+      await fetchEvents(effectiveOrgId, start, end, controller.signal);
     };
 
     load();
     return () => { cancelled = true; abortRef.current?.abort(); };
-  }, [selectedOrgId, organizationId, currentDateKey, view, fetchCalendars, fetchEvents, getDateRange]);
+  }, [effectiveOrgId, organizationId, selectedOrgId, currentDateKey, view, fetchCalendars, fetchEvents, getDateRange]);
 
   // Fetch organizations list on mount (for super admin org switcher)
   useEffect(() => {
@@ -402,7 +419,7 @@ export default function Calendar({
         // Use edit scope "this" to create a detached override at the new location.
         // This is cleaner than the old two-step (exclude + create one-off) flow.
         const patchRes = await fetch(
-          `/api/organizations/${organizationId}/calendar-events/${eventId}`,
+          `/api/organizations/${effectiveOrgId}/calendar-events/${eventId}`,
           {
             method: 'PATCH',
             headers: { 'Content-Type': 'application/json' },
@@ -425,7 +442,7 @@ export default function Calendar({
         setEvents((prev) => prev.map((e) => (e.id === eventId ? overrideEvent : e)));
       } else {
         const res = await fetch(
-          `/api/organizations/${organizationId}/calendar-events/${eventId}`,
+          `/api/organizations/${effectiveOrgId}/calendar-events/${eventId}`,
           {
             method: 'PATCH',
             headers: { 'Content-Type': 'application/json' },
@@ -454,7 +471,7 @@ export default function Calendar({
         setEvents((prev) => prev.map((e) => (e.id === eventId ? existing : e)));
       }
     }
-  }, [events, organizationId]);
+  }, [events, effectiveOrgId]);
 
   const handleDragEnd = useCallback(() => {
     setDraggingEventId(null);
@@ -465,7 +482,7 @@ export default function Calendar({
     let targetCalendarId = defaultCalendarId;
     if (!targetCalendarId) {
       try {
-        const calRes = await fetch(`/api/organizations/${organizationId}/calendar`);
+        const calRes = await fetch(`/api/organizations/${effectiveOrgId}/calendar`);
         if (calRes.ok) {
           const calendars = await calRes.json();
           const def = calendars.find((c: { isDefault: boolean }) => c.isDefault);
@@ -487,7 +504,7 @@ export default function Calendar({
     const startDate = new Date(`${input.date}T10:00`);
     const endDate = new Date(`${input.date}T11:00`);
 
-    const res = await fetch(`/api/organizations/${organizationId}/calendar-events`, {
+    const res = await fetch(`/api/organizations/${effectiveOrgId}/calendar-events`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
@@ -509,18 +526,15 @@ export default function Calendar({
 
     // Refresh the visible range so the new event appears immediately
     const { start, end } = getDateRange();
-    await fetchEvents(selectedOrgId || organizationId, start, end);
-  }, [organizationId, defaultCalendarId, selectedOrgId, getDateRange, fetchEvents]);
+    await fetchEvents(effectiveOrgId, start, end);
+  }, [effectiveOrgId, defaultCalendarId, getDateRange, fetchEvents]);
 
   const handleSaveEvent = useCallback(async (eventData: Partial<CalendarEvent>, saveOptions?: { editScope?: string; clickedDate?: string }) => {
     if (!selectedEvent) return;
 
     const isExisting = selectedEvent.id && !selectedEvent.id.startsWith('temp-');
 
-    const effectiveOrgId = selectedOrgId || organizationId;
     console.log('[Calendar] handleSaveEvent:', { 
-      selectedOrgId, 
-      organizationId, 
       effectiveOrgId,
       defaultCalendarId,
     });
@@ -568,7 +582,7 @@ export default function Calendar({
         setDefaultCalendarId(newCal.id);
       } else {
         // Calendar may already exist — re-fetch to find it
-        const listRes = await fetch(`/api/organizations/${organizationId}/calendar`);
+        const listRes = await fetch(`/api/organizations/${effectiveOrgId}/calendar`);
         if (listRes.ok) {
           const calendars = await listRes.json();
           const def = calendars.find((c: { isDefault: boolean }) => c.isDefault);
@@ -601,7 +615,7 @@ export default function Calendar({
       if (selectedEvent.recurrence && dateChanged) {
         // Recurring event with changed dates: exclude original, create one-off at new location
         const patchRes = await fetch(
-          `/api/organizations/${organizationId}/calendar-events/${selectedEvent.id}`,
+          `/api/organizations/${effectiveOrgId}/calendar-events/${selectedEvent.id}`,
           {
             method: 'PATCH',
             headers: { 'Content-Type': 'application/json' },
@@ -614,7 +628,7 @@ export default function Calendar({
           throw new Error(err.error || 'Failed to update event');
         }
 
-        const createRes = await fetch(`/api/organizations/${organizationId}/calendar-events`, {
+        const createRes = await fetch(`/api/organizations/${effectiveOrgId}/calendar-events`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
@@ -658,7 +672,7 @@ export default function Calendar({
         }
 
         const res = await fetch(
-          `/api/organizations/${organizationId}/calendar-events/${selectedEvent.id}`,
+          `/api/organizations/${effectiveOrgId}/calendar-events/${selectedEvent.id}`,
           {
             method: 'PATCH',
             headers: { 'Content-Type': 'application/json' },
@@ -680,14 +694,14 @@ export default function Calendar({
           // The merge logic in fetchEvents preserves instances outside the range,
           // so events in other months are not lost.
           const { start, end } = getDateRange();
-          await fetchEvents(selectedOrgId || organizationId, start, end);
+          await fetchEvents(effectiveOrgId, start, end);
         } else {
           setEvents((prev) => prev.map((e) => (e.id === updatedEvent.id ? updatedEvent : e)));
         }
       }
     } else {
       // Create new event via POST
-      const res = await fetch(`/api/organizations/${organizationId}/calendar-events`, {
+      const res = await fetch(`/api/organizations/${effectiveOrgId}/calendar-events`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -711,12 +725,12 @@ export default function Calendar({
       if (createdEvent.recurrence) {
         // Re-fetch the visible range so all occurrences of the new series render
         const { start, end } = getDateRange();
-        await fetchEvents(selectedOrgId || organizationId, start, end);
+        await fetchEvents(effectiveOrgId, start, end);
       } else {
         setEvents((prev) => [...prev, createdEvent]);
       }
     }
-  }, [selectedEvent, organizationId, defaultCalendarId, selectedOrgId, getDateRange, fetchEvents]);
+  }, [selectedEvent, effectiveOrgId, defaultCalendarId, getDateRange, fetchEvents]);
 
   const handleContextMenuClose = useCallback(() => {
     setContextMenuPos(null);
@@ -773,21 +787,21 @@ export default function Calendar({
 
     try {
       const res = await fetch(
-        `/api/organizations/${organizationId}/calendar-events/${eventToDelete.id}`,
+        `/api/organizations/${effectiveOrgId}/calendar-events/${eventToDelete.id}`,
         { method: 'DELETE' }
       );
 
       if (!res.ok) {
         // Re-fetch events to sync with server on failure
         const { start, end } = getDateRange();
-        await fetchEvents(organizationId, start, end);
+        await fetchEvents(effectiveOrgId, start, end);
       }
     } catch {
       // Re-fetch events to sync with server on error
       const { start, end } = getDateRange();
-      await fetchEvents(organizationId, start, end);
+      await fetchEvents(effectiveOrgId, start, end);
     }
-  }, [eventToDelete, organizationId, getDateRange, fetchEvents]);
+  }, [eventToDelete, effectiveOrgId, getDateRange, fetchEvents]);
 
   // ---------------------------------------------------------------------------
   // Upcoming events for sidebar

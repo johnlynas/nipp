@@ -8,7 +8,8 @@
 
 import { NextRequest, NextResponse } from 'next/server';
 import { auth } from '@/lib/auth';
-import globalDb from '@/lib/global-db';
+import { superAdminStorage } from '@/lib/global-db-guard';
+import { resolveTenantAccess } from '@/lib/tenant-access';
 import { CalendarService } from '@/services/calendar-service';
 import { isSameSiteRequest } from '@/lib/csrf';
 
@@ -31,20 +32,18 @@ export async function GET(
   const orgId = (await params).orgId;
   const calendarId = (await params).id;
 
-  // Verify membership
-  const membership = await globalDb.member.findFirst({
-    where: { userId: session.user.id, orgId },
-  });
-
-  if (!membership) {
-    return NextResponse.json({ error: 'Not a member of this organization' }, { status: 403 });
+  // Membership OR super admin (platform team can view any tenant's calendar)
+  const access = await resolveTenantAccess(req, session.user.id, orgId);
+  if (!access.ok) {
+    return NextResponse.json({ error: access.error }, { status: access.status });
   }
-
-  const role = membership.role === 'admin' ? ('TENANT_ADMIN' as const) : ('MEMBER' as const);
-  const ctx = { userId: session.user.id, role, organizationId: orgId };
+  const ctx = access.ctx;
 
   try {
-    const calendar = await CalendarService.getCalendarById(ctx, calendarId);
+    // Scoping globalDb access (S7): see notes in PATCH/DELETE below.
+    const calendar = await superAdminStorage.run(true, () =>
+      CalendarService.getCalendarById(ctx, calendarId)
+    );
     return NextResponse.json(calendar);
   } catch (error: unknown) {
     if (error instanceof Error) {
@@ -80,22 +79,17 @@ export async function PATCH(
   const orgId = (await params).orgId;
   const calendarId = (await params).id;
 
-  // Verify membership
-  const membership = await globalDb.member.findFirst({
-    where: { userId: session.user.id, orgId },
-  });
-
-  if (!membership) {
-    return NextResponse.json({ error: 'Not a member of this organization' }, { status: 403 });
+  // Membership OR super admin (platform team can edit any tenant's calendar)
+  const access = await resolveTenantAccess(req, session.user.id, orgId);
+  if (!access.ok) {
+    return NextResponse.json({ error: access.error }, { status: access.status });
   }
 
-  const role = membership.role === 'admin' ? ('TENANT_ADMIN' as const) : ('MEMBER' as const);
-  const ctx = { userId: session.user.id, role, organizationId: orgId };
-
-  // Only admins can update calendars
-  if (role === 'MEMBER') {
+  // Only admins (tenant admin or platform super admin) can update calendars
+  if (access.ctx.role === 'MEMBER') {
     return NextResponse.json({ error: 'Forbidden: admin access required' }, { status: 403 });
   }
+  const ctx = access.ctx;
 
   const body = await req.json();
   const { name, description, color } = body as {
@@ -105,7 +99,10 @@ export async function PATCH(
   };
 
   try {
-    const calendar = await CalendarService.updateCalendar(ctx, calendarId, { name, description, color });
+    // Scoping globalDb access (S7): see note in GET above.
+    const calendar = await superAdminStorage.run(true, () =>
+      CalendarService.updateCalendar(ctx, calendarId, { name, description, color })
+    );
     return NextResponse.json({ calendar });
   } catch (error: unknown) {
     if (error instanceof Error) {
@@ -141,25 +138,21 @@ export async function DELETE(
   const orgId = (await params).orgId;
   const calendarId = (await params).id;
 
-  // Verify membership
-  const membership = await globalDb.member.findFirst({
-    where: { userId: session.user.id, orgId },
-  });
-
-  if (!membership) {
-    return NextResponse.json({ error: 'Not a member of this organization' }, { status: 403 });
+  // Verify membership or super admin access
+  const access = await resolveTenantAccess(req, session.user.id, orgId);
+  if (!access.ok) {
+    return NextResponse.json({ error: access.error }, { status: access.status });
   }
 
-  const role = membership.role === 'admin' ? ('TENANT_ADMIN' as const) : ('MEMBER' as const);
-  const ctx = { userId: session.user.id, role, organizationId: orgId };
-
-  // Only admins can delete calendars
-  if (role === 'MEMBER') {
+  // Only admins (tenant admin or platform super admin) can delete calendars
+  if (access.ctx.role === 'MEMBER') {
     return NextResponse.json({ error: 'Forbidden: admin access required' }, { status: 403 });
   }
+  const ctx = access.ctx;
 
   try {
-    await CalendarService.deleteCalendar(ctx, calendarId);
+    // Scoping globalDb access (S7) — see note in PATCH above.
+    await superAdminStorage.run(true, () => CalendarService.deleteCalendar(ctx, calendarId));
     return NextResponse.json({ success: true });
   } catch (error: unknown) {
     if (error instanceof Error) {

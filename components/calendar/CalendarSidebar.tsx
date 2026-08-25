@@ -3,6 +3,7 @@
 import { useState, useRef, useEffect } from 'react';
 import type { UpcomingEvent, QuickAddInput, CalendarEventType } from './types';
 import { EVENT_TYPES } from './types';
+import { getEventInstanceKey } from './calendar-utils';
 
 // ---------------------------------------------------------------------------
 // Props
@@ -213,7 +214,7 @@ export default function CalendarSidebar({
             ) : (
               <ul className="space-y-2">
                 {upcomingEvents.map((event) => (
-                  <li key={event.id}>
+                  <li key={getEventInstanceKey(event)}>
                     <div className="flex items-start gap-2 p-2 rounded hover:bg-[#24355c] transition-colors">
                       <div
                         className="w-2 h-2 rounded-full mt-1.5 flex-shrink-0"

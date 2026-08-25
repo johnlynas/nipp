@@ -7,7 +7,8 @@
 
 import { NextRequest, NextResponse } from 'next/server';
 import { auth } from '@/lib/auth';
-import globalDb from '@/lib/global-db';
+import { superAdminStorage } from '@/lib/global-db-guard';
+import { resolveTenantAccess } from '@/lib/tenant-access';
 import { CalendarEventService } from '@/services/calendar-event-service';
 import { isSameSiteRequest } from '@/lib/csrf';
 
@@ -29,17 +30,12 @@ export async function GET(
 
   const orgId = (await params).orgId;
 
-  // Verify membership
-  const membership = await globalDb.member.findFirst({
-    where: { userId: session.user.id, orgId },
-  });
-
-  if (!membership) {
-    return NextResponse.json({ error: 'Not a member of this organization' }, { status: 403 });
+  // Membership OR super admin (platform team can view any tenant's calendar)
+  const access = await resolveTenantAccess(req, session.user.id, orgId);
+  if (!access.ok) {
+    return NextResponse.json({ error: access.error }, { status: access.status });
   }
-
-  const role = membership.role === 'admin' ? ('TENANT_ADMIN' as const) : ('MEMBER' as const);
-  const ctx = { userId: session.user.id, role, organizationId: orgId };
+  const ctx = access.ctx;
 
   // Parse query params
   const url = new URL(req.url);
@@ -59,11 +55,15 @@ export async function GET(
   }
 
   try {
-    const events = await CalendarEventService.getEventsWithRecurrences(ctx, {
-      startDate,
-      endDate,
-      calendarId: calendarId || undefined,
-    });
+    // Scoping globalDb access (S7): required so unscoped Prisma queries work
+    // for super admins, and prevents context leaking across operations.
+    const events = await superAdminStorage.run(true, () =>
+      CalendarEventService.getEventsWithRecurrences(ctx, {
+        startDate,
+        endDate,
+        calendarId: calendarId || undefined,
+      })
+    );
     return NextResponse.json(events);
   } catch (error: unknown) {
     if (error instanceof Error) {
@@ -97,20 +97,15 @@ export async function POST(
 
   const orgId = (await params).orgId;
 
-  // Verify membership
-  const membership = await globalDb.member.findFirst({
-    where: { userId: session.user.id, orgId },
-  });
-
-  if (!membership) {
-    return NextResponse.json({ error: 'Not a member of this organization' }, { status: 403 });
+  // Membership OR super admin (platform team can edit any tenant's calendar)
+  const access = await resolveTenantAccess(req, session.user.id, orgId);
+  if (!access.ok) {
+    return NextResponse.json({ error: access.error }, { status: access.status });
   }
+  const ctx = access.ctx;
 
-  const role = membership.role === 'admin' ? ('TENANT_ADMIN' as const) : ('MEMBER' as const);
-  const ctx = { userId: session.user.id, role, organizationId: orgId };
-
-  // Only admins can create events
-  if (role === 'MEMBER') {
+  // Only admins (tenant admin or platform super admin) can create events
+  if (ctx.role === 'MEMBER') {
     return NextResponse.json({ error: 'Forbidden: admin access required' }, { status: 403 });
   }
 
@@ -140,7 +135,8 @@ export async function POST(
   }
 
   try {
-    const event = await CalendarEventService.createEvent(ctx, {
+    // Scoping globalDb access (S7) — see GET above.
+    const event = await superAdminStorage.run(true, () => CalendarEventService.createEvent(ctx, {
       title,
       description,
       startDate: new Date(startDate),
@@ -158,7 +154,8 @@ export async function POST(
         byMonthDay: recurrence.byMonthDay != null ? parseInt(String(recurrence.byMonthDay), 10) || undefined : undefined,
         excludedDates: recurrence.excludedDates ?? [],
       } : null,
-    });
+    }),
+    );
     return NextResponse.json({ event }, { status: 201 });
   } catch (error: unknown) {
     if (error instanceof Error) {

@@ -6,7 +6,8 @@
 
 import { NextRequest, NextResponse } from 'next/server';
 import { auth } from '@/lib/auth';
-import globalDb from '@/lib/global-db';
+import { superAdminStorage } from '@/lib/global-db-guard';
+import { resolveTenantAccess } from '@/lib/tenant-access';
 import { CalendarEventService } from '@/services/calendar-event-service';
 
 export const runtime = 'nodejs';
@@ -27,24 +28,22 @@ export async function GET(
 
   const orgId = (await params).orgId;
 
-  // Verify membership
-  const membership = await globalDb.member.findFirst({
-    where: { userId: session.user.id, orgId },
-  });
-
-  if (!membership) {
-    return NextResponse.json({ error: 'Not a member of this organization' }, { status: 403 });
+  // Membership OR super admin (platform team can view any tenant's calendar)
+  const access = await resolveTenantAccess(req, session.user.id, orgId);
+  if (!access.ok) {
+    return NextResponse.json({ error: access.error }, { status: access.status });
   }
-
-  const role = membership.role === 'admin' ? ('TENANT_ADMIN' as const) : ('MEMBER' as const);
-  const ctx = { userId: session.user.id, role, organizationId: orgId };
+  const ctx = access.ctx;
 
   // Parse limit param
   const url = new URL(req.url);
   const limit = parseInt(url.searchParams.get('limit') || '10', 10);
 
   try {
-    const events = await CalendarEventService.getUpcomingEvents(ctx, orgId, limit);
+    // Scoping globalDb access (S7): required for tenant-org reads by super admins.
+    const events = await superAdminStorage.run(true, () =>
+      CalendarEventService.getUpcomingEvents(ctx, orgId, limit)
+    );
     return NextResponse.json(events);
   } catch (error: unknown) {
     if (error instanceof Error) {

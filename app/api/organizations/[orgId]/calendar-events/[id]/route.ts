@@ -9,6 +9,8 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { auth } from '@/lib/auth';
 import globalDb from '@/lib/global-db';
+import { superAdminStorage } from '@/lib/global-db-guard';
+import { resolveTenantAccess } from '@/lib/tenant-access';
 import { CalendarEventService } from '@/services/calendar-event-service';
 import { isSameSiteRequest } from '@/lib/csrf';
 import {
@@ -36,20 +38,18 @@ export async function GET(
   const orgId = (await params).orgId;
   const eventId = (await params).id;
 
-  // Verify membership
-  const membership = await globalDb.member.findFirst({
-    where: { userId: session.user.id, orgId },
-  });
-
-  if (!membership) {
-    return NextResponse.json({ error: 'Not a member of this organization' }, { status: 403 });
+  // Membership OR super admin (platform team can edit any tenant's calendar)
+  const access = await resolveTenantAccess(req, session.user.id, orgId);
+  if (!access.ok) {
+    return NextResponse.json({ error: access.error }, { status: access.status });
   }
-
-  const role = membership.role === 'admin' ? ('TENANT_ADMIN' as const) : ('MEMBER' as const);
-  const ctx = { userId: session.user.id, role, organizationId: orgId };
+  const ctx = access.ctx;
 
   try {
-    const event = await CalendarEventService.getEventById(ctx, eventId);
+    // Scoping globalDb access (S7): see note in PATCH below.
+    const event = await superAdminStorage.run(true, () =>
+      CalendarEventService.getEventById(ctx, eventId)
+    );
     return NextResponse.json(event);
   } catch (error: unknown) {
     if (error instanceof Error) {
@@ -85,22 +85,17 @@ export async function PATCH(
   const orgId = (await params).orgId;
   const eventId = (await params).id;
 
-  // Verify membership
-  const membership = await globalDb.member.findFirst({
-    where: { userId: session.user.id, orgId },
-  });
-
-  if (!membership) {
-    return NextResponse.json({ error: 'Not a member of this organization' }, { status: 403 });
+  // Membership OR super admin (platform team can edit any tenant's calendar)
+  const access = await resolveTenantAccess(req, session.user.id, orgId);
+  if (!access.ok) {
+    return NextResponse.json({ error: access.error }, { status: access.status });
   }
 
-  const role = membership.role === 'admin' ? ('TENANT_ADMIN' as const) : ('MEMBER' as const);
-  const ctx = { userId: session.user.id, role, organizationId: orgId };
-
-  // Only admins can update events
-  if (role === 'MEMBER') {
+  // Only admins (tenant admin or platform super admin) can update events
+  if (access.ctx.role === 'MEMBER') {
     return NextResponse.json({ error: 'Forbidden: admin access required' }, { status: 403 });
   }
+  const ctx = access.ctx;
 
   const body = await req.json();
   const { title, description, startDate, endDate, eventType, color, propertyId, recurrence, excludedDate, editScope, clickedDate } = body as {
@@ -125,6 +120,10 @@ export async function PATCH(
   };
 
   try {
+    // Scoping globalDb access (S7): every DB-touching call below (service,
+    // recurrence scopes, and direct queries) runs inside this context so it
+    // works for super admins operating on tenant orgs without leaking.
+    return await superAdminStorage.run(true, async () => {
     // Check if this is a recurring event with an edit scope
     const existingEvent = await globalDb.calendarEvent.findFirst({
       where: { id: eventId, organizationId: ctx.organizationId! },
@@ -194,6 +193,7 @@ export async function PATCH(
       } : undefined),
     });
     return NextResponse.json({ event });
+    });  // superAdminStorage.run
   } catch (error: unknown) {
     if (error instanceof Error) {
       const status = error.message.includes('not found') ? 404 : 400;
@@ -228,25 +228,21 @@ export async function DELETE(
   const orgId = (await params).orgId;
   const eventId = (await params).id;
 
-  // Verify membership
-  const membership = await globalDb.member.findFirst({
-    where: { userId: session.user.id, orgId },
-  });
-
-  if (!membership) {
-    return NextResponse.json({ error: 'Not a member of this organization' }, { status: 403 });
+  // Verify membership or super admin access
+  const access = await resolveTenantAccess(req, session.user.id, orgId);
+  if (!access.ok) {
+    return NextResponse.json({ error: access.error }, { status: access.status });
   }
 
-  const role = membership.role === 'admin' ? ('TENANT_ADMIN' as const) : ('MEMBER' as const);
-  const ctx = { userId: session.user.id, role, organizationId: orgId };
-
-  // Only admins can delete events
-  if (role === 'MEMBER') {
+  // Only admins (tenant admin or platform super admin) can delete events
+  if (access.ctx.role === 'MEMBER') {
     return NextResponse.json({ error: 'Forbidden: admin access required' }, { status: 403 });
   }
+  const ctx = access.ctx;
 
   try {
-    await CalendarEventService.deleteEvent(ctx, eventId);
+    // Scoping globalDb access (S7) — see note in PATCH above.
+    await superAdminStorage.run(true, () => CalendarEventService.deleteEvent(ctx, eventId));
     return NextResponse.json({ success: true });
   } catch (error: unknown) {
     if (error instanceof Error) {
