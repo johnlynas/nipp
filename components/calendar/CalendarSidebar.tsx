@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useRef, useEffect } from 'react';
+import { useState, useRef, useEffect, useMemo } from 'react';
 import type { UpcomingEvent } from './types';
 import { getEventInstanceKey } from './calendar-utils';
 
@@ -31,6 +31,14 @@ export default function CalendarSidebar({
 }: CalendarSidebarProps) {
   const [orgDropdownOpen, setOrgDropdownOpen] = useState(false);
   const orgDropdownRef = useRef<HTMLDivElement>(null);
+  // Free-text filter for the upcoming events list (matched against event titles)
+  const [searchQuery, setSearchQuery] = useState('');
+
+  const filteredUpcomingEvents = useMemo(() => {
+    const q = searchQuery.trim().toLowerCase();
+    if (!q) return upcomingEvents;
+    return upcomingEvents.filter((e) => e.title.toLowerCase().includes(q));
+  }, [upcomingEvents, searchQuery]);
 
   // Close dropdown on outside click
   useEffect(() => {
@@ -148,15 +156,43 @@ export default function CalendarSidebar({
             </div>
           )}
 
+          {/* Search box — directly beneath the org switcher, filters the
+              upcoming events list below by event title */}
+          <div className="px-4 py-3 border-b flex-shrink-0" style={{ borderColor: '#24355c' }}>
+            <div className="relative">
+              <input
+                type="text"
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+                placeholder="Search upcoming events..."
+                className="w-full pl-3 pr-8 py-2 rounded text-sm bg-[#24355c] border placeholder:text-gray-500 focus:outline-none"
+                style={{ borderColor: '#3a4f7a', color: '#e2e8f0' }}
+              />
+              {searchQuery && (
+                <button
+                  onClick={() => setSearchQuery('')}
+                  className="absolute right-2 top-1/2 -translate-y-1/2 text-gray-400 hover:text-white"
+                  aria-label="Clear search"
+                >
+                  <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                  </svg>
+                </button>
+              )}
+            </div>
+          </div>
+
           {/* Upcoming Events List - scrollable container (min-h-0 lets the
               flex child shrink so a scrollbar appears instead of the list
               overflowing the sidebar page) */}
           <div className="flex-1 min-h-0 overflow-y-auto px-4 pb-4">
             {upcomingEvents.length === 0 ? (
               <p className="text-sm text-gray-400">No upcoming events</p>
+            ) : filteredUpcomingEvents.length === 0 ? (
+              <p className="text-sm text-gray-400">No events match "{searchQuery.trim()}"</p>
             ) : (
               <ul className="space-y-2">
-                {upcomingEvents.map((event) => (
+                {filteredUpcomingEvents.map((event) => (
                   <li key={getEventInstanceKey(event)}>
                     <div className="flex items-start gap-2 p-2 rounded hover:bg-[#24355c] transition-colors">
                       <div
