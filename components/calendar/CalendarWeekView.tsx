@@ -146,16 +146,30 @@ export default function CalendarWeekView({
 
   return (
     <div className="bg-white rounded-lg shadow-sm border overflow-hidden" style={{ borderColor: '#dee2e6' }}>
-      {/* Day headers */}
-      <div className="grid grid-cols-8 border-b sticky top-0 bg-white z-10" style={{ borderColor: '#dee2e6' }}>
-        <div className="py-2 px-1 text-center text-xs font-semibold" style={{ color: '#6c757d' }}>
+      {/* Single scrollable grid holding BOTH the day-header row and the time
+          body. Both rows share identical track widths — a fixed 4rem time-label
+          column plus equal-width day columns — so the header day dividers line
+          up exactly with the day columns' vertical borders beneath, and the
+          "GMT" cell takes no more width than the Day view's times column. */}
+      <div
+        ref={scrollRef}
+        className="grid grid-cols-[4rem_repeat(7,minmax(0,1fr))]"
+        style={{ maxHeight: '600px', overflowY: 'auto' }}
+        onDragStart={handleDragStart}
+        onDragEnd={cancelAutoscroll}
+      >
+        {/* Day headers (sticky so they stay pinned while the body scrolls) */}
+        <div
+          className="sticky top-0 z-20 bg-white py-2 px-1 text-center text-xs font-semibold border-b border-r"
+          style={{ color: '#6c757d', borderBottomColor: '#dee2e6', borderRightColor: '#f0f0f0' }}
+        >
           GMT
         </div>
         {weekDays.map((day, i) => (
           <div
             key={i}
-            className="py-2 text-center border-l"
-            style={{ borderColor: '#f0f0f0' }}
+            className="sticky top-0 z-20 bg-white py-2 text-center border-b border-l"
+            style={{ borderBottomColor: '#dee2e6', borderLeftColor: '#f0f0f0' }}
           >
             <div className="text-xs font-medium" style={{ color: '#6c757d' }}>
               {day.toLocaleDateString('en-GB', { weekday: 'short' })}
@@ -167,18 +181,9 @@ export default function CalendarWeekView({
             </div>
           </div>
         ))}
-      </div>
 
-      {/* Time grid */}
-      <div
-        ref={scrollRef}
-        className="grid grid-cols-8"
-        style={{ maxHeight: '600px', overflowY: 'auto' }}
-        onDragStart={handleDragStart}
-        onDragEnd={cancelAutoscroll}
-      >
-        {/* Time labels column */}
-        <div className="border-r" style={{ borderColor: '#f0f0f0' }}>
+        {/* Time labels column — 4rem wide, matching the Day view's w-16 */}
+        <div className="border-r border-b" style={{ borderColor: '#f0f0f0' }}>
           {hours.map((hour) => (
             <div
               key={hour}
