@@ -1,647 +1,591 @@
-# Property NI Multi-Tenant Portal
+# Property NI Multi-Tenant Portal (nipp)
 
-A full-stack property management portal for Northern Ireland, built with Next.js 15, BetterAuth, Prisma, and PostgreSQL.
+Property NI is a full-stack property management portal built for the Northern
+Ireland public sector. It is a multi-tenant platform: a single deployment hosts
+many organizations (tenants), and every tenant operates in complete isolation —
+their properties, members, roles, permissions, calendars, and audit trails are
+scoped to them and never visible to anyone else.
 
-Property NI provides a secure, multi-tenant platform for managing property portfolios across multiple organizations. Each tenant operates in complete isolation — their properties, members, roles, and permissions are scoped and never visible to other organizations.
+The application is built with Next.js 15 (App Router), React 19, BetterAuth,
+Prisma 6, and PostgreSQL 16, with optional Redis for caching.
 
-**Key features:**
-- **Multi-tenant architecture** with defense-in-depth isolation (Prisma extension + PostgreSQL Row Level Security)
-- **Super Admin dashboard** for managing organizations, roles, permissions, and cross-tenant audit logs
-- **Interactive Calendar** — multi-view (month/week/day/year) calendar component with drag-and-drop rescheduling, recurring events (daily through annually), event detail modals, quick-add via sidebar or right-click context menu, and color-coded event types (viewings, inspections, maintenance, lease events)
-- **Calendar Notifications** — email notification service that alerts users or entire organizations about events happening today, with rate limiting via Redis and delivery logging to NotificationLog
-- **Granular RBAC** with organization-scoped roles, member-role assignments, and a catalog of ~50 atomic permissions
-- **Teams** — sub-organizational groupings with role inheritance, managed via dedicated REST API
-- **Secure authentication** via BetterAuth with Google OIDC and email/password, tight session expiry (1-hour absolute max), and auto-logout on inactivity
-- **Hybrid caching** (L1 in-memory + L2 Redis) for permission resolution and search, with automatic cache warming
-- **Real-time notifications** via Server-Sent Events (SSE) with browser-aware polling that sleeps when tabs are backgrounded
-- **Strict Content Security Policy** with nonce-based script execution in Report-Only mode
-- **Comprehensive audit logging** tracking all tenant and platform actions
-- **PII encryption** using AES-256-GCM for sensitive data at rest
-- **Data-in-transit payload encryption** (AES-256-GCM) for PII API routes — infrastructure complete, route-by-route migration in progress
-- **Full test coverage** with unit, integration, and isolation tests verifying tenant data separation
+## Who uses it
 
-## Super Admin Dashboard
+There are two kinds of users:
 
-The application includes a Super Admin dashboard for managing tenant organizations, roles, permissions, and audit logs.
+- **Super Admins** — members of the internal "Platform Organization". They
+  manage tenant organizations, global roles and permissions, user accounts,
+  cache metrics, audit logs, and system health from a dedicated admin console.
+- **Tenant Users** — staff of a tenant organization. They work inside their
+  own organization's dashboard: an interactive calendar, teams, roles,
+  resources, and notifications.
 
-### API Endpoints
+Self-service registration is not available (`/register` redirects to
+`/login`); accounts are created by Super Admins or via the seed scripts.
 
-| Route | Description | Access |
-|-------|-------------|--------|
-| `/api/health` | Health check endpoint for load balancers and monitoring services | Public (no auth required) |
+## At a glance
 
-### Admin Routes
+| Area | What it does |
+|------|--------------|
+| **Multi-tenant isolation** | Two independent layers: Prisma query interception + PostgreSQL Row Level Security |
+| **Authentication** | BetterAuth with email/password and Google OIDC, 1-hour session cap, inactivity auto-logout |
+| **RBAC** | Organization-scoped roles, a catalog of ~50 atomic permissions, feature-level access via Resources |
+| **Teams** | Sub-organizational groupings with role inheritance |
+| **Super Admin console** | Manage organizations, users, roles, permissions, audit logs, cache metrics, system health/logs |
+| **Tenant dashboard** | Integrated dashboard for users, organizations, roles, permissions, resources, teams, and the calendar |
+| **Interactive Calendar** | Month/week/day/year views, drag-and-drop rescheduling, RFC 5545 (rrule) recurrence, event modals, quick-add |
+| **Calendar Notifications** | Rate-limited email alerts for today's events, delivery logged to `NotificationLog` |
+| **Hybrid caching** | L1 in-memory + L2 Redis cache with stampede protection, warming, and live metrics |
+| **Real-time notifications** | Server-Sent Events bridge (dev) with browser-aware polling that sleeps when tabs are backgrounded |
+| **Security hardening** | CSP in Report-Only mode, AES-256-GCM PII encryption at rest, optional payload encryption in transit, pre-commit secret scanning |
 
-| Route | Description | Access |
-|-------|-------------|--------|
-| `/admin/organizations` | List all organizations with search, filter, pagination | Super Admin only |
-| `/admin/organizations/create` | Create a new organization | Super Admin only |
-| `/admin/organizations/[id]` | Organization detail (Overview, Members, Roles, Audit tabs) | Super Admin only |
-| `/admin/permissions` | Global permission catalog CRUD | Super Admin only |
-| `/admin/audit-logs` | Audit log viewer with filters | Super Admin only |
+## Project layout
 
-### Team Management (Tenant Admin)
+```
+app/                  Next.js App Router: pages and API route handlers
+  admin/              Super Admin console (pages + /api/admin/* handlers)
+  dashboard/          Integrated role-based dashboards (+ /api/dashboard/admin/*)
+  organizations/      Organization-scoped tenant pages
+  api/                Other route handlers (auth, calendar, teams, health, …)
+components/           React UI (admin, calendar, dashboard, auth, providers)
+features/             Client-side feature modules (notifications, org, permissions, user)
+hooks/                Shared client hooks (useInactivityTimeout, usePermission)
+lib/                  Core infrastructure: auth, tenant-db, cache, crypto, notifications
+services/             Server-side domain services (calendar, teams, roles, resources, …)
+prisma/               Schema, migrations, RLS scripts, and seed
+tests/                unit/, integration/, isolation/ (app-layer + Playwright E2E)
+scripts/              DB setup, test env setup/teardown, cache benchmark, secret check
+openspec/             OpenSpec change proposals (the project's design process)
+documents/            Business research, feature planning, operations runbooks
+```
 
-Teams are managed via REST API endpoints under each organization. Tenant admins can:
-- Create and manage teams within their organization
-- Add/remove team members (with automatic role inheritance)
-- Assign and revoke team-level roles
+---
 
-| Route | Methods | Description |
-|-------|---------|-------------|
-| `/api/organizations/[orgId]/teams` | GET, POST | List teams / Create team |
-| `/api/organizations/[orgId]/teams/[teamId]` | GET, PATCH, DELETE | Get / Update / Delete team |
-| `/api/organizations/[orgId]/teams/[teamId]/members` | GET, POST, DELETE | List / Add / Remove members |
-| `/api/organizations/[orgId]/teams/[teamId]/roles` | GET, POST, DELETE | List / Assign / Remove roles |
+# Functional Areas
 
-See [ARCHITECTURE.md#teams-architecture](./ARCHITECTURE.md#teams-architecture) for the full API reference.
+## 1. Authentication & Sessions
 
-### Interactive Calendar (Tenant Admin)
+Authentication is handled by [BetterAuth](https://www.better-auth.com/)
+(configured in `lib/auth.ts`):
 
-The calendar is a standalone, reusable component (`components/calendar/`) that can be integrated into any organization context. It supports month, week, day, and year views with drag-and-drop rescheduling (for recurring events, the original date is excluded from expansion and a one-off event is created at the new location), recurring events (daily through annually with interval, end-date and occurrence-count limits), event detail modals, and quick-add via sidebar or right-click context menu.
+- **Providers:** email/password and Google OIDC (optional — configure via
+  `GOOGLE_CLIENT_ID` / `GOOGLE_CLIENT_SECRET`).
+- **Sessions:** secure, HTTP-only cookies; `expiresIn` of **1 hour** is the
+  absolute maximum lifetime, with renewal on any server request once remaining
+  time drops below 15 minutes (`updateAge`). Active users who make at least one
+  request per 45 minutes never hit the hard expiry.
+- **Middleware:** `middleware.ts` performs a fast, Edge-runtime-safe session
+  cookie check so unauthenticated visitors are redirected to `/login` before
+  any page renders; public routes (`/api/health`, auth callbacks, CSP reports,
+  …) live in its `PUBLIC_PATTERNS`.
+- **Logout:** deletes the session from the database (not just local cookies),
+  clears all BetterAuth cookies, and hard-redirects to `/login` so no stale
+  client state survives.
 
-| Route | Methods | Description |
-|-------|---------|-------------|
-| `/api/organizations/[orgId]/calendar` | GET, POST | List calendars / Create a new calendar |
-| `/api/organizations/[orgId]/calendar/[id]` | GET, PATCH, DELETE | Get / Update / Delete calendar |
-| `/api/organizations/[orgId]/calendar-events` | GET, POST | List events in date range / Create event |
-| `/api/organizations/[orgId]/calendar-events/[id]` | GET, PATCH, DELETE | Get / Update / Delete event |
-| `/api/organizations/[orgId]/calendar-events/upcoming` | GET | Get upcoming events for sidebar |
+### Auto-logout on inactivity
 
-**Query Parameters (Event List):**
+The app logs users out after a configurable idle period to protect unattended
+devices (`INACTIVITY_TIMEOUT_MINS`, default **15**):
+
+1. `hooks/useInactivityTimeout.ts` tracks `mousemove`, `click`, `keydown`,
+   `scroll`, and `touchstart`.
+2. 30 seconds before expiry, a warning toast appears (via sonner).
+3. If no activity follows, the session is deleted server-side and the browser
+   is redirected to `/login`. Any activity during the warning dismisses the
+   toast and restarts the countdown.
+
+The timer only runs for authenticated sessions and applies equally to Super
+Admins and tenant users; each tab tracks inactivity independently. The
+server-side 1-hour expiry is the backstop if client-side detection is bypassed
+(JScript disabled, browser crash). Configuration flows to the client through a
+React context (`components/providers/InactivityTimeoutConfig.tsx`) — no
+`NEXT_PUBLIC_` duplication.
+
+## 2. Multi-Tenant Isolation
+
+Tenant isolation is enforced at **two independent layers** so a failure in one
+does not leak data (full details in [SECURITY.md](./SECURITY.md)):
+
+1. **Application layer** — the tenant-scoped Prisma client
+   (`lib/tenant-db.ts`) uses a Prisma extension to inject the current
+   `organizationId` into every query on org-scoped models. The org ID comes
+   from the session into `AsyncLocalStorage` (`lib/tenant-context.ts`) via
+   middleware, and queries without an active tenant context **throw** rather
+   than silently going unscoped.
+2. **Database layer** — PostgreSQL Row Level Security policies filter rows by
+   `current_setting('app.current_org_id')` as a safety net.
+
+Super Admins use a separate, explicitly unscoped client (`lib/global-db.ts`)
+for cross-tenant work; a custom ESLint rule blocks direct imports of the raw
+Prisma client in business code, and `lib/global-db-guard.ts` constrains who may
+use the global client. To add RLS for a new table, see
+`prisma/migrations/0000_enable_rls/migration.sql`.
+
+Organizations follow a strict lifecycle state machine:
+`PENDING → ACTIVE ↔ SUSPENDED → ARCHIVED` (terminal).
+
+## 3. Super Admin Console
+
+Super Admins (`app/admin/*`, guarded server-side by `requireSuperAdmin()` and
+client-side by `<RequireSuperAdmin>`) get a console for platform operations:
+
+| Route | Purpose |
+|-------|---------|
+| `/admin/organizations` | List orgs with search, filter, pagination; create/edit/delete, member management, per-org roles & permissions, status changes, settings |
+| `/admin/users` | Platform user accounts (create/view/edit/delete) |
+| `/admin/roles` | Global role management |
+| `/admin/permissions` | Global permission catalog (resources, search, CRUD) |
+| `/admin/audit-logs` | Cross-tenant security audit log viewer with filters |
+| `/admin/cache-metrics` | Live L1/L2 cache hit-rate metrics |
+| `/admin/system-health` | Dependency health card (database, cache) |
+| `/admin/system-logs` | Application/system log browser |
+
+Backed by REST endpoints under `/api/admin/*` (organizations, members, roles,
+permissions, users, audit logs, cache & payload-encryption metrics, system
+logs). The **organization lifecycle** (activate/suspend/archive) is driven
+through `/api/admin/organizations/[orgId]/status`.
+
+A public health check for load balancers and uptime monitors lives at
+`/api/health` — it checks the database (`SELECT 1`) and optionally Redis,
+returning per-check latency. See [Appendix C](#appendix-c--health-endpoint).
+
+## 4. Integrated Tenant Dashboard
+
+The tenant-facing dashboard lives under `/dashboard/admin/*` and is assembled
+from reusable components (`components/dashboard/`):
+
+| Route | Purpose |
+|-------|---------|
+| `/dashboard/admin/users` | Users of the active organization |
+| `/dashboard/admin/organizations` | Organization view/settings |
+| `/dashboard/admin/roles` | Roles scoped to the organization |
+| `/dashboard/admin/permissions` | Permission catalog as visible in org context |
+| `/dashboard/admin/resources` | Feature resources and role-to-resource bindings |
+| `/dashboard/admin/teams` | Teams, members, and team-level roles |
+| `/dashboard/admin/calendar` | The interactive calendar (see below) |
+
+These pages talk to REST endpoints under `/api/dashboard/admin/*`. Role-based
+routing (`lib/dashboard-router.ts`) maps a user's role to their dashboard; the
+`contractor` route is currently scaffolding only, deferred to a future
+OpenSpec proposal.
+
+### Resources & feature-level access control
+
+The **Resource** model (with `ResourceRole` bindings) links named features to
+roles: a user can only reach a feature if one of their roles is bound to its
+resource. This enables per-feature access control beyond plain read/write
+permissions, managed from the dashboard's Resources page and
+`/api/dashboard/admin/resources/*`.
+
+## 5. Roles, Permissions & Teams (RBAC)
+
+- **Permissions** are atomic `resource:action` keys (a catalog of ~50 seeded
+  permissions: property, financial, maintenance, contractor, tenant domains in
+  `lib/permissions/`). Resolution is cached through the hybrid L1/L2 cache.
+  Organization-scoped calendar permissions (`calendar:read|create|update|delete`)
+  are enforced on all `/api/organizations/[orgId]/calendar*` routes.
+- **Platform permissions** (Super Admin only):
+  `platform:manage_organizations`, `platform:manage_roles`,
+  `platform:manage_permissions`, `platform:view_audit_logs`.
+- **Roles** are organization-scoped; members hold roles through `MemberRole`,
+  and roles carry permissions through `RolePermission`. Role deletion is
+  protected by safety checks (see `tests/unit/role-deletion-safety.test.ts`).
+- **Teams** let organizations group people. Teams are sub-organizational:
+  members added to a team inherit its roles automatically. They are managed
+  via the tenant REST API:
+
+| Route | Methods | Purpose |
+|-------|---------|---------|
+| `/api/organizations/[orgId]/teams` | GET, POST | List / create teams |
+| `/api/organizations/[orgId]/teams/[teamId]` | GET, PATCH, DELETE | Get / update / delete team |
+| `/api/organizations/[orgId]/teams/[teamId]/members` | GET, POST, DELETE | List / add / remove members |
+| `/api/organizations/[orgId]/teams/[teamId]/roles` | GET, POST, DELETE | List / assign / remove team roles |
+
+Client-side guards: `<RequirePermission>`, `features/permissions/RoleGuard`,
+and the `usePermission` hook for conditional UI.
+
+## 6. Interactive Calendar
+
+The calendar is a standalone component tree in `components/calendar/` embedded
+at `/dashboard/admin/calendar`. Each organization bootstraps with one default
+calendar (more can be added per org).
+
+**UI features:**
+
+- Month, Week, Day, and Year views; week/day views autoscroll while dragging.
+- **Drag-and-drop rescheduling**: single events move across dates and times;
+  dragging a *recurring* event's occurrence excludes the original date from
+  the series (`exdates`) and creates a one-off event at the new location — the
+  rest of the series is untouched.
+- **Event detail modal** for viewing/editing; drag-and-drop changes persist to
+  the database (including preserved start/end times across month-view drags).
+- **Quick-add** via right-click context menu on any day, plus a **+ Create
+  Event** button in the toolbar that opens the add-event modal pre-populated
+  for the visible date range. Clicking an upcoming-event row navigates the
+  calendar to it.
+- **Sidebar** with the next upcoming events (scoped to the dates you're
+  viewing) and a live search box filtering by title, plus a
+  typeable organization combobox — Super Admins can switch between Platform and
+  any tenant org from the sidebar (or via `?org=` in the URL) to view/edit any
+  tenant's calendar.
+- **Color-coded event types**: viewings, inspections, maintenance, lease
+  events, key exchange, other — with per-event color overrides.
+
+**Recurrence:** rules are stored as RFC 5545 `rrule` JSON on the event
+(`rrule` column) with `exdates` for excluded dates; expansion happens in
+`lib/recurrence-rrule.ts` (the `rrule` library, with QUARTERLY and
+SEMI_ANNUALLY mapped onto monthly intervals). Supported frequencies:
+`DAILY`, `WEEKLY`, `MONTHLY`, `QUARTERLY`, `SEMI_ANNUALLY`, `ANNUALLY`,
+each with an interval plus optional end-date or occurrence-count limit.
+
+**API:**
+
+| Route | Methods | Purpose |
+|-------|---------|---------|
+| `/api/organizations/[orgId]/calendar` | GET, POST | List calendars / create a calendar |
+| `/api/organizations/[orgId]/calendar/[id]` | GET, PATCH, DELETE | Get / update / delete calendar |
+| `/api/organizations/[orgId]/calendar-events` | GET, POST | List events in date range / create event |
+| `/api/organizations/[orgId]/calendar-events/[id]` | GET, PATCH, DELETE | Get / update / delete event |
+| `/api/organizations/[orgId]/calendar-events/upcoming` | GET | Upcoming events for the sidebar |
+
+Event listing takes `start`, `end`, and optional `calendarId` query params:
+
 ```
 GET /api/organizations/[orgId]/calendar-events?start=2026-08-01&end=2026-08-31&calendarId=xxx
 ```
 
-**Event Types:** `VIEWING`, `INSPECTION`, `MAINTENANCE`, `LEASE_SIGNING`, `LEASE_RENEWAL`, `KEY_EXCHANGE`, `OTHER`
+Event types: `VIEWING`, `INSPECTION`, `MAINTENANCE`, `LEASE_SIGNING`,
+`LEASE_RENEWAL`, `KEY_EXCHANGE`, `OTHER`. Events carry an optional
+`propertyId` for future property-scheduling work.
 
-**Recurrence Frequencies:** `DAILY`, `WEEKLY`, `MONTHLY`, `QUARTERLY`, `SEMI_ANNUALLY`, `ANNUALLY`
+## 7. Calendar Notifications
 
-### Calendar Notifications (Tenant Admin)
+The notification service emails users — or entire organizations — about events
+happening **today**, reusing the shared email infrastructure
+(`lib/notifications/`) and logging every delivery to `NotificationLog`.
 
-The calendar notification service sends email notifications to users or entire organizations about events happening today. It reuses the existing notification infrastructure (`lib/notifications/dispatcher.ts`) for rate-limited email delivery and logs all notifications to `NotificationLog`.
+| Route | Methods | Purpose |
+|-------|---------|---------|
+| `/api/organizations/[orgId]/calendar-notifications/today` | GET | Today's events for the current user/org |
+| `/api/organizations/[orgId]/calendar-notifications/send-today` | POST | Trigger today-event notifications |
+| `/api/organizations/[orgId]/calendar-notifications/history` | GET | Delivery history |
 
-| Route | Methods | Description |
-|-------|---------|-------------|
-| `/api/organizations/[orgId]/calendar-notifications/today` | GET | Get today's events for the current user/org |
-| `/api/organizations/[orgId]/calendar-notifications/send-today` | POST | Trigger notifications for today's events |
-| `/api/organizations/[orgId]/calendar-notifications/history` | GET | View notification delivery history |
+Flow: scan for events whose `startDate` is today → resolve recipients
+(specific user or all org members) → build a branded email (Property NI colors,
+via nodemailer — configure `SMTP_*` variables) → dispatch through the shared
+rate-limited dispatcher (max 5 per event type per 24h; fails open without
+Redis) → log each delivery.
 
-**Notification Flow:**
-1. Scans for events where `startDate` falls on the current date
-2. Resolves recipients (specific user or all org members)
-3. Builds a branded email using Property NI colors
-4. Dispatches via the existing rate-limited email dispatcher
-5. Logs each notification to `NotificationLog`
+## 8. Real-Time Notifications
 
-**Rate Limiting:** Max 5 notifications per event type per 24-hour window (same as existing notification system).
+The notification bell (`features/notifications/`) combines:
 
-### Platform Permissions
+- **SSE bridge** — `EventSource` to `/api/notifications/stream`; incoming
+  events are injected directly into the React Query cache so the UI updates
+  without a refresh. The connection only opens while the tab is focused.
+  **Note:** this endpoint currently sends a simulated stream in development;
+  in production it returns `501` until it is backed by Redis Pub/Sub or a
+  message queue (tracked as future work).
+- **Browser-aware polling** — React Query refetches while the window is
+  focused and sleeps when it is backgrounded, conserving battery and server
+  load.
 
-The following platform-level permissions are available (Super Admin only):
+## 9. Caching
 
-| Permission Key | Description |
-|---------------|-------------|
-| `platform:manage_organizations` | Manage tenant organizations |
-| `platform:manage_roles` | Manage global roles |
-| `platform:manage_permissions` | Manage global permission catalog |
-| `platform:view_audit_logs` | View audit logs across all organizations |
+Permission resolution and search use a **hybrid cache**: an L1 in-memory LRU
+(`lib/cache/lru.ts`, with stampede protection and background warming) in front
+of L2 Redis (`lib/redis.ts`), orchestrated by `lib/cache/hybrid.ts`. The app
+degrades gracefully when Redis is absent (reads fall back to the database).
+Live hit-rate metrics are shown at `/admin/cache-metrics`, and a benchmark
+script measures the real-world benefit of each layer:
 
-### Organization-Scoped Permissions (Calendar)
+```bash
+npx tsx scripts/cache-benchmark.ts   # 8 scenarios: direct DB, L2 hit, L1 hit, etc.
+```
 
-The following calendar-related permissions are available for tenant users, scoped to their organization:
+See [CACHING_ARCHITECTURE.md](./CACHING_ARCHITECTURE.md) and
+[scripts/README.md](./scripts/README.md).
 
-| Permission Key | Description |
-|---------------|-------------|
-| `calendar:read` | View calendar events |
-| `calendar:create` | Create new calendar events |
-| `calendar:update` | Edit existing calendar events |
-| `calendar:delete` | Delete calendar events |
+## 10. Data Protection & Security Hardening
 
-These permissions are enforced on all `/api/organizations/[orgId]/calendar*` endpoints and integrated with the existing RBAC engine.
+- **PII at rest:** AES-256-GCM encryption for sensitive columns, keyed by
+  `PII_ENCRYPTION_KEY` (`lib/pii-crypto.ts`, `lib/pii-routes.ts`).
+- **Payloads in transit:** optional application-layer AES-256-GCM encryption of
+  PII request/response bodies with session-bound payload keys, replay
+  protection (nonce cache), and a `disabled | permissive | enforce` mode
+  (`PAYLOAD_ENCRYPTION_MODE`, default `disabled`). Metrics at
+  `/api/admin/payload-encryption/metrics`.
+- **Content Security Policy:** strict nonce-based CSP applied via edge
+  middleware in **Report-Only** mode (violations reported to
+  `/api/csp-report`); `'unsafe-eval'` is permitted only in development for
+  Fast Refresh. Directive details in [SECURITY.md](./SECURITY.md).
+- **Secrets:** a pre-commit hook (`scripts/check-secrets.sh`, run by husky)
+  blocks commits containing private-key headers, cloud access keys, or
+  password-bearing connection strings; `lint-staged` runs ESLint + Prettier on
+  staged files. `.env*` (except committed examples) and certificates are never
+  committed.
 
-### Organization Lifecycle States
+---
 
-Organizations follow a strict state machine: `PENDING` → `ACTIVE` ↔ `SUSPENDED` → `ARCHIVED` (terminal).
-
-### Tenant Isolation & Super Admin Access
-
-- Regular tenant users are scoped to their organization via Prisma Extension + PostgreSQL RLS.
-- Super Admins (Platform Organization members) use `lib/global-db.ts` — an explicitly unscoped Prisma client — to query across all organizations.
-- All `/admin/*` routes are wrapped with `<RequireSuperAdmin>` and guarded by `requireSuperAdmin()` API middleware.
-
-## Tech Stack
-
-| Layer | Technology | Version |
-|-------|-----------|---------|
-| Runtime | Node.js | 22 LTS (pinned) |
-| Framework | Next.js | ^15.x (App Router) |
-| UI Library | React | ^19.x |
-| Authentication | BetterAuth | ^1.6.x |
-| ORM | Prisma | ^6.x |
-| Database | PostgreSQL | 16+ |
-| Styling | Tailwind CSS | v4.x |
-| Testing | Vitest | ^4.1.x |
-| Validation | Zod | ^4.x |
-| Logging | Pino | ^9.x |
+# Getting Started
 
 ## Prerequisites
 
-| Requirement | Version | How to Install |
-|---|---|---|
-| **Node.js** | 22 LTS (pinned) | [nvm](https://github.com/nvm-sh/nvm) — `nvm install 22 && nvm use` |
-| **PostgreSQL** | 16+ | [postgresapp.com](https://postgresapp.com) (macOS), `brew install postgresql`, or your distro's package manager |
-| **Redis** *(optional)* | 7+ | `brew install redis` (macOS) — used for permission caching; app degrades gracefully without it |
-| **Git** | Latest | [git-scm.com](https://git-scm.com) |
+| Requirement | Version | Notes |
+|-------------|---------|-------|
+| **Node.js** | 22 LTS (pinned in `.nvmrc`) | `nvm install 22 && nvm use` |
+| **PostgreSQL** | 16+ | Postgres.app (macOS), `brew install postgresql`, or your distro's manager. PgBouncer is used for connection pooling (port 6432 in the default `.env.example`) — set `PGBOUNCER_PASSWORD` accordingly, or use a plain connection string. |
+| **Redis** *(optional)* | 7+ | Permission/cache layer; app works without it |
+| **Docker** *(for isolation tests)* | Any recent | Used by the test infrastructure compose file |
 
 ```bash
-# Verify prerequisites
-node -v   # v22.x.x
-npm -v    # 10.x+
-psql --version  # 16+
-redis-cli --version  # optional — 7+
+node -v            # v22.x.x
+psql --version     # 16+
+redis-cli --version  # optional, 7+
 ```
 
-## Getting Started (Step by Step)
+## Setup (step by step)
 
-### 1. Clone and install dependencies
+### 1. Clone and install
 
 ```bash
 git clone <repo-url> && cd nipp
-nvm use                          # switch to Node.js 22 (from .nvmrc)
-npm install                      # install all dependencies
+nvm use            # switches to Node 22 via .nvmrc
+npm install
 ```
 
-### 2. Set up PostgreSQL
-
-Create the development and production databases:
+### 2. Create the databases
 
 ```bash
-# one-liner (creates both nipp_dev and nipp_prod)
-bash scripts/setup-db.sh
+bash scripts/setup-db.sh   # creates nipp_dev and nipp_prod
+```
 
-Then update `DATABASE_URL` in `.env` to match your database connection string
-
-Edit `.env` and set:
-
-| Variable | What it is | How to generate / what to put |
-|---|---|---|
-| `DATABASE_URL` | PostgreSQL connection string | e.g. `postgresql://postgres@localhost:5432/nipp_dev` |
-| `BETTER_AUTH_SECRET` | Session encryption key | `openssl rand -base64 32` |
-| `GOOGLE_CLIENT_ID` | Google OAuth client ID | From [Google Cloud Console](https://console.cloud.google.com) (optional — skip if not using Google login) |
-| `GOOGLE_CLIENT_SECRET` | Google OAuth client secret | From [Google Cloud Console](https://console.cloud.google.com) (optional — skip if not using Google login) |
-| `PII_ENCRYPTION_KEY` | AES-256-GCM key for PII encryption | `openssl rand -hex 32` (64 hex chars) |
-| `REDIS_URL` | Redis connection string | `redis://localhost:6379` (optional — app works without it) |
-| `LOG_LEVEL` | Logging verbosity | `debug`, `info`, `warn`, or `error` (default: `debug`) |
-| `FRONTEND_URL` / `NEXT_PUBLIC_API_URL` | App URLs | `http://localhost:3000` (default) |
-| `INACTIVITY_TIMEOUT_MINS` | Auto-logout timeout in minutes | Positive integer (default: `15`) — see [Auto-Logout on Inactivity](#auto-logout-on-inactivity) |
-| `ADMIN_EMAIL` | Super admin email for seeding | e.g. `admin@example.com` (Required for `npm run db:seed`) |
-| `ADMIN_PASSWORD` | Super admin password for seeding | Strong password, > 8 chars (Required for `npm run db:seed`) |
-| `DEV_TENANT_A_EMAIL` / `DEV_TENANT_A_PASSWORD` | Dev tenant user A credentials | Optional — defaults to `dev-tenant-a@example.com` / `DevTenantA123!` |
-| `DEV_TENANT_B_EMAIL` / `DEV_TENANT_B_PASSWORD` | Dev tenant user B credentials | Optional — defaults to `dev-tenant-b@example.com` / `DevTenantB123!` |
-| `TEST_ADMIN_EMAIL` | Activate test mode seeding | Set any non-empty value to switch from dev → test profile |
-| `TEST_ADMIN_PASSWORD` | Test super admin password | Required when `TEST_ADMIN_EMAIL` is set |
-| `TEST_TENANT_A_EMAIL` / `TEST_TENANT_A_PASSWORD` | Test tenant user A credentials | Required when in test mode |
-| `TEST_TENANT_B_EMAIL` / `TEST_TENANT_B_PASSWORD` | Test tenant user B credentials | Required when in test mode |
-| `PLATFORM_ORG_ID` | Platform organization ID | Auto-written by seed; optional to set manually for stability |
-
-> **Never commit `.env`** — it is in `.gitignore`. Only `.env.example` (with placeholder values) is committed.
-
-### 4. Initialize the database
+### 3. Configure environment variables
 
 ```bash
-# Generate the Prisma client (required before any prisma command)
-npx prisma generate
-
-# Push the schema to your database (creates all tables)
-npx prisma db push
-
-# Seed the database with:
-#   - Platform Organization (for Super Admins)
-#   - Master permission catalog (~50 resource:action permissions)
-#   - Default admin user (requires ADMIN_EMAIL and ADMIN_PASSWORD env vars)
-npm run db:seed
+cp .env.example .env
 ```
 
-After seeding, check your `.env` file — the `PLATFORM_ORGANIZATION_ID` will be written automatically.
-
-### Database Seeding Guide
-
-The seed script (`prisma/seed.ts`) bootstraps the database with organizations, permissions, admin users, and teams. It runs in two modes depending on your environment variables.
-
-#### Required Variables (Both Modes)
-| Variable | Description |
-|---|---|
-| `ADMIN_EMAIL` | Valid email for the super admin account (e.g., `admin@nipp.gov.uk`) |
-| `ADMIN_PASSWORD` | Password for the super admin (must be > 8 characters) |
-
-#### Dev Mode (Default)
-When `TEST_ADMIN_EMAIL` is **not** set, the seed script runs in **developer profile** mode:
-
-| Variable | Default Value | Description |
-|---|---|---|
-| `DEV_TENANT_A_EMAIL` | `dev-tenant-a@example.com` | First dev tenant user email |
-| `DEV_TENANT_A_PASSWORD` | `DevTenantA123!` | First dev tenant user password |
-| `DEV_TENANT_B_EMAIL` | `dev-tenant-b@example.com` | Second dev tenant user email |
-| `DEV_TENANT_B_PASSWORD` | `DevTenantB123!` | Second dev tenant user password |
-
-**What gets created:**
-- Platform Organization (with "Platform Ops" team)
-- Dev Tenant Ltd organization (with "Members" + "Operations" teams)
-- Super admin user with all platform permissions
-- Two dev tenant users, each added to the Operations team
-
-#### Test Mode
-When `TEST_ADMIN_EMAIL` is **set** (any non-empty value), the seed script runs in **testing profile** mode:
-
-| Variable | Default Value | Description |
-|---|---|---|
-| `TEST_ADMIN_EMAIL` | *(required)* | Super admin email for testing |
-| `TEST_ADMIN_PASSWORD` | *(required)* | Super admin password for testing |
-| `TEST_TENANT_A_EMAIL` | `test-tenant-a@example.com` | First test tenant user email |
-| `TEST_TENANT_A_PASSWORD` | `TestTenantA123!` | First test tenant user password |
-| `TEST_TENANT_B_EMAIL` | `test-tenant-b@example.com` | Second test tenant user email |
-| `TEST_TENANT_B_PASSWORD` | `TestTenantB123!` | Second test tenant user password |
-
-**What gets created:**
-- Platform Organization (with "Members" team only)
-- Test Tenant Ltd organization (with "Members" + "QA Operations" teams)
-- Super admin user with all platform permissions
-- Two test tenant users, each added to the QA Operations team
-
-#### Running the Seed
-```bash
-# Standard seed (dev mode)
-npm run db:seed
-
-# Test mode — set TEST_ADMIN_EMAIL to activate
-cp .env.test.example .env.test
-# Edit .env.test with test credentials, then:
-TEST_ADMIN_EMAIL=platform-test@nipp.gov.uk npx tsx prisma/seed.ts
-```
-
-#### Re-seeding
-The seed script is **idempotent** — running it multiple times will update existing records rather than creating duplicates. All organizations, users, and permissions are upserted to match the latest script values.
-
-#### After Seeding
-1. Add `PLATFORM_ORG_ID=<id>` to your `.env` for stability (auto-printed after seed)
-2. Restart your dev server: `npm run dev`
-3. Log out completely and log back in using the credentials from your `.env` file
-4. You should now see the Super Admin dashboard!
-
-### 5. Start the development server
+Fill in the values — the required ones are `DATABASE_URL`,
+`BETTER_AUTH_SECRET`, `PII_ENCRYPTION_KEY`, and the seed credentials
+(`ADMIN_EMAIL`, `ADMIN_PASSWORD`). The complete reference is
+[Appendix A](#appendix-a--environment-variables). Quick secret generation:
 
 ```bash
-npm run dev
+openssl rand -base64 32   # BETTER_AUTH_SECRET
+openssl rand -hex 32      # PII_ENCRYPTION_KEY (64 hex chars)
 ```
 
-Open [http://localhost:3000](http://localhost:3000) in your browser.
+> **Never commit `.env`** — only the committed examples (`.env.example`,
+> `.env.local-prod.example`, `.env.test.example`) go in version control.
 
-### 6. (Optional) Run tests
+### 4. Initialize and seed the database
 
 ```bash
-npm test                 # Fast unit tests (no running system needed)
-npm run test:watch       # watch mode — re-runs on file changes
-npm run test:integration # Integration tests (needs PostgreSQL + Redis running)
-npm run test:all         # Run all unit and integration
-npm run test:coverage    # Run unit tests with code coverage report
+npx prisma generate   # required before any prisma command
+npx prisma db push    # create all tables (dev; use db:migrate for migration files)
+npm run db:seed       # platform org + permission catalog + admin + dev tenants
 ```
 
-### 7. Auto-Logout on Inactivity
+The seed is idempotent and runs in two profiles (dev by default, test mode when
+`TEST_ADMIN_EMAIL` is set). Details are in
+[Appendix B](#appendix-b--database-seeding-guide). The script prints the
+`PLATFORM_ORG_ID` afterwards — add it to `.env` for stability.
 
-The application automatically logs out users after a configurable period of inactivity to protect unattended devices.
-
-**How it works:**
-1. A client-side timer tracks user activity (`mousemove`, `click`, `keydown`, `scroll`, `touchstart`).
-2. After the configured timeout (default: 15 minutes), a **warning toast** appears in the top-right corner with 30 seconds remaining.
-3. If no activity occurs within those 30 seconds, the user is logged out — the session is invalidated server-side (deleted from the database) and cookies are cleared.
-4. A hard redirect to `/login` follows immediately, bypassing the Next.js client-side router.
-
-**Configuration:**
-| Variable | Default | Description |
-|---|---|---|
-| `INACTIVITY_TIMEOUT_MINS` | `15` | Minutes of inactivity before auto-logout. Must be a positive integer (digits only). |
-
-**Server-side session backstop:**
-- `session.expiresIn`: **1 hour** — absolute maximum session lifetime.
-- `session.updateAge`: **15 minutes** — sessions are renewed on any server request when remaining time drops below this threshold.
-- Active users making at least one request per 45 minutes never hit the absolute expiry.
-- If client-side detection is bypassed (JS disabled, browser crash), the server rejects stale sessions after 1 hour.
-
-**Behavior:**
-- Applies uniformly to all authenticated users (Super Admins and tenant users).
-- Each browser tab tracks inactivity independently.
-- The timer resets on any tracked activity, including during the warning period (any interaction dismisses the toast and restarts the countdown).
-- The inactivity timer only runs when a user has an active session — it does not fire on the `/login` page or other unauthenticated routes.
-
-**Files:**
-- `hooks/useInactivityTimeout.ts` — Client-side hook with ref-stabilized event listeners.
-- `components/providers/InactivityTimeoutConfig.tsx` — React Context provider bridging server env config to the client.
-- `app/providers.tsx` — Unconditional `<Toaster />` and hook invocation.
-
-### 8. (Optional) Isolation Testing
-
-The project includes isolation tests to verify tenant data separation and super admin access controls. These require a dedicated test database (`nipp_test`) and Docker infrastructure.
+### 5. Run it
 
 ```bash
-# Full pipeline: setup → tests → teardown
-npm run test:isolation
-
-# Granular control:
-docker compose -f docker-compose.test.yml up -d          # Start PostgreSQL + pgbouncer
-npm run test:isolation:setup                              # Create DB + seed with OrgA/OrgB
-npm test -- tests/isolation/application/                  # Vitest app-layer tests
-npx playwright test                                       # Playwright E2E tests
-npm run test:isolation:teardown                           # Drop test database
-docker compose -f docker-compose.test.yml down            # Stop infra
+npm run dev          # http://localhost:3000
 ```
 
-For detailed setup, test data model, and troubleshooting, see [ISOLATION_TEST_STRATEGY.md](./ISOLATION_TEST_STRATEGY.md).
+Log in as the super admin (from your `.env`) to see the Super Admin console,
+or as a dev tenant user to see the tenant dashboard and calendar.
 
----
+### 6. Verify
 
-## Auto-Logout on Inactivity (Architecture)
-
-The auto-logout feature uses a **defense-in-depth** approach combining client-side detection with server-side session expiry.
-
-### Client-Side Detection (`hooks/useInactivityTimeout.ts`)
-- Listens for `mousemove`, `click`, `keydown`, `scroll`, and `touchstart` events on `window`.
-- Uses `useRef` to stabilize function identities, preventing event listener thrashing on every React render.
-- At `timeout - 30s`: displays a warning toast via [sonner](https://github.com/emilkowalski/sonner).
-- At `timeout`: calls `signOutUser()` (server-side session deletion) then `window.location.href = '/login'` (hard redirect).
-- Any tracked activity during the warning period dismisses the toast and resets the timer.
-- Only runs when a user has an active session — returns early on unauthenticated pages.
-
-### Server-Side Backstop (`lib/auth.ts`)
-- `session.expiresIn = 3600s` (1 hour absolute maximum).
-- `session.updateAge = 900s` (15 minutes — sessions renew on any request when remaining time drops below this).
-- `signOutUser()` deletes the session from the database, not just local cookies.
-
-### Data Flow
-```
-User loads page → layout.tsx reads env.INACTIVITY_TIMEOUT_MINS (number)
-  → InactivityTimeoutProvider passes value via React Context
-    → useInactivityTimeout() attaches event listeners, starts timer
-      → Activity detected → timer resets (toast dismissed)
-      → No activity for T-30s → warning toast appears
-        → Still no activity for 30s → signOutUser() + hard redirect to /login
-          → Middleware allows /login for unauthenticated users
+```bash
+npm test             # unit tests (no running services needed)
+npm run type-check   # strict TypeScript
+npm run lint         # ESLint — zero warnings expected
 ```
 
-### Testing
-- **Unit tests:** `tests/unit/useInactivityTimeout.test.tsx` (8 tests) — timer behavior, toast timing, cleanup.
-- **Env schema tests:** `tests/unit/env-inactivity-timeout.test.ts` (15 tests) — validation, defaults, type transformation.
+# Day-to-Day Development
 
----
+## Scripts
 
-## Available Scripts
+| Script | Command | Purpose |
+|--------|---------|---------|
+| `npm run dev` | `next dev` | Dev server (HTTP, hot reload) |
+| `npm run dev:https` | `next dev --experimental-https` | Dev server with local HTTPS |
+| `npm run build` / `npm start` | `next build` / `next start` | Production build / serve |
+| `npm run lint` | `next lint` | ESLint (zero warnings is the bar) |
+| `npm run type-check` | `tsc --noEmit` | Strict TypeScript check |
+| `npm run db:migrate` | `prisma migrate dev` | Create + apply a migration file |
+| `npm run db:push` | `prisma db push` | Push schema without migration files (dev) |
+| `npm run db:seed` | `tsx prisma/seed.ts` | Seed platforms, permissions, users, teams |
+| `npm run db:studio` | `prisma studio` | GUI database browser |
+| `npm run db:reset` | `prisma migrate reset --skip-seed` | Drop and recreate the database |
+| `bash scripts/setup-db.sh` | — | Create dev/prod databases and guide setup |
+| `npm test` | `vitest run tests/unit` | Unit tests only |
+| `npm run test:watch` | `vitest tests/unit` | Watch mode (unit) |
+| `npm run test:coverage` | `vitest run tests/unit --coverage` | Unit tests + coverage report |
+| `npm run test:integration` | `vitest run tests/integration tests/isolation` | Integration + isolation app-layer tests (needs PostgreSQL + Redis) |
+| `npm run test:all` | `vitest run` | Everything under `tests/` |
+| `npm run test:isolation` | — | Full isolation pipeline: setup → app tests → Playwright E2E → teardown |
+| `npm run test:isolation:setup` / `:teardown` | bash scripts | Create/drop the dedicated `nipp_test` database (+ Docker infra) |
+| `npm run test:isolation:app` | `vitest run tests/isolation/application/` | App-layer tenant-separation tests |
+| `npm run test:isolation:e2e` | Playwright | Browser E2E (cross-tenant UI isolation, calendar, payload encryption) |
+| `npm run build:cloud` / `deploy:cloud` | — | Placeholders for the cloud pipeline |
 
-| Script | Command | Description |
-|--------|---------|-------------|
-| **Development** | | |
-| `npm run dev` | `next dev` | Start dev server (HTTP, hot-reload) |
-| `npm run dev:https` | `next dev --experimental-https` | Start dev server with local HTTPS |
-| **Database** | | |
-| `npm run db:push` | `prisma db push` | Push schema changes to the database (no migration files) |
-| `npm run db:migrate` | `prisma migrate dev` | Create and apply a migration file |
-| `npm run db:seed` | `tsx prisma/seed.ts` | Run the seed script (create admin user, permissions catalog) |
-| `npm run db:studio` | `prisma studio` | Open the Prisma Studio GUI |
-| `npm run db:reset` | `prisma migrate reset --skip-seed` | Reset the database (drops all data) |
-| **Setup** | | |
-| `bash scripts/setup-db.sh` | — | Create databases and guide through remaining setup steps |
-| **Build & Deploy** | | |
-| `npm run build` | `next build` | Production build |
-| `npm start` | `next start` | Start production server |
-| `npm run lint` | `next lint` | Run ESLint |
-| `npm run type-check` | `tsc --noEmit` | TypeScript type checking (no output) |
-| **Testing** | | |
-| `npm test` | `vitest run` | Run all unit tests |
-| `npm run test:watch` | `vitest` | Watch mode |
-| `npm run test:coverage` | `vitest run --coverage` | Run tests with coverage report |
-| `npm run test:integration` | `vitest run tests/integration tests/isolation` | Run integration + isolation app-layer tests |
-| `npm run test:all` | `vitest run` | Run all unit and integration tests |
-| **Isolation Tests** | | |
-| `npm run test:isolation` | — | Full pipeline (setup → app-layer tests → E2E tests → teardown) |
-| `npm run test:isolation:setup` | — | Create nipp_test DB, generate Prisma client, push schema, seed |
-| `npm run test:isolation:teardown` | — | Drop nipp_test DB and clean up |
-| **Cloud** *(placeholders)* | | |
-| `npm run build:cloud` | — | Placeholder for cloud build pipeline |
-| `npm run deploy:cloud` | — | Placeholder for cloud deployment |
+## Quality gates (pre-commit & pre-push)
 
----
+All four checks must pass before committing and pushing:
+
+```bash
+npm test              # 1. unit tests green
+npm run test:integration   # 2. integration + isolation app-layer tests
+npx eslint . --max-warnings=0   # 3. zero lint warnings
+npx tsc --noEmit      # 4. strict type check clean
+```
+
+Husky runs `scripts/check-secrets.sh` and `lint-staged` (ESLint --fix +
+Prettier) automatically on each commit.
+
+## Testing the tenant isolation suite
+
+Isolation tests use a dedicated `nipp_test` database and Docker infrastructure
+(`docker-compose.test.yml` — PostgreSQL + PgBouncer):
+
+```bash
+npm run test:isolation   # full pipeline, one command
+```
+
+For the manual granular flow, fixtures, and troubleshooting see
+[ISOLATION_TEST_STRATEGY.md](./ISOLATION_TEST_STRATEGY.md) and the
+[quick-start](./ISOLATION_TEST_QUICK_START.md). The app-layer suite verifies
+Prisma-extension scoping, tenant context propagation, and global-db guards;
+the E2E suite exercises cross-tenant isolation, super-admin exclusivity,
+calendar interactions, and payload encryption from a real browser.
 
 ## Troubleshooting
 
-| Problem | Solution |
-|---|---|
+| Problem | Fix |
+|---------|-----|
 | `@prisma/client did not initialize` | Run `npx prisma generate` |
-| `DATABASE_URL not found` | Ensure `.env` exists and contains a valid `DATABASE_URL` |
-| `Invalid admin roles: super_admin` | The BetterAuth admin plugin requires all `adminRoles` to be defined in its `roles` config. This is handled automatically — if you see this, check that `lib/auth.ts` has the correct admin config |
-| Redis connection errors | Redis is optional. The app degrades gracefully — permissions are fetched from the database directly if Redis is unavailable |
-| Port 3000 already in use | Kill the process: `lsof -ti:3000 \| xargs kill` or start on a different port with `PORT=3001 npm run dev` |
-| TypeScript errors after adding models | Run `npx prisma generate` to regenerate the Prisma client types |
+| `DATABASE_URL not found` | Ensure `.env` exists with a valid connection string |
+| `PLATFORM_ORG_ID ... does not exist` (from `lib/rls.ts`) | Run the seed script first, or set `PLATFORM_ORG_ID` in `.env` |
+| Redis connection errors | Optional — the app degrades to direct DB reads; fix your `REDIS_URL` if you want caching |
+| Port 3000 busy | `lsof -ti:3000 \| xargs kill`, or `PORT=3001 npm run dev` |
+| TypeScript errors after schema changes | `npx prisma generate` |
+| Seed fails on credentials | `ADMIN_EMAIL` (valid email) and `ADMIN_PASSWORD` (> 8 chars) must be set |
 
-## Build Targets
+---
 
-| Target | Command | Description |
-|--------|---------|-------------|
-| Local Dev | `npm run dev` | HTTP, hot-reload, debug logging |
-| Local Prod | `npm run dev:https` | HTTPS (experimental), production-like config |
-| Cloud Build | `npm run build:cloud` | Placeholder — configure for your cloud platform |
-| Cloud Deploy | `npm run deploy:cloud` | Placeholder — configure for your cloud platform |
+# Appendices
 
-## Tenant Isolation Strategy (Defense-in-Depth)
+## Appendix A — Environment Variables
 
-This application enforces strict tenant isolation at **two independent layers**. A failure in one layer does not result in data leakage because the other layer still enforces isolation.
+All variables are validated at startup by the Zod schema in `lib/env.ts`.
+Start from `.env.example` (committed, placeholders only).
 
-### Layer 1: Application Layer (Prisma Extension)
+**Database & core**
 
-The tenant-scoped Prisma client (`lib/tenant-db.ts`) automatically injects `organizationId` into the `where` clause of all queries on organization-scoped models.
+| Variable | Required | Default | Purpose |
+|----------|----------|---------|---------|
+| `DATABASE_URL` | yes | — | PostgreSQL connection string (PgBouncer-aware by default: port 6432 with pool options) |
+| `PGBOUNCER_PASSWORD` | when using PgBouncer | — | Pooler password |
+| `REDIS_URL` | no | `redis://localhost:6379` | Redis for L2 caching & replay cache |
+| `L1_CACHE_MAX_ENTRIES`, `L1_CACHE_TTL_MS` | no | built-in | L1 in-memory cache tuning |
+| `LOG_LEVEL` | no | `debug` | `debug` \| `info` \| `warn` \| `error` |
+| `FRONTEND_URL`, `NEXT_PUBLIC_API_URL` | no | `http://localhost:3000` | App URLs |
+| `PLATFORM_ORG_ID` | no (auto-found) | — | Platform organization ID; written by the seed, worth pinning |
+| `TRUSTED_PROXY_CIDRS` | no | — | Proxy CIDRs for client-IP extraction |
 
-**How it works:**
-1. Next.js middleware (`middleware.ts`) extracts the user's active organization ID from the session
-2. The org ID is stored in `AsyncLocalStorage` via `lib/tenant-context.ts`
-3. The Prisma Extension (`lib/tenant-db.ts`) reads the org ID and injects it into every query
+**Authentication**
 
-**Using the tenant-scoped client:**
-```typescript
-import tenantDb from '@/lib/tenant-db';
+| Variable | Required | Purpose |
+|----------|----------|---------|
+| `BETTER_AUTH_SECRET` | yes (≥ 32 chars) | Session encryption key |
+| `BETTER_AUTH_URL` | no | BetterAuth base URL |
+| `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET` | no (for Google login) | Google OIDC credentials |
+| `INACTIVITY_TIMEOUT_MINS` | no (default `15`) | Auto-logout after this idle time; digits only |
+| `SUPER_ADMIN_EMAIL` | no | Optional super-admin email hint |
 
-// All queries are automatically scoped to the current organization
-const properties = await tenantDb.property.findMany({}); // WHERE organizationId = <currentOrg>
-```
+**Email (nodemailer)**
 
-### Layer 2: Database Layer (PostgreSQL RLS)
+| Variable | Required | Default | Purpose |
+|----------|----------|---------|---------|
+| `SMTP_HOST`, `SMTP_PORT` | for notifications | `localhost` / `587` | SMTP server |
+| `SMTP_USER`, `SMTP_PASS` | no | — | SMTP auth |
+| `SMTP_FROM` | no | `noreply@nipp.gov.uk` | Sender address |
 
-PostgreSQL Row Level Security policies filter rows by organization as a safety net against application-layer failures.
+**Data protection**
 
-**How to add RLS for a new table:**
-1. Ensure the table has an `organizationId` column (text/varchar)
-2. Create a migration with:
-   ```sql
-   ALTER TABLE "<table>" ENABLE ROW LEVEL SECURITY;
-   CREATE POLICY tenant_isolation ON "<table>"
-     USING ("organizationId"::text = current_setting('app.current_org_id', true));
-   ```
-3. See `prisma/migrations/0000_enable_rls/migration.sql` for the full template
+| Variable | Required | Purpose |
+|----------|----------|---------|
+| `PII_ENCRYPTION_KEY` | yes (64 hex chars) | AES-256-GCM key for PII at rest |
+| `PAYLOAD_ENCRYPTION_MODE` | no (`disabled`) | `disabled` \| `permissive` \| `enforce` — payload encryption in transit |
+| `PAYLOAD_ENCRYPTION_MAX_BYTES` | no (65536) | Max encrypted request body size |
+| `PAYLOAD_ENCRYPTION_KEY_TTL_SECONDS` | no (300) | Payload key lifetime |
+| `PAYLOAD_ENCRYPTION_REPLAY_WINDOW_SECONDS` | no (30) | Replay-protection window |
+| `PAYLOAD_ENCRYPTION_NONCE_TTL_SECONDS` | no (60) | Nonce cache TTL |
+| `PAYLOAD_ENCRYPTION_REPLAY_CACHE` | no (`redis`) | `memory` \| `redis` replay-dedup backend |
+| `PAYLOAD_ENCRYPTION_REQUIRE_REPLAY_CACHE` | no (`false`) | Fail closed in enforce mode if the replay cache is unavailable |
 
-### ESLint Rule: Prevent Direct Prisma Imports
+**Seed credentials** — never shared in committed files; see Appendix B.
 
-The ESLint configuration blocks direct imports of the unscoped `prisma` client from `lib/db.ts` in business logic files. Always use `lib/tenant-db.ts` instead:
+## Appendix B — Database Seeding Guide
 
-```typescript
-// ❌ BAD — bypasses tenant isolation
-import { prisma } from '@/lib/db';
+The seed script (`prisma/seed.ts`) bootstraps organizations, the permission
+catalog (~50 `resource:action` permissions), the super admin, and teams. It is
+**idempotent** — re-running upserts existing records to match the latest
+script values.
 
-// ✅ GOOD — respects tenant isolation
-import tenantDb from '@/lib/tenant-db';
-```
+**Both modes require:**
 
-### ORM Evaluation: Why Prisma?
+| Variable | Notes |
+|----------|-------|
+| `ADMIN_EMAIL` | Valid email for the super admin |
+| `ADMIN_PASSWORD` | > 8 characters |
 
-We evaluated three TypeScript ORMs with official BetterAuth adapters:
+**Dev profile** (default — when `TEST_ADMIN_EMAIL` is *not* set):
 
-| ORM | RLS Integration | BetterAuth Adapter | Ecosystem | Decision |
-|-----|----------------|--------------------|-----------|----------|
-| **Prisma** (selected) | Awkward (requires raw SQL for session variables) | Official, mature | Largest community, best docs | **Selected** |
-| Drizzle | Natural (SQL-like API) | Official, mature | Growing but smaller | Rejected |
-| Kysely | Trivial (query builder) | Official | Smaller, more manual | Rejected |
+Creates the Platform Organization ("Platform Ops" team), "Dev Tenant Ltd"
+("Members" + "Operations" teams), the super admin with all platform
+permissions, and two dev tenant users joined to Operations.
 
-**Rationale:** Prisma's superior docs and ecosystem reduce long-term maintenance burden. The RLS awkwardness is contained to ~100 lines in `lib/tenant-db.ts` (write once, never touch again).
+| Variable | Default |
+|----------|---------|
+| `DEV_TENANT_A_EMAIL` / `_PASSWORD` | `dev-tenant-a@example.com` / `DevTenantA123!` |
+| `DEV_TENANT_B_EMAIL` / `_PASSWORD` | `dev-tenant-b@example.com` / `DevTenantB123!` |
 
-## Secrets Management
+**Test profile** (activated by setting a non-empty `TEST_ADMIN_EMAIL`):
 
-### Files That Must NEVER Be Committed
+Creates the Platform Organization (Members team only), "Test Tenant Ltd"
+("Members" + "QA Operations" teams), the test super admin, and two test tenant
+users in QA Operations.
 
-| File | Contains |
-|------|----------|
-| `.env` | Real database credentials, API keys, secrets |
-| `.env.local` | Next.js local overrides with real values |
-| `.env.local-prod` | Production-like config with real secrets |
-| `certs/` | TLS certificates and private keys |
-| `*.pem`, `*.key` | Certificate and key files anywhere in the project |
+| Variable | Default |
+|----------|---------|
+| `TEST_ADMIN_EMAIL` / `_PASSWORD` | *(required, no default)* |
+| `TEST_TENANT_A_EMAIL` / `_PASSWORD` | `test-tenant-a@example.com` / `TestTenantA123!` |
+| `TEST_TENANT_B_EMAIL` / `_PASSWORD` | `test-tenant-b@example.com` / `TestTenantB123!` |
 
-### Setting Up Environment Variables
-
-1. Copy `.env.example` to `.env` and fill in real values
-2. Copy `.env.local-prod.example` to `.env.local-prod` for production-like development
-3. Generate secrets:
-   ```bash
-   # BetterAuth secret (session encryption)
-   openssl rand -base64 32
-
-   # PII encryption key (AES-256, 32 bytes hex-encoded)
-   openssl rand -hex 32
-
-   # TLS certificates for local-prod HTTPS
-   openssl req -x509 -newkey rsa:4096 -keyout certs/key.pem \
-     -out certs/cert.pem -days 365 -nodes \
-     -subj "/CN=localhost"
-   ```
-
-### Pre-Commit Secret Detection
-
-A pre-commit hook (`scripts/check-secrets.sh`) scans staged files for patterns that look like secrets:
-- Private key headers (`-----BEGIN PRIVATE KEY-----`)
-- AWS access keys (`AKIA...`)
-- Database URLs with embedded passwords
-- Common secret variable names with values
-
-If a potential secret is detected, the commit is blocked. Bypass (not recommended): `git commit --no-verify`.
-
-## Content Security Policy (CSP)
-
-The application enforces a strict Content Security Policy via Edge Runtime middleware (`middleware.ts`) to mitigate Cross-Site Scripting (XSS) and data injection attacks. CSP is deployed in **Report-Only** mode initially, allowing us to monitor violations without blocking legitimate functionality.
-
-### How It Works
-1. **Nonce Generation:** On every request, a cryptographically secure random nonce is generated using `@/lib/csp-nonce`.
-2. **Header Propagation:** The nonce is passed to the client via a custom `x-csp-nonce` header, allowing React components and scripts to dynamically inject the nonce into `<script>` tags.
-3. **Directive Enforcement:** The middleware constructs a strict CSP string applied to the `Content-Security-Policy-Report-Only` header.
-
-### Policy Directives
-| Directive | Value | Rationale |
-|-----------|-------|-----------|
-| `default-src` | `'self'` | Blocks all resources not explicitly allowed. |
-| `script-src` | `'self' 'nonce-${nonce}'` (+ `'unsafe-eval'` in dev) | Strict nonce-based execution. `unsafe-eval` is only allowed in development for Next.js Fast Refresh (HMR). |
-| `style-src` | `'self' 'unsafe-inline'` | Next.js internal runtime injects inline styles. Browsers ignore `'unsafe-inline'` if a nonce is present in the same directive, so we omit the nonce here. |
-| `img-src` | `'self' data: blob:` | Allows standard images, inline base64 data URIs, and blob URLs. |
-| `font-src` | `'self' data:` | Allows standard fonts and base64-encoded font files. |
-| `connect-src` | `'self'` | Restricts AJAX/Fetch/WebSocket connections to the same origin. |
-| `frame-ancestors` | `'none'` | Prevents clickjacking by disallowing the app from being embedded in iframes. |
-| `base-uri` / `form-action` | `'self'` | Prevents base tag hijacking and restricts form submissions to the same origin. |
-
-### Development vs Production
-- **Development:** `script-src` includes `'unsafe-eval'` to support Next.js Hot Module Replacement (Fast Refresh). All other directives remain strict.
-- **Production:** `script-src` strictly uses the nonce only. No `'unsafe-inline'` or `'unsafe-eval'` is permitted for scripts, ensuring maximum XSS protection.
-
-### Component Integration
-React components consume the nonce via the `x-csp-nonce` header:
-```tsx
-import { headers } from 'next/headers';
-
-export default function MyComponent() {
-  const nonce = headers().get('x-csp-nonce') ?? '';
-  return (
-    <script nonce={nonce} dangerouslySetInnerHTML={{ __html: '/* inline script */' }} />
-  );
-}
-```
-
-### Safe Rollout Strategy
-CSP is currently set via `Content-Security-Policy-Report-Only`. This logs violations to the browser console without blocking resources. Once validated, it can be switched to `Content-Security-Policy` for strict enforcement.
-
-## Node.js Version Requirements
-
-The project is pinned to **Node.js 22 LTS** for the following reasons:
-
-- Node 22 is LTS (supported until April 2027)
-- Vitest 4.x requires `^20.0.0 || ^22.0.0 || >=24.0.0` (Node 23 is explicitly excluded)
-- Node 23 is odd-numbered, non-LTS, and unsupported by many packages
-- All project dependencies (Next.js 15+, Prisma 6.x, BetterAuth 1.6.x) are tested against Node 22
-
-## Next.js / React Version Requirements
-
-- **Next.js ^15.x** — Stable App Router, Route Handlers, middleware APIs
-- **React ^19.x** — Required by Next.js 15
-
-Major version upgrades (e.g., Next.js 16) require a separate OpenSpec proposal.
-
-## Vitest Version Requirements
-
-- **Vitest ^4.1.x** — Required by `@better-auth/test-utils`
-- **Node.js 22 LTS** — Vitest 4.x requires `^20.0.0 || ^22.0.0 || >=24.0.0`
-
-## Adding RLS Policies for New Tables
-
-When creating a new organization-scoped table:
-
-1. Add the model to `prisma/schema.prisma` with `organizationId` field
-2. Create a new migration file in `prisma/migrations/`
-3. Add RLS enablement and policy:
-   ```sql
-   ALTER TABLE "<table>" ENABLE ROW LEVEL SECURITY;
-   CREATE POLICY tenant_isolation ON "<table>"
-     USING ("organizationId"::text = current_setting('app.current_org_id', true));
-   ```
-
-## ⚡ Real-Time Engine (SSE + React Query)
-Unlike traditional apps that poll the server every few seconds, Property NI uses a **Hybrid Real-Time Engine**:
-- **Zero-Latency Notifications:** Using Server-Sent Events (SSE), notifications are "pushed" from the server and injected directly into your local cache. This means new alerts appear in your UI instantly without a page refresh.
-- **Resource-Aware Polling:** Our system is "browser-aware"—it polls for updates when you are active and automatically goes to sleep when your tab is in the background, saving device battery and server CPU.
-
-
-
-
-## Health Check Endpoint
-
-The application includes a `/api/health` endpoint for use by load balancers, container orchestrators (Docker/Kubernetes), and uptime monitoring services.
-
-### Usage
 ```bash
-curl http://localhost:3000/api/health
+npm run db:seed          # dev profile
+# test profile:
+cp .env.test.example .env.test   # fill in credentials, then
+TEST_ADMIN_EMAIL=platform-test@nipp.gov.uk npx tsx prisma/seed.ts
 ```
 
-### Response Format
+After seeding: add the printed `PLATFORM_ORG_ID` to `.env`, restart the dev
+server, and log in fresh.
+
+## Appendix C — Health Endpoint
+
+`GET /api/health` (public, excluded from session validation) is for load
+balancers, orchestrators, and uptime monitors:
+
 ```json
 {
   "status": "healthy",
@@ -650,109 +594,72 @@ curl http://localhost:3000/api/health
   "uptime": 3600,
   "checks": {
     "database": { "status": "healthy", "latency_ms": 12 },
-    "cache": { "status": "healthy", "latency_ms": 3 }
+    "cache":    { "status": "healthy", "latency_ms": 3 }
   }
 }
 ```
 
-### Status Codes
-- **200 OK**: Application is healthy (all checks pass)
-- **200 OK with degraded status**: Non-critical check failed (e.g., Redis unavailable but database is up)
-- **503 Service Unavailable**: Critical check failed (e.g., database unreachable)
+- **200** — healthy (or degraded: a non-critical check like Redis failed)
+- **503** — critical check failed (database unreachable)
+- No sensitive information is exposed.
 
-### Configuration
-- The endpoint is excluded from session validation in `middleware.ts` (added to `PUBLIC_PATTERNS`)
-- Database check uses `SELECT 1` with timeout handling
-- Cache (Redis) check is non-critical and gracefully degrades if Redis is not configured
-- No sensitive information is exposed in the response (security best practice)
+## Appendix D — Data Model
 
-## Pre-Commit & Pre-Push Checklist
+Prisma models (`prisma/schema.prisma`), grouped by domain:
 
-Before committing and pushing changes to the `nipp` GitHub repository, **all four checks below must pass**. Do not push until every item is green.
+| Group | Models |
+|-------|--------|
+| Identity & auth | `User`, `Session`, `Account` |
+| Organizations & membership | `Organization`, `Member`, `Invitation`, `SentInvitation` |
+| Teams | `Team`, `TeamMember`, `TeamRole` |
+| RBAC | `Permission`, `Role`, `RolePermission`, `MemberRole`, `Resource`, `ResourceRole` |
+| Calendar | `Calendar`, `CalendarEvent` (rrule JSON + exdates, optional `propertyId`) |
+| Audit & notifications | `AuditLog`, `NotificationLog` |
 
-### 1. Unit Tests
-```bash
-npm test
-```
-All unit tests must pass with zero failures.
+All organization-scoped models carry an `organizationId` and are covered by
+the two-layer isolation strategy (Prisma extension + RLS).
 
-### 2. Integration Tests
-```bash
-npm run test:integration
-```
-All integration and isolation tests must pass. Requires PostgreSQL and Redis running.
+## Appendix E — Technology Stack & Version Pins
 
-### 3. Linter
-```bash
-npx eslint . --max-warnings=0
-```
-Resolve all lint errors and warnings. Zero warnings are allowed.
+| Layer | Technology | Version |
+|-------|-----------|---------|
+| Runtime | Node.js | 22 LTS (pinned — `.nvmrc`, `engines`) |
+| Framework | Next.js (App Router) | ^15.x |
+| UI | React / Tailwind CSS | ^19.x / v4.x |
+| Auth | BetterAuth | ^1.6.x |
+| ORM / DB | Prisma / PostgreSQL | ^6.x / 16+ |
+| Pooler | PgBouncer | — |
+| Cache | Redis (ioredis) + in-memory LRU | optional |
+| Recurrence | rrule | ^2.x |
+| Email | nodemailer | ^9.x |
+| State/queries | @tanstack/react-query | ^5.x |
+| Validation / logging | Zod v4 / Pino | — |
+| Testing | Vitest / Playwright / Testing Library | ^4.1.x / ^1.x |
 
-### 4. Type Check
-```bash
-npx tsc --noEmit
-```
-Resolve all TypeScript errors. The project is configured with `strict: true`.
+Why Node 22: it is LTS (supported to April 2027); Vitest 4 requires
+`^20 || ^22 || >=24`, and every other major dependency (Next 15, Prisma 6,
+BetterAuth 1.6) is tested against it. Major framework upgrades require their
+own OpenSpec proposal (see SPECIFICATION_DESIGN_PROCESS.md).
 
-> **Rule:** Only after all four checks pass should you commit and push. Failing any check means your change is not ready for the shared branch.
+## Appendix F — Project Documentation Map
 
-## Cache Performance Profiling
+| Document | What it covers |
+|----------|----------------|
+| [ARCHITECTURE.md](./ARCHITECTURE.md) | System architecture, component diagram, teams API reference |
+| [SECURITY.md](./SECURITY.md) | Multi-tenancy layers, auth/session model, auto-logout, CSP directives |
+| [CACHING_ARCHITECTURE.md](./CACHING_ARCHITECTURE.md) | L1/L2/ISR caching design, stampede protection, tuning |
+| [QUICK_START.md](./QUICK_START.md) | Minimal setup path |
+| [ISOLATION_TEST_STRATEGY.md](./ISOLATION_TEST_STRATEGY.md) | Tenant-isolation test design and troubleshooting |
+| [SPECIFICATION_DESIGN_PROCESS.md](./SPECIFICATION_DESIGN_PROCESS.md) | OpenSpec-driven feature lifecycle used across the project |
+| [scripts/README.md](./scripts/README.md) | Cache benchmark and script utilities |
+| `openspec/changes/` | One proposal per feature (calendar, isolation infra, payload encryption, CSP, …) |
+| `documents/` | Business research, feature planning, operations runbook |
 
-The project includes a comprehensive cache profiling script to measure the real-world performance impact of L1 (in-memory) and L2 (Redis) caching.
-
-### Running the Profiler
-
-```bash
-# Requires DATABASE_URL in .env (Redis is optional)
-npx tsx scripts/cache-benchmark.ts
-```
-
-### What It Measures
-
-The script benchmarks **8 scenarios** using real data from your database:
-
-| Scenario | Path Tested | Expected (Local) |
-|----------|-------------|------------------|
-| **A** | Direct DB Query (Baseline) | 15–40ms |
-| **B** | Redis L2 Cache (Warm Hit) | 1–5ms |
-| **C** | L1 In-Memory Hit | 0.01–0.1ms |
-| **D** | L1 Miss → L2 Hit | 5–8ms |
-| **E** | Search Endpoint (Cache Miss) | 10–30ms |
-| **F** | Search Endpoint (L1 Hit) | 0.01–0.1ms |
-| **G** | Permission Resolution (via cacheGet) | Varies |
-| **H** | Full Hybrid Flow (L1 Miss → L2 Hit) | Varies |
-
-### Interpreting Results
-
-- **If Scenario A (DB) > 20ms**: L1+L2 caching will reduce average latency by **50–70%**
-- **If L1 Hit Rate < 50%**: Consider increasing `L1_CACHE_MAX_ENTRIES` or adjusting TTLs
-- **If Scenario B (Redis) > 10ms**: Fix Redis connection/network before adding L1 complexity
-- **If Scenario A < 5ms**: Database is already fast; L1 may be over-engineering
-
-### How It Works
-
-The script uses **real database data** (not random UUIDs) and tests against the actual cache implementation:
-- `lib/cache/lru.ts` — L1 in-memory cache singleton
-- `lib/redis.ts` — Redis client wrapper (L2)
-- `lib/cache/hybrid.ts` — L1+L2 orchestration layer
-- `lib/cache/health.ts` — Hit/miss tracking and metrics
-
-It runs a warmup phase (10 iterations) before each benchmark to stabilize measurements, then executes the configured number of iterations (default: 100). Results include average latency, total time, and throughput in ops/sec.
-
-### When to Run It
-
-- **Before enabling L1**: Establish a baseline (Scenario A only) to quantify expected improvement
-- **After cache warming is active**: Compare L1 hit rates against the metrics dashboard at `/admin/cache-metrics`
-- **After infrastructure changes**: Re-run to verify Redis latency hasn't degraded
-- **Periodically**: Track cache performance trends over time
-
-### Full Documentation
-
-See [scripts/README.md](scripts/README.md) for detailed usage, configuration options, and troubleshooting.
-
-## Deferred Items
-
-See the [Deferred Items Registry](openspec/changes/project-initialization/proposal.md) for actively tracked future features.
+**Deferred work** is tracked in the deferred items registry at
+[openspec/changes/project-initialization/proposal.md](./openspec/changes/project-initialization/proposal.md).
+Notable open threads: production-grade real-time fan-out (the SSE stream is a
+dev simulation), contractor-role feature, property management business flows,
+and the cloud build/deploy pipeline (scripts are placeholders).
 
 ## License
 
