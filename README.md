@@ -23,6 +23,46 @@ There are two kinds of users:
 Self-service registration is not available (`/register` redirects to
 `/login`); accounts are created by Super Admins or via the seed scripts.
 
+## Contents
+
+- [Who uses it](#who-uses-it)
+- [At a glance](#at-a-glance)
+- [Project layout](#project-layout)
+- [Functional Areas](#functional-areas)
+  - [Authentication & Sessions](#1-authentication-sessions)
+    - [Auto-logout on inactivity](#auto-logout-on-inactivity)
+  - [Multi-Tenant Isolation](#2-multi-tenant-isolation)
+  - [Super Admin Console](#3-super-admin-console)
+  - [Integrated Tenant Dashboard](#4-integrated-tenant-dashboard)
+    - [Resources & feature-level access control](#resources-feature-level-access-control)
+  - [Roles, Permissions & Teams (RBAC)](#5-roles-permissions-teams-rbac)
+  - [Interactive Calendar](#6-interactive-calendar)
+  - [Calendar Notifications](#7-calendar-notifications)
+  - [Real-Time Notifications](#8-real-time-notifications)
+  - [Caching](#9-caching)
+  - [Data Protection & Security Hardening](#10-data-protection-security-hardening)
+- [Getting Started](#getting-started)
+  - [Prerequisites](#prerequisites)
+  - [Setup (step by step)](#setup-step-by-step)
+    - [1. Clone and install](#1-clone-and-install)
+    - [2. Create the databases](#2-create-the-databases)
+    - [3. Configure environment variables](#3-configure-environment-variables)
+    - [4. Initialize and seed the database](#4-initialize-and-seed-the-database)
+    - [5. Run it](#5-run-it)
+    - [6. Verify](#6-verify)
+- [Day-to-Day Development](#day-to-day-development)
+  - [Scripts](#scripts)
+  - [Quality gates (pre-commit & pre-push)](#quality-gates-pre-commit-pre-push)
+  - [Testing the tenant isolation suite](#testing-the-tenant-isolation-suite)
+  - [Troubleshooting](#troubleshooting)
+- [Appendices](#appendices)
+  - [Environment Variables](#appendix-a-environment-variables)
+  - [Database Seeding Guide](#appendix-b-database-seeding-guide)
+  - [Health Endpoint](#appendix-c-health-endpoint)
+  - [Data Model](#appendix-d-data-model)
+  - [Technology Stack & Version Pins](#appendix-e-technology-stack-version-pins)
+  - [Project Documentation Map](#appendix-f-project-documentation-map)
+
 ## At a glance
 
 | Area | What it does |
@@ -147,7 +187,7 @@ through `/api/admin/organizations/[orgId]/status`.
 
 A public health check for load balancers and uptime monitors lives at
 `/api/health` — it checks the database (`SELECT 1`) and optionally Redis,
-returning per-check latency. See [Appendix C](#appendix-c--health-endpoint).
+returning per-check latency. See [Appendix C](#appendix-c-health-endpoint).
 
 ## 4. Integrated Tenant Dashboard
 
@@ -369,7 +409,7 @@ cp .env.example .env
 Fill in the values — the required ones are `DATABASE_URL`,
 `BETTER_AUTH_SECRET`, `PII_ENCRYPTION_KEY`, and the seed credentials
 (`ADMIN_EMAIL`, `ADMIN_PASSWORD`). The complete reference is
-[Appendix A](#appendix-a--environment-variables). Quick secret generation:
+[Appendix A](#appendix-a-environment-variables). Quick secret generation:
 
 ```bash
 openssl rand -base64 32   # BETTER_AUTH_SECRET
@@ -389,7 +429,7 @@ npm run db:seed       # platform org + permission catalog + admin + dev tenants
 
 The seed is idempotent and runs in two profiles (dev by default, test mode when
 `TEST_ADMIN_EMAIL` is set). Details are in
-[Appendix B](#appendix-b--database-seeding-guide). The script prints the
+[Appendix B](#appendix-b-database-seeding-guide). The script prints the
 `PLATFORM_ORG_ID` afterwards — add it to `.env` for stability.
 
 ### 5. Run it
