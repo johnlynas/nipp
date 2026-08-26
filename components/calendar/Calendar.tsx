@@ -720,8 +720,17 @@ export default function Calendar({
       updatedAt: new Date(),
     };
     setSelectedEvent(newEvent);
+    // Always open in create mode — a previously viewed event must not carry
+    // its view-only state into a fresh "Create Event".
+    setViewMode(false);
     setModalOpen(true);
   }, []);
+
+  // Toolbar "+ Create Event": open the Add Event modal pre-populated with the
+  // currently displayed date.
+  const handleCreateNewEvent = useCallback(() => {
+    handleAddEventFromContext(currentDate);
+  }, [currentDate, handleAddEventFromContext]);
 
   const handleEditEventFromContext = useCallback((event: CalendarEvent) => {
     // Open modal with existing event for editing
@@ -912,7 +921,10 @@ export default function Calendar({
             {renderViewTitle()}
           </h2>
 
-          {/* View toggle */}
+          {/* View toggle — evenly spaced in the toolbar; the three flex-1
+              spacers split the free space equally so the Create button
+              lands midway between "Year" and the nav controls */}
+          <div className="flex-1" />
           <div className="flex items-center gap-1">
             {(['month', 'week', 'day', 'year'] as CalendarView[]).map((v) => (
               <button
@@ -927,6 +939,17 @@ export default function Calendar({
               </button>
             ))}
           </div>
+          <div className="flex-1" />
+
+          {/* Create Event */}
+          <button
+            onClick={handleCreateNewEvent}
+            className="px-3 py-1.5 rounded text-sm font-medium transition-colors hover:opacity-90"
+            style={{ backgroundColor: '#F5A623', color: '#ffffff' }}
+          >
+            + Create Event
+          </button>
+          <div className="flex-1" />
 
           {/* Navigation */}
           <div className="flex items-center gap-2">
