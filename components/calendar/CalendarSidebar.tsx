@@ -15,6 +15,9 @@ interface CalendarSidebarProps {
   organizations?: { id: string; name: string }[];
   selectedOrgId?: string | null;
   onOrgChange?: (orgId: string) => void;
+  /** Fired when an upcoming event row is clicked — parent navigates the
+      main calendar to the day view for the event's start date. */
+  onEventClick?: (event: UpcomingEvent) => void;
 }
 
 // ---------------------------------------------------------------------------
@@ -28,6 +31,7 @@ export default function CalendarSidebar({
   organizations = [],
   selectedOrgId,
   onOrgChange,
+  onEventClick,
 }: CalendarSidebarProps) {
   const [orgDropdownOpen, setOrgDropdownOpen] = useState(false);
   const orgDropdownRef = useRef<HTMLDivElement>(null);
@@ -267,18 +271,25 @@ export default function CalendarSidebar({
               <ul className="space-y-2">
                 {filteredUpcomingEvents.map((event) => (
                   <li key={getEventInstanceKey(event)}>
-                    <div className="flex items-start gap-2 p-2 rounded hover:bg-[#24355c] transition-colors">
-                      <div
-                        className="w-2 h-2 rounded-full mt-1.5 flex-shrink-0"
-                        style={{ backgroundColor: event.color || '#2A9D8F' }}
-                      />
-                      <div className="min-w-0">
-                        <p className="text-sm font-medium truncate" style={{ color: '#e2e8f0' }}>{event.title}</p>
-                        <p className="text-xs truncate" style={{ color: '#94a3b8' }}>
-                          {formatEventDateTime(event)}
-                        </p>
+                    <button
+                      type="button"
+                      onClick={() => onEventClick?.(event)}
+                      title="View day in calendar"
+                      className="w-full text-left"
+                    >
+                      <div className="flex items-start gap-2 p-2 rounded hover:bg-[#24355c] transition-colors">
+                        <div
+                          className="w-2 h-2 rounded-full mt-1.5 flex-shrink-0"
+                          style={{ backgroundColor: event.color || '#2A9D8F' }}
+                        />
+                        <div className="min-w-0">
+                          <p className="text-sm font-medium truncate" style={{ color: '#e2e8f0' }}>{event.title}</p>
+                          <p className="text-xs truncate" style={{ color: '#94a3b8' }}>
+                            {formatEventDateTime(event)}
+                          </p>
+                        </div>
                       </div>
-                    </div>
+                    </button>
                   </li>
                 ))}
               </ul>

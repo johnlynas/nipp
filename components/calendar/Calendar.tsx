@@ -327,6 +327,15 @@ export default function Calendar({
     setView('month');
   }, [currentDate]);
 
+  // Clicking an Upcoming Events row in the sidebar jumps the main calendar
+  // to the day view for that event's start date.
+  const handleSidebarEventClick = useCallback((event: Pick<CalendarEvent, 'startDate'>) => {
+    const start = event.startDate instanceof Date ? event.startDate : new Date(event.startDate);
+    if (isNaN(start.getTime())) return;
+    setCurrentDate(new Date(start.getFullYear(), start.getMonth(), start.getDate()));
+    setView('day');
+  }, []);
+
   // ---------------------------------------------------------------------------
   // Event handlers
   // ---------------------------------------------------------------------------
@@ -452,7 +461,12 @@ export default function Calendar({
         }
 
         const { event: overrideEvent }: { event: CalendarEvent } = await patchRes.json();
-        setEvents((prev) => prev.map((e) => (e.id === eventId ? overrideEvent : e)));
+        // Replace ONLY the moved instance. Every expanded occurrence of a
+        // recurring series shares the base event id, so an id-only match would
+        // replace ALL instances with one record — producing N duplicate
+        // entries (and duplicate React keys) in local state.
+        const movedInstanceKey = getEventInstanceKey(existing);
+        setEvents((prev) => prev.map((e) => (e.id === eventId && getEventInstanceKey(e) === movedInstanceKey ? overrideEvent : e)));
       } else {
         const res = await fetch(
           `/api/organizations/${effectiveOrgId}/calendar-events/${eventId}`,
@@ -606,7 +620,11 @@ export default function Calendar({
 
         if (createRes.ok) {
           const { event: oneOff } = await createRes.json();
-          setEvents((prev) => prev.map((e) => (e.id === selectedEvent.id ? oneOff : e)));
+          // Swap ONLY the edited instance for the new one-off record. All
+          // expanded occurrences share the base id, so matching on id alone
+          // would overwrite every other occurrence with this one record.
+          const editedInstanceKey = getEventInstanceKey(selectedEvent);
+          setEvents((prev) => prev.map((e) => (getEventInstanceKey(e) === editedInstanceKey ? oneOff : e)));
         } else {
           const err = await createRes.json().catch(() => ({ error: 'Failed to create moved event' }));
           throw new Error(err.error || 'Failed to create moved event');
@@ -997,6 +1015,7 @@ export default function Calendar({
         organizations={organizations}
         selectedOrgId={selectedOrgId}
         onOrgChange={handleOrgChange}
+        onEventClick={handleSidebarEventClick}
       />
 
       {/* Event detail modal */}
