@@ -22,6 +22,8 @@ interface CalendarProps {
   organizationId: string;
   initialView?: CalendarView;
   className?: string;
+  /** Display name of the organisation whose calendar is shown (header title). */
+  organizationName?: string;
   /** Fired when the super admin org switcher picks a different tenant org. */
   onOrganizationSelected?: (orgId: string, orgName: string) => void;
 }
@@ -34,6 +36,7 @@ export default function Calendar({
   organizationId,
   initialView = 'month',
   className,
+  organizationName,
   onOrganizationSelected,
 }: CalendarProps) {
   // View state
@@ -70,7 +73,7 @@ export default function Calendar({
   // Organizations for switcher (super admin only). The displayed org is the
   // one from the ?org= URL param when present (survives refresh), otherwise
   // the caller's own org.
-  const [organizations, setOrganizations] = useState<{ id: string; name: string }[]>([]);
+  const [organizations, setOrganizations] = useState<{ id: string; name: string; isPlatform?: boolean }[]>([]);
   const [selectedOrgId, setSelectedOrgId] = useState<string | null>(() => {
     if (typeof window === 'undefined') return organizationId;
     return new URL(window.location.href).searchParams.get('org');
@@ -187,15 +190,30 @@ export default function Calendar({
     }
   }, []);
 
-  const fetchOrganizations = useCallback(async () => {
-    try {
-      const res = await fetch('/api/admin/organizations/list');
-      if (!res.ok) return;
-      const data = await res.json();
-      setOrganizations(data.organizations || []);
-    } catch {
-      // Silently fail
-    }
+  // Fetch organizations list on mount (for super admin org switcher). When the
+  // super admin has not explicitly picked an org (no ?org= param), default to
+  // the Platform organization so the platform calendar is shown first.
+  useEffect(() => {
+    let cancelled = false;
+    const loadOrgs = async () => {
+      try {
+        const res = await fetch('/api/admin/organizations/list');
+        if (!res.ok) return;
+        const data = await res.json();
+        const orgs: { id: string; name: string; isPlatform?: boolean }[] = data.organizations || [];
+        if (cancelled) return;
+        setOrganizations(orgs);
+        const urlHasOrg = new URLSearchParams(window.location.search).has('org');
+        if (!urlHasOrg) {
+          const platform = orgs.find((o) => o.isPlatform);
+          if (platform) setSelectedOrgId(platform.id);
+        }
+      } catch {
+        // Silently fail
+      }
+    };
+    loadOrgs();
+    return () => { cancelled = true; };
   }, []);
 
   const handleOrgChange = useCallback((orgId: string) => {
@@ -261,11 +279,6 @@ export default function Calendar({
     load();
     return () => { cancelled = true; abortRef.current?.abort(); };
   }, [effectiveOrgId, organizationId, selectedOrgId, currentDateKey, view, fetchCalendars, fetchEvents, getDateRange]);
-
-  // Fetch organizations list on mount (for super admin org switcher)
-  useEffect(() => {
-    fetchOrganizations();
-  }, [fetchOrganizations]);
 
   // ---------------------------------------------------------------------------
   // Navigation handlers
@@ -756,7 +769,11 @@ export default function Calendar({
   // ---------------------------------------------------------------------------
 
   const upcomingEvents = useMemo(() => {
-    const now = new Date();
+    // In Month/Week/Day views only show events that fall inside the currently
+    // displayed date range; in Year view fall back to everything from now on.
+    const { start: rangeStart, end: rangeEnd } = getDateRange();
+    const lowerBound = view === 'year' ? new Date() : rangeStart;
+    const upperBound = view === 'year' ? null : rangeEnd;
     // Deduplicate by instance key (multi-day events and recurring instances may
     // appear multiple times in the raw list)
     const seen = new Set<string>();
@@ -766,7 +783,9 @@ export default function Calendar({
         if (seen.has(key)) return false;
         seen.add(key);
         const start = e.startDate instanceof Date ? e.startDate : new Date(e.startDate);
-        return !isNaN(start.getTime()) && start >= now;
+        if (isNaN(start.getTime())) return false;
+        if (start < lowerBound) return false;
+        return upperBound ? start <= upperBound : true;
       })
       .sort((a, b) => {
         const aStart = a.startDate instanceof Date ? a.startDate : new Date(a.startDate);
@@ -774,7 +793,7 @@ export default function Calendar({
         return aStart.getTime() - bStart.getTime();
       })
       .slice(0, 15);
-  }, [events]);
+  }, [events, view, getDateRange]);
 
   // ---------------------------------------------------------------------------
   // Render view title
@@ -875,6 +894,15 @@ export default function Calendar({
     <div className={`flex h-full ${className || ''}`} style={{ backgroundColor: '#f8f9fa' }}>
       {/* Main calendar area */}
       <div className="flex-1 flex flex-col overflow-hidden">
+        {/* Org title bar — lives inside the left column so the right-hand
+            Upcoming Events sidebar extends to the top of the screen. */}
+        {organizationName && (
+          <div className="bg-white border-b px-4 py-3 flex items-center shadow-sm flex-shrink-0" style={{ borderColor: '#dee2e6' }}>
+            <h1 className="text-lg font-semibold" style={{ color: '#1B2A4A' }}>
+              {organizationName} Calendar
+            </h1>
+          </div>
+        )}
         {/* Toolbar */}
         <div className="flex items-center justify-between px-4 py-3 bg-white border-b" style={{ borderColor: '#dee2e6' }}>
 

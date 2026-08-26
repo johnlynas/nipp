@@ -46,7 +46,7 @@ export default function AdminDashboardLayout({ children }: { children: React.Rea
 
   return (
     <RequireSuperAdmin>
-      <div className="min-h-screen bg-[#f8f9fa] flex overflow-hidden">
+      <div className="h-screen bg-[#f8f9fa] flex overflow-hidden">
         {/* Sidebar */}
         <aside
           className={`flex-shrink-0 bg-[#1B2A4A] text-white flex flex-col transition-all duration-200 overflow-hidden ${
@@ -117,7 +117,7 @@ export default function AdminDashboardLayout({ children }: { children: React.Rea
           )}
 
           {/* Page Content */}
-          <main className="flex-1 p-6 overflow-y-auto">
+          <main className={`flex-1 min-h-0 min-w-0 ${isCalendarPage ? 'flex flex-col overflow-hidden' : 'p-6 overflow-y-auto'}`}>
             {children}
           </main>
         </div>

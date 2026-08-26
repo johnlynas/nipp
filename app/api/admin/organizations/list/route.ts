@@ -35,7 +35,7 @@ export async function GET() {
 
     return NextResponse.json({
       organizations: [
-        ...platform.map((o) => ({ id: o.id, name: 'Platform' })),
+        ...platform.map((o) => ({ id: o.id, name: 'Platform', isPlatform: true })),
         ...tenants.map((o) => ({ id: o.id, name: o.name })),
       ],
     });

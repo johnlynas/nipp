@@ -76,22 +76,15 @@ export default function CalendarPage() {
   }
 
   return (
-    <div className="flex flex-col h-full">
-      {/* Custom header */}
-      <header className="bg-white border-b px-6 py-3 flex items-center justify-between shadow-sm" style={{ borderColor: '#dee2e6' }}>
-        <h1 className="text-lg font-semibold" style={{ color: '#1B2A4A' }}>
-          {selectedOrgName ? `${selectedOrgName} Calendar` : 'Calendar'}
-        </h1>
-      </header>
-      <div className="flex-1 overflow-hidden">
-        <Calendar
-          organizationId={orgId}
-          onOrganizationSelected={(id, name) => {
-            setOrgId(id);
-            if (name) setSelectedOrgName(name);
-          }}
-        />
-      </div>
+    <div className="flex-1 overflow-hidden">
+      <Calendar
+        organizationId={orgId}
+        organizationName={selectedOrgName}
+        onOrganizationSelected={(id, name) => {
+          setOrgId(id);
+          if (name) setSelectedOrgName(name);
+        }}
+      />
     </div>
   );
 }
