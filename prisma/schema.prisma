@@ -45,6 +45,27 @@ enum NotificationStatus {
   FAILED
 }
 
+/** Calendar event types */
+enum CalendarEventType {
+  VIEWING
+  INSPECTION
+  MAINTENANCE
+  LEASE_SIGNING
+  LEASE_RENEWAL
+  KEY_EXCHANGE
+  OTHER
+}
+
+/** Recurrence frequency for recurring calendar events (used by frontend/display helpers). */
+enum CalendarRecurrenceFrequency {
+  DAILY
+  WEEKLY
+  MONTHLY
+  QUARTERLY
+  SEMI_ANNUALLY
+  ANNUALLY
+}
+
 // ============================================================
 // Authentication Models (BetterAuth — global, not org-scoped)
 // ============================================================
@@ -135,6 +156,9 @@ model Organization {
   teams              Team[]
   teamMembers        TeamMember[] // Organization-scoped team memberships
   teamRoles          TeamRole[]   // Organization-scoped team-role assignments
+  // Calendars: organization-scoped calendar containers and events
+  calendars          Calendar[]
+  calendarEvents     CalendarEvent[]
 }
 
 model Member {
@@ -429,4 +453,64 @@ model ResourceRole {
   role       Role     @relation(fields: [roleId], references: [id], onDelete: Cascade)
 
   @@unique([resourceId, roleId]) // A role can only be assigned once per resource
+}
+
+// ============================================================
+// Calendar Models (Interactive Calendar — org-scoped)
+// ============================================================
+
+/**
+ * Calendar — Container/namespace for events within an organization.
+ * Each org gets one default calendar at bootstrap. Supports multiple calendars
+ * per org for future extensibility (e.g., "Maintenance Calendar", "Lettings Calendar").
+ */
+model Calendar {
+  id          String   @id @default(cuid())
+  name        String   // Human-readable calendar name
+  description String?
+  color       String   @default("#1B2A4A") // Default color theme
+  isDefault   Boolean  @default(false) // Exactly one default calendar per org
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  organizationId String
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+
+  events CalendarEvent[]
+
+  @@unique([organizationId, name]) // Prevent duplicate names within an org
+  @@index([organizationId])
+}
+
+/**
+ * CalendarEvent — Individual events within a calendar.
+ * Supports single-day, multi-day, and recurring events via rrule JSON.
+ */
+model CalendarEvent {
+  id          String   @id @default(cuid())
+  title       String
+  description String?
+  startDate   DateTime // Local datetime (no timezone for v1)
+  endDate     DateTime // Local datetime (no timezone for v1)
+  eventType   CalendarEventType @default(OTHER)
+  color       String?  // Event-level override of calendar default color
+
+  calendarId String
+  calendar   Calendar @relation(fields: [calendarId], references: [id], onDelete: Cascade)
+
+  /** RFC 5545 recurrence rule stored as JSON (rrule format). */
+  rrule        Json?
+  /** Excluded dates from expansion (YYYY-MM-DD strings). */
+  exdates      Json @default("[]") @db.Json
+
+  propertyId String? // Optional property association (nullable for general events)
+
+  organizationId String
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@index([organizationId, startDate]) // Efficient date range queries
+  @@index([propertyId])                // Property-based event lookups (future scheduler)
 }

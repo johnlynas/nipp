@@ -1,9 +1,9 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, useMemo } from 'react';
 import { useRouter, usePathname } from 'next/navigation';
 import Link from 'next/link';
-import { Menu, X, UserRound, Building2, UsersRound, Shield, Key, Layers, LogOut } from 'lucide-react';
+import { Menu, X, UserRound, Building2, UsersRound, Shield, Key, Layers, LogOut, CalendarDays } from 'lucide-react';
 import { authClient } from '@/lib/auth-client';
 import { RequireSuperAdmin } from '@/components/auth/RequireSuperAdmin';
 
@@ -14,12 +14,14 @@ const navItems = [
   { href: '/dashboard/admin/roles', label: 'Roles', icon: Shield },
   { href: '/dashboard/admin/permissions', label: 'Permissions', icon: Key },
   { href: '/dashboard/admin/resources', label: 'Resources', icon: Layers },
+  { href: '/dashboard/admin/calendar', label: 'Calendar', icon: CalendarDays },
 ];
 
 export default function AdminDashboardLayout({ children }: { children: React.ReactNode }) {
   const [sidebarOpen, setSidebarOpen] = useState(true);
   const router = useRouter();
   const pathname = usePathname();
+  const isCalendarPage = useMemo(() => pathname === '/dashboard/admin/calendar', [pathname]);
 
   const handleLogout = async () => {
     try {
@@ -44,7 +46,7 @@ export default function AdminDashboardLayout({ children }: { children: React.Rea
 
   return (
     <RequireSuperAdmin>
-      <div className="min-h-screen bg-[#f8f9fa] flex overflow-hidden">
+      <div className="h-screen bg-[#f8f9fa] flex overflow-hidden">
         {/* Sidebar */}
         <aside
           className={`flex-shrink-0 bg-[#1B2A4A] text-white flex flex-col transition-all duration-200 overflow-hidden ${
@@ -106,14 +108,16 @@ export default function AdminDashboardLayout({ children }: { children: React.Rea
         {/* Main Content */}
         <div className="flex-1 flex flex-col min-w-0">
           {/* Top Bar */}
-          <header className="bg-white border-b px-6 py-3 flex items-center justify-between shadow-sm" style={{ borderColor: '#dee2e6' }}>
-            <h1 className="text-lg font-semibold" style={{ color: '#1B2A4A' }}>
-              {navItems.find((item) => item.href === pathname)?.label || 'Dashboard'}
-            </h1>
-          </header>
+          {!isCalendarPage && (
+            <header className="bg-white border-b px-6 py-3 flex items-center justify-between shadow-sm" style={{ borderColor: '#dee2e6' }}>
+              <h1 className="text-lg font-semibold" style={{ color: '#1B2A4A' }}>
+                {navItems.find((item) => item.href === pathname)?.label || 'Dashboard'}
+              </h1>
+            </header>
+          )}
 
           {/* Page Content */}
-          <main className="flex-1 p-6 overflow-y-auto">
+          <main className={`flex-1 min-h-0 min-w-0 ${isCalendarPage ? 'flex flex-col overflow-hidden' : 'p-6 overflow-y-auto'}`}>
             {children}
           </main>
         </div>

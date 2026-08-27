@@ -132,6 +132,66 @@ export const auth = betterAuth({
     },
   },
 
+  // ---------------------------------------------------------------------------
+  // Auto-assign active organization on session creation.
+  // Since each user belongs to exactly one org (1:1), we look up their
+  // Member record and set activeOrganizationId on the User model (the field
+  // lives there, not on Session). This way /api/auth/me returns it and
+  // calendar/event APIs work without a manual "select org" step.
+  // ---------------------------------------------------------------------------
+  databaseHooks: {
+    session: {
+      create: {
+        after: async (session) => {
+          logger.info(
+            { userId: session.userId, sessionId: session.id },
+            '[Auth] Session created — checking for activeOrganizationId',
+          );
+
+          // Only set the org once — skip if it's already assigned
+          const current = await prisma.user.findUnique({
+            where: { id: session.userId },
+            select: { activeOrganizationId: true },
+          });
+
+          if (current?.activeOrganizationId) {
+            logger.info(
+              { userId: session.userId, activeOrgId: current.activeOrganizationId },
+              '[Auth] User already has activeOrganizationId — skipping',
+            );
+            return;
+          }
+
+          logger.info(
+            { userId: session.userId },
+            '[Auth] User has no activeOrganizationId — looking up Member record',
+          );
+
+          const member = await prisma.member.findFirst({
+            where: { userId: session.userId },
+            select: { orgId: true },
+          });
+
+          if (member) {
+            logger.info(
+              { userId: session.userId, orgId: member.orgId },
+              '[Auth] Found Member record — setting activeOrganizationId on User',
+            );
+            await prisma.user.update({
+              where: { id: session.userId },
+              data: { activeOrganizationId: member.orgId },
+            });
+          } else {
+            logger.warn(
+              { userId: session.userId },
+              '[Auth] No Member record found for user — activeOrganizationId NOT set',
+            );
+          }
+        },
+      },
+    },
+  },
+
   hooks: {
     before: createAuthMiddleware(async (ctx) => {
       // Check banned status during email sign-in

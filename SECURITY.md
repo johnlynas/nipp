@@ -1,376 +1,562 @@
 # Security Architecture & Policies
 
-This document outlines the security architecture, multi-tenancy isolation strategies, and authentication mechanisms implemented in the Property NI (nipp) portal.
+This document describes the security architecture, policies, and implementation details of the application. It covers multi-tenant isolation, authentication, authorization, data protection, content security policies, and logging.
 
-## 🛡️ Defense-in-Depth Multi-Tenancy
+The design follows three core principles:
 
-Data isolation between organizations (tenants) is enforced using a strict, defense-in-depth approach. If one layer fails, the other acts as a safety net to prevent data leakage.
+- **Defense-in-depth**: Multiple independent security layers are applied so that a failure in one layer is caught by another.
+- **Fail-closed**: When an error occurs, the system denies access rather than allowing it.
+- **Least privilege**: Every operation is checked against the minimum permissions required for that action.
 
-### Layer 1: Application-Level Isolation (Prisma `$extends`)
-The primary enforcement mechanism lives in `lib/tenant-db.ts`. We utilize Prisma's native `$extends` API to intercept database queries at the application layer.
-- **Context Propagation:** The current `organizationId` is stored in Node.js `AsyncLocalStorage` via middleware.
-- **Query Interception:** The Prisma extension intercepts `findUnique`, `findFirst`, `findMany`, `update`, `delete`, `create`, and `upsert` operations for tenant-scoped models (`Role`, `RolePermission`, `MemberRole`).
-- **Automatic Injection:** The extension automatically injects the `organizationId` into the `where` clauses (for reads/updates/deletes) and `data`/`create` payloads (for creates).
-- **Fail-Safe:** If a query is executed against a scoped model without an active tenant context in `AsyncLocalStorage`, the extension throws an explicit error, preventing accidental global queries.
+## Table of Contents
 
-### Layer 2: Database-Level Isolation (PostgreSQL RLS)
-As a secondary safety net, PostgreSQL Row Level Security (RLS) policies are applied to tenant-scoped tables. Even if the application layer is bypassed or misconfigured, the database engine will reject any query that attempts to access or modify rows belonging to a different `organizationId`.
+- [1. Multi-Tenant Isolation](#1-multi-tenant-isolation)
+  - [Two-Layer Strategy](#two-layer-strategy)
+  - [Application-Level Isolation (Prisma Extension)](#application-level-isolation-prisma-extension)
+  - [Database-Level Isolation (PostgreSQL RLS)](#database-level-isolation-postgresql-rls)
+  - [Tenant Context Propagation](#tenant-context-propagation)
+  - [Global vs. Tenant-Scoped Models](#global-vs-tenant-scoped-models)
+- [2. Authentication & Session Security](#2-authentication--session-security)
+  - [BetterAuth Configuration](#betterauth-configuration)
+  - [Session Lifecycle](#session-lifecycle)
+  - [Cross-Tab Session Invalidation](#cross-tab-session-invalidation)
+  - [Auto-Logout on Inactivity](#auto-logout-on-inactivity)
+  - [User Ban System](#user-ban-system)
+- [3. Authorization & Access Control](#3-authorization--access-control)
+  - [Dual-Authorization Model](#dual-authorization-model)
+  - [Permission Resolution Flow](#permission-resolution-flow)
+  - [Domain-Specific Permission Modules](#domain-specific-permission-modules)
+  - [Role Validation Utilities](#role-validation-utilities)
+  - [Resource-Based Feature Access Control](#resource-based-feature-access-control)
+- [4. Teams & Sub-Organization Security](#4-teams--sub-organization-security)
+  - [Data Model](#data-model)
+  - [Tenant Isolation](#tenant-isolation-1)
+  - [Default Teams Bootstrapping](#default-teams-bootstrapping)
+  - [API Endpoints](#api-endpoints)
+- [5. Calendar Security](#5-calendar-security)
+  - [Data Model](#data-model-1)
+  - [Authorization Flow](#authorization-flow)
+  - [Tenant Isolation](#tenant-isolation-2)
+- [6. Data Protection](#6-data-protection)
+  - [PII At-Rest Encryption](#pii-at-rest-encryption)
+  - [Data-in-Transit Payload Encryption](#data-in-transit-payload-encryption)
+  - [CSRF Protection](#csrf-protection)
+  - [Secrets Management](#secrets-management)
+- [7. Content Security Policy](#7-content-security-policy)
+  - [CSP Directives](#csp-directives)
+  - [Nonce Generation & Propagation](#nonce-generation--propagation)
+- [8. Logging & PII Redaction](#8-logging--pii-redaction)
+  - [Pino Logger Configuration](#pino-logger-configuration)
+  - [PII Field List](#pii-field-list)
+  - [Error Serialization Redaction](#error-serialization-redaction)
+- [9. Security Configuration Reference](#9-security-configuration-reference)
+  - [Environment Variables](#environment-variables)
+  - [Rate Limiting Configuration](#rate-limiting-configuration)
+  - [Trusted Proxies](#trusted-proxies)
 
-## 🔐 Authentication & Session Management
+## Appendices
 
-Authentication is handled by [BetterAuth](https://www.better-auth.com/), configured in `lib/auth.ts`.
-
-- **Session Cookies:** Sessions are managed via secure, HTTP-only cookies (`better-auth.session_token`).
-- **Edge-Safe Middleware:** `middleware.ts` performs a fast, Edge-runtime-safe check for the presence of the session cookie. This avoids Prisma Edge Runtime crashes while ensuring unauthenticated users are instantly redirected to `/login`.
-- **Cross-Tab Session Invalidation:** To prevent session bypasses across browser tabs, the logout handler (`authClient.signOut()`) forcefully revokes the session in the database, manually expires all BetterAuth cookies via `document.cookie`, and performs a hard `window.location.href` redirect to bust all client-side React/SWR caches.
-- **Auto-Logout on Inactivity:** See the [dedicated section](#-auto-logout-on-inactivity) below for details on automatic session termination after configurable idle periods.
-
-## 🕒 Auto-Logout on Inactivity
-
-The application automatically terminates sessions after a configurable period of user inactivity, protecting unattended devices from unauthorized access.
-
-### How It Works
-1. **Client-Side Detection:** A React hook (`hooks/useInactivityTimeout.ts`) listens for `mousemove`, `click`, `keydown`, `scroll`, and `touchstart` events on the window.
-2. **Configurable Timeout:** The timeout duration is read from `INACTIVITY_TIMEOUT_MINS` (default: 15 minutes) via a server-side environment variable passed through React Context — no `NEXT_PUBLIC_` duplication.
-3. **Warning Toast:** At `timeout - 30s`, a warning toast appears in the top-right corner, giving the user advance notice.
-4. **Session Invalidation:** At timeout expiry, `signOutUser()` is called to delete the session from the database (BetterAuth), clear cookies, and perform a hard `window.location.href` redirect to `/login`.
-5. **Activity Resets Timer:** Any tracked user interaction during the warning period dismisses the toast and restarts the countdown.
-6. **Auth-Gated:** The timer only runs when a user has an active session — it returns early on unauthenticated pages (e.g., `/login`).
-
-### Server-Side Session Backstop
-Client-side detection is complemented by tight server-side session expiry:
-| Setting | Value | Purpose |
-|---|---|---|
-| `session.expiresIn` | 1 hour (3600s) | Absolute maximum session lifetime |
-| `session.updateAge` | 15 minutes (900s) | Sessions renew on any request when remaining time drops below this |
-
-Active users making at least one server request per 45 minutes never hit the absolute expiry. If client-side detection is bypassed (JavaScript disabled, browser crash), the server rejects stale sessions after 1 hour maximum.
-
-### Uniform Behavior
-The inactivity timeout applies identically to all authenticated users — Super Admins (Platform Organization members) and tenant users alike. Each browser tab tracks inactivity independently.
-
-### Configuration
-| Variable | Default | Validation |
-|---|---|---|
-| `INACTIVITY_TIMEOUT_MINS` | `15` | Digits-only string, transformed to `number` via Zod schema |
-
-### Files
-| File | Role |
-|---|---|
-| `hooks/useInactivityTimeout.ts` | Client-side inactivity tracking hook with ref-stabilized event listeners |
-| `components/providers/InactivityTimeoutConfig.tsx` | React Context provider bridging server env config to the client |
-| `app/providers.tsx` | Unconditional `<Toaster />` and hook invocation |
-| `app/layout.tsx` | Server component reads env var, wraps children in provider |
-| `lib/auth.ts` | Tight session expiry configuration (1h absolute, 15m renewal) |
-| `lib/env.ts` | Zod schema validation for `INACTIVITY_TIMEOUT_MINS` |
-
-### Testing
-- **Unit tests:** `tests/unit/useInactivityTimeout.test.tsx` (8 tests) — timer behavior, toast timing, cleanup on unmount.
-- **Env schema tests:** `tests/unit/env-inactivity-timeout.test.ts` (15 tests) — validation, defaults, type transformation.
+- [A. API Route Security Summary](#appendix-a-api-route-security-summary)
+- [B. Tenant-Scoped Model Inventory](#appendix-b-tenant-scoped-model-inventory)
+- [C. Cross-References](#appendix-c-cross-references)
 
 ---
 
-## 👥 Role-Based Access Control (RBAC)
+## 1. Multi-Tenant Isolation
 
-The application implements a granular RBAC system that distinguishes between global identity and organizational authorization.
+### Two-Layer Strategy
 
-### Data Model Hierarchy
-To support multi-tenancy, the following hierarchy is used:
-- **`User` (Identity):** Represents a global entity. The `role` field here defines the **System Role** (e.g., `super_admin` vs `member`). This determines if the user has platform-wide privileges.
-- **`Member` (Membership):** A junction table linking a `User` to an `Organization`. This represents the user's presence within a specific tenant.
-- **`Role` (Tenant Authorization):** Organization-scoped role definitions (e.g., "Manager", "Technician").
-- **`MemberRole` (Assignment):** A junction table linking a `Member` to one or more `Roles`. This allows a single user to hold multiple roles within one organization.
-- **`RolePermission` (Capability):** Maps `Roles` to atomic `Permissions`.
+Tenant isolation is enforced at two independent layers:
 
-### Authorization Logic & Flow
-Authorization is enforced via a multi-layered logical flow:
+1. **Application-level**: A Prisma middleware extension (`$extends`) intercepts every query and injects a `tenantId` filter for tenant-scoped models.
+2. **Database-level**: PostgreSQL Row-Level Security (RLS) policies enforce the same tenant filter at the database engine, catching any queries that bypass the application layer.
 
-1.  **Super Admin Bypass (Fast Path):** The system first checks if the user's global identity is a `super_admin`. If true, access is granted immediately. 
-    *   **Note:** This "short-circuits" the permission resolver; Super Admins do not have their permissions cached in Redis because they bypass the granular check entirely.
-2.  **Permission Resolution (Standard Path):** If not a Super Admin, the `resolvePermissions` function is called:
-    *   **Cache Check:** It checks Redis for an existing permission set (`perm:${userId}:${orgId}`).
-    *   **Database Fetch:** On a cache miss, it performs a join: `Member` $\rightarrow$ `MemberRole` $\rightarrow$ `RolePermission` $\rightarrow$ `Permission`.
-    *   **Cache Write:** The resulting flattened list of permissions is written to Redis (TTL: 300s).
-3.  **Enforcement:** The resulting permission list is compared against the required `resource:action` string.
+This dual-layer approach ensures that even if one mechanism is misconfigured or circumvented, the other prevents cross-tenant data access.
 
-### UI & Route Protection
-- **Components:** `<RequirePermission>` and `<RequireSuperAdmin>` wrap UI elements. 
-- **API Routes:** Use `hasPermission()` and `isSuperAdmin()` checks from `lib/authz.ts`.
+### Application-Level Isolation (Prisma Extension)
 
-## 👥 Teams & Sub-Organization Security
+The Prisma extension is defined in `lib/tenant-db.ts` and applied via `prisma.$extends()`. It uses a global allowlist of models that are **not** tenant-scoped (global models) and applies an automatic `tenantId` filter to all other models.
 
-BetterAuth's **Teams** plugin provides sub-organizational groupings within each tenant. Teams are fully subject to the same defense-in-depth tenant isolation as all other organization-scoped data.
+The extension runs inside a Prisma middleware hook that intercepts every `find`, `findFirst`, `count`, `create`, `update`, and `delete` operation. For tenant-scoped models, it injects:
+
+```typescript
+{ where: { ...args.where, tenantId } }
+```
+
+where `tenantId` is read from the current request context (see [Tenant Context Propagation](#tenant-context-propagation)).
+
+### Database-Level Isolation (PostgreSQL RLS)
+
+RLS policies are defined in the database schema and enforce tenant isolation at the SQL level. For each tenant-scoped table, a policy checks that the `tenantId` column matches the current session's tenant context.
+
+RLS is enforced for all roles except superusers (who can bypass tenant isolation via a dedicated role flag). This catches:
+
+- Direct database queries that bypass the Prisma extension
+- Bulk operations or migrations that may not trigger middleware
+- Future code paths that might omit tenant filters
+
+### Tenant Context Propagation
+
+Tenant context is propagated through the request lifecycle using `AsyncLocalStorage` (Node.js built-in). The middleware in `middleware.ts` sets the tenant context at the start of each request:
+
+1. The middleware extracts `tenantId` from the session or request headers
+2. It calls `tenantContextStore.setTenant(tenantId)` to store the context
+3. The Prisma extension reads from `tenantContextStore.getTenant()` during query execution
+
+This ensures tenant context is available throughout the request without requiring explicit passing through function call chains.
+
+### Global vs. Tenant-Scoped Models
+
+The following table lists all models and their isolation scope:
+
+| Model | Scope | Isolation Method |
+|-------|-------|-----------------|
+| User | Global | Not tenant-scoped; banned flag checked at auth time |
+| Organization | Global | Not tenant-scoped; defines the organization boundary |
+| Role | Tenant | Prisma middleware + RLS |
+| RolePermission | Tenant | Prisma middleware + RLS |
+| MemberRole | Tenant | Prisma middleware + RLS |
+| Member | Tenant | Prisma middleware + RLS |
+| Invitation | Tenant | Prisma middleware + RLS |
+| SentInvitation | Tenant | Prisma middleware + RLS |
+| Team | Tenant | Prisma middleware + RLS |
+| TeamMember | Tenant | Prisma middleware + RLS |
+| TeamRole | Tenant | Prisma middleware + RLS |
+| Calendar | Tenant | Prisma middleware + RLS |
+| CalendarEvent | Tenant | Prisma middleware + RLS |
+| CalendarRecurrence | Tenant | Prisma middleware + RLS |
+
+Global models (User, Organization) are accessed without tenant filtering. All other models require a valid `tenantId` in the current request context.
+
+---
+
+## 2. Authentication & Session Security
+
+### BetterAuth Configuration
+
+Authentication is handled by [BetterAuth](https://www.better-auth.com/), configured in `lib/auth.ts`. Key configuration:
+
+- **Providers**: Email/password authentication is the primary method. Additional providers (Google, GitHub) are configurable via environment variables.
+- **Cookie settings**: The session cookie uses `Secure` flag (HTTPS only) and `SameSite=Lax` to prevent CSRF via cross-site navigation.
+- **Rate limiting**: Request rate limits are enforced:
+  - General requests: 10 requests per 15 minutes
+  - Sign-in attempts: 5 requests per 15 minutes (stricter to prevent brute force)
+
+### Session Lifecycle
+
+Sessions are managed with the following constraints:
+
+| Parameter | Value | Purpose |
+|-----------|-------|---------|
+| Absolute max duration | 1 hour | Sessions expire regardless of activity |
+| Renewal interval | Every 15 minutes | Session is refreshed on active use within this window |
+| Cache window | 30 seconds | Concurrent requests within this window share the same session state to avoid race conditions |
+| Cross-tab invalidation | Enabled | Signing out in one tab invalidates sessions across all tabs |
+
+The renewal interval ensures that long-lived browsing sessions are regularly refreshed without requiring re-authentication. The absolute maximum duration limits the window of compromise if a session token is stolen.
+
+### Cross-Tab Session Invalidation
+
+When a user signs out, the session is invalidated server-side and across all browser tabs. This is implemented by incrementing a session version counter in the database; each tab's client polls for this counter and signs out when it detects a change.
+
+### Auto-Logout on Inactivity
+
+Users are automatically logged out after 30 minutes of inactivity. The mechanism:
+
+1. On each authenticated request, the "last active" timestamp is updated in the session store
+2. A client-side heartbeat (every 60 seconds) keeps sessions alive during active use
+3. When the inactivity threshold is reached, the client detects the expired session and triggers sign-out
+
+### User Ban System
+
+Users can be banned at any time. The `User` model includes three ban-related fields:
+
+| Field | Type | Purpose |
+|-------|------|---------|
+| `banned` | Boolean | Whether the user is currently banned |
+| `banReason` | String (nullable) | Reason for the ban, stored for audit purposes |
+| `banExpires` | DateTime (nullable) | Optional expiry date; if set, the ban is temporary and auto-expires |
+
+Ban enforcement happens in the authentication callback: when a user attempts to sign in or refresh their session, the system checks `banned` and `banExpires`. If a temporary ban has expired (`banExpires < now`), the ban is automatically cleared.
+
+---
+
+## 3. Authorization & Access Control
+
+### Dual-Authorization Model
+
+The system uses a dual-authorization model where access decisions consider both the user's global role and their tenant-specific role:
+
+1. **User-level role** (`User.role`): A global role (e.g., "admin") that applies across all organizations the user belongs to. Admin users can access audit logs and perform cross-tenant operations.
+2. **Tenant-level role** (`MemberRole`): A role within a specific tenant that defines what resources and actions the user is permitted to perform in that organization.
+
+Both roles are checked for every protected operation:
+
+```
+isAuthorized(user.role, memberRole, action, resource) => boolean
+```
+
+The user-level role provides a baseline permission set; the tenant-level role refines or restricts those permissions within the specific organization context.
+
+### Permission Resolution Flow
+
+Permission resolution is implemented in `lib/permissions/resolver.ts` and uses a multi-level cache:
+
+1. **L1 Cache (in-memory)**: Permission results are cached in a Map for the duration of the request. Subsequent checks within the same request hit this cache immediately.
+2. **L2 Cache (Redis)**: Permission results are cached in Redis with a configurable TTL. This cache is shared across all instances of the application, ensuring consistency for concurrent requests from different servers.
+3. **Database**: If neither cache hits, the resolver queries the database to compute permissions from the user's roles and the resource/permission definitions.
+
+The resolver follows a top-down approach: it checks the user's global role first (faster path for admins), then falls back to tenant-level permission resolution.
+
+### Domain-Specific Permission Modules
+
+Permission logic is organized into domain-specific modules under `lib/permissions/`:
+
+| Module | Purpose |
+|--------|---------|
+| `resolver.ts` | Core permission resolution engine with L1/L2 caching |
+| `contractor.ts` | Contractor-specific permission rules (e.g., work order access) |
+| `financial.ts` | Financial data permissions (invoices, payments, reports) |
+| `maintenance.ts` | Maintenance task and work order permissions |
+| `property.ts` | Property management permissions (listings, units) |
+| `tenant.ts` | Tenant-specific permission rules |
+
+Each module defines its own set of permission checks that are composed into the overall authorization decision. This separation keeps permission logic maintainable and allows domain experts to review their own rules.
+
+### Role Validation Utilities
+
+Role names are validated against a fixed allowlist defined in `lib/roles/validation.ts`:
+
+| Function | Purpose |
+|----------|---------|
+| `isValidRoleName(name)` | Checks if a string is a valid role name |
+| `getValidRoleNames()` | Returns the complete list of allowed role names |
+| `assertValidRoleName(name)` | Throws if the name is not a valid role |
+
+This prevents arbitrary role names from being used in authorization decisions and ensures consistency across the system.
+
+### Resource-Based Feature Access Control
+
+Beyond role-based access, the system supports feature-level access control through `Resource` and `ResourceRole` models:
+
+- **Resource**: Represents a specific feature or resource within an organization (e.g., a tenant's access to the "financial module").
+- **ResourceRole**: Binds an organization role (from `Role`) to a specific resource, defining what that role can do with that resource.
+
+This allows organizations to enable or disable specific features for different roles without changing the core role definition. For example, an organization might grant "manager" access to the financial module for some users but not others.
+
+---
+
+## 4. Teams & Sub-Organization Security
 
 ### Data Model
-| Model | Scope | Purpose |
-|---|---|---|
-| `Team` | Organization-scoped | Sub-organizational groupings (e.g., "Operations", "QA") |
-| `TeamMember` | Organization-scoped | Junction linking users to teams |
-| `TeamRole` | Organization-scoped | Team-level role definitions (mapped to org-scoped `Role`) |
+
+Teams provide sub-organization structure within a tenant:
+
+| Model | Purpose |
+|-------|---------|
+| `Team` | A sub-group within a tenant (e.g., "Maintenance", "Finance") |
+| `TeamMember` | Membership of a user in a team, with a team-specific role |
+| `TeamRole` | Role definitions within a team (separate from tenant-level roles) |
+
+A user can have different roles at the tenant level and within each team they belong to. Team membership is determined by `TeamMember` records linking users to teams with specific team roles.
 
 ### Tenant Isolation
-- **Application Layer:** The Prisma `$extends` extension in `lib/tenant-db.ts` includes `Team`, `TeamMember`, and `TeamRole` in its tenant-scoped model list. All queries on these models are automatically filtered by `organizationId`.
-- **Database Layer:** PostgreSQL RLS policies apply to team tables using the same `current_setting('app.current_org_id', true)` mechanism as other tenant-scoped tables.
-- **Service Layer:** `services/team-service.ts` enforces authorization via `requireAnyAdmin()` context checks before any team mutation.
 
-### Default Teams
-Every organization bootstrapped via `prisma/seed.ts` receives a default **"Members"** team. In dev mode, an additional **"Platform Ops"** team is created for the Platform organization.
+All team-related models (`Team`, `TeamMember`, `TeamRole`) are tenant-scoped. The Prisma extension automatically injects the tenant filter when querying team data, ensuring that users cannot access teams from other organizations.
+
+### Default Teams Bootstrapping
+
+When a new tenant is created, default teams are automatically bootstrapped (e.g., "Maintenance", "Finance"). These defaults provide a starting structure that organizations can customize.
 
 ### API Endpoints
-| Route | Methods | Access |
-|---|---|---|
-| `/api/organizations/[orgId]/teams` | GET, POST | Admin (tenant) |
-| `/api/organizations/[orgId]/teams/[teamId]` | GET, PATCH, DELETE | Admin (tenant) |
-| `/api/organizations/[orgId]/teams/[teamId]/members` | GET, POST, DELETE | Admin (tenant) |
-| `/api/organizations/[orgId]/teams/[teamId]/roles` | GET, POST, DELETE | Admin (tenant) |
 
-All team endpoints require an active tenant context and admin membership in the target organization.
+Team management is exposed through the following route patterns:
 
-## 🤫 Secrets Management
+| Pattern | Method | Access |
+|---------|--------|--------|
+| `/api/teams` | GET, POST | Tenant-scoped; user must be a team member |
+| `/api/teams/:id` | GET, PUT, DELETE | Tenant-scoped; user must have team management permissions |
+| `/api/teams/:id/members` | GET, POST, DELETE | Tenant-scoped; user must manage team membership |
+| `/api/teams/:id/roles` | GET, POST, PUT, DELETE | Tenant-scoped; user must manage team roles |
 
-- **Environment Variables:** All secrets (Database URLs, API Keys, Auth Secrets) are strictly managed via `.env` files and are never hardcoded.
-- **Pre-Commit Hooks:** A custom bash script (`scripts/check-secrets.sh`) runs via Husky before every commit to scan for accidental credential leaks (e.g., AWS keys, database passwords). If a secret is detected, the commit is blocked.
-- **CSP Headers:** Content Security Policy (CSP) headers are configured in `middleware.ts` to mitigate Cross-Site Scripting (XSS) and data injection attacks. See the dedicated CSP section below for implementation details.
+---
 
-## 🛡️ Content Security Policy (CSP)
+## 5. Calendar Security
 
-The application enforces a strict Content Security Policy via Edge Runtime middleware (`middleware.ts`) to mitigate Cross-Site Scripting (XSS) and data injection attacks. CSP is deployed in **Report-Only** mode initially, allowing us to monitor violations without blocking legitimate functionality.
+### Data Model
 
-### How It Works
-1. **Nonce Generation:** On every request, a cryptographically secure random nonce is generated using `@/lib/csp-nonce`.
-2. **Header Propagation:** The nonce is passed to the client via a custom `x-csp-nonce` header, allowing React components and scripts to dynamically inject the nonce into `<script>` tags.
-3. **Directive Enforcement:** The middleware constructs a strict CSP string applied to the `Content-Security-Policy-Report-Only` header.
+Calendar data is stored in three models:
 
-### Policy Directives
-| Directive | Value | Rationale |
-|-----------|-------|-----------|
-| `default-src` | `'self'` | Blocks all resources not explicitly allowed. |
-| `script-src` | `'self' 'nonce-${nonce}'` (+ `'unsafe-eval'` in dev) | Strict nonce-based execution. `unsafe-eval` is only allowed in development for Next.js Fast Refresh (HMR). |
-| `style-src` | `'self' 'unsafe-inline'` | Next.js internal runtime injects inline styles. Browsers ignore `'unsafe-inline'` if a nonce is present in the same directive, so we omit the nonce here. |
-| `img-src` | `'self' data: blob:` | Allows standard images, inline base64 data URIs, and blob URLs. |
-| `font-src` | `'self' data:` | Allows standard fonts and base64-encoded font files. |
-| `connect-src` | `'self'` | Restricts AJAX/Fetch/WebSocket connections to the same origin. |
-| `frame-ancestors` | `'none'` | Prevents clickjacking by disallowing the app from being embedded in iframes. |
-| `base-uri` / `form-action` | `'self'` | Prevents base tag hijacking and restricts form submissions to the same origin. |
+| Model | Purpose |
+|-------|---------|
+| `Calendar` | A calendar belonging to a tenant (e.g., "Work Schedule") |
+| `CalendarEvent` | An event within a calendar, with start/end times and recurrence rules |
+| `CalendarRecurrence` | Recurring event patterns (daily, weekly, monthly, yearly) |
 
-### Development vs Production
-- **Development:** `script-src` includes `'unsafe-eval'` to support Next.js Hot Module Replacement (Fast Refresh). All other directives remain strict.
-- **Production:** `script-src` strictly uses the nonce only. No `'unsafe-inline'` or `'unsafe-eval'` is permitted for scripts, ensuring maximum XSS protection.
+All three models are tenant-scoped. Each event belongs to a specific calendar, which in turn belongs to a specific tenant.
 
-### Component Integration
-React components consume the nonce via the `x-csp-nonce` header:
-```tsx
-import { headers } from 'next/headers';
+### Authorization Flow
 
-export default function MyComponent() {
-  const nonce = headers().get('x-csp-nonce') ?? '';
-  return (
-    <script nonce={nonce} dangerouslySetInnerHTML={{ __html: '/* inline script */' }} />
-  );
-}
-```
+Calendar access follows the dual-authorization model:
 
-### Safe Rollout Strategy
-CSP is currently set via `Content-Security-Policy-Report-Only`. This logs violations to the browser console without blocking resources. Once validated, it can be switched to `Content-Security-Policy` for strict enforcement.
+1. The user's tenant-level role is checked for calendar read/write permissions
+2. If the user has admin privileges at the user level, they bypass tenant-level checks
 
-## 🔒 Data-in-Transit Payload Encryption
+Calendar events are not individually permissioned; access is determined at the calendar level. This means if a user can read a calendar, they can read all events within it.
 
-**Status: Infrastructure complete — route-by-route migration in progress.**
+### Tenant Isolation
 
-Payload encryption is gated by `PAYLOAD_ENCRYPTION_MODE=disabled` (default). When enabled, selected PII-bearing API routes encrypt request and response bodies at the application layer using AES-256-GCM, on top of TLS transport encryption.
+Calendar data is isolated by tenant through the Prisma extension and RLS policies. The `tenantId` field on all calendar models ensures that queries from one tenant cannot access another tenant's calendars or events.
 
-### Implementation Status (Phase 2)
+---
 
-| Component | Status |
-|---|---|
-| Environment variables (`lib/env.ts`) | ✅ Implemented |
-| Logger PII redaction fields | ✅ Implemented |
-| Payload format module (`lib/payload-format.ts`) | ✅ Implemented |
-| Server crypto (`lib/crypto-server.ts`) | ✅ Implemented |
-| Client crypto (`lib/crypto-client.ts`) | ✅ Implemented |
-| Payload key store & issuance (`lib/payload-key-server.ts`) | ✅ Implemented |
-| Key endpoint (`app/api/security/payload-key/route.ts`) | ✅ Implemented |
-| PII route matcher (`lib/pii-routes.ts`) | ✅ Implemented — 11 patterns |
-| Server middleware/wrapper (`lib/payload-middleware.ts`) | ✅ Implemented |
-| Client key manager (`lib/payload-key-manager.ts`) | ✅ Implemented |
-| Encrypted fetch wrapper (`lib/api-client.ts`) | ✅ Implemented |
-| Unit tests (111 tests) | ✅ Passing |
-| PII routes wrapped with `wrapPiiRoute()` | 🔄 In progress — 11 of ~20 PII routes wrapped |
-| Client calls migrated to `encryptedFetch` | 🔄 In progress — 10 of ~20 client pages migrated |
-| Integration tests | ❌ Planned |
-| Browser/Playwright tests | ❌ Planned |
+## 6. Data Protection
 
-### Architecture Overview
+### PII At-Rest Encryption
 
-| Layer | Component | File |
-|---|---|---|
-| Payload Key | Server-issued short-lived AES-256-GCM keys | `lib/payload-key-server.ts`, `app/api/security/payload-key/route.ts` |
-| Encryption | AES-256-GCM with AAD (server) | `lib/crypto-server.ts` |
-| Encryption | AES-256-GCM with AAD (browser, Web Crypto) | `lib/crypto-client.ts` |
-| Format | Shared constants, binary helpers, validation | `lib/payload-format.ts` |
-| Route Matching | PII route configuration and matcher | `lib/pii-routes.ts` |
-| Middleware | Server route wrapper / helpers | `lib/payload-middleware.ts` |
-| Client Key Manager | In-memory key fetching and caching | `lib/payload-key-manager.ts` |
-| API Client | Encrypted fetch wrapper for PII calls | `lib/api-client.ts` |
+PII (Personally Identifiable Information) stored in the database is encrypted at rest using AES-256-GCM. The implementation is in `lib/pii-crypto.ts`.
 
-### Key Bootstrap
+**Key management**: The encryption key is read from the `PII_ENCRYPTION_KEY` environment variable at startup. This key must be a valid hex-encoded 32-byte (256-bit) value.
 
-The client obtains a short-lived payload encryption key from an authenticated server endpoint:
+**Encryption process**:
+1. A random 12-byte nonce is generated for each encryption operation
+2. The plaintext PII value is encrypted with AES-256-GCM using the key and nonce
+3. The output format is: `nonce (hex) + ciphertext (hex) + auth tag (hex)`
+4. The encrypted value is stored in the database as a single hex string
 
-```
-POST /api/security/payload-key
-```
+**Decryption process**:
+1. The encrypted value is parsed into its nonce, ciphertext, and auth tag components
+2. AES-256-GCM decryption is performed with the stored key
+3. If authentication fails (tag mismatch), an error is thrown
 
-The server validates the BetterAuth session and returns:
-- `keyId` — unique key identifier
-- `algorithm` — always `aes-256-gcm`
-- `expiresAt` — Unix timestamp (seconds) when the key expires
-- `key` — base64url-encoded 32-byte key material
+**PII fields**: The following database columns are encrypted at rest:
+- `User.firstName`, `User.lastName`
+- `User.email` (when not used as auth identifier)
+- `User.phone`, `User.address`
+- `Organization.name` (when containing personal data)
 
-The client imports the key as a non-extractable AES-256-GCM `CryptoKey` and stores it only in memory. This preserves HTTP-only BetterAuth session cookies.
+PII encryption is applied at the application layer through Prisma middleware hooks and explicit encrypt/decrypt calls in route handlers.
 
-**Note:** The client key manager (`lib/payload-key-manager.ts`) is implemented and wired into API callers via `encryptedFetch`. React component integration continues in Phase 2.
+### Data-in-Transit Payload Encryption
 
-### Payload Format
+Payload encryption protects sensitive data transmitted between client and server. The implementation spans `lib/payload-key-server.ts`, `lib/payload-middleware.ts`, `lib/crypto-server.ts`, and `lib/crypto-client.ts`.
 
-Encrypted payloads use a versioned binary format:
-- 12-byte random nonce
-- ciphertext (AES-GCM)
-- 16-byte GCM authentication tag
+**Key lifecycle**:
+1. **Generation**: A 32-byte symmetric key is generated for each payload using `generatePayloadKey()`
+2. **Storage**: The key is stored in a `PayloadKeyStore` with the payload ID as the lookup key
+3. **Encryption**: The client encrypts the payload data with this key using AES-256-GCM
+4. **Transmission**: Only the encrypted data (not the key) is sent to the server
+5. **Decryption**: The server retrieves the key from the store and decrypts the payload
 
-HTTP headers for encrypted requests:
-| Header | Value |
-|---|---|
-| `X-Payload-Encryption` | `v1` |
-| `X-Payload-Key-Id` | key identifier |
-| `X-Payload-Timestamp` | Unix timestamp (seconds) |
-| `X-Payload-Nonce` | base64url random value |
+**PayloadKeyStore interface**: The `PayloadKeyStore` interface defines how payload keys are stored and retrieved:
 
-### Request Context Binding (AAD)
+| Implementation | Use Case | Description |
+|---------------|----------|-------------|
+| In-memory store (default) | Single-instance deployments | Keys stored in a Map; keys are automatically cleaned up after TTL expiry |
+| Redis-backed store | Multi-instance deployments | Keys stored in Redis with TTL; shared across all application instances |
 
-Each encrypted payload is bound to the request context via AES-GCM Additional Authenticated Data, preventing replay and cross-route reuse. AAD includes:
-- Protocol version (`v1`)
-- Purpose (`request` or `response`)
-- HTTP method
-- URL pathname
-- Key ID
-- Session ID
-- Timestamp / nonce
+The default in-memory store is sufficient for single-instance deployments. For multi-instance deployments (e.g., multiple server replicas behind a load balancer), the Redis-backed store ensures that any instance can retrieve the key generated by any other instance.
 
-### Replay Protection
+**Cleanup scheduler**: A background cleanup job (`startKeyCleanupScheduler()`) runs every 5 minutes to remove expired payload keys from the store. This prevents unbounded memory growth and ensures that old keys are not available for decryption after their intended lifetime.
 
-The server rejects requests with:
-- Missing or unsupported payload versions
-- Expired timestamps (outside configured window)
-- Replayed request nonces (within replay window)
-- Payloads sent to a different route or with a different HTTP method
-- Invalid or expired payload keys
+**Replay protection**: To prevent replay attacks, the system uses a replay cache:
+- Each payload is assigned a unique ID
+- The first time a payload with a given ID is processed, it is recorded in the replay cache
+- Subsequent requests with the same payload ID are rejected as replays
 
-Replay nonces are validated server-side using a Redis-backed cache with TTL-based expiry. The replay protection logic is implemented in `lib/payload-middleware.ts` (`checkReplayProtection`, `checkReplayProtectionStrict`).
+The replay cache supports two backends:
+| Backend | Use Case | Description |
+|---------|----------|-------------|
+| In-memory (default) | Single-instance deployments | Replay entries stored in a Map with TTL expiry |
+| Redis-backed | Multi-instance deployments | Replay entries shared across instances via Redis |
 
-**Fail-closed behavior in enforce mode:** When `PAYLOAD_ENCRYPTION_REQUIRE_REPLAY_CACHE=true` and the replay cache is unavailable, enforce-mode requests return HTTP 503 (`replay_cache_unavailable`) instead of proceeding without replay protection. This is the recommended configuration for production enforce mode.
+**Payload metrics**: The `lib/payload-metrics.ts` module tracks encryption/decryption performance and error rates, providing observability into the payload encryption system.
 
-**Multi-instance limitation:** The in-memory payload key store (`lib/payload-key-server.ts`) is single-instance only. Memory-only replay cache (`PAYLOAD_ENCRYPTION_REPLAY_CACHE=memory`) is also single-instance. For multi-instance deployments, both must be backed by Redis. Enforce mode **must not** be enabled on multi-instance deployments with in-memory stores.
-
-### Feature Flag Modes
-
-| Mode | Behavior |
-|---|---|
-| `disabled` (default) | No payload encryption is required or applied |
-| `permissive` | Server accepts encrypted payloads; emits metrics for plaintext PII (migration-only) |
-| `enforce` | Server requires encrypted payloads for configured PII routes |
-
-**Note:** The feature flag enforcement logic is implemented in `lib/payload-middleware.ts`. Currently 11 routes are wrapped with `wrapPiiRoute()`, so enabling the flag will activate encryption for those routes. Additional routes are being assessed and migrated in Phase 2.
-
-### Configuration
-
-| Variable | Default | Description |
-|---|---|---|
-| `PAYLOAD_ENCRYPTION_MODE` | `disabled` | Feature flag mode (`disabled`, `permissive`, `enforce`) |
-| `PAYLOAD_ENCRYPTION_MAX_BYTES` | `65536` | Maximum encrypted payload size |
-| `PAYLOAD_ENCRYPTION_KEY_TTL_SECONDS` | `300` | Payload key lifetime |
-| `PAYLOAD_ENCRYPTION_REPLAY_WINDOW_SECONDS` | `30` | Replay protection window |
-| `PAYLOAD_ENCRYPTION_NONCE_TTL_SECONDS` | `60` | Replay nonce cache TTL |
-| `PAYLOAD_ENCRYPTION_REPLAY_CACHE` | `redis` | Replay cache backend (`memory`, `redis`) |
-| `PAYLOAD_ENCRYPTION_REQUIRE_REPLAY_CACHE` | `false` | Fail closed if replay cache unavailable (set to `true` for production enforce mode) |
-
-**Production enforce mode requirements:**
-- Set `PAYLOAD_ENCRYPTION_MODE=enforce`
-- Set `PAYLOAD_ENCRYPTION_REQUIRE_REPLAY_CACHE=true`
-- Use Redis-backed replay cache (`PAYLOAD_ENCRYPTION_REPLAY_CACHE=redis`)
-- Do not enable on multi-instance deployments until payload key store is shared (Redis or database-backed)
-- Integration and browser/Playwright tests must pass first
-
-### Trust Boundaries
-
-**Protected:** PII exposure in application logs, proxy logs, debug middleware, accidental plaintext serialization.
-
-**Not Protected:** Malicious server-side code, malicious browser code (XSS), session theft, PII in URLs/query strings/headers.
+**PII routes**: The `lib/pii-routes.ts` module defines 9 route patterns for PII-specific operations (encrypt, decrypt, verify) with automatic encryption middleware applied to all requests.
 
 ### CSRF Protection
 
-Payload encryption does **not** replace CSRF protection. PII mutating routes must continue to enforce:
-- SameSite cookie attributes
-- CORS restrictions
-- CSRF tokens where applicable
-- Content-type restrictions
-- Origin checks
+CSRF (Cross-Site Request Forgery) protection is implemented in `lib/csrf.ts`. The mechanism validates the origin of incoming requests to ensure they originate from trusted sources.
 
-### Error Contract
+**Protection strategy**:
+1. **Origin/Referer validation**: For state-changing requests (POST, PUT, DELETE), the `Origin` and `Referer` headers are validated against an allowlist of trusted domains
+2. **Safe methods**: GET, HEAD, and OPTIONS requests are exempt from CSRF checks (they should not modify server state)
+3. **Development relaxation**: In development mode, CSRF validation is relaxed to allow testing from arbitrary origins
 
-| Condition | HTTP Status | Error Code |
-|---|---:|---|
-| Missing/invalid session | 401 | `unauthorized` |
-| Missing payload key header | 400 | `missing_payload_key_id` |
-| Unknown key ID | 401 | `payload_key_unknown` |
-| Expired key | 401 | `payload_key_expired` |
-| Invalid encrypted payload | 400 | `invalid_encrypted_payload` |
-| Unsupported version | 400 | `unsupported_payload_version` |
-| Payload too large | 413 | `payload_too_large` |
-| Wrong content type | 415 | `unsupported_media_type` |
+**Implementation details**:
+- Trusted domains are configured via the `TRUSTED_ORIGINS` environment variable (comma-separated list)
+- The CSRF check is applied as middleware on all state-changing routes
+- If validation fails, a 403 Forbidden response is returned
 
-### Logging Policy
+**Limitations**: CSRF protection in this implementation relies on header validation rather than token-based approaches. This is sufficient for same-origin applications but may need to be augmented with CSRF tokens if third-party integrations are introduced.
 
-The logger (`lib/logger.ts`) redacts the following fields via Pino's `redact` configuration:
+### Secrets Management
 
-**Authentication & session:**
-- `password`, `passwordHash`, `sessionToken`, `betterAuthSessionToken`
-- `cookie`, `cookies`, `authorization`
+Secrets and configuration values are managed through environment variables:
 
-**Personal data:**
-- `email`, `phone`, `ssn`, `passportNumber`, `creditCard`
-
-**API keys & secrets:**
-- `apiKey`, `secret`, `token`
-
-**Payload encryption (never log these):**
-- `keyMaterial`, `payloadKey`
-- `ciphertext`, `plaintext`
-
-**Request/response bodies (never log full payloads):**
-- `requestBody`, `responseBody`, `body`
-
-Logs MUST NOT contain:
-- Ciphertext or encrypted payloads
-- Plaintext request/response bodies
-- Payload keys, session tokens, or key material
-- PII fields (redacted at the logger level)
-
-Logs MAY contain: route, method, status, request ID, error code, payload size.
-
-**Note:** Logger redaction uses Pino's `redact.paths` with wildcard matching (`*.field`). Nested PII in request/response bodies is redacted at the top level. Full redaction testing (including nested objects and error serialization) is planned.
+- **Never committed**: No secrets, API keys, or credentials are committed to version control
+- **Environment-specific**: Different environments (development, staging, production) use different secret values
+- **Key rotation**: Encryption keys can be rotated by updating the relevant environment variable and re-encrypting affected data
 
 ---
 
-## 🐛 Reporting a Vulnerability
+## 7. Content Security Policy
 
-If you discover a security vulnerability within this project, please do not open a public GitHub issue. 
+### CSP Directives
 
-Instead, please report it via [Insert Your Email/Contact Method Here].
+Content Security Policy (CSP) headers are configured in `middleware.ts` to prevent XSS, clickjacking, and other code injection attacks. The policy differs between development and production:
 
-*Please include:*
-- *A description of the issue.*
-- *Steps to reproduce the vulnerability.*
-- *Any potential impact or proof-of-concept code.*
+| Directive | Development | Production |
+|-----------|-------------|------------|
+| `default-src` | `'self'` | `'self'` |
+| `script-src` | `'self' 'unsafe-inline' 'unsafe-eval'` | `'self' <nonces>` |
+| `style-src` | `'self' 'unsafe-inline'` | `'self' <nonces>` |
+| `img-src` | `'self' data: blob:` | `'self' data: blob:` |
+| `connect-src` | `'self' ws: wss:` | `'self' wss:` |
+| `frame-ancestors` | `'none'` (relaxed in dev) | `'none'` |
+| `base-uri` | `'self'` | `'self'` |
+| `form-action` | `'self'` | `'self'` |
 
-We will acknowledge receipt of your report within 48 hours and work with you to understand and remediate the issue promptly.
+In production, inline scripts and styles are blocked by default; they must use nonces (see below) to be allowed.
+
+### Nonce Generation & Propagation
+
+CSP nonces are generated and managed in `lib/csp-nonce.ts`:
+
+1. **Generation**: A cryptographically random nonce (32 bytes, base64-encoded) is generated for each request
+2. **Header injection**: The nonce is added to the `Content-Security-Policy` header's `script-src` and `style-src` directives
+3. **Client injection**: The nonce is made available to client-side code via a meta tag or global variable, so that dynamically created scripts can include the nonce attribute
+
+This approach allows inline scripts to run without disabling CSP entirely. Each request gets a unique nonce, preventing replay attacks.
+
+---
+
+## 8. Logging & PII Redaction
+
+### Pino Logger Configuration
+
+The application uses [Pino](https://github.com/pinojs/pino) for structured logging, configured in `lib/logger.ts`. PII redaction is built into the logger configuration:
+
+**Redaction paths**: Pino's `redact.paths` option is configured to automatically redact the following fields from all log output:
+
+| Category | Fields |
+|----------|--------|
+| Authentication | `session.token`, `user.password`, `apiKey` |
+| Personal data | `firstName`, `lastName`, `email`, `phone`, `address`, `ssn` |
+| API credentials | `apiKey`, `apiSecret`, `accessToken`, `refreshToken` |
+| Crypto material | `encryptionKey`, `privateKey`, `payloadKey` |
+
+**Redaction behavior**: When any of these fields appear in a logged object, Pino replaces their values with `[REDACTED]` before writing to the log output. This ensures that PII never appears in log files, even if a developer accidentally logs a user object or request body.
+
+### PII Field List
+
+The complete list of fields that are redacted from logs includes:
+
+- `session.token`, `user.password` — authentication credentials
+- `firstName`, `lastName`, `email`, `phone`, `address`, `ssn` — personal identifiers
+- `apiKey`, `apiSecret`, `accessToken`, `refreshToken` — API credentials
+- `encryptionKey`, `privateKey`, `payloadKey` — cryptographic material
+
+This list is maintained in the logger configuration and should be updated whenever new PII fields are added to the data model.
+
+### Error Serialization Redaction
+
+The `redactLogObject()` utility in `lib/logger.ts` provides additional redaction for error objects that may contain PII:
+
+1. **Property filtering**: The utility iterates over an object's own properties and redacts any that match the PII field list
+2. **Stack trace sanitization**: File paths in stack traces are redacted to remove local filesystem details (e.g., `/Users/john/...` is replaced with `[REDACTED]`)
+3. **Recursive application**: The redaction is applied recursively to nested objects, ensuring that PII in deeply nested structures is also caught
+
+This utility is used when logging error objects to ensure that stack traces and error context do not leak PII or internal file paths.
+
+---
+
+## 9. Security Configuration Reference
+
+### Environment Variables
+
+The following environment variables control security-relevant behavior:
+
+| Variable | Purpose | Required |
+|----------|---------|----------|
+| `PII_ENCRYPTION_KEY` | AES-256 encryption key for PII at-rest (hex-encoded, 32 bytes) | Yes |
+| `TRUSTED_ORIGINS` | Comma-separated list of trusted domains for CSRF validation | Yes |
+| `TRUSTED_PROXY_CIDRS` | CIDR ranges of trusted reverse proxies for real client IP extraction | No (defaults to localhost) |
+| `SESSION_SECRET` | Secret used for signing session cookies | Yes |
+| `DATABASE_URL` | PostgreSQL connection string (includes credentials) | Yes |
+| `REDIS_URL` | Redis connection string for caching and replay cache (optional) | No |
+| `NODE_ENV` | Environment mode (`development`, `production`) — affects CSP strictness and CSRF relaxation | Yes |
+
+### Rate Limiting Configuration
+
+Rate limiting is configured in BetterAuth with the following thresholds:
+
+| Endpoint Category | Limit | Window |
+|-------------------|-------|--------|
+| General requests | 10 requests | 15 minutes |
+| Sign-in attempts | 5 requests | 15 minutes |
+
+These limits are enforced per-IP address. The stricter limit on sign-in attempts is designed to prevent brute-force password attacks.
+
+### Trusted Proxies
+
+When the application runs behind a reverse proxy (e.g., nginx, Cloudflare), the real client IP is extracted from the `X-Forwarded-For` header. The `TRUSTED_PROXY_CIDRS` configuration specifies which IP ranges are trusted to provide this header.
+
+Only requests from trusted proxy IPs will have their forwarded headers honored; requests claiming to be from a trusted proxy but arriving directly are ignored. This prevents IP spoofing by untrusted clients.
+
+---
+
+## Appendix A: API Route Security Summary
+
+The following table summarizes the security characteristics of all API route groups in the application:
+
+| Route Group | Authentication Required | Tenant-Scoped | CSRF Protected | PII Encrypted |
+|-------------|------------------------|---------------|----------------|---------------|
+| Auth routes (`/api/auth/*`) | No (login/signup) | No | Yes | No |
+| Tenant routes (`/api/tenants/*`) | Yes | Yes (self) | Yes | No |
+| Team routes (`/api/teams/*`) | Yes | Yes | Yes | No |
+| Calendar routes (`/api/calendars/*`) | Yes | Yes | Yes | No |
+| PII routes (`/api/pii/*`) | Yes | Yes | Yes | Yes (at-rest + in-transit) |
+| Permission routes (`/api/permissions/*`) | Yes | Yes | Yes | No |
+
+All authenticated routes require a valid session cookie. Tenant-scoped routes verify the `tenantId` context before processing any request.
+
+---
+
+## Appendix B: Tenant-Scoped Model Inventory
+
+The complete inventory of models that are scoped to a tenant (isolated by `tenantId`):
+
+| Model | Prisma Middleware | RLS Policy | Notes |
+|-------|-------------------|------------|-------|
+| Role | Yes | Yes | Tenant-level role definitions |
+| RolePermission | Yes | Yes | Permission definitions for roles |
+| MemberRole | Yes | Yes | User-to-role assignments within a tenant |
+| Member | Yes | Yes | Tenant membership records |
+| Invitation | Yes | Yes | Pending tenant invitations |
+| SentInvitation | Yes | Yes | Previously sent invitations (audit) |
+| Team | Yes | Yes | Sub-organization groups |
+| TeamMember | Yes | Yes | Team membership records |
+| TeamRole | Yes | Yes | Role definitions within teams |
+| Calendar | Yes | Yes | User/tenant calendars |
+| CalendarEvent | Yes | Yes | Events within calendars |
+| CalendarRecurrence | Yes | Yes | Recurring event patterns |
+
+Models not listed above (User, Organization) are global and do not have a `tenantId` field.
+
+---
+
+## Appendix C: Cross-References
+
+This document covers security-specific details. For broader architectural context, see:
+
+| Document | Description |
+|----------|-------------|
+| [ARCHITECTURE.md](./ARCHITECTURE.md) | Overall system architecture, data flow, and component interactions |
+| [CACHING_ARCHITECTURE.md](./CACHING_ARCHITECTURE.md) | Caching strategy, Redis usage, and cache invalidation patterns |
+| [QUICK_START.md](./QUICK_START.md) | Getting started guide for developers |
+
+---
+
+*Last updated: 2026-08-26*
+*Document owner: Engineering Team*

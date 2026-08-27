@@ -1,38 +1,118 @@
-# Property NI Portal - System Architecture
+# Property NI Portal — System Architecture
 
-## 📋 Overview
-The Property NI (nipp) portal is a full-stack, multi-tenant property management system designed for Northern Ireland's public sector housing authority. It provides a secure, role-based platform for managing organizations (tenants), users, properties, leases, and maintenance requests. The system enforces strict data isolation between organizations using a defense-in-depth architecture combining application-layer query interception and database-level Row Level Security (RLS).
+A full-stack, multi-tenant property management system for Northern Ireland's public sector housing authority. It provides a secure, role-based platform for managing organizations (tenants), users, properties, leases, and maintenance requests. The system enforces strict data isolation between organizations using a defense-in-depth architecture combining application-layer query interception and database-level Row Level Security (RLS).
 
-## 🏗️ Technology Stack
+This document is organized by **functional area**. Use the table of contents below to navigate directly to the section you need.
+
+## Table of Contents
+
+- [1. Technology Stack](#1-technology-stack)
+  - [Frontend](#frontend)
+  - [Backend & Infrastructure](#backend--infrastructure)
+  - [Testing & Quality](#testing--quality)
+- [2. High-Level Architecture](#2-high-level-architecture)
+  - [Component Diagram](#component-diagram)
+  - [Layer Responsibilities](#layer-responsibilities)
+- [3. Authentication & Session Management](#3-authentication--session-management)
+  - [Auth Flow](#auth-flow)
+  - [Session Cookies & Caching](#session-cookies--caching)
+  - [Auto-Logout on Inactivity](#auto-logout-on-inactivity)
+  - [Middleware Protection](#middleware-protection)
+  - [Public Routes](#public-routes)
+- [4. Authorization (RBAC)](#4-authorization-rbac)
+  - [Identity vs. Membership](#identity-vs-membership)
+  - [Dual-Authorization Model](#dual-authorization-model)
+  - [Permission Resolution Flow](#permission-resolution-flow)
+  - [Domain-Specific Permission Modules](#domain-specific-permission-modules)
+  - [Role Validation](#role-validation)
+- [5. Multi-Tenant Architecture](#5-multi-tenant-architecture)
+  - [Defense-in-Depth Strategy](#defense-in-depth-strategy)
+    - [Layer 1: Application-Level Isolation](#layer-1-application-level-isolation)
+    - [Layer 2: Database-Level Isolation](#layer-2-database-level-isolation)
+  - [Tenant Context Propagation](#tenant-context-propagation)
+  - [Data Flow](#data-flow)
+  - [Tenant-Scoped vs. Global Models](#tenant-scoped-vs-global-models)
+- [6. Service Layer](#6-service-layer)
+  - [Base Services](#base-services)
+  - [Domain Services](#domain-services)
+- [7. Data Layer](#7-data-layer)
+  - [Core Entities](#core-entities)
+  - [Relationships](#relationships)
+  - [Indexing Strategy](#indexing-strategy)
+  - [Connection Pooling (PgBouncer)](#connection-pooling-pgbouncer)
+- [8. Cache Architecture](#8-cache-architecture)
+  - [Overview](#overview)
+  - [Layer 1: In-Memory LRU Cache](#layer-1-in-memory-lru-cache)
+  - [Layer 2: Redis (Distributed Cache)](#layer-2-redis-distributed-cache)
+  - [Hybrid Cache Orchestration](#hybrid-cache-orchestration)
+  - [Adaptive TTL Strategy](#adaptive-ttl-strategy)
+  - [Cross-Instance Invalidation](#cross-instance-invalidation)
+  - [Stampede Protection](#stampede-protection)
+  - [Cache Monitoring & Metrics](#cache-monitoring--metrics)
+- [9. Calendar System](#9-calendar-system)
+  - [Models & Services](#models--services)
+  - [Recurrence Handling](#recurrence-handling)
+  - [Real-Time Notifications (SSE)](#real-time-notifications-ssq)
+  - [Authorization](#authorization)
+- [10. Security](#10-security)
+  - [Content Security Policy (CSP)](#content-security-policy-csp)
+  - [Data-in-Transit Payload Encryption](#data-in-transit-payload-encryption)
+  - [CSRF Protection](#csrf-protection)
+  - [Secrets Management](#secrets-management)
+  - [PII Logging Policy](#pii-logging-policy)
+- [11. Project Structure](#11-project-structure)
+- [12. Development & Testing](#12-development--testing)
+  - [Local Setup](#local-setup)
+  - [Running Tests](#running-tests)
+  - [Database Migrations](#database-migrations)
+
+---
+
+## 1. Technology Stack
 
 ### Frontend
-- **Framework:** Next.js 15 (App Router)
-- **UI Library:** React 19
-- **Styling:** Tailwind CSS v4 (with `@tailwindcss/postcss` and `@tailwindcss/typography`)
-- **State Management:** React Server Components / Client Components with `useSyncExternalStore` for session state, SWR/React Query patterns implied by caching architecture
-- **Testing UI:** Testing Library (`@testing-library/react`, `@testing-library/jest-dom`)
 
-### Backend
-- **Runtime:** Node.js 22 LTS (pinned)
-- **API Routes:** Next.js API Routes (App Router) with explicit `nodejs` runtime for Prisma compatibility
-- **Authentication:** BetterAuth v1.6 (with Organization plugin)
-- **Database ORM:** Prisma 6 (`@prisma/client`)
-- **Connection Pooler:** PgBouncer (manages database connections between Node.js and PostgreSQL)
-- **Database:** PostgreSQL 16+
-- **Caching:** Redis (via `ioredis`) for permission caching and session cache
+| Component | Version / Library |
+|-----------|-------------------|
+| Framework | Next.js 15 (App Router) |
+| UI Library | React 19 |
+| Styling | Tailwind CSS v4 (`@tailwindcss/postcss`, `@tailwindcss/typography`) |
+| State / Data Fetching | TanStack Query v5 (React Query) |
+| Calendar Engine | rrule v2.8.1 |
+| UI Primitives | lucide-react (icons), sonner (toasts) |
+| Validation | Zod v4.0.0 |
+| Testing | Vitest v4, React Testing Library, jsdom |
+
+### Backend & Infrastructure
+
+| Component | Version / Library |
+|-----------|-------------------|
+| Runtime | Node.js 22 LTS (pinned, `>=22.0.0 <23.0.0`) |
+| API Layer | Next.js App Router (API Routes) + Server Components |
+| Authentication | BetterAuth v1.6 (Organization plugin, Teams mode) |
+| Database ORM | Prisma 6 (`@prisma/client`) |
+| Database | PostgreSQL 16+ |
+| Connection Pooler | PgBouncer (port 6432) |
+| Cache / Session Store | Redis (`ioredis`) |
+| In-Memory Cache | `lru-cache` v11 (L1 cache) |
+| Email | Nodemailer v9.0.3 |
+| Logging | Pino (`pino`, `pino-pretty`) |
+| Database Driver | `pg` v8.22.0 |
 
 ### Testing & Quality
-- **Unit/Integration Tests:** Vitest v4.1 (with `@vitest/coverage-v8`)
-- **Type Checking:** TypeScript 5.7 (strict mode)
-- **Linting:** ESLint 9 (flat config via `eslint-config-next`)
-- **Formatting:** Prettier v3.4
 
+| Tool | Version |
+|------|---------|
+| Test Runner | Vitest v4.1 (with `@vitest/coverage-v8`) |
+| E2E Testing | Playwright v1.62 |
+| Type Checking | TypeScript 5.7 (strict mode) |
+| Linting | ESLint 9 (flat config, `eslint-config-next`) |
+| Formatting | Prettier v3.4 |
+| Git Hooks | Husky + lint-staged |
 
-## High Level Architecture
+---
 
-The following diagram illustrates the core components, data flow and security boundaries of the portal
-
-## High Level Architecture
+## 2. High-Level Architecture
 
 The following diagram illustrates the core components, data flow, and security boundaries of the portal.
 
@@ -55,7 +135,7 @@ flowchart TB
         end
 
         ReactApp[<b>React Client</b>] -.->|REST & SSE Events| API
-        ReactApp -.->|State Mgmt<br/>SWR/Cache Patterns| Browser[(Browser State)]
+        ReactApp -.->|State Mgmt<br/>TanStack Query| Browser[(Browser State)]
     end
 
     %% --- Data Persistence Layer ---
@@ -65,542 +145,449 @@ flowchart TB
 
     %% --- Performance Caching Layer ---
     subgraph Cache_Layer [Performance & Caching]
-        Authm -.->|Session / Token<｜><br/>Cache| Cookie[(Cookie Cache)]
+        Authm -.->|Session / Token<br/>Cache| Cookie[(Cookie Cache)]
+        Services -.->|L1 + L2 Caching| Redis[(Redis)]
     end
 
     linkStyle default interpolate spline;
 ```
 
-## 🗂️ Project Structure
+### Layer Responsibilities
 
-```
-nipp/
-├── app/                          # Next.js App Router (pages & API routes)
-│   ├── (auth)/                   # Authentication pages (login, register)
-│   ├── admin/                    # Super admin dashboard & layouts
-│   │   ├── organizations/        # Organization management pages
-│   │   ├── permissions/          # Permission catalog page
-│   │   ├── resources/            # Resource catalog page
-│   │   └── ...                   # Other admin pages
-│   ├── api/                      # API endpoints (RESTful routes)
-│   │   ├── auth/[...all]/        # BetterAuth catch-all handler
-│   │   ├── health/               # Health check endpoint for monitoring
-│   │   ├── dashboard/admin/      # Admin dashboard API routes (permissions, resources)
-│   │   └── ...                   # Domain-specific API routes
-│   ├── layout.tsx                # Root layout
-│   └── ...                       # Page components & layouts
-├── components/                   # Reusable React components
-│   ├── auth/                     # Auth-related components (RequirePermission, RequireSuperAdmin)
-│   └── ui/                       # UI primitives & domain components
-├── lib/                          # Core business logic & utilities
-│   ├── auth.ts                   # BetterAuth configuration & session callbacks
-│   ├── auth-client.ts            # Client-side auth utilities & hooks
-│   ├── authz.ts                  # Authorization logic (hasPermission, isSuperAdmin)
-│   ├── tenant-db.ts              # Multi-tenant Prisma extension ($extends)
-│   ├── db.ts                     # Global Prisma client instance
-│   ├── tenant-context.ts         # AsyncLocalStorage for tenant context propagation
-│   └── permissions/              # Permission resolution & caching logic
-├── services/                     # Domain-specific business logic layers
-│   ├── organization-service.ts   # Organization management service
-│   ├── team-service.ts           # Team CRUD, membership, and role inheritance
-│   ├── resource-service.ts       # Resource catalog CRUD (global, non-org-scoped)
-│   ├── permission-service.ts     # Permission management service
-│   ├── role-service.ts           # Role management service
-│   └── user-service.ts           # User management service
-├── hooks/                        # Custom React hooks (useSession, usePermission)
-├── prisma/                       # Database schema & migrations
-│   ├── schema.prisma             # Prisma schema definition (enums, models, relations)
-│   └── migrations/               # Database migration files & RLS policies
-├── tests/                        # Test suites
-│   ├── unit/                     # Unit tests (isolated function testing)
-│   ├── integration/              # Integration tests (PostgreSQL + Redis)
-│   └── isolation/                # Tenant isolation guarantee tests
-├── scripts/                      # Utility scripts (secret checking, DB setup)
-│   └── check-secrets.sh          # Pre-commit secret scanning hook
-├── middleware.ts                 # Route protection & Edge-runtime cookie validation
-└── next.config.ts                # Next.js configuration (CSP, webpack externals)
-```
+| Layer | Responsibility | Runtime |
+|-------|---------------|---------|
+| **Edge Middleware** (`middleware.ts`) | Session cookie check, CSP headers, cache control. Fast path — no Prisma. | Edge |
+| **API Routes** (`app/api/`) | HTTP request handling, parameter parsing, status codes. Thin wrappers around services. | Node |
+| **Service Layer** (`services/`, `lib/services/`) | Business logic: slug generation, complex transactions, multi-step bootstrapping. | Node |
+| **Data Layer** (`prisma/schema.prisma`) | Schema definition, relations, RLS policies. | PostgreSQL |
+| **Cache Layer** (`lib/cache/`, `lib/redis.ts`) | L1 in-memory + L2 Redis caching with stampede protection and cross-instance invalidation. | Node / Redis |
 
-## 🔐 Multi-Tenant Architecture
+---
 
-### Tenant Isolation Strategy
+## 3. Authentication & Session Management
+
+### Auth Flow
+
+Authentication is provided by **BetterAuth v1.6** with email/password and OAuth (Google) support.
+
+1. User submits credentials to `/api/auth/sign-in/email`
+2. BetterAuth validates the password hash, creates a `Session` record
+3. Sets an HTTP-only session cookie (`__Secure-better-auth.session_token`)
+4. In Node.js runtime, the `session` callback resolves user permissions and Super Admin status before returning the session object
+5. In Edge runtime (middleware), a lightweight session is returned without permissions to avoid Prisma initialization errors
+6. User is redirected to the appropriate dashboard; `AsyncLocalStorage` is populated with `organizationId`
+
+### Session Cookies & Caching
+
+- **Cookie Cache:** Enabled in `lib/auth.ts` (`maxAge: 5 minutes`). Encrypted, signed session cookies that can be validated in Edge runtime without database lookups.
+- **Session Expiry:** Absolute maximum lifetime of 1 hour (`session.expiresIn`). Sessions renew on any request when remaining time drops below 15 minutes (`session.updateAge`).
+- **Cross-Tab Invalidation:** Logout revokes the session in the database, expires all cookies via `document.cookie`, and performs a hard redirect to bust client-side caches.
+
+### Auto-Logout on Inactivity
+
+A React hook (`hooks/useInactivityTimeout.ts`) listens for `mousemove`, `click`, `keydown`, `scroll`, and `touchstart` events. After a configurable idle period (default 15 minutes, controlled by `INACTIVITY_TIMEOUT_MINS`), the session is terminated: a warning toast appears 30 seconds before timeout, then `signOutUser()` is called to delete the session from the database and redirect to `/login`.
+
+### Middleware Protection
+
+`middleware.ts` performs a fast check for session cookie presence on every non-public route. This avoids Prisma Edge Runtime crashes while ensuring unauthenticated users are redirected to `/login`. Protected routes return `Cache-Control: no-store, max-age=0`, `Surrogate-Control: no-store`, and `Pragma: no-cache` headers to prevent caching of sensitive data.
+
+### Public Routes
+
+The following routes bypass session validation: `/login`, `/register`, `/api/auth/*`, and `/api/health`.
+
+---
+
+## 4. Authorization (RBAC)
+
+### Identity vs. Membership
+
+The system explicitly separates global identity from organizational authorization:
+
+| Model | Scope | Purpose |
+|-------|-------|---------|
+| `User` (Identity) | Global | Authentication principal. The `role` field defines the **System Role** (`super_admin` vs `member`). |
+| `Member` (Membership) | Organization | Junction linking a `User` to an `Organization`. Represents presence within a tenant. |
+| `Role` (Tenant Authorization) | Organization-scoped | Role definitions within an org (e.g., "Manager", "Technician"). |
+| `MemberRole` (Assignment) | Organization-scoped | Links a `Member` to one or more `Roles`. Supports multiple roles per member. |
+| `RolePermission` (Capability) | Organization-scoped | Maps `Roles` to atomic `Permissions`. |
+
+### Dual-Authorization Model
+
+| Field | Scope | Purpose | Usage |
+|-------|-------|---------|-------|
+| `User.role` | Global | Server-side routing & access gates (e.g., `/admin/*` vs tenant dashboard) | Used in middleware, server components, and API route guards to determine *where* a user can go. |
+| `MemberRole` | Org-Scoped | Fine-grained permission checks within an organization (e.g., `properties:view`, `tenants:create`) | Used by `<RequirePermission>`, `hasPermission()`, and service-layer authorization checks to determine *what* a user can do. |
+
+`User.role` does **not** grant org-scoped permissions. A `super_admin` bypasses org-scoped checks entirely, but a standard `member` must be assigned `MemberRole`s to perform actions.
+
+### Permission Resolution Flow
+
+When an authorization check is performed (via `hasPermission` or `<RequirePermission>`):
+
+1. **Super Admin Bypass (Fast Path):** If the user's global identity is `super_admin`, access is granted immediately. Super Admins do not have their permissions cached in Redis because they bypass the granular check entirely.
+2. **Permission Resolution (Standard Path):** The `resolvePermissions` function in `lib/permissions/resolver.ts`:
+   - Checks the hybrid cache (L1 → L2 → DB) for `perm:${userId}:${orgId}`
+   - On cache miss, joins: `Member` → `MemberRole` → `RolePermission` → `Permission`
+   - Writes the flattened permission list to both L1 and L2 caches (TTL: 5 min, volatile type)
+3. **Enforcement:** The resulting permission list is compared against the required `resource:action` string.
+
+### Domain-Specific Permission Modules
+
+The permission system is organized into domain-specific modules under `lib/permissions/`:
+
+| Module | File | Responsibility |
+|--------|------|---------------|
+| Contractor | `lib/permissions/contractor.ts` | Permissions and validation for contractor-related operations |
+| Financial | `lib/permissions/financial.ts` | Permissions and validation for financial operations |
+| Maintenance | `lib/permissions/maintenance.ts` | Permissions and validation for maintenance operations |
+| Property | `lib/permissions/property.ts` | Permissions and validation for property management operations |
+| Resolver | `lib/permissions/resolver.ts` | Core permission resolution with hybrid caching (L1 → L2 → DB) |
+| Tenant | `lib/permissions/tenant.ts` | Permissions and validation for tenant-related operations |
+
+### Role Validation
+
+Role names are validated against the organization's role catalog to prevent free-text assignment. The validation utilities in `lib/roles/validation.ts` provide three functions:
+
+- `isValidRoleName(roleName, orgId)` — returns boolean
+- `getValidRoleNames(orgId)` — returns list of valid role names (for dropdowns)
+- `assertValidRoleName(roleName, orgId)` — throws if invalid (fail-fast in API routes)
+
+Domain-specific role modules under `lib/roles/` provide additional validation and definitions:
+- `contractor.ts`, `letting.ts`, `maintenance.ts`, `property-management.ts` — domain role definitions
+- `validation.ts` — core role name validation
+
+---
+
+## 5. Multi-Tenant Architecture
+
+### Defense-in-Depth Strategy
+
 The system enforces strict tenant isolation using a **defense-in-depth** approach. If one layer fails, the other acts as a safety net to prevent cross-tenant data leakage.
 
-**Layer 1: Application-Level Isolation (Prisma `$extends`)**
-- Located in `lib/tenant-db.ts`, this extension intercepts Prisma queries at the application layer.
+#### Layer 1: Application-Level Isolation
+
+Located in `lib/tenant-db.ts`, a Prisma `$extends` extension intercepts queries at the application layer:
+
 - **Context Propagation:** The current `organizationId` is stored in Node.js `AsyncLocalStorage` via middleware and `lib/tenant-context.ts`.
 - **Query Interception:** The extension automatically injects `organizationId` into the `where`, `data`, `create`, and `update` clauses for tenant-scoped models.
-- **Fail-Safe:** If a query executes against a scoped model without an active tenant context, the extension throws an explicit error (`Tenant context missing for scoped query.`), preventing accidental global queries.
+- **Fail-Safe:** If a query executes against a scoped model without an active tenant context, the extension throws `Tenant context missing for scoped query.`, preventing accidental global queries.
 
-**Layer 2: Database-Level Isolation (PostgreSQL RLS)**
-- PostgreSQL Row Level Security policies are applied to tenant-scoped tables as a secondary safety net.
-- Even if the application layer is bypassed or misconfigured, the database engine rejects any query attempting to access rows belonging to a different `organizationId`.
-- RLS policies use `current_setting('app.current_org_id', true)` to enforce isolation at the database engine level.
+#### Layer 2: Database-Level Isolation
+
+PostgreSQL Row Level Security policies are applied to tenant-scoped tables as a secondary safety net. Even if the application layer is bypassed or misconfigured, the database engine rejects any query attempting to access rows belonging to a different `organizationId`. RLS policies use `current_setting('app.current_org_id', true)` to enforce isolation at the database engine level.
+
+### Tenant Context Propagation
+
+1. Request arrives at an API route or Server Component
+2. Middleware extracts `organizationId` from the session, stores it in `AsyncLocalStorage` via `lib/tenant-context.ts`
+3. Service layer and Prisma queries automatically inherit the context
+4. The Prisma extension injects the filter into every tenant-scoped query
 
 ### Data Flow
+
 1. **Request arrives** → Middleware checks session cookie presence (Edge-safe, no Prisma)
 2. **Tenant context established** → `AsyncLocalStorage` stores the user's `organizationId`
 3. **Database query executed** → Prisma extension automatically injects tenant filter into `where` clauses
 4. **Response returned** → User only sees data scoped to their organization
 
-### Tenant-Scoped Models
-The following models are strictly scoped to organizations and protected by the Prisma extension:
-- `Role` (organization-scoped role definitions)
-- `RolePermission` (junction table mapping roles to permissions, org-scoped for isolation)
-- `MemberRole` (junction table linking members to roles, org-scoped for isolation)
-- `Team` (sub-organizational groupings, org-scoped)
-- `TeamMember` (user-to-team membership, org-scoped)
-- `TeamRole` (team-level role definitions mapped to org roles, org-scoped)
+### Tenant-Scoped vs. Global Models
 
-Global models (`User`, `Organization`, `Member`, `Permission`, `AuditLog`, `NotificationLog`, `Resource`, `ResourceRole`) are not scoped and require explicit authorization checks.
+| Scope | Models |
+|-------|--------|
+| **Tenant-Scoped** (protected by Prisma extension + RLS) | `Role`, `RolePermission`, `MemberRole`, `Team`, `TeamMember`, `TeamRole`, `Calendar`, `CalendarEvent`, `CalendarRecurrence` |
+| **Global** (not org-scoped; require explicit authorization) | `User`, `Organization`, `Member`, `Permission`, `AuditLog`, `NotificationLog`, `Resource`, `ResourceRole` |
 
-## 🔒 Content Security Policy (CSP)
+---
 
-The application enforces a strict Content Security Policy via Edge Runtime middleware (`middleware.ts`) to mitigate Cross-Site Scripting (XSS) and data injection attacks. CSP is deployed in **Report-Only** mode initially, allowing us to monitor violations without blocking legitimate functionality.
+## 6. Service Layer
 
-### Architecture & Flow
-1. **Nonce Generation:** On every request, a cryptographically secure random nonce is generated using `@/lib/csp-nonce`.
-2. **Header Propagation:** The nonce is passed to the client via a custom `x-csp-nonce` header, allowing React components and scripts to dynamically inject the nonce into `<script>` tags.
-3. **Directive Enforcement:** The middleware constructs a CSP string applied to the `Content-Security-Policy-Report-Only` (dev) or `Content-Security-Policy` (prod) header.
+A dedicated `services/` layer sits between the API routes and the database (Prisma). This provides separation of concerns, reusability across entry points (REST API routes, Server Actions, CLI scripts), testability via mocking, transaction management for complex workflows, and reduced complexity in route handlers.
 
-**NOTE:** The `script-src` directive uses `'unsafe-inline'` rather than nonce-based enforcement. See the **Nonce Limitation** section below for details.
+### Base Services
 
-### Policy Directives
-| Directive | Value | Rationale |
-|-----------|-------|-----------|
-| `default-src` | `'self'` | Blocks all resources not explicitly allowed. |
-| `script-src` | `'self' 'unsafe-inline'` (+ `'unsafe-eval'` in dev) | See **Nonce Limitation** below. `unsafe-eval` is only allowed in development for Next.js Fast Refresh (HMR). |
-| `style-src` | `'self' 'unsafe-inline'` | Next.js internal runtime injects inline styles at hydration time. |
-| `img-src` | `'self' data: blob:` | Allows standard images, inline base64 data URIs, and blob URLs. |
-| `font-src` | `'self' data:` | Allows standard fonts and base64-encoded font files. |
-| `connect-src` | `'self'` | Restricts AJAX/Fetch/WebSocket connections to the same origin. |
-| `frame-ancestors` | `'none'` | Prevents clickjacking by disallowing the app from being embedded in iframes. |
-| `base-uri` / `form-action` | `'self'` | Prevents base tag hijacking and restricts form submissions to the same origin. |
+| File | Responsibility |
+|------|---------------|
+| `lib/services/base-service.ts` | Base class / utilities shared across all domain services |
+| `lib/services/error-handler.ts` | Standardized error handling and transformation |
+| `lib/services/types.ts` | Shared type definitions for service layer |
 
-### Nonce Limitation (Known Trade-Off)
-The `x-csp-nonce` header is generated and available for application-level inline scripts (see Component Integration below), but it is **not** used in the `script-src` CSP directive. This is because Next.js App Router injects its own inline scripts for RSC hydration payloads and Fast Refresh that cannot be given nonces — there is no supported mechanism to inject a nonce into these internal scripts without a custom server.
+### Domain Services
 
-This means `script-src` must use `'unsafe-inline'` in both development and production. This is the industry-standard compromise for Next.js App Router (see [vercel/next.js#54850](https://github.com/vercel/next.js/issues/54850)). While `'unsafe-inline'` weakens CSP compared to a strict nonce-only policy, the risk is mitigated by:
-- **Report-Only mode in development** — violations are logged but not enforced, allowing safe iteration.
-- **Strict enforcement of all other directives** — `default-src 'self'`, `connect-src 'self'`, `frame-ancestors 'none'` still block the vast majority of XSS attack vectors.
-- **Application-level nonce availability** — any inline scripts you add in your own components can (and should) use the `x-csp-nonce` header, which browsers will honor alongside `'unsafe-inline'`.
+| Service | File | Responsibility |
+|---------|------|---------------|
+| Organization | `services/organization-service.ts` | Org CRUD, slug generation, lifecycle transitions, bootstrapping with default teams and roles |
+| User | `services/user-service.ts` | User CRUD, ban management, organization membership creation |
+| Team | `services/team-service.ts` | Team CRUD, membership management, role inheritance (auto-assign on join) |
+| Permission | `services/permission-service.ts` | Global permission catalog CRUD |
+| Role | `services/role-service.ts` | Org-scoped role CRUD, permission assignment |
+| Resource | `services/resource-service.ts` | Global resource catalog CRUD (Super Admin only) |
+| Calendar | `services/calendar-service.ts` | Calendar container CRUD, default-calendar bootstrapping (org-scoped) |
+| Calendar Event | `services/calendar-event-service.ts` | Event CRUD, recurrence expansion, upcoming events |
+| Calendar Notification | `services/calendar-notification-service.ts` | Today's-events email notifications, delivery history |
 
-### Development vs Production
-- **Development:** `script-src` includes `'unsafe-eval'` to support Next.js Hot Module Replacement (Fast Refresh). All other directives remain strict.
-- **Production:** `script-src` uses `'self' 'unsafe-inline'`. No `'unsafe-eval'` is permitted. The nonce infrastructure (`x-csp-nonce`) remains available for application-level scripts.
+---
 
-### Component Integration
-React components consume the nonce via the `x-csp-nonce` header for any inline scripts you add (the nonce is not applied to Next.js internal hydration scripts):
-```tsx
-import { headers } from 'next/headers';
-
-export default function MyComponent() {
-  const nonce = headers().get('x-csp-nonce') ?? '';
-  return (
-    <script nonce={nonce} dangerouslySetInnerHTML={{ __html: '/* inline script */' }} />
-  );
-}
-```
-
-### Safe Rollout Strategy
-CSP is set via `Content-Security-Policy-Report-Only` in development (logs violations without blocking) and `Content-Security-Policy` in production (strict enforcement). The nonce infrastructure (`x-csp-nonce`) is available in both modes for application-level scripts.
-
-
-## 🔐 Authentication & Authorization
-
-### Authentication Flow
-- **Provider:** BetterAuth v1.6 with email/password and OAuth (Google) support.
-- **Session Management:** Secure, HTTP-only cookies (`better-auth.session_token`, `__Secure-better-auth.session_token`).
-- **Cookie Cache:** Enabled in `lib/auth.ts` (`maxAge: 5 minutes`) for fast, Edge-runtime-safe session validation without hitting Prisma.
-- **Session Callbacks:** In Node.js runtime, the `session` callback resolves user permissions and Super Admin status before returning the session object. In Edge runtime (middleware), it returns a lightweight session without permissions to avoid Prisma initialization errors.
-
-### Authorization Flow & Permission Resolution
-The system uses a multi-layered approach to determine if an action is permitted.
-
-#### 1. Identity vs. Membership (The Data Model)
-It is critical to distinguish between global identity and organizational authorization:
-- **`User` (Identity):** Represents a global entity. The `role` field here defines the **System Role** (e.g., `super_admin` vs `member`). This determines if the user has platform-wide privileges.
-- **`Member` (Membership):** A junction table linking a `User` to an `Organization`. This represents the user's presence within a specific tenant.
-- **`Role` (Tenant Authorization):** Organization-scoped role definitions (e.g., "Manager", "Technician").
-- **`MemberRole` (Assignment):** A junction table linking a `Member` to one or more `Roles`. This allows a single user to hold multiple roles within one organization.
-- **`RolePermission` (Capability):** Maps `Roles` to atomic `Permissions`.
-
-#### Dual-Authorization Model Clarification (`User.role` vs `MemberRole`)
-To prevent authorization confusion, the system explicitly separates global routing gates from org-scoped permissions:
-
-| Field | Scope | Purpose | Usage |
-|-------|-------|---------|-------|
-| `User.role` | Global | Server-side routing & access gates (e.g., `/admin/*` vs tenant dashboard) | Used exclusively in middleware, server components, and API route guards to determine *where* a user can go. |
-| `MemberRole` | Org-Scoped | Fine-grained permission checks within an organization (e.g., `properties:view`, `tenants:create`) | Used by `<RequirePermission>`, `hasPermission()`, and service-layer authorization checks to determine *what* a user can do. |
-
-**Important:** `User.role` does **not** grant org-scoped permissions. A `super_admin` bypasses org-scoped checks entirely, but a standard `member` must be assigned `MemberRole`s to perform actions. This dual-model ensures clean separation between platform administration and tenant operations.
-
-#### 2. The Logical Permission Flow
-When an authorization check is performed (via `hasPermission` or `<RequirePermission>`):
-
-1.  **Super Admin Bypass (Fast Path):** The system first checks if the user's global identity is a `super_admin`. If true, access is granted immediately. **Note:** This "short-circuits" the permission resolver; Super Admins do not have their permissions cached in Redis because they bypass the granular check entirely.
-2.  **Permission Resolution (Standard Path):** If not a Super Admin, the `resolvePermissions` function is called:
-    *   **Cache Check:** It checks Redis for an existing permission set (`perm:${userId}:${orgId}`).
-    *   **Database Fetch:** On a cache miss, it performs a join: `Member` $\rightarrow$ `MemberRole` $\rightarrow$ `RolePermission` $\rightarrow$ `Permission`.
-    *   **Cache Write:** The resulting flattened list of permissions is written to Redis (TTL: 300s).
-3.  **Enforcement:** The resulting permission list is compared against the required `resource:action` string.
-
-### Middleware Protection
-- **Edge-Safe Validation:** `middleware.ts` performs a fast check for session cookie presence. This avoids Prisma Edge Runtime crashes while ensuring unauthenticated users are redirected to `/login`.
-- **Cache Control:** Protected routes return `Cache-Control: no-store, max-age=0` headers to prevent caching of sensitive data and ensure logout is respected across tabs.
-- **Public Routes:** `/login`, `/register`, `/api/auth`, and `/api/health` are explicitly whitelisted.
-
-## 👥 Teams Architecture
-
-BetterAuth's **Teams** plugin provides sub-organizational groupings within each tenant, enabling finer-grained user organization beyond the flat member model.
-
-### Design Decisions
-- **Explicit Prisma Models:** `Team`, `TeamMember`, and `TeamRole` are defined as explicit Prisma models (not relying on BetterAuth's internal schema), giving full type safety and tenant isolation coverage.
-- **Dedicated TeamService:** Business logic lives in `services/team-service.ts` following the single responsibility principle, separate from `OrganizationService`.
-- **Role Inheritance:** When a user is added to a team via `addTeamMember()`, all team roles are automatically assigned to the user's member record via `assignTeamRolesToMember()`. Removing a team member revokes those roles.
-- **Default "Members" Team:** Every organization bootstrapped via seed receives a default "Members" team with slug `members`.
-
-### Team Service API (`services/team-service.ts`)
-| Method | Description |
-|---|---|
-| `createTeam(ctx, input)` | Create a new team within an organization |
-| `getTeamById(ctx, teamId)` | Get team details with members and roles |
-| `updateTeam(ctx, teamId, input)` | Update team name/slug/description |
-| `deleteTeam(ctx, teamId)` | Delete a team (revokes all memberships) |
-| `listTeams(ctx, orgId)` | List all teams in an organization |
-| `addTeamMember(ctx, teamId, userId)` | Add a user to a team (assigns all team roles) |
-| `removeTeamMember(ctx, teamId, userId)` | Remove a user from a team (revokes team roles) |
-| `listTeamMembers(ctx, teamId)` | List all members of a team |
-| `assignTeamRoles(ctx, teamId, roleIds)` | Assign org-scoped roles to a team |
-| `removeTeamRoles(ctx, teamId, roleIds)` | Remove org-scoped roles from a team |
-| `listTeamRoles(ctx, teamId)` | List all roles assigned to a team |
-
-### Resource Service API (`services/resource-service.ts`)
-| Method | Description |
-|---|---|
-| `create(data, ctx)` | Create a new global resource with optional role assignments |
-| `getById(id, ctx)` | Get a single resource by ID with assigned roles |
-| `list(filters, pagination, ctx)` | Paginated list of resources with optional search by name |
-| `update(id, data, ctx)` | Update a resource (name, description) and optionally replace role assignments |
-| `delete(id, ctx)` | Delete a resource (with safety check for existing role assignments) |
-
-**Note:** Resources are global (non-org-scoped). All operations require `PLATFORM_ADMIN` role. The service uses `globalDb` (not the tenant-scoped Prisma extension) for all queries.
-
-### Permission Service API (`services/permission-service.ts`)
-| Method | Description |
-|---|---|
-| `create(data, ctx)` | Create a new permission in the global catalog |
-| `getById(id, ctx)` | Get a single permission by ID |
-| `list(filters, pagination, ctx)` | Paginated list of permissions with optional search and resource filter |
-| `update(id, data, ctx)` | Update a permission (key, description, isDefault) |
-| `delete(id, ctx)` | Delete a permission from the catalog |
-
-### Role Service API (`services/role-service.ts`)
-| Method | Description |
-|---|---|
-| `create(data, ctx)` | Create a new org-scoped role with optional permissions |
-| `getById(id, ctx)` | Get a single role by ID with assigned permissions |
-| `list(filters, pagination, ctx)` | Paginated list of roles in an organization |
-| `update(id, data, ctx)` | Update a role (name, description, isDefault) and optionally replace permissions |
-| `delete(id, ctx)` | Delete a role (with safety check for existing member assignments) |
-
-### User Service API (`services/user-service.ts`)
-| Method | Description |
-|---|---|
-| `create(data, ctx)` | Create a new user with optional organization membership |
-| `getById(id, ctx)` | Get a single user by ID |
-| `list(filters, pagination, ctx)` | Paginated list of users with optional search |
-| `update(id, data, ctx)` | Update a user (name, email, role, ban status) |
-| `delete(id, ctx)` | Delete a user (cascades to sessions, accounts, members) |
-
-### Organization Service API (`services/organization-service.ts`)
-| Method | Description |
-|---|---|
-| `create(data, ctx)` | Create a new organization with admin user and default teams |
-| `getById(id, ctx)` | Get a single organization by ID |
-| `list(filters, pagination, ctx)` | Paginated list of organizations with optional search |
-| `update(id, data, ctx)` | Update an organization (name, slug, status, metadata) |
-| `delete(id, ctx)` | Delete an organization (cascades to members, roles, teams) |
-| `getBySlug(slug, ctx)` | Resolve organization by slug (used for tenant routing) |
-
-### REST API Routes
-| Route | Methods | Description |
-|---|---|---|
-| `/api/organizations/[orgId]/teams` | GET, POST | List teams / Create team |
-| `/api/organizations/[orgId]/teams/[teamId]` | GET, PATCH, DELETE | Get / Update / Delete team |
-| `/api/organizations/[orgId]/teams/[teamId]/members` | GET, POST, DELETE | List / Add / Remove members |
-| `/api/organizations/[orgId]/teams/[teamId]/roles` | GET, POST, DELETE | List / Assign / Remove roles |
-
-All routes require admin membership in the target organization and enforce tenant isolation via `AsyncLocalStorage` context.
-
-### Admin Dashboard API Routes (Super Admin Only)
-| Route | Methods | Description |
-|---|---|---|
-| `/api/dashboard/admin/permissions` | GET, POST | List permissions (paginated) / Create permission |
-| `/api/dashboard/admin/permissions/[id]` | GET, PATCH, DELETE | Get / Update / Delete permission |
-| `/api/dashboard/admin/resources` | GET, POST | List resources (paginated) / Create resource |
-| `/api/dashboard/admin/resources/names` | GET | Get sorted list of all resource names (for dropdowns) |
-| `/api/dashboard/admin/resources/[id]` | GET, PATCH, DELETE | Get / Update / Delete resource |
-
-All admin dashboard routes require `PLATFORM_ADMIN` role and use `requireSuperAdmin()` middleware for authorization.
-
-### Resources Page (`app/dashboard/admin/resources/page.tsx`)
-The Resources page provides a Super Admin interface for managing the global resource catalog. It follows the same UI pattern as the Permissions page with a data table, search, and CRUD modals.
-
-**Features:**
-- **Data Table:** Displays resources with columns for Name, Description, Roles Assigned, and Actions (View/Edit/Delete)
-- **Pagination:** Configurable page size (default: 8 rows per page) with `PaginationControls` component
-- **Search:** Client-side search filtered through the API with abort controller for stale request cancellation
-- **Stat Cards:** Shows "Total Resources" and "Assigned Roles" counts, refreshed on every create/update/delete
-- **Create/Edit/Delete Modals:** Inline modals for full CRUD operations with client-side validation
-- **Detail Modal:** Expanded view showing resource name, description, and all assigned roles with organization context
-- **Resource Name Endpoint:** Dedicated `/api/dashboard/admin/resources/names` endpoint returns a sorted list of resource names, used by the Permissions page to populate its "Filter by Resource" dropdown
-
-**State Management:**
-- `fetchData()` — paginated resource list with search, uses `useCallback` for stable reference
-- `fetchCounts()` — unfiltered total counts and role assignment totals, called after every mutation to keep stat cards in sync
-- Abort controller pattern prevents race conditions from rapid filter changes
-
-## 🗄️ Database Design
+## 7. Data Layer
 
 ### Core Entities
-- **User:** Authentication principal with email, password hash, role, and ban status.
-- **Organization:** Tenant entity with lifecycle states (`PENDING`, `ACTIVE`, `SUSPENDED`, `ARCHIVED`).
-- **Member:** Junction table linking Users to Organizations (many-to-many).
-- **Role:** Organization-scoped role definitions (default bootstrapped roles vs. custom admin-created roles).
-- **Permission:** Global master catalog of atomic actions (`resource:action`).
-- **RolePermission:** Junction table mapping Roles to Permissions.
-- **MemberRole:** Junction table linking Members to Roles (supports multiple roles per member).
-- **AuditLog:** Global security audit trail recording admin actions across all organizations.
-- **NotificationLog:** Tracks email notifications sent by the notification system. Global model (not org-scoped).
-- **Team:** Sub-organizational groupings within a tenant (e.g., "Operations", "QA"). Organization-scoped.
-- **TeamMember:** Junction table linking a `User` to a `Team`. Organization-scoped.
-- **TeamRole:** Team-level role definitions mapped to organization-scoped `Role` records. Organization-scoped.
-- **Resource:** Global catalog of portal feature modules (e.g., "platform", "organizations", "properties"). Represents feature areas that are shared across all tenants. Managed exclusively by Super Admins.
-- **ResourceRole:** Global junction table linking Resources to org-scoped Roles. Enables feature-level access control: a role must be assigned to a resource for users with that role to access the feature.
+
+| Entity | Scope | Description |
+|--------|-------|-------------|
+| `User` | Global | Authentication principal with email, password hash, system role (`super_admin`/`member`), ban status |
+| `Organization` | Global | Tenant entity with lifecycle states (`PENDING`, `ACTIVE`, `SUSPENDED`, `ARCHIVED`) |
+| `Member` | Global | Junction linking Users to Organizations (many-to-many) |
+| `Role` | Org-scoped | Organization-scoped role definitions (bootstrapped defaults vs. custom admin-created) |
+| `Permission` | Global | Master catalog of atomic actions (`resource:action` syntax) |
+| `RolePermission` | Org-scoped | Maps Roles to Permissions |
+| `MemberRole` | Org-scoped | Links Members to Roles (multiple roles per member supported) |
+| `Team` | Org-scoped | Sub-organizational groupings (e.g., "Operations", "QA") |
+| `TeamMember` | Org-scoped | User-to-team membership within an organization |
+| `TeamRole` | Org-scoped | Team-level role definitions mapped to org-scoped `Role` records |
+| `Resource` | Global | Catalog of portal feature modules (e.g., "platform", "organizations") |
+| `ResourceRole` | Global | Junction linking Resources to org-scoped Roles (feature-level access control) |
+| `AuditLog` | Global | Security audit trail recording admin actions across all organizations |
+| `NotificationLog` | Global | Tracks email notifications sent by the notification system |
+| `Calendar` | Org-scoped | Container/namespace for calendar events (one default per org) |
+| `CalendarEvent` | Org-scoped | Individual events within a calendar (local datetimes, optional property association) |
+| `CalendarRecurrence` | Org-scoped | 1:1 recurrence rule per event (iCal-inspired fields, `excludedDates` JSON array) |
 
 ### Relationships
+
 - `User` ↔ `Organization`: Via `Member` (many-to-many)
-- `Role` → `Permission`: Via `RolePermission` (one-to-many from Role, many-to-one to Permission)
-- `Member` → `Role`: Via `MemberRole` (one-to-many from Member, many-to-one to Role)
-- `Organization` → `Role`, `MemberRole`, `AuditLog`, `NotificationLog`, `Team`: One-to-many cascading deletes
+- `Role` → `Permission`: Via `RolePermission` (one-to-many from Role)
+- `Member` → `Role`: Via `MemberRole` (one-to-many from Member)
+- `Organization` → `Role`, `Team`, `Calendar`: One-to-many cascading deletes
 - `Team` → `TeamMember`, `TeamRole`: One-to-many cascading deletes
 - `User` ↔ `Team`: Via `TeamMember` (many-to-many)
 - `TeamRole` → `Role`: Many-to-one mapping to org-scoped roles (role inheritance)
-- `Resource` → `Role`: Via `ResourceRole` (many-to-many, global junction table). A resource can be assigned to multiple roles across organizations; a role can access multiple resources.
+- `Resource` → `Role`: Via `ResourceRole` (many-to-many, global junction)
+- `Calendar` → `CalendarEvent`: One-to-many cascading delete
+- `CalendarEvent` ↔ `CalendarRecurrence`: One-to-one via `eventId @unique`
 
 ### Indexing Strategy
+
 - Foreign keys are automatically indexed by Prisma.
 - Explicit composite indexes on `organizationId` for tenant-scoped models (`Role`, `RolePermission`, `MemberRole`).
 - Additional indexes on `AuditLog` for `userId`, `organizationId`, `timestamp`, and `resourceType` to support Super Admin cross-tenant queries.
 - Unique constraints on `[userId, orgId]` (Member), `[roleId, permissionId]` (RolePermission), and `[memberId, roleId]` (MemberRole) to prevent duplicates.
 
-## 🔗 Connection Pooling (PgBouncer)
+### Connection Pooling (PgBouncer)
+
+The system uses **PgBouncer** as a connection pooler between the Node.js application and PostgreSQL. Prisma clients connect to PgBouncer's port (default 6432) instead of the raw PostgreSQL port (5432).
+
+- **Health Monitoring:** The `/api/health` endpoint includes a dedicated PgBouncer health check via `lib/pgbouncer-monitor.ts`. It queries the admin interface for connection counts and pool utilization.
+- **System Health Card:** The admin dashboard displays PgBouncer status, latency, and active connections alongside Database and Cache health.
+- **Pool Modes:** Configured for `transaction` or `session` pooling depending on requirements.
+
+---
+
+## 8. Cache Architecture
+
+The portal implements a **multi-layered caching strategy** combining Next.js ISR, L1 in-memory LRU cache, Redis (L2), TanStack Query (client-side), and SSE for real-time updates. This section covers the server-side cache layers in detail.
+
+For client-side caching and SSE details, see [CACHING_ARCHITECTURE.md](./CACHING_ARCHITECTURE.md).
 
 ### Overview
-The system uses **PgBouncer** as a lightweight connection pooler between the Node.js application and PostgreSQL. Instead of each Prisma client instance maintaining a direct connection to the database, PgBouncer maintains a pool of persistent connections and multiplexes them across application requests.
 
-### Why PgBouncer?
-- **Connection Overhead Reduction:** PostgreSQL connection establishment is expensive. PgBouncer keeps a fixed number of server connections open, regardless of how many client requests are made.
-- **Resource Efficiency:** Prevents connection exhaustion under high concurrency, ensuring stable performance during traffic spikes.
-- **Pool Modes:** Configured to use `transaction` or `session` pooling (depending on requirements) to balance connection reuse and transaction safety.
+```
+Request → API Route / Resolver
+    │
+    ▼
+L1 Cache Check (in-memory, <0.1ms)
+    ├── HIT → Return cached value
+    │
+    └── MISS
+        │
+        ▼
+L2 Cache Check (Redis, ~5ms)
+    ├── HIT → Populate L1, return value
+    │
+    └── MISS
+        │
+        ▼
+Database Query (Prisma, ~15–40ms)
+    │
+    ▼
+Write-Through: L2 (Redis, configurable TTL) + L1 (60s TTL)
+    │
+    ▼
+Pub/Sub Publish → Other instances evict L1 key
+```
 
-### Architecture & Integration
-- **Client Configuration:** Prisma clients connect to PgBouncer's listening port (default `6432`) instead of the raw PostgreSQL port (`5432`).
-- **Admin Interface:** PgBouncer exposes an admin interface that accepts administrative queries (`SHOW CLIENTS`, `SHOW DATABASES`, `SHOW POOLS`, etc.).
-- **Health Monitoring:** The `/api/health` endpoint includes a dedicated PgBouncer health check. It connects to the admin interface, verifies responsiveness, and reports connection counts and pool utilization. If PgBouncer is unreachable, the system status becomes `unhealthy` (HTTP 503), as it is a critical dependency for database connectivity.
+### Layer 1: In-Memory LRU Cache
 
-### Monitoring & Observability
-- **Health Check Integration:** The `PgBouncerMonitor` utility (`lib/pgbouncer-monitor.ts`) queries the admin interface to gather metrics like active clients, idle servers, and pool utilization.
-- **System Health Card:** The admin dashboard (`components/admin/SystemHealthCard.tsx`) displays PgBouncer status, latency, and active connections alongside Database and Cache health.
-- **Alerting:** If PgBouncer goes offline or pool utilization exceeds thresholds, it triggers system logs and alerts via the health check pipeline.
+A high-performance, instance-local cache for frequently accessed data. Eliminates network round-trips for hot keys.
 
-This ensures that connection pooling is transparent to the application while providing robust visibility into database connectivity health.
+| Parameter | Default | Description |
+|-----------|---------|-------------|
+| `L1_CACHE_MAX_ENTRIES` | 1000 | Maximum cache entries per instance |
+| `L1_CACHE_TTL_MS` | 60,000 (60s) | Max TTL for cache entries |
+| `ENABLE_L1_CACHE` | `true` | Feature flag to disable L1 entirely |
 
-## 🧪 Testing Strategy
+- **Library:** `lru-cache` v11 with byte-level size calculation
+- **Runtime Guard:** Disabled on Edge runtime (`process.env.NEXT_RUNTIME === 'edge'`)
+- **Max Entry Size:** 10KB (rejects oversized entries to prevent memory issues)
+- **Singleton Pattern:** Stored on `globalThis` for a single instance across all Next.js route bundles
+- **TTL Strategy:** 60-second max TTL (shorter than Redis to limit stale data window)
 
-### Test Categories
-- **Unit Tests:** Isolated function testing using Vitest. Mocks Prisma and Redis clients to test business logic without database dependencies.
-- **Integration Tests:** Full stack testing with real PostgreSQL and Redis instances. Validates end-to-end workflows like organization bootstrapping, role assignment, and permission resolution.
-- **Isolation Tests:** Specifically verify tenant isolation guarantees by attempting cross-tenant queries and confirming they are blocked at the application or database layer.
+### Layer 2: Redis (Distributed Cache)
 
-### Test Infrastructure
-- **Vitest Configuration:** Uses `jsdom` environment for React component tests, Node.js environment for backend logic.
-- **Mocking Strategies:** `vi.mock()` is used extensively to mock `@/lib/db`, `@/lib/redis`, and custom hooks. Mocks return structured objects matching Prisma schema shapes to catch type mismatches early.
-- **Test Fixtures:** Seed data and test organizations are created programmatically within tests or via `prisma/seed.ts`.
+Distributed server-side cache for cross-instance consistency and persistence across restarts.
 
-## 🚀 Deployment & DevOps
+- **Client:** `ioredis` with retry strategy (max 10 retries, exponential backoff)
+- **Connection Pooling:** Handled internally by ioredis
+- **Invalidation:** Explicit via `cacheDel()` + Pub/Sub for cross-instance sync
 
-### Build Process
-- `npm run build` triggers Next.js production build, TypeScript compilation (`tsc --noEmit`), and Prisma client generation.
-- `serverExternalPackages: ['ioredis']` in `next.config.ts` ensures Redis client is bundled correctly for Edge runtime compatibility.
-- Webpack externals configuration prevents `ioredis` from being bundled in Edge middleware bundles.
+### Hybrid Cache Orchestration
 
-### Environment Variables
-| Variable | Purpose |
-|----------|---------|
-| `DATABASE_URL` | PostgreSQL connection string |
-| `BETTER_AUTH_SECRET` | Session encryption key (generated via `openssl rand -base64 32`) |
-| `PLATFORM_ORG_ID` | ID of the Platform Organization for Super Admin detection (auto-written by seed) |
-| `REDIS_URL` | Redis connection string for permission caching (optional, app degrades gracefully) |
-| `PII_ENCRYPTION_KEY` | AES-256-GCM key for PII encryption (optional) |
-| `GOOGLE_CLIENT_ID` / `GOOGLE_CLIENT_SECRET` | OAuth credentials (optional) |
+The hybrid cache layer (`lib/cache/hybrid.ts`) provides a unified interface: `cacheGet(key, resolver, options)` checks L1 first, falls back to Redis (L2), then calls the resolver function on a miss. Results are written through to both layers.
 
-### Security Measures
-- **Pre-Commit Hooks:** `scripts/check-secrets.sh` scans staged files for AWS keys, private key headers, and database passwords. Commits are blocked if secrets are detected.
-- **CSP Headers:** Configured in `next.config.ts` to mitigate XSS and data injection attacks (`default-src 'self'`, `frame-ancestors 'none'`, etc.).
-- **Secrets Management:** `.env` files are strictly gitignored. Only `.env.example` (with placeholders) is committed.
+- **Read Path:** L1 → L2 (Redis) → Resolver (DB). Write-through stores to both layers on miss.
+- **Write Path:** L2 first (source of truth) → L1 → Pub/Sub publish for cross-instance invalidation.
+- **Delete Path:** Remove from both layers + Pub/Sub publish.
 
-## 📊 Performance Considerations
+### Adaptive TTL Strategy
 
-### Caching Strategy
-- **Permission Cache:** Redis stores permission lists per user (`perm:${userId}:${orgId}`) with a 5-minute TTL. Cache is invalidated on role/permission changes via `invalidateUserCache()`.
-- **Session Cache:** BetterAuth's `cookieCache` enables encrypted, signed session cookies that can be validated in Edge runtime without database lookups (maxAge: 5 minutes).
-- **Cache Invalidation:** Triggered explicitly when roles, permissions, or memberships change. Middleware prevents caching of protected pages via `Cache-Control: no-store`.
+| Type | TTL | Used For |
+|------|-----|----------|
+| `permanent` | No TTL (evicted only on explicit delete) | Static reference data |
+| `stable` | 1 hour (3600s) | Orgs, users, roles |
+| `volatile` | 5 minutes (300s) | Permissions (can change with role updates) |
+| `search` | 30 seconds | Search results (relatively stable) |
 
-### Database Optimization
-- **Connection Pooling:** Managed by Prisma's built-in connection pooler.
-- **Query Optimization:** Tenant-scoped queries benefit from indexes on `organizationId`. Super Admin audit log queries use composite indexes for efficient cross-tenant filtering.
-- **Prisma Accelerate:** Not currently enabled, but architecture supports future migration to Prisma's global connection pool for multi-region deployments.
+### Cross-Instance Invalidation
 
-## 🔄 Data Flow Diagrams
+When data changes, a Pub/Sub message is published to Redis channel `cache:invalidations`. All instances subscribe to this channel and evict the affected key from their L1 cache:
 
-### User Login Flow
-1. User submits credentials → `/api/auth/sign-in/email`
-2. BetterAuth validates password hash, creates `Session` record
-3. Sets HTTP-only session cookie (`better-auth.session_token`)
-4. Session callback resolves permissions (Node.js runtime) or returns lightweight session (Edge runtime)
-5. User redirected to dashboard, `AsyncLocalStorage` populated with `organizationId`
+```
+Instance A:  Mutation → redis.publish('cache:invalidations', { key })
+Instance B:  subscriber.on('message') → lruCache.delete(key)
+Instance C:  subscriber.on('message') → lruCache.delete(key)
+```
 
-### Tenant-Scoped Query Flow
-1. Request arrives at API route or Server Component
-2. Middleware validates session cookie, sets `Cache-Control` headers
-3. Tenant context middleware extracts `organizationId` from session/headers, stores in `AsyncLocalStorage`
-4. Prisma extension intercepts query, injects `organizationId` into `where` clause
-5. Database executes query with RLS policy as secondary filter
-6. Response returned containing only tenant-scoped data
+### Stampede Protection
 
-### Permission Resolution Flow
-1. User accesses protected resource → `<RequirePermission>` or API route guard
-2. `resolvePermissions(userId, orgId)` called
-3. Check Redis cache for `perm:${userId}:${orgId}`
-4. If miss: Query `Member` → `MemberRole` → `RolePermission` → `Permission` tables
-5. Flatten permission keys, store in Redis (TTL: 300s)
-6. Return permission list for authorization check
+When the L1 cache is cold (e.g., after restart), concurrent requests for the same key could all miss and trigger simultaneous DB queries. Stampede protection uses a `Map<string, Promise>` (`lib/cache/stampede.ts`) to deduplicate concurrent misses — only one resolver is executed per unique key.
 
-### Health Check Flow
-1. Load balancer/monitoring service sends `GET /api/health`
-2. Middleware bypasses session validation (public route)
-3. Endpoint executes database check (`SELECT 1`) with timeout
-4. If Redis configured, endpoint executes cache check (`PING`)
-5. Returns JSON response with status, uptime, and individual check results
-6. HTTP 200 for healthy/degraded, HTTP 503 for unhealthy
+### Cache Monitoring & Metrics
 
-## 🔒 Data-in-Transit Payload Encryption
+Cache metrics are exposed via `lib/cache/health.ts` and the health endpoint (`GET /api/health`):
 
-**Status: Infrastructure complete — route-by-route migration in progress.**
+```json
+{
+  "l1Hits": 1500,
+  "l1Misses": 500,
+  "l2Hits": 450,
+  "l2Misses": 50,
+  "l1Size": 850,
+  "l1MemoryBytes": 4250000,
+  "l1HitRate": 75.0,
+  "redisConnected": true
+}
+```
+
+| Metric | Source | Target |
+|--------|--------|--------|
+| L1 Hit Rate | `lib/cache/health.ts` | >70% (varies by traffic) |
+| L1 Entry Count | `lib/cache/health.ts` | <1000 (configurable) |
+| L1 Memory Usage | `lib/cache/health.ts` | <20MB per instance |
+| Redis Latency | `lib/redis.ts` | <5ms p99 |
+| Redis Connection State | `lib/redis.ts` | Connected |
+
+The admin dashboard includes a cache metrics page at `/admin/cache-metrics`. A profiling script (`scripts/cache-benchmark.ts`) measures real-world cache performance across all scenarios.
+
+---
+
+## 9. Calendar System
+
+### Models & Services
+
+| Model | Scope | Description |
+|-------|-------|-------------|
+| `Calendar` | Org-scoped | Container/namespace for events (one default per org, multiple supported) |
+| `CalendarEvent` | Org-scoped | Individual events (local datetimes, optional property association) |
+| `CalendarRecurrence` | Org-scoped | 1:1 recurrence rule per event (`eventId @unique`, iCal-inspired fields, `excludedDates` JSON array for drag-and-drop instance exclusion) |
+
+Services:
+- `services/calendar-service.ts` — Calendar CRUD, default-calendar bootstrapping (org-scoped)
+- `services/calendar-event-service.ts` — Event CRUD, recurrence expansion, upcoming events
+- `services/calendar-notification-service.ts` — Today's-events email notifications
+
+Recurrence handling is supported by:
+- `lib/recurrence.ts` — Core recurrence expansion logic
+- `lib/recurrence-rrule.ts` — rrule library integration for iCal-compatible rules
+- `lib/recurrence-scopes.ts` — Scoping logic for recurrence instances
+
+### Real-Time Notifications (SSE)
+
+The system handles high-frequency data using a **Hybrid SSE-to-Cache Injection** pattern:
+
+1. **The Stream (Server):** A dedicated SSE endpoint (`/api/notifications/stream`) maintains a long-lived connection, pushing lightweight JSON events.
+2. **The Bridge (Client Hook):** The `useNotifications` hook manages the lifecycle of the `EventSource`.
+3. **The Injection (Cache):** When a new event arrives, the hook uses `queryClient.setQueryData` to manually inject the new item into the top of the existing list in the React Query cache.
+4. **The UI (Reaction):** Components subscribed to the React Query key re-render instantly.
+
+**Intelligent Polling (Safety Net):** When the browser tab is in focus, a slow poll (60s) runs as fallback. When blurred, polling pauses entirely to conserve battery and server bandwidth. On tab focus return, a fresh fetch reconciles any missed data.
+
+Notification dispatch is handled by `lib/notifications/dispatcher.ts`, with email delivery via `lib/notifications/email.ts` and event definitions in `lib/notifications/events.ts`.
+
+### Authorization
+
+Every `/api/organizations/[orgId]/calendar*` route verifies the session (401) and membership in the URL's organization via `globalDb.member.findFirst` (403 for non-members). Mutations call `requireAnyAdmin(ctx)` — only tenant admins can modify data; members are read-only. Permissions: `calendar:read`, `calendar:create`, `calendar:update`, `calendar:delete` are seeded into the permission catalog.
+
+---
+
+## 10. Security
+
+### Content Security Policy (CSP)
+
+The application enforces a strict CSP via Edge Runtime middleware (`middleware.ts`) to mitigate XSS and data injection attacks. CSP is deployed in **Report-Only** mode in development (logs violations without blocking) and strict enforcement in production.
+
+| Directive | Development | Production | Rationale |
+|-----------|------------|------------|-----------|
+| `default-src` | `'self'` | `'self'` | Blocks all resources not explicitly allowed. |
+| `script-src` | `'self' 'unsafe-inline' 'unsafe-eval'` | `'self' 'unsafe-inline'` | `unsafe-eval` only in dev for Fast Refresh. `unsafe-inline` required because Next.js App Router injects inline scripts (hydration, RSC payload) that cannot be given nonces without a custom server. |
+| `style-src` | `'self' 'unsafe-inline'` | `'self' 'unsafe-inline'` | Next.js internal runtime injects inline styles at hydration time. |
+| `img-src` | `'self' data: blob:` | `'self' data: blob:` | Standard images, inline base64 data URIs, and blob URLs. |
+| `font-src` | `'self' data:` | `'self' data:` | Standard fonts and base64-encoded font files. |
+| `connect-src` | `'self'` | `'self'` | Restricts AJAX/Fetch/WebSocket connections to same origin. |
+| `frame-ancestors` | `'none'` | `'none'` | Prevents clickjacking. |
+| `base-uri` / `form-action` | `'self'` | `'self'` | Prevents base tag hijacking and restricts form submissions. |
+
+**Nonce Infrastructure:** A cryptographically secure nonce is generated on every request (`lib/csp-nonce.ts`) and passed via the `x-csp-nonce` header. Application-level inline scripts can use this nonce (browsers honor it alongside `'unsafe-inline'`). The nonce cannot be applied to Next.js internal hydration scripts — this is a known limitation documented at [vercel/next.js#54850](https://github.com/vercel/next.js/issues/54850).
+
+### Data-in-Transit Payload Encryption
+
+**Status:** Infrastructure complete — route-by-route migration in progress.
 
 Payload encryption is gated by `PAYLOAD_ENCRYPTION_MODE=disabled` (default). When enabled, selected PII-bearing API routes encrypt request and response bodies at the application layer using AES-256-GCM, on top of TLS transport encryption.
 
-### Implementation Status (Phase 2)
-
-| Component | Status |
-|---|---|
-| Environment variables (`lib/env.ts`) | ✅ Implemented |
-| Logger PII redaction fields | ✅ Implemented |
-| Payload format module (`lib/payload-format.ts`) | ✅ Implemented |
-| Server crypto (`lib/crypto-server.ts`) | ✅ Implemented |
-| Client crypto (`lib/crypto-client.ts`) | ✅ Implemented |
-| Payload key store & issuance (`lib/payload-key-server.ts`) | ✅ Implemented |
-| Key endpoint (`app/api/security/payload-key/route.ts`) | ✅ Implemented |
-| PII route matcher (`lib/pii-routes.ts`) | ✅ Implemented — 11 patterns |
-| Server middleware/wrapper (`lib/payload-middleware.ts`) | ✅ Implemented |
-| Client key manager (`lib/payload-key-manager.ts`) | ✅ Implemented |
-| Encrypted fetch wrapper (`lib/api-client.ts`) | ✅ Implemented |
-| Unit tests (111 tests) | ✅ Passing |
-| PII routes wrapped with `wrapPiiRoute()` | 🔄 In progress — 11 of ~20 PII routes wrapped |
-| Client calls migrated to `encryptedFetch` | 🔄 In progress — 10 of ~20 client pages migrated |
-| Integration tests | ❌ Planned |
-| Browser/Playwright tests | ❌ Planned |
-
-### Wrapped Routes (Phase 2)
-
-| Route | Methods | PII Data |
-|---|---|---|
-| `/api/admin/users/search` | GET | User names, emails |
-| `/api/admin/organizations/:orgId/members` | GET, POST | Member names, emails |
-| `/api/admin/organizations/:orgId/members/:memberId` | PATCH, DELETE | Member names, emails |
-| `/api/admin/organizations` | GET, POST | Admin email, member lists |
-| `/api/admin/organizations/:orgId` | GET, PATCH, DELETE | Admin email, member lists |
-| `/api/auth/user-permissions` | GET | User identity data |
-| `/api/admin/audit-logs` | GET | User names, emails, actions |
-| `/api/admin/system-logs` | GET | User agents, IPs |
-| `/api/admin/organizations/search` | GET | Org names/slugs (admin-only) |
-| `/api/admin/organizations/:orgId/status` | PATCH | Org status transitions |
-| `/api/admin/organizations/:orgId/settings` | PATCH | Org name/slug/status |
-
-### Client Pages Migrated (Phase 2)
-
-| Page | Route(s) |
-|---|---|
-| `app/admin/organizations/page.tsx` | GET org list, search |
-| `app/admin/organizations/create/page.tsx` | POST create org |
-| `app/admin/organizations/[orgId]/page.tsx` | GET/PATCH status |
-| `app/admin/organizations/[orgId]/members/page.tsx` | GET/POST members, PATCH/DELETE |
-| `app/admin/organizations/[orgId]/settings/page.tsx` | GET/PATCH settings |
-| `features/organization/api/useOrganization.ts` | GET org details |
-| `features/organization/api/useUpdateOrgSettings.ts` | PATCH org settings |
-| `features/permissions/api/usePermissions.ts` | GET user permissions |
-| `app/admin/audit-logs/page.tsx` | GET audit logs |
-| `app/admin/system-logs/page.tsx` | GET system logs |
-
-### Architecture Overview
-
-```
-Phase 1 (implemented): Infrastructure
-┌──────────────┐     POST /api/security/payload-key      ┌──────────────────┐
-│  Browser     │ ──────────────────────────────────────► │  Server          │
-│              │                                         │                  │
-│ encryptedFetch()                    ◄─────────────────  Returns keyId,   │
-│   ├─ getPayloadKey()              encrypted key       │ algorithm,      │
-│   ├─ encrypt(body)                binary response     │ expiresAt, key  │
-│   └─ send binary body               (no-store)        │ material        │
-└──────────────┘                                         └──────────────────┘
-
-Phase 2 (in progress): Route & client migration
-✅ 11 PII routes wrapped with wrapPiiRoute()
-🔄 ~9 additional PII routes to be assessed and wrapped
-✅ 10 client pages migrated to encryptedFetch()
-🔄 ~10 additional client pages to be assessed and migrated
-```
-
-### Key Components
+#### Key Components
 
 | Component | File | Purpose |
-|---|---|---|
+|-----------|------|---------|
 | Payload Key Store | `lib/payload-key-server.ts` | In-memory key storage with session binding and expiry |
 | Key Issuance Endpoint | `app/api/security/payload-key/route.ts` | Authenticated endpoint for key bootstrap |
 | Server Crypto | `lib/crypto-server.ts` | AES-256-GCM with AAD using `node:crypto` |
 | Client Crypto | `lib/crypto-client.ts` | AES-256-GCM with AAD using Web Crypto API |
 | Wire Format | `lib/payload-format.ts` | Shared constants, binary helpers, validation |
 | Route Matcher | `lib/pii-routes.ts` | PII route configuration and matching (11 patterns) |
-| Server Middleware | `lib/payload-middleware.ts` | Route wrapper with decryption/encryption |
+| Server Middleware | `lib/payload-middleware.ts` | Route wrapper with decryption/encryption, replay protection |
 | Client Key Manager | `lib/payload-key-manager.ts` | In-memory key fetching and caching |
 | API Client | `lib/api-client.ts` | Encrypted fetch wrapper for PII calls |
+| PII Crypto Helpers | `lib/pii-crypto.ts` | Additional PII-specific cryptographic utilities |
 
-### Key Lifecycle
+#### Key Lifecycle
 
-1. **Issuance:** Client POSTs to `/api/security/payload-key` with BetterAuth session cookie
-2. **Validation:** Server validates session, generates 32-byte AES-256 key
-3. **Storage:** Key is stored in-memory bound to session ID with TTL expiry (single-instance only)
-4. **Distribution:** Server returns keyId, algorithm, expiresAt, and base64url-encoded key material
-5. **Import:** Client imports as non-extractable `CryptoKey` (Web Crypto)
-6. **Refresh:** Client refreshes key 30s before expiry or on stale-key error
-7. **Revocation:** Keys are revoked on logout via `revokeSessionKeys()`
+1. Client POSTs to `/api/security/payload-key` with BetterAuth session cookie
+2. Server validates session, generates 32-byte AES-256 key
+3. Key stored in-memory bound to session ID with TTL expiry (single-instance only)
+4. Server returns `keyId`, algorithm, `expiresAt`, and base64url-encoded key material
+5. Client imports as non-extractable `CryptoKey` (Web Crypto)
+6. Client refreshes key 30s before expiry or on stale-key error
+7. Keys revoked on logout via `revokeSessionKeys()`
 
-**Note on multi-instance deployments:** The current in-memory key store does not work across multiple server instances. For production multi-instance deployments, the `PayloadKeyStore` interface should be backed by Redis or a shared database. The interface (`lib/payload-key-server.ts`) is designed to support this via `setPayloadKeyStore()`.
-
-### Payload Format
+#### Payload Format
 
 ```
 ┌──────────────┬─────────────────┬──────────────────┐
@@ -609,58 +596,202 @@ Phase 2 (in progress): Route & client migration
 └──────────────┴─────────────────┴──────────────────┘
 ```
 
-HTTP headers for encrypted requests:
-| Header | Value |
-|---|---|
-| `X-Payload-Encryption` | `v1` |
-| `X-Payload-Key-Id` | key identifier |
-| `X-Payload-Timestamp` | Unix timestamp (seconds) |
-| `X-Payload-Nonce` | base64url random value |
+HTTP headers for encrypted requests: `X-Payload-Encryption`, `X-Payload-Key-Id`, `X-Payload-Timestamp`, `X-Payload-Nonce`.
 
-### Feature Flag Modes
+#### Feature Flag Modes
 
 | Mode | Behavior |
-|---|---|
-| `disabled` (default) | No payload encryption is required or applied |
+|------|----------|
+| `disabled` (default) | No payload encryption required or applied |
 | `permissive` | Server accepts encrypted payloads; emits metrics for plaintext PII (migration-only) |
 | `enforce` | Server requires encrypted payloads for configured PII routes |
 
-**Note:** The feature flag enforcement logic is implemented in `lib/payload-middleware.ts`. Currently 11 routes are wrapped with `wrapPiiRoute()`, so enabling the flag will activate encryption for those routes. Additional routes are being assessed and migrated in Phase 2.
+#### Multi-Instance Limitation
 
-### Configuration
+The current in-memory key store does not work across multiple server instances. For production multi-instance deployments, the `PayloadKeyStore` interface should be backed by Redis or a shared database. The interface (`lib/payload-key-server.ts`) supports this via `setPayloadKeyStore()`. Enforce mode **must not** be enabled on multi-instance deployments until a shared key store is implemented.
+
+#### Replay Protection
+
+The server rejects requests with missing/unsupported versions, expired timestamps, replayed nonces, wrong routes/methods, or invalid/expired keys. Replay nonces are validated using a Redis-backed cache (`lib/replay-cache-redis.ts`). When `PAYLOAD_ENCRYPTION_REQUIRE_REPLAY_CACHE=true`, unavailability of the replay cache returns HTTP 503 (`replay_cache_unavailable`) — fail-closed behavior.
+
+#### Configuration
 
 | Variable | Default | Description |
-|---|---|---|
-| `PAYLOAD_ENCRYPTION_MODE` | `disabled` | Feature flag mode (`disabled`, `permissive`, `enforce`) |
-| `PAYLOAD_ENCRYPTION_MAX_BYTES` | `65536` | Maximum encrypted payload size |
-| `PAYLOAD_ENCRYPTION_KEY_TTL_SECONDS` | `300` | Payload key lifetime |
-| `PAYLOAD_ENCRYPTION_REPLAY_WINDOW_SECONDS` | `30` | Replay protection window |
-| `PAYLOAD_ENCRYPTION_NONCE_TTL_SECONDS` | `60` | Replay nonce cache TTL |
+|----------|---------|-------------|
+| `PAYLOAD_ENCRYPTION_MODE` | `disabled` | Feature flag mode |
+| `PAYLOAD_ENCRYPTION_MAX_BYTES` | 65536 | Maximum encrypted payload size |
+| `PAYLOAD_ENCRYPTION_KEY_TTL_SECONDS` | 300 | Payload key lifetime |
+| `PAYLOAD_ENCRYPTION_REPLAY_WINDOW_SECONDS` | 30 | Replay protection window |
+| `PAYLOAD_ENCRYPTION_NONCE_TTL_SECONDS` | 60 | Replay nonce cache TTL |
 | `PAYLOAD_ENCRYPTION_REPLAY_CACHE` | `redis` | Replay cache backend (`memory`, `redis`) |
-| `PAYLOAD_ENCRYPTION_REQUIRE_REPLAY_CACHE` | `false` | Fail closed if replay cache unavailable (set to `true` for production enforce mode) |
+| `PAYLOAD_ENCRYPTION_REQUIRE_REPLAY_CACHE` | `false` | Fail closed if replay cache unavailable |
 
-### Multi-Instance Deployment Limitations
+### CSRF Protection
 
-**Critical:** The current payload key store (`lib/payload-key-server.ts`) uses an in-memory `Map`. This means:
+Payload encryption does **not** replace CSRF protection. PII mutating routes must continue to enforce SameSite cookie attributes, CORS restrictions, CSRF tokens where applicable, content-type restrictions, and origin checks.
 
-- **Single-instance only:** Keys issued on one instance are not visible to other instances.
-- **Memory-only replay cache** (`PAYLOAD_ENCRYPTION_REPLAY_CACHE=memory`) has the same limitation.
-- **Enforce mode must not be enabled** on multi-instance deployments until a shared key store is implemented.
+### Secrets Management
 
-For production multi-instance deployments, the `PayloadKeyStore` interface should be backed by Redis or a shared database. The interface (`lib/payload-key-server.ts`) is designed to support this via `setPayloadKeyStore()`.
-
-### Fail-Closed Replay Protection
-
-When `PAYLOAD_ENCRYPTION_REQUIRE_REPLAY_CACHE=true`:
-- If the replay cache (Redis) is unavailable during enforce mode, requests return HTTP 503 with error `replay_cache_unavailable`.
-- This prevents replay attacks from being silently disabled during outages.
-- In permissive mode, the cache unavailability check is not enforced (warn-and-continue).
+- **Environment Variables:** All secrets managed via `.env` files, strictly gitignored. Only `.env.example` (with placeholders) is committed.
+- **Pre-Commit Hooks:** `scripts/check-secrets.sh` scans staged files for AWS keys, private key headers, and database passwords. Commits are blocked if secrets detected.
+- **PII Redaction:** The logger (`lib/logger.ts`) redacts passwords, session tokens, PII fields (email, phone, SSN), API keys, and payload encryption material via Pino's `redact` configuration.
 
 ---
 
-## 🛠️ Development Workflow
+## 11. Project Structure
+
+```
+nipp/
+├── app/                          # Next.js App Router (pages, layouts, API routes)
+│   ├── (auth)/                   # Authentication pages (login, register)
+│   ├── admin/                    # Super admin dashboard & layouts
+│   │   ├── audit-logs/page.tsx   # Audit log viewer
+│   │   ├── cache-metrics/page.tsx# Cache performance metrics
+│   │   ├── organizations/        # Org management (list, create, edit, delete, members, permissions, roles, settings)
+│   │   ├── permissions/          # Permission catalog (list, create, edit, view, delete)
+│   │   ├── roles/                # Role management (list, create, edit, view, delete)
+│   │   ├── system-health/page.tsx# System health dashboard
+│   │   ├── system-logs/page.tsx  # System log viewer
+│   │   └── users/                # User management (list, create, edit, view, delete)
+│   ├── api/                      # API endpoints (RESTful routes)
+│   │   ├── admin/                # Super admin APIs (audit-logs, cache metrics, orgs, permissions, roles, users)
+│   │   ├── auth/                 # BetterAuth catch-all + user endpoints
+│   │   ├── cache/metrics/        # Cache metrics endpoint
+│   │   ├── csp-report/           # CSP violation reporting
+│   │   ├── dashboard/admin/      # Dashboard admin APIs (orgs, permissions, resources, roles, teams, users)
+│   │   ├── health/               # Health check endpoint
+│   │   ├── notifications/stream/# SSE notification stream
+│   │   ├── organizations/[orgId]/# Org-scoped APIs (calendar, teams)
+│   │   ├── roles/                # Role-related APIs
+│   │   └── security/payload-key/# Payload encryption key management
+│   ├── dashboard/                # Tenant dashboard layouts & pages
+│   │   ├── admin/                # Super admin tenant view (calendar, orgs, permissions, resources, roles, teams, users)
+│   │   └── contractor/           # Contractor-specific dashboard
+│   ├── org/[orgId]/              # Org-scoped pages (roles)
+│   ├── layout.tsx                # Root layout (CSP, inactivity timeout provider)
+│   ├── login/page.tsx            # Login page
+│   ├── register/page.tsx         # Registration page
+│   └── providers.tsx             # Global providers (Toaster, inactivity timeout)
+├── components/                   # Reusable React components
+│   ├── admin/                    # Admin-specific UI (AccessDenied, AuditLogViewer, ConfirmDialog, EditModal, OrgStatusBadge, OrgTable, Pagination, RoleManager, SystemHealthCard, TenantMemberForm, TenantRoleForm)
+│   ├── auth/                     # Auth components (LogoutButton, RequirePermission, RequireSuperAdmin)
+│   ├── calendar/                 # Interactive calendar (month/week/day/year views, DnD, recurrence)
+│   ├── dashboard/                # Dashboard UI (ConfirmDialog, DataTable)
+│   └── ui/                       # Shared UI primitives
+├── features/                     # Feature modules (permissions index)
+├── hooks/                        # Custom React hooks
+│   ├── useInactivityTimeout.ts   # Auto-logout on inactivity
+│   └── usePermission.ts          # Three-state permission check (null/loading/true/false)
+├── lib/                          # Core business logic & utilities
+│   ├── api-client.ts             # Encrypted fetch wrapper for PII calls
+│   ├── api-error.ts              # API error handling utilities
+│   ├── audit-log.ts / audit.ts   # Audit logging
+│   ├── auth.ts                   # BetterAuth configuration & session callbacks
+│   ├── auth-client.ts            # Client-side auth utilities & hooks
+│   ├── authz-route.ts / authz.ts # Authorization logic (hasPermission, isSuperAdmin)
+│   ├── cache/                    # Cache architecture (hybrid L1+L2, LRU, stampede prevention, health/metrics, warming)
+│   ├── client-error-logger.ts    # Client-side error logging
+│   ├── constants.ts              # Shared constants
+│   ├── crypto-client.ts / server.ts  # AES-256-GCM encryption (client & server)
+│   ├── csp-nonce.ts              # CSP nonce generation
+│   ├── csrf.ts                   # CSRF protection
+│   ├── dashboard-router.ts       # Dashboard routing logic
+│   ├── db.ts                     # Global Prisma client instance
+│   ├── env.ts                    # Environment variable validation (Zod schemas)
+│   ├── global-db-guard.ts        # Global database access guard
+│   ├── global-db.ts              # Global (non-org-scoped) Prisma client
+│   ├── ip.ts                     # IP address utilities
+│   ├── logger.ts                 # Pino logger with PII redaction
+│   ├── middleware/auth.ts        # Auth middleware utilities
+│   ├── notifications/            # Notification system (dispatcher, email, events)
+│   ├── org-bootstrap.ts          # Organization bootstrapping logic
+│   ├── organization-context.tsx  # React context for organization state
+│   ├── organization.ts           # Organization utilities
+│   ├── payload-format.ts         # Payload encryption wire format
+│   ├── payload-key-manager.ts    # Client-side payload key management
+│   ├── payload-key-server.ts     # Server-side payload key store
+│   ├── payload-key-server-redis.ts  # Redis-backed payload key store (multi-instance)
+│   ├── payload-metrics.ts        # Payload encryption metrics
+│   ├── payload-middleware.ts     # Server-side PII route wrapper & replay protection
+│   ├── pgbouncer-monitor.ts      # PgBouncer health monitoring
+│   ├── pii-crypto.ts             # PII-specific cryptographic helpers
+│   ├── pii-routes.ts             # PII route configuration & matcher
+│   ├── recurrence-rrule.ts       # rrule library integration for calendar recurrence
+│   ├── recurrence-scopes.ts      # Recurrence instance scoping
+│   ├── recurrence.ts             # Core recurrence expansion logic
+│   ├── redis.ts                  # Redis client with retry strategy
+│   ├── replay-cache-redis.ts     # Redis-backed replay nonce cache
+│   ├── require-super-admin.ts    # Super admin route guard
+│   ├── rls.ts                    # RLS policy management
+│   ├── schemas/                  # Zod validation schemas (auth, member, org, user)
+│   ├── services/                 # Base service utilities (base-service, error-handler, types)
+│   ├── system-logs.ts            # System log utilities
+│   ├── tenant-access.ts          # Tenant access control utilities
+│   ├── tenant-context.ts         # AsyncLocalStorage for tenant context propagation
+│   ├── tenant-db.ts              # Prisma $extends extension (tenant isolation)
+│   └── validate-schema.ts        # Schema validation utilities
+├── middleware.ts                 # Route protection & Edge-runtime CSP/session validation
+│                                  # Public routes: /login, /register, /api/auth/*, /api/health
+├── next.config.ts                # Next.js configuration (CSP, webpack externals)
+├── prisma/                       # Database schema & migrations
+│   ├── migration-scripts/        # Migration helper scripts (upgrade-existing-orgs.ts)
+│   ├── schema.prisma             # Prisma schema (enums, models, relations, RLS comments)
+│   └── seed.ts                   # Seed data (admin user, permission catalog, default roles/teams)
+├── scripts/                      # Utility scripts
+│   ├── cache-benchmark.ts        # Cache performance profiling script
+│   ├── check-secrets.sh          # Pre-commit secret scanning hook
+│   ├── setup-db.sh               # PostgreSQL database setup
+│   ├── setup-db.sql              # Database initialization SQL
+│   ├── setup-test-env.sh         # Test environment setup
+│   └── teardown-test-env.sh      # Test environment cleanup
+├── services/                     # Domain-specific business logic layers
+│   ├── calendar-event-service.ts  # Calendar event CRUD, recurrence expansion
+│   ├── calendar-notification-service.ts  # Today's-events email notifications
+│   ├── calendar-service.ts        # Calendar CRUD, default-calendar bootstrapping
+│   ├── organization-service.ts    # Organization management & lifecycle
+│   ├── permission-service.ts      # Global permission catalog CRUD
+│   ├── resource-service.ts        # Global resource catalog CRUD (Super Admin)
+│   ├── role-service.ts            # Org-scoped role CRUD
+│   ├── team-service.ts            # Team CRUD, membership, role inheritance
+│   └── user-service.ts            # User management & lifecycle
+├── tests/                        # Test suites
+│   ├── fixtures/                 # Test data fixtures (organizations, users)
+│   ├── integration/              # Integration tests (PostgreSQL + Redis)
+│   │   ├── auth.test.ts          # Authentication flow tests
+│   │   ├── calendar-events-*.test.ts  # Calendar event CRUD & query tests
+│   │   ├── logout-flow.test.ts   # Cross-tab session invalidation tests
+│   │   ├── notification-reliability.test.ts  # SSE/notification reliability
+│   │   ├── org-lifecycle.test.ts # Organization lifecycle tests
+│   │   ├── organization-*.test.ts  # Organization API & bootstrap tests
+│   │   ├── payload-encryption.test.ts  # Payload encryption integration tests
+│   │   ├── super-admin-integration.test.ts  # Super admin flow tests
+│   │   ├── team-*.test.ts        # Team lifecycle & membership tests
+│   │   ├── user-permissions.test.ts  # Permission resolution tests
+│   │   └── user-profile.test.ts  # User profile management tests
+│   ├── isolation/                # Tenant isolation guarantee tests (Playwright E2E)
+│   │   ├── playwright.config.ts  # Playwright configuration for isolation tests
+│   │   └── README.md             # Isolation test documentation
+│   ├── setup.ts                  # Test setup & teardown
+│   └── unit/                     # Unit tests (isolated function testing)
+├── types/                        # TypeScript type declarations
+│   ├── better-auth.d.ts          # BetterAuth type extensions
+│   └── missing-modules.d.ts      # Missing module declarations
+├── CACHING_ARCHITECTURE.md       # Detailed cache layer architecture document
+├── SECURITY.md                   # Security guidelines and RLS policies
+├── QUICK_START.md                # Developer onboarding guide
+├── README.md                     # Project overview and quick start
+├── docker-compose.test.yml       # Docker Compose for test infrastructure (PostgreSQL + Redis)
+├── Dockerfile.test               # Test environment Dockerfile
+├── docker-entrypoint.sh          # Container entrypoint script
+└── vitest.config.ts              # Vitest configuration (jsdom for React, Node for backend)
+```
+
+---
+
+## 12. Development & Testing
 
 ### Local Setup
+
 ```bash
 git clone <repo-url> && cd nipp
 nvm use                          # Switch to Node.js 22
@@ -668,501 +799,33 @@ npm install                      # Install dependencies
 bash scripts/setup-db.sh         # Create PostgreSQL databases
 cp .env.example .env             # Configure environment variables
 npx prisma generate              # Generate Prisma client
-npx prisma db push               # Push schema to database
+npx prisma db push               # Push schema to database (dev only)
 npm run db:seed                  # Seed admin user & permission catalog
 npm run dev                      # Start development server
 ```
 
 ### Running Tests
-- `npm test` → Run all unit tests (fast, no running system required)
-- `npm run test:watch` → Watch mode for unit tests
-- `npm run test:integration` → Run integration & isolation tests (requires PostgreSQL + Redis)
-- `npm run test:all` → Execute full test suite
-- `npm run test:coverage` → Generate code coverage report
+
+| Command | Description |
+|---------|-------------|
+| `npm test` | Run all unit tests (fast, no running system required) |
+| `npm run test:watch` | Watch mode for unit tests |
+| `npm run test:integration` | Run integration & isolation tests (requires PostgreSQL + Redis) |
+| `npm run test:all` | Execute full test suite (unit + integration + isolation) |
+| `npm run test:coverage` | Generate code coverage report |
+| `npm run test:isolation` | Run tenant isolation tests end-to-end (setup → app tests → Playwright E2E → teardown) |
 
 ### Database Migrations
-- `npm run db:migrate` → Create and apply migration files (recommended for production)
-- `npm run db:push` → Push schema changes directly to database (dev only, skips migration files)
-- `npm run db:studio` → Open Prisma Studio GUI for visual data inspection
 
-## 📚 Key Design Decisions
-
-### Why Prisma `$extends` over Proxy?
-The team evaluated proxy-based query interception but chose Prisma's native `$extends` API for:
-- **Type Safety:** Native extension hooks preserve TypeScript types and autocomplete.
-- **Maintainability:** Official API with clear lifecycle management, no runtime proxy overhead.
-- **Reliability:** Direct integration with Prisma's query engine ensures compatibility across version upgrades.
-
-### Why BetterAuth?
-BetterAuth was selected over NextAuth or custom authentication due to:
-- **Official Prisma Adapter:** Seamless integration with Prisma 6 without custom adapter maintenance.
-- **Organization Plugin:** Built-in multi-tenancy support with `Member`, `Invitation`, and `SentInvitation` models.
-- **Edge Runtime Support:** Native support for Edge-compatible session validation via cookie caching.
-- **Active Development:** Rapid iteration, strong TypeScript support, and growing ecosystem.
-
-### Why AsyncLocalStorage for Tenant Context?
-`AsyncLocalStorage` was chosen over prop drilling or global state because:
-- **Automatic Propagation:** Context flows automatically through async call chains without manual passing.
-- **Thread Safety:** Each request maintains isolated context, preventing cross-request data leakage.
-- **Middleware Integration:** Seamlessly integrates with Next.js middleware and API routes without architectural changes.
-
-### Why a Dedicated Service Layer?
-We have introduced a dedicated `services/` layer to sit between the API routes and the database (Prisma). This architectural decision was made for several key reasons:
-
-- **Separation of Concerns:** API routes should focus on HTTP concerns (parsing params, status codes, request validation), while services handle core business logic (slug generation, complex transactions, multi-step bootstrapping).
-- **Reusability:** Business logic (e.g., `createOrganization`) can be reused across different entry points, such as REST API routes, Server Actions, or CLI scripts, without duplicating code.
-- **Testability:** Services are easier to unit test in isolation. We can mock the database client and focus on testing complex logic like slug collision handling or admin bootstrapping without spinning up a full HTTP server.
-- **Transaction Management:** Complex workflows involving multiple database operations (e.g., creating an organization AND a user AND a member relationship) are encapsulated within a single service method, ensuring atomic operations and consistent error handling.
-- **Reduced Complexity in Routes:** By offloading logic to services, API route handlers remain thin and readable, making the codebase easier to navigate and maintain as the domain grows.
-
-## 🏥 Health Check Architecture
-
-The `/api/health` endpoint provides standardized health monitoring for production deployments.
-
-### Design Principles
-- **No Authentication Required:** Publicly accessible for load balancers and monitoring services
-- **Generic Terminology:** Uses `cache` instead of `redis` to avoid leaking technology stack details
-- **Graceful Degradation:** Non-critical checks (Redis) don't cause unhealthy status if unavailable
-- **No Sensitive Data:** Response only includes status, latency, and uptime—no connection strings or internal details
-- **Edge-Safe:** Excluded from middleware session validation to prevent Prisma Edge Runtime crashes
-
-### Implementation Details
-- **Location:** `app/api/health/route.ts`
-- **Database Check:** Uses `prisma.$queryRaw`SELECT 1`` with timeout handling
-- **Cache Check:** Uses `redis.ping()` with 3-second timeout (gracefully skips if Redis not configured)
-- **Status Logic:**
-  - `healthy`: All checks pass
-  - `degraded`: Non-critical check failed (Redis down, database up)
-  - `unhealthy`: Critical check failed (database unreachable) → HTTP 503
-- **Response Fields:** `status`, `timestamp`, `version`, `uptime` (from `process.uptime()`), `checks`
-
-### Monitoring Integration
-- **Load Balancers:** Configure health check to call `/api/health` every 10-30 seconds
-- **Container Orchestrators:** Use as liveness probe (HTTP 200 = running, HTTP 503 = restart)
-- **Uptime Monitoring:** External services can verify application availability and dependency health
-- **Alerting:** Set up alerts for HTTP 503 responses or degraded status
-
-## 📡 Real-Time & High Volatility Architecture
-
-The system handles high-frequency data (like Notifications) using a **Hybrid SSE-to-Cache Injection** pattern. This avoids the "Loading Spinner Fatigue" and heavy server load associated with standard polling or constant WebSocket connections.
-
-### The "Push-to-Cache" Pattern
-Instead of the UI components listening to a socket directly, the **React Query Cache** acts as the single source of truth.
-
-1.  **The Stream (Server):** A dedicated SSE (Server-Sent Events) endpoint (`/api/notifications/stream`) maintains a long-lived connection. It pushes lightweight JSON events to the client.
-2.  **The Bridge (Client Hook):** The `useNotifications` hook manages the lifecycle of the `EventSource`.
-3.  **The Injection (Cache):** When a new event arrives, the hook uses `queryClient.setQueryData` to **manually inject** the new item into the top of the existing list in the cache.
-4.  **The UI (Reaction):** Because the component is subscribed to the React Query key, it re-renders instantly when the cache is modified.
-
-### Intelligent Polling (The Safety Net)
-To ensure eventual consistency even if a user's internet drops momentarily and misses an SSE event, we implement **Context-Aware Polling**:
-- **Active State:** When the browser tab is in focus, we run a slow poll (e.g., 60s) as a fallback.
-- **Background State:** When the tab is blurred, polling is paused entirely to conserve battery and server bandwidth.
-- **Re-sync:** Upon returning to the tab (`window.onfocus`), a fresh fetch is triggered to reconcile any missed data.
-
+| Command | Description |
+|---------|-------------|
+| `npm run db:migrate` | Create and apply migration files (recommended for production) |
+| `npm run db:push` | Push schema changes directly to database (dev only, skips migration files) |
+| `npm run db:studio` | Open Prisma Studio GUI for visual data inspection |
+| `npm run db:reset` | Reset database (drops and recreates, skips seed) |
+| `npm run db:seed` | Seed admin user and permission catalog |
 
 ---
 
-# Flash of Incorrect Content (FOIC) Fix - Architecture Decision Record
-
-## Executive Summary
-
-24/7/26: Today's changes eliminated the Flash of Incorrect Content (FOIC) that Super Admins experienced when logging into the Property NI Multi-Tenant Portal. The fix involved moving authentication routing from the client-side to the server-side, implementing a three-state permission checking pattern, and properly separating server and client components.
-
-## Problem Statement
-
-### The User Experience Issue
-
-When a Super Admin logged into the application, they experienced a jarring visual flash:
-1. The browser would briefly render the default tenant dashboard layout
-2. Then flash an "Access Denied" screen
-3. Finally redirect to the `/admin/organizations` Super Admin dashboard
-
-This occurred because client-side routing inherently paints the initial route before asynchronous permission checks complete and redirects can fire.
-
-### The Root Causes
-
-**Cause 1: Client-Side Routing Race Condition**
-
-```typescript
-// ❌ PROBLEMATIC PATTERN
-export default function HomePage() {
-  const { isSuperAdmin, isLoading } = useIsSuperAdmin();
-  
-  // This renders BEFORE the async check completes
-  if (!isSuperAdmin) {
-    return <TenantDashboard />; // Wrong UI shown initially
-  }
-  
-  // Then redirect happens after fetch completes
-  if (isSuperAdmin) {
-    router.push('/admin/organizations');
-  }
-}
-```
-
-**Cause 2: Incorrect State Initialization**
-
-```typescript
-// ❌ PROBLEMATIC PATTERN
-const [isSuperAdmin, setIsSuperAdmin] = useState(false);
-
-useEffect(() => {
-  fetch('/api/auth/permissions')
-    .then(res => res.json())
-    .then(data => setIsSuperAdmin(data.isSuperAdmin));
-}, []);
-```
-
-During the async fetch, `isSuperAdmin` is `false`, causing `RequireSuperAdmin` to immediately render `<AccessDenied />` before the true value arrives.
-
-## Solution Architecture
-
-### Decision 1: Server-Side Authentication Routing Gate
-
-**Implementation:** `app/page.tsx` as a pure Server Component
-
-```typescript
-import { auth } from '@/lib/auth';
-import { headers } from 'next/headers';
-import { redirect } from 'next/navigation';
-import { prisma } from '@/lib/db';
-
-export default async function HomePage() {
-  // 1. Securely fetch session on the server
-  const session = await auth.api.getSession({
-    headers: await headers(),
-  });
-
-  if (!session) {
-    redirect('/login');
-  }
-
-  // 2. Query database directly for user role
-  const user = await prisma.user.findUnique({
-    where: { id: session.user.id },
-    select: { role: true },
-  });
-
-  // 3. Server-side redirect BEFORE any HTML is sent
-  if (user?.role === 'super_admin') {
-    redirect('/admin/organizations');
-  }
-
-  // 4. Render tenant dashboard for standard users
-  return <TenantDashboard />;
-}
-```
-
-**Why Query the Database Instead of Using Session Cookie?**
-
-BetterAuth does not serialize custom fields (like `role`) into the session cookie payload by default. While we could reconfigure BetterAuth to include the role, querying the database directly provides:
-- **Single source of truth**: Database is always authoritative
-- **No configuration complexity**: No need to modify BetterAuth's session serialization
-- **Minimal performance impact**: Single lightweight query on server-side
-- **Security**: Prevents client-side spoofing of role claims
-
-### Decision 2: Three-State Client-Side Permission Guards
-
-**Implementation:** `hooks/usePermission.ts`
-
-```typescript
-// ✅ CORRECT PATTERN
-export function useIsSuperAdmin(): boolean | null {
-  const [isSuperAdmin, setIsSuperAdmin] = useState<boolean | null>(null);
-
-  useEffect(() => {
-    async function checkPermissions() {
-      const res = await fetch('/api/auth/permissions');
-      const data = await res.json();
-      setIsSuperAdmin(data.isSuperAdmin === true);
-    }
-    checkPermissions();
-  }, []);
-
-  return isSuperAdmin; // Returns null initially, then true/false
-}
-```
-
-**Three-State Machine Implementation:**
-
-```typescript
-// components/auth/RequireSuperAdmin.tsx
-export function RequireSuperAdmin({ children }) {
-  const isSuperAdmin = useIsSuperAdmin();
-
-  // State 1: null = check in progress
-  if (isSuperAdmin === null) {
-    return <LoadingSpinner />;
-  }
-
-  // State 2: false = check complete, unauthorized
-  if (!isSuperAdmin) {
-    return <AccessDenied />;
-  }
-
-  // State 3: true = check complete, authorized
-  return <>{children}</>;
-}
-```
-
-### Decision 3: Client Component Extraction
-
-**Problem:** `app/page.tsx` must remain a Server Component to use `headers()` and `redirect()`, but interactive elements require `onClick` handlers.
-
-**Solution:** Extract `LogoutButton` to a separate Client Component file.
-
-```typescript
-// components/auth/LogoutButton.tsx
-'use client'; // Required for onClick and window.location
-
-export function LogoutButton() {
-  async function handleLogout() {
-    await signOutUser();
-    window.location.replace('/login');
-  }
-
-  return <button onClick={handleLogout}>Logout</button>;
-}
-```
-
-## Flow Diagram
-
-```mermaid
-flowchart TD
-    A[User Logs In] --> B[BetterAuth Validates Credentials]
-    B --> C[Session Cookie Set]
-    C --> D[Redirect to /]
-    
-    D --> E{Server Component<br/>app/page.tsx}
-    
-    E --> F[auth.api.getSession]
-    F --> G{Session Valid?}
-    
-    G -->|No| H[Redirect to /login]
-    G -->|Yes| I[prisma.user.findUnique<br/>Query role from DB]
-    
-    I --> J{User Role?}
-    
-    J -->|super_admin| K[HTTP 307 Redirect<br/>to /admin/organizations]
-    J -->|member| L[Render TenantDashboard<br/>Server-Side]
-    
-    K --> M[Admin Dashboard<br/>No UI Flash]
-    L --> N[Tenant Dashboard<br/>Renders Correctly]
-    
-    M --> O{Direct URL Access<br/>to /admin/* routes?}
-    O -->|Yes| P[RequireSuperAdmin<br/>Client Component]
-    O -->|No| Q[Continue Normal Flow]
-    
-    P --> R{useIsSuperAdmin<br/>State?}
-    
-    R -->|null| S[Show Loading Spinner]
-    R -->|false| T[Show AccessDenied]
-    R -->|true| U[Render Protected Content]
-    
-    S --> V[Async Permission Check<br/>Completes]
-    V --> R
-    
-    style E fill:#1B2A4A,stroke:#F5A623,stroke-width:3px,color:#fff
-    style K fill:#10B981,stroke:#059669,stroke-width:2px,color:#fff
-    style H fill:#EF4444,stroke:#DC2626,stroke-width:2px,color:#fff
-    style S fill:#F59E0B,stroke:#D97706,stroke-width:2px,color:#fff
-```
-
-## Consequences
-
-### Positive Consequences
-
-#### 1. **Zero UI Flash**
-- Super Admins are instantly routed to the correct dashboard
-- No intermediate rendering of tenant UI or access denied screens
-- HTTP 307/308 redirects happen before any HTML is painted
-
-#### 2. **Enhanced Security**
-- Authorization verified on the server before any client code executes
-- Database is the single source of truth for user roles
-- No risk of client-side role spoofing or manipulation
-- Prevents unauthorized UI exposure during async checks
-
-#### 3. **Improved Performance**
-- Server-side redirect is faster than client-side navigation
-- No unnecessary rendering of incorrect components
-- Reduced client-side JavaScript execution for routing logic
-
-#### 4. **Better Developer Experience**
-- Clear separation between Server Components (data fetching, secure routing) and Client Components (interactivity)
-- Explicit three-state pattern prevents common authorization bugs
-- Documented architecture decision prevents future regressions
-
-#### 5. **Maintainability**
-- Server-side gate is easy to understand and test
-- Client-side guards follow a consistent pattern across the application
-- Type-safe implementation with proper null handling
-
-### Trade-offs and Considerations
-
-#### 1. **Additional Database Query**
-- **Trade-off**: One extra database query per root page load
-- **Mitigation**: Query is lightweight (`SELECT role FROM users WHERE id = ?`) and executes in < 5ms
-- **Acceptable because**: Security and UX benefits far outweigh minimal performance cost
-
-#### 2. **Server Component Complexity**
-- **Trade-off**: Cannot use React hooks or browser APIs in `app/page.tsx`
-- **Mitigation**: Extract interactive elements to Client Components
-- **Acceptable because**: This is the recommended Next.js pattern for authentication flows
-
-#### 3. **Client-Side Guards Still Required**
-- **Trade-off**: Must maintain both server-side and client-side authorization checks
-- **Mitigation**: Client-side guards only handle direct URL access to `/admin/*` routes
-- **Acceptable because**: Defense-in-depth security model is industry best practice
-
-#### 4. **TypeScript Complexity**
-- **Trade-off**: Must handle `boolean | null` return types in permission hooks
-- **Mitigation**: Use nullish coalescing (`?? false`) for type safety
-- **Acceptable because**: Prevents the exact bug we fixed (premature access denied rendering)
-
-## Security Implications
-
-### What We Prevented
-1. **Client-Side Role Spoofing**: Server-side verification prevents attackers from manipulating client-side state
-2. **Unauthorized UI Exposure**: Tenant UI never renders for Super Admins, preventing accidental data exposure
-3. **Race Condition Exploits**: Three-state pattern prevents "fail-open" or "fail-closed" authorization bugs
-
-### What We Maintained
-1. **Row Level Security (RLS)**: Database-level tenant isolation unchanged
-2. **Session Validation**: BetterAuth session cookies still cryptographically validated
-3. **Permission Catalog**: All 43 permissions still enforced at API layer
-
-## Performance Impact
-
-### Before (Client-Side Routing)
-```
-1. Browser requests /
-2. Server renders TenantDashboard HTML
-3. Browser paints TenantDashboard
-4. Client JS loads and executes
-5. useIsSuperAdmin fetches permissions
-6. Redirect to /admin/organizations
-7. Browser requests /admin/organizations
-8. Server renders AdminDashboard HTML
-9. Browser paints AdminDashboard
-
-Total: 2 full page renders, 1 redirect, visible flash
-```
-
-### After (Server-Side Routing)
-```
-1. Browser requests /
-2. Server validates session
-3. Server queries user role
-4. Server issues HTTP 307 redirect
-5. Browser requests /admin/organizations
-6. Server renders AdminDashboard HTML
-7. Browser paints AdminDashboard
-
-Total: 1 full page render, 1 redirect, no flash
-```
-
-**Performance Gain**: Eliminated one full page render and all associated client-side JavaScript execution.
-
-## Migration Guide
-
-### For Existing Code
-
-If you have other pages that need similar protection:
-
-```typescript
-// app/protected-page/page.tsx
-import { auth } from '@/lib/auth';
-import { headers } from 'next/headers';
-import { redirect } from 'next/navigation';
-import { prisma } from '@/lib/db';
-
-export default async function ProtectedPage() {
-  const session = await auth.api.getSession({
-    headers: await headers(),
-  });
-
-  if (!session) {
-    redirect('/login');
-  }
-
-  const user = await prisma.user.findUnique({
-    where: { id: session.user.id },
-    select: { role: true },
-  });
-
-  if (user?.role !== 'super_admin') {
-    redirect('/unauthorized');
-  }
-
-  return <ProtectedContent />;
-}
-```
-
-### For New Client Components
-
-Always follow the three-state pattern:
-
-```typescript
-export function usePermission(permission: string): boolean | null {
-  const [hasPermission, setHasPermission] = useState<boolean | null>(null);
-  
-  useEffect(() => {
-    // Fetch permission
-    setHasPermission(result);
-  }, []);
-  
-  return hasPermission;
-}
-
-// In component:
-const hasPermission = usePermission('properties:create');
-
-if (hasPermission === null) return <LoadingSpinner />;
-if (!hasPermission) return <AccessDenied />;
-return <ProtectedContent />;
-```
-
-## Testing Checklist
-
-- [x] Super Admin login redirects instantly to `/admin/organizations` with zero flash
-- [x] Standard tenant user login renders tenant dashboard correctly
-- [x] Direct URL access to `/admin/*` by non-admin shows loading spinner, then access denied
-- [x] Logout button works correctly on tenant dashboard
-- [x] TypeScript compilation passes with strict null checks
-- [x] No console errors during authentication flow
-- [x] Session cookie properly validated on server-side
-
-## Related Documentation
-
-- **[SECURITY.md](./SECURITY.md)** - Security guidelines and RLS policies
-- **[README.md](./README.md)** - Project overview and quick start
-- **[QUICK_START.md](./QUICK_START.md)** - Developer onboarding guide
-
-## Conclusion
-
-The FOIC fix represents a significant improvement in both user experience and security. By moving authentication routing to the server-side and implementing proper three-state permission checking, we've eliminated a class of bugs that commonly plague React applications. The trade-offs (one additional database query, component extraction complexity) are minimal compared to the benefits (zero flash, enhanced security, better performance).
-
-This architecture decision should be followed for all future authentication and authorization routing in the application.
-
----
-
-## 🔮 Future Considerations
-
-### Scalability
-- **Horizontal Scaling:** Stateless architecture supports horizontal scaling via load balancers. Session cookies are self-contained (signed/encrypted), eliminating sticky session requirements.
-- **Database Sharding:** Architecture supports future sharding by `organizationId` if single-tenant PostgreSQL becomes a bottleneck.
-- **CDN Integration:** Static assets and API responses can be cached via CDN with proper `Cache-Control` headers.
-
-### Feature Roadmap
-- **Email Notifications:** Nodemailer integration for password reset, invitation emails, and maintenance alerts.
-- **Audit Log Enhancements:** Real-time audit log streaming via WebSockets for Super Admin dashboard.
-- **Multi-Region Support:** Prisma Accelerate integration for global read replicas and reduced latency.
-- **Advanced RBAC:** Dynamic permission evaluation (e.g., `properties:view:own` vs `properties:view:all`) with context-aware middleware.
-
-
----
-
-*Last Updated: 14/08/26
+*Last Updated: 26/08/26*
 *Maintained by: Property NI Development Team*

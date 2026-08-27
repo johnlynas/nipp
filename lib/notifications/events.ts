@@ -14,6 +14,7 @@ export const EXTREME_EVENT_TYPES = {
   SUSPICIOUS_LOGIN: 'SUSPICIOUS_LOGIN',     // Multiple failed logins from new IP
   ORG_SUSPENSION: 'ORG_SUSPENSION',         // Organization suspended
   ORG_ARCHIVAL: 'ORG_ARCHIVAL',             // Organization archived
+  TODAY_EVENTS: 'TODAY_EVENTS',             // Today's calendar events notification
 } as const;
 
 export type ExtremeEventType = (typeof EXTREME_EVENT_TYPES)[keyof typeof EXTREME_EVENT_TYPES];
@@ -27,6 +28,7 @@ export const EVENT_THRESHOLDS: Record<ExtremeEventType, { count: number; windowH
   [EXTREME_EVENT_TYPES.SUSPICIOUS_LOGIN]:  { count: 5, windowHours: 1 },
   [EXTREME_EVENT_TYPES.ORG_SUSPENSION]:    { count: 1, windowHours: 24 },
   [EXTREME_EVENT_TYPES.ORG_ARCHIVAL]:      { count: 1, windowHours: 24 },
+  [EXTREME_EVENT_TYPES.TODAY_EVENTS]:      { count: 1, windowHours: 24 },
 };
 
 /**
@@ -55,6 +57,8 @@ export function generateEventMessage(
       return `Organization "${metadata.orgName}" (ID: ${metadata.organizationId}) has been suspended by Super Admin ${metadata.adminName}.`;
     case EXTREME_EVENT_TYPES.ORG_ARCHIVAL:
       return `Organization "${metadata.orgName}" (ID: ${metadata.organizationId}) has been archived by Super Admin ${metadata.adminName}.`;
+    case EXTREME_EVENT_TYPES.TODAY_EVENTS:
+      return `Today's calendar events: ${metadata.count} event(s) scheduled for today.`;
     default:
       return `Extreme event detected: ${eventType}`;
   }

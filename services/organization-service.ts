@@ -199,7 +199,22 @@ export const OrganizationService = {
         'Default Members team created',
       );
 
-      // 4. Handle Admin Bootstrap if email provided
+      // 4. Create default calendar for the organization
+      await tx.calendar.create({
+        data: {
+          name: 'Main Calendar',
+          description: 'Default calendar for the organization',
+          color: '#1B2A4A',
+          isDefault: true,
+          organizationId: organization.id,
+        },
+      });
+      logger.debug(
+        { orgId: organization.id, method: 'Service.createOrganization' },
+        'Default calendar created',
+      );
+
+      // 5. Handle Admin Bootstrap if email provided
       if (adminEmail) {
         let user = await tx.user.findUnique({ where: { email: adminEmail } });
 
@@ -230,7 +245,7 @@ export const OrganizationService = {
         );
       }
 
-      // 5. Return the created organization
+      // 6. Return the created organization
       return organization;
     });
   },
