@@ -60,8 +60,8 @@ describe('db.ts (Prisma extensions)', () => {
       env: { NODE_ENV: 'test' },
     }));
     
-    const module = await import('@/lib/db');
-    db = module.default;
+    const dbModule = await import('@/lib/db');
+    db = dbModule.default;
   });
 
   describe('generateSlug (via team.create)', () => {

@@ -17,8 +17,8 @@ vi.mock('@/lib/auth', () => ({
   auth: {
     api: {
       getSession: vi.fn().mockResolvedValue({
-        user: { id: 'user-1' },
-        session: { id: 'session-1', activeOrganizationId: null },
+        user: { id: 'user-1' } as any,
+        session: { id: 'session-1', activeOrganizationId: null } as any,
       }),
     },
   },
@@ -119,8 +119,8 @@ describe('extractSession', () => {
   beforeEach(() => {
     // Restore default mock implementation after each test.
     vi.mocked(auth.api.getSession).mockResolvedValue({
-      user: { id: 'user-1' },
-      session: { id: 'session-1', activeOrganizationId: null },
+      user: { id: 'user-1' } as any,
+      session: { id: 'session-1', activeOrganizationId: null } as any,
     });
   });
 
@@ -149,7 +149,7 @@ describe('extractSession', () => {
 
   it('should return null when session object has no id', async () => {
     vi.mocked(auth.api.getSession).mockResolvedValue({
-      user: { id: 'user-1' },
+      user: { id: 'user-1' } as any,
       session: {}, // no id field
     } as any);
 
@@ -519,8 +519,8 @@ describe('isReplayCacheAvailable', () => {
 describe('wrapPiiRoute — skipEncryptionForUnauthenticated', () => {
   beforeEach(() => {
     vi.mocked(auth.api.getSession).mockResolvedValue({
-      user: { id: 'user-1' },
-      session: { id: 'session-1', activeOrganizationId: null },
+      user: { id: 'user-1' } as any,
+      session: { id: 'session-1', activeOrganizationId: null } as any,
     });
   });
 
@@ -613,8 +613,8 @@ describe('wrapPiiRoute — skipEncryptionForUnauthenticated', () => {
 describe('wrapPiiRoute — encrypted response body', () => {
   beforeEach(() => {
     vi.mocked(auth.api.getSession).mockResolvedValue({
-      user: { id: 'user-1' },
-      session: { id: 'session-1', activeOrganizationId: null },
+      user: { id: 'user-1' } as any,
+      session: { id: 'session-1', activeOrganizationId: null } as any,
     });
     vi.mocked(incrementMetric).mockClear();
   });
@@ -753,8 +753,8 @@ describe('wrapPiiRoute — encrypted response body', () => {
 describe('wrapPiiRoute — context.params passthrough', () => {
   beforeEach(() => {
     vi.mocked(auth.api.getSession).mockResolvedValue({
-      user: { id: 'user-1' },
-      session: { id: 'session-1', activeOrganizationId: null },
+      user: { id: 'user-1' } as any,
+      session: { id: 'session-1', activeOrganizationId: null } as any,
     });
   });
 
@@ -818,8 +818,8 @@ describe('wrapPiiRoute — context.params passthrough', () => {
 describe('wrapPiiRoute — key validation error paths', () => {
   beforeEach(() => {
     vi.mocked(auth.api.getSession).mockResolvedValue({
-      user: { id: 'user-1' },
-      session: { id: 'session-1', activeOrganizationId: null },
+      user: { id: 'user-1' } as any,
+      session: { id: 'session-1', activeOrganizationId: null } as any,
     });
   });
 
@@ -893,8 +893,8 @@ describe('wrapPiiRoute — key validation error paths', () => {
 describe('wrapPiiRoute — no-store headers', () => {
   beforeEach(() => {
     vi.mocked(auth.api.getSession).mockResolvedValue({
-      user: { id: 'user-1' },
-      session: { id: 'session-1', activeOrganizationId: null },
+      user: { id: 'user-1' } as any,
+      session: { id: 'session-1', activeOrganizationId: null } as any,
     });
   });
 
@@ -978,8 +978,8 @@ describe('wrapPiiRoute — disabled mode passthrough', () => {
       auth: {
         api: {
           getSession: vi.fn().mockResolvedValue({
-            user: { id: 'user-1' },
-            session: { id: 'session-1', activeOrganizationId: null },
+            user: { id: 'user-1' } as any,
+            session: { id: 'session-1', activeOrganizationId: null } as any,
           }),
         },
       },
@@ -1016,8 +1016,8 @@ describe('wrapPiiRoute — disabled mode passthrough', () => {
       auth: {
         api: {
           getSession: vi.fn().mockResolvedValue({
-            user: { id: 'user-1' },
-            session: { id: 'session-1', activeOrganizationId: null },
+            user: { id: 'user-1' } as any,
+            session: { id: 'session-1', activeOrganizationId: null } as any,
           }),
         },
       },
@@ -1046,8 +1046,8 @@ describe('wrapPiiRoute — disabled mode passthrough', () => {
 describe('wrapPiiRoute — stale timestamp', () => {
   beforeEach(() => {
     vi.mocked(auth.api.getSession).mockResolvedValue({
-      user: { id: 'user-1' },
-      session: { id: 'session-1', activeOrganizationId: null },
+      user: { id: 'user-1' } as any,
+      session: { id: 'session-1', activeOrganizationId: null } as any,
     });
   });
 
@@ -1091,8 +1091,8 @@ describe('wrapPiiRoute — stale timestamp', () => {
 describe('wrapPiiRoute — GET and DELETE skip body decryption', () => {
   beforeEach(() => {
     vi.mocked(auth.api.getSession).mockResolvedValue({
-      user: { id: 'user-1' },
-      session: { id: 'session-1', activeOrganizationId: null },
+      user: { id: 'user-1' } as any,
+      session: { id: 'session-1', activeOrganizationId: null } as any,
     });
   });
 
@@ -1151,8 +1151,8 @@ describe('wrapPiiRoute — GET and DELETE skip body decryption', () => {
 describe('wrapPiiRoute — permissive mode response encryption', () => {
   beforeEach(async () => {
     vi.mocked(auth.api.getSession).mockResolvedValue({
-      user: { id: 'user-1' },
-      session: { id: 'session-1', activeOrganizationId: null },
+      user: { id: 'user-1' } as any,
+      session: { id: 'session-1', activeOrganizationId: null } as any,
     });
     vi.mocked(incrementMetric).mockClear();
     
@@ -1166,7 +1166,6 @@ describe('wrapPiiRoute — permissive mode response encryption', () => {
         expiresAt: Math.floor(Date.now() / 1000) + 300,
         algorithm: 'aes-256-gcm',
         keyMaterial: Buffer.from('a'.repeat(32)).toString('base64url'),
-        keyBytes: Buffer.from('a'.repeat(32)),
       }
     });
   });
@@ -1233,8 +1232,8 @@ describe('wrapPiiRoute — permissive mode response encryption', () => {
       auth: {
         api: {
           getSession: vi.fn().mockResolvedValue({
-            user: { id: 'user-1' },
-            session: { id: 'session-1', activeOrganizationId: null },
+            user: { id: 'user-1' } as any,
+            session: { id: 'session-1', activeOrganizationId: null } as any,
           }),
         },
       },
@@ -1290,8 +1289,8 @@ describe('wrapPiiRoute — permissive mode response encryption', () => {
       auth: {
         api: {
           getSession: vi.fn().mockResolvedValue({
-            user: { id: 'user-1' },
-            session: { id: 'session-1', activeOrganizationId: null },
+            user: { id: 'user-1' } as any,
+            session: { id: 'session-1', activeOrganizationId: null } as any,
           }),
         },
       },
@@ -1320,8 +1319,8 @@ describe('wrapPiiRoute — permissive mode response encryption', () => {
 describe('wrapPiiRoute — non-PII route passthrough', () => {
   beforeEach(() => {
     vi.mocked(auth.api.getSession).mockResolvedValue({
-      user: { id: 'user-1' },
-      session: { id: 'session-1', activeOrganizationId: null },
+      user: { id: 'user-1' } as any,
+      session: { id: 'session-1', activeOrganizationId: null } as any,
     });
   });
 

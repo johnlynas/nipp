@@ -90,7 +90,7 @@ describe('authz', () => {
 
     it('returns ID from database when env is not set', async () => {
       env.PLATFORM_ORGANIZATION_ID = '';
-      vi.mocked(tenantDb.organization.findFirst).mockResolvedValue({ id: 'db-platform-id' });
+      vi.mocked(tenantDb.organization.findFirst).mockResolvedValue({ id: 'db-platform-id' } as any);
 
       const result = await getPlatformOrgId();
 
@@ -163,7 +163,7 @@ describe('authz', () => {
         id: 'member-1',
         userId: 'user-1',
         orgId: 'platform-org-id',
-      });
+      } as any);
 
       const result = await verifySuperAdmin('user-1');
 
@@ -175,7 +175,7 @@ describe('authz', () => {
         id: 'member-1',
         userId: 'user-1',
         orgId: 'platform-org-id',
-      });
+      } as any);
 
       const result = await verifySuperAdmin('user-1', 'platform-org-id');
 
