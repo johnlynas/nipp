@@ -489,7 +489,35 @@ The following environment variables control security-relevant behavior:
 
 ### Rate Limiting Configuration
 
-Rate limiting is configured in BetterAuth with the following thresholds:
+The application uses a unified rate limiting system with three distinct implementations, each configurable via environment variables with sensible defaults.
+
+#### HTTP Route Rate Limiting (In-Memory)
+
+Used by payload-key endpoints to prevent abuse of cryptographic key operations. All thresholds are configurable:
+
+| Variable | Purpose | Default |
+|----------|---------|---------|
+| `RATE_LIMIT_PAYLOAD_KEY_MAX` | Max requests per window for key issuance | 30 |
+| `RATE_LIMIT_PAYLOAD_KEY_WINDOW` | Window duration in seconds for key issuance | 60 |
+| `RATE_LIMIT_PAYLOAD_KEY_REVOKE_MAX` | Max requests per window for key revocation | 5 |
+| `RATE_LIMIT_PAYLOAD_KEY_REVOKE_WINDOW` | Window duration in seconds for key revocation | 60 |
+
+The payload-key issuance endpoint uses a stricter limit (30 req/min) while revocation is capped at 5 req/min to prevent brute-force key destruction. Stores are in-memory and cleaned up every 5 minutes (entries older than 2× the window).
+
+#### Notification Rate Limiting (Redis-Backed)
+
+Used by the notification dispatcher to prevent email flooding. Configurable via:
+
+| Variable | Purpose | Default |
+|----------|---------|---------|
+| `RATE_LIMIT_NOTIFICATION_MAX` | Max notifications per event type/recipient/window | 5 |
+| `RATE_LIMIT_NOTIFICATION_WINDOW_HOURS` | Window duration in hours for notifications | 24 |
+
+The notification rate limiter uses Redis for cross-instance consistency (important in multi-server deployments). Each event type and recipient gets an independent counter, so a user can receive notifications for different event types without sharing the same quota.
+
+#### Authentication Rate Limiting (BetterAuth)
+
+BetterAuth provides built-in rate limiting for authentication endpoints:
 
 | Endpoint Category | Limit | Window |
 |-------------------|-------|--------|
@@ -497,6 +525,23 @@ Rate limiting is configured in BetterAuth with the following thresholds:
 | Sign-in attempts | 5 requests | 15 minutes |
 
 These limits are enforced per-IP address. The stricter limit on sign-in attempts is designed to prevent brute-force password attacks.
+
+#### Rate Limiting Across API Routes
+
+The unified rate limiter module (`lib/rate-limiter.ts`) is designed to be shared across all routes. Currently applied to:
+
+| Route Group | Rate Limiting Applied |
+|-------------|----------------------|
+| `POST /api/security/payload-key` (issuance) | ✅ 30 req/min per session |
+| `POST /api/security/payload-key/revoke` | ✅ 5 req/min per session |
+| Notification dispatcher (email sending) | ✅ 5 per event type/recipient/24h |
+| Auth endpoints (`/api/auth/*`) | ✅ BetterAuth built-in limits |
+| Admin/Dashboard-Admin routes (`/api/admin/*`, `/api/dashboard/admin/*`) | ❌ Not yet rate limited — priority for future implementation |
+| Organization routes (`/api/organizations/*`) | ❌ Not yet rate limited — priority for future implementation |
+| Role routes (`/api/roles/*`) | ❌ Not yet rate limited — priority for future implementation |
+| `POST /api/csp-report` | ❌ Not yet rate limited — ingestion endpoint needs protection |
+
+See [Unified Rate Limiting Design](./openspec/changes/unified-rate-limiter/design.md) for the full architecture and plans to extend rate limiting to unprotected routes.
 
 ### Trusted Proxies
 

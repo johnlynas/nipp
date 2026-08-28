@@ -10,6 +10,7 @@ import { auth } from '@/lib/auth';
 import { env } from '@/lib/env';
 import { logger } from '@/lib/logger';
 import { revokeSessionKeys } from '@/lib/payload-key-server';
+import { checkRevokeRateLimit, resetRevokeRateLimitStore } from '@/lib/rate-limiter';
 
 // ---------------------------------------------------------------------------
 // Route segment configuration — never cache, always dynamic
@@ -66,64 +67,6 @@ function isTrustedOrigin(request: NextRequest): boolean {
 
   return false;
 }
-
-// ---------------------------------------------------------------------------
-// Rate limiting (stricter than key issuance — max 5 revocations per minute)
-// ---------------------------------------------------------------------------
-
-const REVOKE_RATE_LIMIT_WINDOW = 60; // seconds
-const REVOKE_RATE_LIMIT_MAX = 5;     // requests per window
-
-interface RateLimitEntry {
-  count: number;
-  windowStart: number;
-}
-
-const revokeRateLimitStore = new Map<string, RateLimitEntry>();
-
-function checkRevokeRateLimit(clientId: string): boolean {
-  const now = Math.floor(Date.now() / 1000);
-
-  let entry = revokeRateLimitStore.get(clientId);
-  if (!entry || now - entry.windowStart > REVOKE_RATE_LIMIT_WINDOW) {
-    // New window
-    entry = { count: 1, windowStart: now };
-    revokeRateLimitStore.set(clientId, entry);
-    return true;
-  }
-
-  if (entry.count >= REVOKE_RATE_LIMIT_MAX) {
-    return false; // Rate limited
-  }
-
-  entry.count++;
-  return true;
-}
-
-// ---------------------------------------------------------------------------
-// Cleanup old rate-limit entries (lazy singleton)
-// ---------------------------------------------------------------------------
-
-let revokeCleanupTimer: ReturnType<typeof setInterval> | null = null;
-
-function startRevokeRateLimitCleanup(): void {
-  if (revokeCleanupTimer) return;
-
-  revokeCleanupTimer = setInterval(() => {
-    const now = Math.floor(Date.now() / 1000);
-    for (const [clientId, entry] of revokeRateLimitStore.entries()) {
-      if (now - entry.windowStart > REVOKE_RATE_LIMIT_WINDOW * 2) {
-        revokeRateLimitStore.delete(clientId);
-      }
-    }
-  }, 5 * 60 * 1000);
-
-  if (typeof revokeCleanupTimer.unref === 'function') {
-    revokeCleanupTimer.unref();
-  }
-}
-
-startRevokeRateLimitCleanup();
 
 // ---------------------------------------------------------------------------
 // Handler

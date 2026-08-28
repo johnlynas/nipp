@@ -5,6 +5,8 @@
  * Super Admins and affected Org Admins.
  */
 
+import { env } from '@/lib/env';
+
 /**
  * Extreme event types that trigger notifications.
  */
@@ -32,11 +34,17 @@ export const EVENT_THRESHOLDS: Record<ExtremeEventType, { count: number; windowH
 };
 
 /**
- * Notification rate limit: max 5 notifications per event type per 24-hour window.
+ * Notification rate limit: max notifications per event type per recipient per window.
+ * Configurable via env vars with sensible defaults:
+ *   RATE_LIMIT_NOTIFICATION_MAX          — max notifications (default 5)
+ *   RATE_LIMIT_NOTIFICATION_WINDOW_HOURS — window in hours (default 24)
  */
+const NOTIFICATION_MAX = Number(env.RATE_LIMIT_NOTIFICATION_MAX ?? 5);
+const NOTIFICATION_WINDOW_HOURS = Number(env.RATE_LIMIT_NOTIFICATION_WINDOW_HOURS ?? 24);
+
 export const NOTIFICATION_RATE_LIMIT = {
-  maxPerWindow: 5,
-  windowHours: 24,
+  maxPerWindow: NOTIFICATION_MAX,
+  windowHours: NOTIFICATION_WINDOW_HOURS,
 };
 
 /**
