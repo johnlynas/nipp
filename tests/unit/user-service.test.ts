@@ -20,6 +20,8 @@ vi.mock('@/lib/global-db', () => ({
       delete: vi.fn(),
     },
     member: { findFirst: vi.fn(), findMany: vi.fn(), create: vi.fn(), deleteMany: vi.fn() },
+    account: { create: vi.fn() },
+    teamMember: { findMany: vi.fn() },
   },
 }));
 
@@ -317,6 +319,206 @@ describe('UserService', () => {
       await expect(
         UserService.delete('user-999', mockCtx('PLATFORM_ADMIN'))
       ).rejects.toThrow(NotFoundError);
+    });
+  });
+
+  describe('create — password / credential account', () => {
+    it('hashes the password and creates a Better Auth credential account', async () => {
+      vi.mocked(globalDb.user.findUnique).mockResolvedValue(null);
+      const created = castUser(mockUser({ id: 'pw-user' }));
+      vi.mocked(globalDb.user.create).mockResolvedValue(created as never);
+      const accountResult = { id: 'account-1', accountId: 'pw-user', providerId: 'credential', password: 'hash', userId: 'pw-user' };
+      vi.mocked(globalDb.account.create).mockResolvedValue(accountResult as never);
+
+      await UserService.create(
+        { email: 'pw@example.com', name: 'Pw User', password: 's3cret-pass' },
+        mockCtx('PLATFORM_ADMIN'),
+      );
+
+      // The user record stores a hash, never the plaintext password
+      const userData = (vi.mocked(globalDb.user.create).mock.calls[0][0].data) as { passwordHash?: string; email: string };
+      expect(userData.passwordHash).toBeTypeOf('string');
+      expect(userData.passwordHash).not.toBe('s3cret-pass');
+
+      // Credential account links sign-in to the same user
+      expect(globalDb.account.create).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: expect.objectContaining({
+            providerId: 'credential',
+            userId: 'pw-user',
+            password: userData.passwordHash,
+          }),
+        }),
+      );
+    });
+
+    it('skips the credential account when no password is provided', async () => {
+      vi.mocked(globalDb.user.findUnique).mockResolvedValue(null);
+      vi.mocked(globalDb.user.create).mockResolvedValue(castUser(mockUser({ id: 'no-pw' })) as never);
+
+      await UserService.create(
+        { email: 'nopw@example.com', name: 'No Pw' },
+        mockCtx('PLATFORM_ADMIN'),
+      );
+
+      const userData = (vi.mocked(globalDb.user.create).mock.calls[0][0].data) as { passwordHash?: string };
+      expect(userData.passwordHash).toBeUndefined();
+      expect(globalDb.account.create).not.toHaveBeenCalled();
+    });
+
+    it('PLATFORM_ADMIN can assign a newly created user to a specific organization', async () => {
+      vi.mocked(globalDb.user.findUnique).mockResolvedValue(null);
+      vi.mocked(globalDb.user.create).mockResolvedValue(castUser(mockUser({ id: 'org-assign' })) as never);
+      vi.mocked(globalDb.member.create).mockResolvedValue({ id: 'm-1' } as never);
+
+      await UserService.create(
+        { email: 'assign@example.com', name: 'Assign', organizationId: 'target-org-5' },
+        mockCtx('PLATFORM_ADMIN'),
+      );
+
+      expect(globalDb.member.create).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: expect.objectContaining({ userId: 'org-assign', orgId: 'target-org-5', role: 'member' }),
+        }),
+      );
+    });
+  });
+
+  describe('list — platform admin org/role/team filters', () => {
+    it('filters users by organization through the member table', async () => {
+      vi.mocked(globalDb.member.findMany).mockResolvedValue([
+        { userId: 'user-1' },
+        { userId: 'user-2' },
+      ] as never);
+      vi.mocked(globalDb.user.findMany).mockResolvedValue([] as never[]);
+      vi.mocked(globalDb.user.count).mockResolvedValue(0);
+
+      await UserService.list({ organizationId: 'org-1' } , { page: 1, pageSize: 20 }, mockCtx('PLATFORM_ADMIN'));
+
+      expect(globalDb.member.findMany).toHaveBeenCalledWith(
+        expect.objectContaining({ where: { orgId: 'org-1' } }),
+      );
+      expect(globalDb.user.findMany).toHaveBeenCalledWith(
+        expect.objectContaining({ where: expect.objectContaining({ id: { in: ['user-1', 'user-2'] } }) }),
+      );
+    });
+
+    it('scopes member lookups by both organization and role', async () => {
+      vi.mocked(globalDb.member.findMany).mockResolvedValue([{ userId: 'user-1' }] as never);
+      vi.mocked(globalDb.user.findMany).mockResolvedValue([] as never[]);
+      vi.mocked(globalDb.user.count).mockResolvedValue(0);
+
+      await UserService.list({ organizationId: 'org-1', role: 'admin' }, { page: 1, pageSize: 20 }, mockCtx('PLATFORM_ADMIN'));
+
+      expect(globalDb.member.findMany).toHaveBeenCalledWith(
+        expect.objectContaining({ where: { orgId: 'org-1', role: 'admin' } }),
+      );
+    });
+
+    it('intersects org membership with team membership when both filters are set', async () => {
+      vi.mocked(globalDb.member.findMany).mockResolvedValue([
+        { userId: 'user-1' },
+        { userId: 'user-2' },
+      ] as never);
+      vi.mocked(globalDb.teamMember.findMany).mockResolvedValue([
+        { userId: 'user-2' },
+        { userId: 'user-3' },
+      ] as never);
+      vi.mocked(globalDb.user.findMany).mockResolvedValue([] as never[]);
+      vi.mocked(globalDb.user.count).mockResolvedValue(0);
+
+      await UserService.list({ organizationId: 'org-1', teamId: 'team-1' }, { page: 1, pageSize: 20 }, mockCtx('PLATFORM_ADMIN'));
+
+      expect(globalDb.teamMember.findMany).toHaveBeenCalledWith(
+        expect.objectContaining({ where: { teamId: 'team-1' } }),
+      );
+      // Only user-2 is in both the org and the team
+      expect(globalDb.user.findMany).toHaveBeenCalledWith(
+        expect.objectContaining({ where: expect.objectContaining({ id: { in: ['user-2'] } }) }),
+      );
+    });
+
+    it('returns an empty id set when no users match the filters', async () => {
+      vi.mocked(globalDb.member.findMany).mockResolvedValue([] as never);
+      vi.mocked(globalDb.user.findMany).mockResolvedValue([] as never[]);
+      vi.mocked(globalDb.user.count).mockResolvedValue(0);
+
+      await UserService.list({ organizationId: 'org-ghost' }, { page: 1, pageSize: 20 }, mockCtx('PLATFORM_ADMIN'));
+
+      expect(globalDb.user.findMany).toHaveBeenCalledWith(
+        expect.objectContaining({ where: expect.objectContaining({ id: { in: [] } }) }),
+      );
+    });
+
+    it('applies the banned status filter', async () => {
+      vi.mocked(globalDb.user.findMany).mockResolvedValue([] as never[]);
+      vi.mocked(globalDb.user.count).mockResolvedValue(0);
+
+      await UserService.list({ status: 'banned' } , { page: 1, pageSize: 20 }, mockCtx('PLATFORM_ADMIN'));
+
+      expect(globalDb.user.findMany).toHaveBeenCalledWith(
+        expect.objectContaining({ where: expect.objectContaining({ banned: true }) }),
+      );
+    });
+
+    it('applies the active status filter', async () => {
+      vi.mocked(globalDb.user.findMany).mockResolvedValue([] as never[]);
+      vi.mocked(globalDb.user.count).mockResolvedValue(0);
+
+      await UserService.list({ status: 'active' } , { page: 1, pageSize: 20 }, mockCtx('PLATFORM_ADMIN'));
+
+      expect(globalDb.user.findMany).toHaveBeenCalledWith(
+        expect.objectContaining({ where: expect.objectContaining({ banned: false }) }),
+      );
+    });
+  });
+
+  describe('list — tenant admin role filter within org', () => {
+    it('restricts the member scope to users with the requested role in their org', async () => {
+      vi.mocked(globalDb.user.findMany).mockResolvedValue([] as never[]);
+      vi.mocked(globalDb.user.count).mockResolvedValue(0);
+
+      await UserService.list({ role: 'admin' } , { page: 1, pageSize: 20 }, mockCtx('TENANT_ADMIN', 'org-1'));
+
+      expect(globalDb.user.findMany).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: expect.objectContaining({
+            members: { some: { orgId: 'org-1', role: 'admin' } },
+          }),
+        }),
+      );
+    });
+  });
+
+  describe('update — email changes', () => {
+    it('allows changing to an unused email', async () => {
+      (globalDb.user.findUnique as unknown as ReturnType<typeof vi.fn>).mockImplementation(
+        async (args: { where: { id?: string; email?: string } }) => {
+          if (args.where.email === 'fresh@example.com') return null;
+          return castUser(mockUser()); // the existing user by id
+        },
+      ) as never;
+      vi.mocked(globalDb.user.update).mockResolvedValue({ id: 'user-1', name: 'Test User', email: 'fresh@example.com' } as never);
+
+      const result = await UserService.update('user-1', { email: 'fresh@example.com' }, mockCtx('PLATFORM_ADMIN'));
+
+      expect(result.email).toBe('fresh@example.com');
+    });
+
+    it('skips the duplicate-email check when the email is unchanged', async () => {
+      let lookups = 0;
+      (globalDb.user.findUnique as unknown as ReturnType<typeof vi.fn>).mockImplementation(
+        async (args: { where: { id?: string; email?: string } }) => {
+          // A second findUnique by email should never happen when the email is identical
+          if (args.where.email !== undefined) lookups += 1;
+          return castUser(mockUser({ email: 'test@example.com' }));
+        },
+      ) as never;
+      vi.mocked(globalDb.user.update).mockResolvedValue({ id: 'user-1', name: 'Renamed', email: 'test@example.com' } as never);
+
+      await UserService.update('user-1', { name: 'Renamed', email: 'test@example.com' }, mockCtx('PLATFORM_ADMIN'));
+
+      expect(lookups).toBe(0);
     });
   });
 });

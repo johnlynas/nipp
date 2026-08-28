@@ -21,6 +21,9 @@ export interface OrganizationWithCount {
   name: string;
   slug: string | null;
   description?: string | null;
+  /** Convenience counts projected from `_count` in list queries. */
+  memberCount: number;
+  teamCount: number;
   createdAt: Date;
   updatedAt: Date;
   _count: {

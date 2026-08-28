@@ -6,7 +6,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 import globalDb from '@/lib/global-db';
 import { env } from '@/lib/env';
 import { OrganizationService } from '@/services/organization-service';
-import { ServiceContext, ForbiddenError, NotFoundError, ConflictError } from '@/lib/services/types';
+import { ServiceContext, ForbiddenError, NotFoundError, ConflictError, ValidationError } from '@/lib/services/types';
 
 // Mock dependencies
 vi.mock('@/lib/global-db', () => ({
@@ -23,6 +23,8 @@ vi.mock('@/lib/global-db', () => ({
     },
     user: { findUnique: vi.fn(), create: vi.fn() },
     member: { create: vi.fn() },
+    team: { create: vi.fn() },
+    calendar: { create: vi.fn() },
     $transaction: vi.fn(async (fn: (tx: unknown) => Promise<unknown>) => fn(null)),
   },
 }));
@@ -282,6 +284,265 @@ describe('OrganizationService', () => {
       await expect(
         OrganizationService.createOrganization({ name: 'Test' }, mockCtx('MEMBER'))
       ).rejects.toThrow(ForbiddenError);
+    });
+
+    it('throws when an organization with the same name already exists (case-insensitive)', async () => {
+      vi.mocked(globalDb.organization.findFirst).mockResolvedValue(mockOrg({ id: 'existing' }) as never);
+      // Pass a real-looking tx through so the service's in-transaction checks run
+      vi.mocked(globalDb.$transaction).mockImplementation(async (fn) => {
+        const tx = {
+          organization: globalDb.organization,
+          team: globalDb.team,
+          calendar: globalDb.calendar,
+          user: globalDb.user,
+          member: globalDb.member,
+        };
+        return fn(tx as never);
+      });
+
+      await expect(
+        OrganizationService.createOrganization({ name: 'TEST' }, mockCtx('PLATFORM_ADMIN'))
+      ).rejects.toThrow(/already exists/i);
+
+      // Name lookup must be case-insensitive
+      expect(globalDb.organization.findFirst).toHaveBeenCalledWith({
+        where: { name: { equals: 'TEST', mode: 'insensitive' } },
+      });
+    });
+
+    it('creates the default Members team and default calendar inside the transaction', async () => {
+      vi.mocked(globalDb.organization.findFirst).mockResolvedValue(null);
+      const createdOrg = mockOrg({ id: 'new-org' });
+      vi.mocked(globalDb.organization.create).mockResolvedValue(createdOrg as never);
+      vi.mocked(globalDb.team.create).mockResolvedValue({ id: 'team-1' } as never);
+      vi.mocked(globalDb.calendar.create).mockResolvedValue({ id: 'cal-1' } as never);
+
+      vi.mocked(globalDb.$transaction).mockImplementation(async (fn) => {
+        const tx = {
+          organization: globalDb.organization,
+          team: globalDb.team,
+          calendar: globalDb.calendar,
+          user: globalDb.user,
+          member: globalDb.member,
+        };
+        return fn(tx as never);
+      });
+
+      await OrganizationService.createOrganization({ name: 'Test Org' }, mockCtx('PLATFORM_ADMIN'));
+
+      expect(globalDb.team.create).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: expect.objectContaining({ name: 'Members', slug: 'members', organizationId: 'new-org' }),
+        }),
+      );
+      expect(globalDb.calendar.create).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: expect.objectContaining({ isDefault: true, organizationId: 'new-org' }),
+        }),
+      );
+    });
+
+    it('reuses an existing admin user and only creates the member link', async () => {
+      const existingUser = { id: 'admin-user-1', email: 'admin@test.com', name: 'admin' };
+      vi.mocked(globalDb.organization.findFirst).mockResolvedValue(null);
+      vi.mocked(globalDb.organization.create).mockResolvedValue(mockOrg({ id: 'new-org' }) as never);
+      vi.mocked(globalDb.team.create).mockResolvedValue({ id: 'team-1' } as never);
+      vi.mocked(globalDb.calendar.create).mockResolvedValue({ id: 'cal-1' } as never);
+      vi.mocked(globalDb.user.findUnique).mockResolvedValue(existingUser as never);
+      vi.mocked(globalDb.member.create).mockResolvedValue({ id: 'm-1' } as never);
+
+      vi.mocked(globalDb.$transaction).mockImplementation(async (fn) => {
+        const tx = {
+          organization: globalDb.organization,
+          team: globalDb.team,
+          calendar: globalDb.calendar,
+          user: globalDb.user,
+          member: globalDb.member,
+        };
+        return fn(tx as never);
+      });
+
+      await OrganizationService.createOrganization(
+        { name: 'Test Org', adminEmail: 'admin@test.com' },
+        mockCtx('PLATFORM_ADMIN'),
+      );
+
+      expect(globalDb.user.create).not.toHaveBeenCalled();
+      expect(globalDb.member.create).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: expect.objectContaining({ userId: 'admin-user-1', orgId: 'new-org', role: 'admin' }),
+        }),
+      );
+    });
+
+    it('retries with a numeric slug suffix on P2002 collision, then succeeds', async () => {
+      vi.mocked(globalDb.organization.findFirst).mockResolvedValue(null);
+      const collision = Object.assign(new Error('Unique constraint failed'), { code: 'P2002' });
+      let attempts = 0;
+      (globalDb.organization.create as unknown as ReturnType<typeof vi.fn>).mockImplementation(
+        async (args: { data: { slug: string } }) => {
+          attempts += 1;
+          if (args.data.slug === 'test') throw collision;
+          return mockOrg({ id: 'new-org', slug: args.data.slug });
+        },
+      );
+      vi.mocked(globalDb.team.create).mockResolvedValue({ id: 'team-1' } as never);
+      vi.mocked(globalDb.calendar.create).mockResolvedValue({ id: 'cal-1' } as never);
+
+      vi.mocked(globalDb.$transaction).mockImplementation(async (fn) => {
+        const tx = {
+          organization: globalDb.organization,
+          team: globalDb.team,
+          calendar: globalDb.calendar,
+          user: globalDb.user,
+          member: globalDb.member,
+        };
+        return fn(tx as never);
+      });
+
+      const result = await OrganizationService.createOrganization(
+        { name: 'Test', slug: 'test' },
+        mockCtx('PLATFORM_ADMIN'),
+      );
+
+      expect(attempts).toBeGreaterThanOrEqual(2);
+      // First attempt used the bare slug; a subsequent one applied the numeric suffix
+      const slugs = vi.mocked(globalDb.organization.create).mock.calls.map((c) => (c[0].data as { slug: string }).slug);
+      expect(slugs[0]).toBe('test');
+      expect(slugs.at(-1)).toMatch(/^test-\d+$/);
+      expect(result.id).toBe('new-org');
+    });
+
+    it('generates the slug from the name (spaces to hyphens) when none is provided', async () => {
+      vi.mocked(globalDb.organization.findFirst).mockResolvedValue(null);
+      const createdOrg = mockOrg({ id: 'new-org' });
+      vi.mocked(globalDb.organization.create).mockResolvedValue(createdOrg as never);
+      vi.mocked(globalDb.team.create).mockResolvedValue({ id: 'team-1' } as never);
+      vi.mocked(globalDb.calendar.create).mockResolvedValue({ id: 'cal-1' } as never);
+
+      vi.mocked(globalDb.$transaction).mockImplementation(async (fn) => {
+        const tx = {
+          organization: globalDb.organization,
+          team: globalDb.team,
+          calendar: globalDb.calendar,
+          user: globalDb.user,
+          member: globalDb.member,
+        };
+        return fn(tx as never);
+      });
+
+      await OrganizationService.createOrganization({ name: 'Test Org Name' }, mockCtx('PLATFORM_ADMIN'));
+
+      expect(globalDb.organization.create).toHaveBeenCalledWith(
+        expect.objectContaining({ data: expect.objectContaining({ slug: 'test-org-name' }) }),
+      );
+    });
+  });
+
+  describe('updateOrganization — tenant admin scoping', () => {
+    it('allows TENANT_ADMIN to update their own org (no slug change) without touching slug', async () => {
+      vi.mocked(globalDb.organization.findUnique).mockResolvedValue(mockOrg({ id: 'org-1' }) as never);
+      vi.mocked(globalDb.organization.update).mockResolvedValue({ ...mockOrg(), name: 'Updated' } as never);
+
+      await OrganizationService.updateOrganization('org-1', { name: 'Updated' }, mockCtx('TENANT_ADMIN', 'org-1'));
+
+      expect(globalDb.organization.update).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: { id: 'org-1' },
+          data: expect.not.objectContaining({ slug: expect.anything() }),
+        } as never),
+      );
+    });
+
+    it('throws ValidationError when TENANT_ADMIN attempts a slug change', async () => {
+      vi.mocked(globalDb.organization.findUnique).mockResolvedValue(mockOrg({ id: 'org-1' }) as never);
+
+      await expect(
+        OrganizationService.updateOrganization('org-1', { slug: 'changed' }, mockCtx('TENANT_ADMIN', 'org-1'))
+      ).rejects.toThrow(ValidationError);
+    });
+
+    it('updates description and status for TENANT_ADMIN on their own org', async () => {
+      vi.mocked(globalDb.organization.findUnique).mockResolvedValue(mockOrg({ id: 'org-1' }) as never);
+      vi.mocked(globalDb.organization.update).mockResolvedValue(
+        { ...mockOrg(), description: 'D', status: 'SUSPENDED' } as never,
+      );
+
+      const result = await OrganizationService.updateOrganization(
+        'org-1',
+        { description: 'D', status: 'SUSPENDED' },
+        mockCtx('TENANT_ADMIN', 'org-1'),
+      );
+
+      expect(result.description).toBe('D');
+      expect(result.status).toBe('SUSPENDED');
+    });
+  });
+
+  describe('getPaginatedOrganizations — dashboard aggregates', () => {
+    it('returns statusCounts from groupBy and globalTotal', async () => {
+      vi.mocked(globalDb.organization.count).mockResolvedValue(9);
+      vi.mocked(globalDb.organization.groupBy).mockResolvedValue([
+        { status: 'ACTIVE', _count: { status: 5 } },
+        { status: 'PENDING', _count: { status: 2 } },
+      ] as never);
+      vi.mocked(globalDb.organization.findMany).mockResolvedValue([]);
+
+      const result = await OrganizationService.getPaginatedOrganizations({ page: 1, pageSize: 20 });
+
+      expect(result.globalTotal).toBe(9);
+      expect(result.statusCounts).toEqual({
+        ACTIVE: 5,
+        PENDING: 2,
+        SUSPENDED: 0,
+        ARCHIVED: 0,
+      });
+    });
+
+    it('maps member and team counts onto each organization row', async () => {
+      vi.mocked(globalDb.organization.count).mockResolvedValue(1);
+      vi.mocked(globalDb.organization.groupBy).mockResolvedValue([] as never);
+      vi.mocked(globalDb.organization.findMany).mockResolvedValue([
+        { ...mockOrg(), _count: { members: 7, teams: 2 } },
+      ] as never);
+
+      const result = await OrganizationService.getPaginatedOrganizations({ page: 1, pageSize: 20 });
+
+      expect(result.organizations[0].memberCount).toBe(7);
+      expect(result.organizations[0].teamCount).toBe(2);
+    });
+
+    it('combines status and search filters in the where clause', async () => {
+      vi.mocked(globalDb.organization.findMany).mockResolvedValue([]);
+      vi.mocked(globalDb.organization.count).mockResolvedValue(0);
+
+      await OrganizationService.getPaginatedOrganizations({
+        page: 1,
+        pageSize: 20,
+        status: 'ACTIVE',
+        search: 'acme',
+      });
+
+      expect(globalDb.organization.findMany).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: {
+            status: 'ACTIVE',
+            name: { contains: 'acme', mode: 'insensitive' },
+          },
+        }),
+      );
+    });
+
+    it('computes skip from page and pageSize', async () => {
+      vi.mocked(globalDb.organization.findMany).mockResolvedValue([]);
+      vi.mocked(globalDb.organization.count).mockResolvedValue(0);
+      vi.mocked(globalDb.organization.groupBy).mockResolvedValue([] as never);
+
+      await OrganizationService.getPaginatedOrganizations({ page: 3, pageSize: 25 });
+
+      expect(globalDb.organization.findMany).toHaveBeenCalledWith(
+        expect.objectContaining({ skip: 50, take: 25 }),
+      );
     });
   });
 });

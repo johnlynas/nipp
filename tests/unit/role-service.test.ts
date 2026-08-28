@@ -17,6 +17,12 @@ vi.mock('@/lib/global-db', () => ({
       findUnique: vi.fn(),
       update: vi.fn(),
     },
+    permission: {
+      findUnique: vi.fn(),
+    },
+    rolePermission: {
+      findFirst: vi.fn(),
+    },
   },
 }));
 
@@ -30,7 +36,8 @@ vi.mock('@/lib/tenant-db', () => ({
       update: vi.fn(),
       delete: vi.fn(),
     },
-    memberRole: { count: vi.fn() },
+    memberRole: { count: vi.fn(), findMany: vi.fn() },
+    rolePermission: { create: vi.fn(), deleteMany: vi.fn() },
   },
   tenantDb: {
     role: {
@@ -363,6 +370,166 @@ describe('RoleService', () => {
       await RoleService.delete('role-1', 'org-1', mockCtx('PLATFORM_ADMIN'));
 
       expect(globalDb.role.findUnique).toHaveBeenCalled();
+    });
+  });
+
+  describe('getRolePermissions', () => {
+    it('returns the permissions assigned to a role', async () => {
+      vi.mocked(tenantDb.role.findUnique).mockResolvedValue({
+        ...mockRole(),
+        permissions: [
+          { id: 'rp-1', permissionId: 'p-1', permission: { id: 'p-1', resource: 'calendar', action: 'read' } },
+          { id: 'rp-2', permissionId: 'p-2', permission: { id: 'p-2', resource: 'calendar', action: 'create' } },
+        ],
+      } as never);
+
+      const result = await RoleService.getRolePermissions('role-1', 'org-1', mockCtx('PLATFORM_ADMIN'));
+
+      expect(result).toEqual([
+        { id: 'p-1', resource: 'calendar', action: 'read' },
+        { id: 'p-2', resource: 'calendar', action: 'create' },
+      ]);
+    });
+
+    it('throws NotFoundError when role does not exist', async () => {
+      vi.mocked(tenantDb.role.findUnique).mockResolvedValue(null);
+
+      await expect(
+        RoleService.getRolePermissions('role-999', 'org-1', mockCtx('PLATFORM_ADMIN')),
+      ).rejects.toThrow(NotFoundError);
+    });
+
+    it('throws ForbiddenError for MEMBER', async () => {
+      await expect(
+        RoleService.getRolePermissions('role-1', 'org-1', mockCtx('MEMBER')),
+      ).rejects.toThrow(ForbiddenError);
+    });
+  });
+
+  describe('assignPermission', () => {
+    it('assigns a permission to the role within the target org', async () => {
+      vi.mocked(globalDb.role.findUnique).mockResolvedValue(mockRole() as never);
+      vi.mocked(globalDb.permission.findUnique).mockResolvedValue({ id: 'p-1' } as never);
+      vi.mocked(globalDb.rolePermission.findFirst).mockResolvedValue(null);
+      vi.mocked(tenantDb.rolePermission.create).mockResolvedValue({ id: 'rp-1' } as never);
+
+      const result = await RoleService.assignPermission('role-1', 'org-1', { permissionId: 'p-1' }, mockCtx('PLATFORM_ADMIN'));
+
+      expect(result.success).toBe(true);
+      expect(tenantDb.rolePermission.create).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: expect.objectContaining({ roleId: 'role-1', permissionId: 'p-1', organizationId: 'org-1' }),
+        }),
+      );
+    });
+
+    it('throws NotFoundError when the role does not exist', async () => {
+      vi.mocked(globalDb.role.findUnique).mockResolvedValue(null);
+
+      await expect(
+        RoleService.assignPermission('role-999', 'org-1', { permissionId: 'p-1' }, mockCtx('PLATFORM_ADMIN')),
+      ).rejects.toThrow(NotFoundError);
+    });
+
+    it('throws NotFoundError when the permission does not exist', async () => {
+      vi.mocked(globalDb.role.findUnique).mockResolvedValue(mockRole() as never);
+      vi.mocked(globalDb.permission.findUnique).mockResolvedValue(null);
+
+      await expect(
+        RoleService.assignPermission('role-1', 'org-1', { permissionId: 'p-999' }, mockCtx('PLATFORM_ADMIN')),
+      ).rejects.toThrow(new RegExp('Permission not found'));
+    });
+
+    it('throws ConflictError when the permission is already assigned', async () => {
+      vi.mocked(globalDb.role.findUnique).mockResolvedValue(mockRole() as never);
+      vi.mocked(globalDb.permission.findUnique).mockResolvedValue({ id: 'p-1' } as never);
+      vi.mocked(globalDb.rolePermission.findFirst).mockResolvedValue({ id: 'rp-existing' } as never);
+
+      await expect(
+        RoleService.assignPermission('role-1', 'org-1', { permissionId: 'p-1' }, mockCtx('PLATFORM_ADMIN')),
+      ).rejects.toThrow(ConflictError);
+
+      expect(tenantDb.rolePermission.create).not.toHaveBeenCalled();
+    });
+
+    it('throws ForbiddenError for MEMBER', async () => {
+      await expect(
+        RoleService.assignPermission('role-1', 'org-1', { permissionId: 'p-1' }, mockCtx('MEMBER')),
+      ).rejects.toThrow(ForbiddenError);
+    });
+  });
+
+  describe('revokePermission', () => {
+    it('removes the role-permission link idempotently and succeeds either way', async () => {
+      vi.mocked(tenantDb.rolePermission.deleteMany).mockResolvedValue({ count: 1 } as never);
+
+      const result = await RoleService.revokePermission('role-1', 'org-1', 'p-1', mockCtx('PLATFORM_ADMIN'));
+
+      expect(result.success).toBe(true);
+      expect(tenantDb.rolePermission.deleteMany).toHaveBeenCalledWith({
+        where: { roleId: 'role-1', permissionId: 'p-1' },
+      });
+    });
+
+    it('succeeds even when no assignment existed', async () => {
+      vi.mocked(tenantDb.rolePermission.deleteMany).mockResolvedValue({ count: 0 } as never);
+
+      const result = await RoleService.revokePermission('role-1', 'org-1', 'p-1', mockCtx('PLATFORM_ADMIN'));
+
+      expect(result.success).toBe(true);
+    });
+
+    it('throws ForbiddenError for MEMBER', async () => {
+      await expect(
+        RoleService.revokePermission('role-1', 'org-1', 'p-1', mockCtx('MEMBER')),
+      ).rejects.toThrow(ForbiddenError);
+    });
+  });
+
+  describe('getRoleMembers', () => {
+    it('returns member info joined through memberRole and user', async () => {
+      vi.mocked(tenantDb.memberRole.findMany).mockResolvedValue([
+        {
+          id: 'mr-1',
+          member: {
+            id: 'member-1',
+            userId: 'user-9',
+            user: { id: 'user-9', name: 'Member One', email: 'm1@example.com' },
+          },
+        },
+        {
+          id: 'mr-2',
+          member: {
+            id: 'member-2',
+            userId: 'user-10',
+            user: { id: 'user-10', name: 'Member Two', email: 'm2@example.com' },
+          },
+        },
+      ] as never);
+
+      const result = await RoleService.getRoleMembers('role-1', 'org-1', mockCtx('PLATFORM_ADMIN'));
+
+      expect(result).toEqual([
+        { memberId: 'member-1', userId: 'user-9', userName: 'Member One', userEmail: 'm1@example.com' },
+        { memberId: 'member-2', userId: 'user-10', userName: 'Member Two', userEmail: 'm2@example.com' },
+      ]);
+      expect(tenantDb.memberRole.findMany).toHaveBeenCalledWith(
+        expect.objectContaining({ where: { roleId: 'role-1' } }),
+      );
+    });
+
+    it('returns an empty list when the role has no members', async () => {
+      vi.mocked(tenantDb.memberRole.findMany).mockResolvedValue([] as never);
+
+      const result = await RoleService.getRoleMembers('role-1', 'org-1', mockCtx('PLATFORM_ADMIN'));
+
+      expect(result).toEqual([]);
+    });
+
+    it('throws ForbiddenError for MEMBER', async () => {
+      await expect(
+        RoleService.getRoleMembers('role-1', 'org-1', mockCtx('MEMBER')),
+      ).rejects.toThrow(ForbiddenError);
     });
   });
 });
