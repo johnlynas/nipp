@@ -16,11 +16,6 @@ import { useEffect, useCallback, useSyncExternalStore } from 'react';
 // Types
 // ---------------------------------------------------------------------------
 
-const EMPTY_NOTIFICATIONS_STATE = {
-  notifications: [] as Notification[],
-  isConnected: false,
-};
-
 
 export interface NotificationItem {
   id: string;
@@ -72,7 +67,6 @@ const SERVER_SNAPSHOT: NotificationStore = {
 
 const listeners = new Set<() => void>();
 let connectionStarted = false;
-let reconnectTimeout: ReturnType<typeof setTimeout> | null = null;
 let reconnectAttempts = 0;
 const dismissTimers = new Map<string, ReturnType<typeof setTimeout>>();
 
@@ -122,7 +116,7 @@ function startConnection() {
         connectionStarted = false;
         reconnectAttempts += 1;
         const delay = Math.min(1000 * Math.pow(2, reconnectAttempts), 30_000);
-        reconnectTimeout = setTimeout(() => {
+        setTimeout(() => {
           startConnection();
         }, delay);
         return;
@@ -187,7 +181,7 @@ function startConnection() {
       connectionStarted = false;
 
       // Reconnect after a short delay
-      reconnectTimeout = setTimeout(() => {
+      setTimeout(() => {
         startConnection();
       }, 2000);
     } catch {
@@ -198,7 +192,7 @@ function startConnection() {
 
       reconnectAttempts += 1;
       const delay = Math.min(1000 * Math.pow(2, reconnectAttempts), 30_000);
-      reconnectTimeout = setTimeout(() => {
+      setTimeout(() => {
         startConnection();
       }, delay);
     }

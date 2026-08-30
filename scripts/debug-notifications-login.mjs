@@ -60,7 +60,9 @@ try {
   await page.getByLabel('Password').fill(PASSWORD, { timeout: 5_000 });
   filledPass = true;
   console.log('filled password field via label "Password"');
-} catch {}
+} catch {
+  // expected — fall back to input[type=password] below
+}
 if (!filledPass) {
   const passInput = page.locator('input[type="password"]').first();
   await passInput.fill(PASSWORD, { timeout: 10_000 });
@@ -94,7 +96,9 @@ const badge = page.locator('text=/Live|Disconnected/').first();
 let statusText = '(no status badge found)';
 try {
   statusText = (await badge.innerText({ timeout: 5_000 })).trim();
-} catch {}
+} catch {
+  // expected — if the badge never appears, statusText keeps its placeholder
+}
 console.log('\nSTATUS BADGE:', statusText);
 
 // --- 3. Second sample after longer wait (reconnect backoff may kick in) ---
@@ -102,7 +106,9 @@ await page.waitForTimeout(8000);
 try {
   const t2 = (await badge.innerText({ timeout: 5_000 })).trim();
   if (t2 !== statusText) console.log('STATUS AFTER ~13s WAIT:', t2);
-} catch {}
+} catch {
+  // expected — badge may have disappeared between samples
+}
 
 // --- Reports ---------------------------------------------------------------
 console.log('\n--- interesting console lines ---');
