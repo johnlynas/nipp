@@ -9,6 +9,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { revalidateTag } from 'next/cache';
 import { auth } from '@/lib/auth';
 import tenantDb from '@/lib/tenant-db';
+import { checkAdminRateLimit } from '@/lib/rate-limiter';
 
 export const runtime = 'nodejs';
 
@@ -24,6 +25,11 @@ export async function POST(
 
   if (!session?.user) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+  }
+
+  // Rate limit write operations by session
+  if (!checkAdminRateLimit(session.user.id)) {
+    return NextResponse.json({ error: 'rate_limited' }, { status: 429 });
   }
 
   const { roleId } = await params;

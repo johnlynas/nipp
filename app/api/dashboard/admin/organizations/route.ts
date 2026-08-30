@@ -1,5 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { requireSuperAdmin } from '@/lib/require-super-admin';
+import { checkAdminRateLimit } from '@/lib/rate-limiter';
+
 import { OrganizationService } from '@/services/organization-service';
 
 export const runtime = 'nodejs';
@@ -41,6 +43,11 @@ export async function POST(request: NextRequest) {
   }
 
   try {
+    // Rate limit write operations by session
+    if (!checkAdminRateLimit(auth.session!.user.id)) {
+      return NextResponse.json({ error: 'rate_limited' }, { status: 429 });
+    }
+
     const body = await request.json();
     const result = await OrganizationService.createOrganization(body, {
       userId: auth.session!.user.id,

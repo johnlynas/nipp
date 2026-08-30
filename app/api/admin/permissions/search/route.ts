@@ -9,6 +9,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import globalDb from '@/lib/global-db';
 import { requireSuperAdmin } from '@/lib/require-super-admin';
+import { checkAdminRateLimit } from '@/lib/rate-limiter';
 import { cacheGet } from '@/lib/cache/hybrid';
 import { logger } from '@/lib/logger';
 
@@ -58,9 +59,15 @@ export async function GET(request: NextRequest) {
     );
 
     // Authenticate: require Super Admin
-    const authResult = await requireSuperAdmin();
+    const authResult = await requireSuperAdmin(request.headers);
     if (!authResult.authorized) {
       return NextResponse.json({ error: authResult.error || 'Unauthorized' }, { status: authResult.status });
+    }
+
+    // Rate limit admin operations by session (safe extraction for tests)
+    const userId = authResult.session?.user?.id;
+    if (userId && !checkAdminRateLimit(userId)) {
+      return NextResponse.json({ error: 'rate_limited' }, { status: 429 });
     }
 
     // Build cache key from normalized query

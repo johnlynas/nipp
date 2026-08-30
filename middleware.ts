@@ -6,6 +6,7 @@ const PUBLIC_PATTERNS = [
   '/login',
   '/api/auth',
   '/api/health',
+  '/api/notifications/stream', // SSE stream — handles its own auth
 ];
 
 function isPublicRoute(pathname: string): boolean {

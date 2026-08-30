@@ -66,6 +66,20 @@ enum CalendarRecurrenceFrequency {
   ANNUALLY
 }
 
+/** Notification scope — who receives the notification */
+enum NotificationScope {
+  GLOBAL
+  ORG
+}
+
+/** Notification priority levels */
+enum NotificationPriority {
+  INFO
+  WARNING
+  ERROR
+  CRITICAL
+}
+
 // ============================================================
 // Authentication Models (BetterAuth — global, not org-scoped)
 // ============================================================
@@ -149,6 +163,7 @@ model Organization {
   memberRoles        MemberRole[]
   auditLogs          AuditLog[]
   notificationLogs   NotificationLog[]
+  notifications      Notification[]
   // RBAC: roles and role-permission mappings scoped to this organization
   roles              Role[]
   rolePermissions    RolePermission[]
@@ -416,6 +431,34 @@ model NotificationLog {
 
   @@index([organizationId])
   @@index([timestamp])
+}
+
+// ============================================================
+// Notification Models (In-app notifications — org-scoped + global)
+// ============================================================
+
+/**
+ * Notification — In-app notifications visible via SSE stream.
+ * Super admins see all notifications regardless of scope.
+ */
+model Notification {
+  id             String   @id @default(cuid())
+  title          String
+  message        String
+  priority       NotificationPriority @default(INFO)
+  scope          NotificationScope @default(ORG) // ORG = tenant-specific, GLOBAL = broadcast to all
+  source         String?  // e.g., "health-check:database", "admin:message"
+
+  /** Organization this notification belongs to (null for global broadcasts) */
+  organizationId String?
+  organization   Organization? @relation(fields: [organizationId], references: [id], onDelete: SetNull)
+
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  @@index([organizationId])
+  @@index([createdAt])
+  @@index([scope, createdAt]) // For global notification queries
 }
 
 // ============================================================

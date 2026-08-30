@@ -12,6 +12,7 @@ import { superAdminStorage } from '@/lib/global-db-guard';
 import { resolveTenantAccess } from '@/lib/tenant-access';
 import { CalendarService } from '@/services/calendar-service';
 import { isSameSiteRequest } from '@/lib/csrf';
+import { checkCalendarRateLimit } from '@/lib/rate-limiter';
 
 export const runtime = 'nodejs';
 
@@ -90,6 +91,11 @@ export async function PATCH(
     return NextResponse.json({ error: 'Forbidden: admin access required' }, { status: 403 });
   }
   const ctx = access.ctx;
+
+// Rate limit write operations
+  if (!checkCalendarRateLimit(session.user.id)) {
+    return NextResponse.json({ error: 'rate_limited' }, { status: 429 });
+  }
 
   const body = await req.json();
   const { name, description, color } = body as {

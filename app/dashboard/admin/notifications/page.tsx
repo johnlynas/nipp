@@ -1,0 +1,223 @@
+/**
+ * Notifications Log Page — Persistent history of all system notifications.
+ *
+ * Complements the ticker (transient) and system/audit logs with a searchable,
+ * filterable history of all notifications delivered via SSE.
+ */
+
+'use client';
+
+import { useState, useEffect, useCallback } from 'react';
+import { useNotifications, PRIORITY_COLORS, getPriorityIcon } from '@/hooks/useNotifications';
+
+// ---------------------------------------------------------------------------
+// Types
+// ---------------------------------------------------------------------------
+
+interface NotificationItem {
+  id: string;
+  title: string;
+  message: string;
+  priority: 'INFO' | 'WARNING' | 'ERROR' | 'CRITICAL';
+  scope?: string;
+  organizationId?: string;
+  source?: string;
+  createdAt: string;
+}
+
+interface PaginationInfo {
+  page: number;
+  pageSize: number;
+  total: number;
+}
+
+// ---------------------------------------------------------------------------
+// Component
+// ---------------------------------------------------------------------------
+
+export default function NotificationsLogPage() {
+  const [notifications, setNotifications] = useState<NotificationItem[]>([]);
+  const [pagination, setPagination] = useState<PaginationInfo>({ page: 1, pageSize: 50, total: 0 });
+  const [loading, setLoading] = useState(false);
+  const [scopeFilter, setScopeFilter] = useState<string>('');
+  const [priorityFilter, setPriorityFilter] = useState<string>('');
+
+  // SSE live updates
+  const { notifications: liveNotifications, isConnected } = useNotifications();
+
+  // Fetch paginated history
+  const fetchNotifications = useCallback(async (page: number) => {
+    setLoading(true);
+    try {
+      const params = new URLSearchParams({ page: String(page), pageSize: '50' });
+      if (scopeFilter) params.set('scope', scopeFilter);
+      if (priorityFilter) params.set('priority', priorityFilter);
+
+      const res = await fetch(`/api/admin/notifications?${params}`);
+      if (!res.ok) throw new Error('Failed to fetch notifications');
+
+      const data = await res.json();
+      setNotifications(data.notifications);
+      setPagination(data.pagination);
+    } catch (err) {
+      console.error('[Notifications Log] Failed to fetch:', err);
+    } finally {
+      setLoading(false);
+    }
+  }, [scopeFilter, priorityFilter]);
+
+  useEffect(() => {
+    fetchNotifications(1);
+  }, [fetchNotifications]);
+
+  // Merge live notifications into the list (deduplicate by ID)
+  useEffect(() => {
+    setNotifications((prev) => {
+      const merged = [...prev];
+      for (const live of liveNotifications) {
+        if (!merged.find((n) => n.id === live.id)) {
+          merged.unshift(live as NotificationItem);
+        }
+      }
+      return merged.slice(0, 50); // Keep max 50 entries visible
+    });
+  }, [liveNotifications]);
+
+  const handlePageChange = (newPage: number) => {
+    if (newPage >= 1 && newPage <= Math.ceil(pagination.total / pagination.pageSize)) {
+      fetchNotifications(newPage);
+    }
+  };
+
+  const handleFilterChange = (setter: (val: string) => void, value: string) => {
+    setter(value);
+  };
+
+  return (
+    <div className="space-y-6">
+      {/* Header */}
+      <div className="flex items-center justify-between">
+        <h2 className="text-xl font-semibold" style={{ color: '#1B2A4A' }}>
+          Notifications Log
+        </h2>
+        <div className="flex items-center gap-3">
+          <div className={`w-2 h-2 rounded-full ${isConnected ? 'bg-green-400' : 'bg-red-400 animate-pulse'}`} />
+          <span className="text-xs text-gray-500">{isConnected ? 'Live' : 'Disconnected'}</span>
+        </div>
+      </div>
+
+      {/* Filters */}
+      <div className="flex flex-wrap gap-4">
+        <select
+          value={scopeFilter}
+          onChange={(e) => handleFilterChange(setScopeFilter, e.target.value)}
+          className="px-3 py-2 border rounded text-sm bg-white"
+          style={{ borderColor: '#dee2e6' }}
+        >
+          <option value="">All Scopes</option>
+          <option value="GLOBAL">Global</option>
+          <option value="ORG">Tenant-Specific</option>
+        </select>
+
+        <select
+          value={priorityFilter}
+          onChange={(e) => handleFilterChange(setPriorityFilter, e.target.value)}
+          className="px-3 py-2 border rounded text-sm bg-white"
+          style={{ borderColor: '#dee2e6' }}
+        >
+          <option value="">All Priorities</option>
+          <option value="INFO">Info</option>
+          <option value="WARNING">Warning</option>
+          <option value="ERROR">Error</option>
+          <option value="CRITICAL">Critical</option>
+        </select>
+
+        <button
+          onClick={() => fetchNotifications(1)}
+          className="px-3 py-2 text-sm font-medium bg-blue-600 text-white rounded hover:bg-blue-700 transition-colors"
+        >
+          Refresh
+        </button>
+      </div>
+
+      {/* Notifications Table */}
+      <div className="bg-white rounded-lg border overflow-hidden" style={{ borderColor: '#dee2e6' }}>
+        {loading ? (
+          <div className="flex items-center justify-center py-12">
+            <div className="animate-spin rounded-full h-8 w-8 border-b-2" style={{ borderColor: '#1B2A4A' }} />
+          </div>
+        ) : notifications.length === 0 ? (
+          <div className="flex items-center justify-center py-12 text-gray-500">
+            No notifications found.
+          </div>
+        ) : (
+          <table className="w-full text-sm">
+            <thead>
+              <tr className="border-b" style={{ borderColor: '#dee2e6', backgroundColor: '#f8f9fa' }}>
+                <th className="px-4 py-3 text-left font-medium" style={{ color: '#1B2A4A' }}>Priority</th>
+                <th className="px-4 py-3 text-left font-medium" style={{ color: '#1B2A4A' }}>Title</th>
+                <th className="px-4 py-3 text-left font-medium" style={{ color: '#1B2A4A' }}>Scope</th>
+                <th className="px-4 py-3 text-left font-medium" style={{ color: '#1B2A4A' }}>Source</th>
+                <th className="px-4 py-3 text-left font-medium" style={{ color: '#1B2A4A' }}>Time</th>
+              </tr>
+            </thead>
+            <tbody>
+              {notifications.map((notif) => (
+                <tr key={notif.id} className="border-b hover:bg-gray-50 transition-colors" style={{ borderColor: '#f1f3f4' }}>
+                  <td className="px-4 py-3">
+                    <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded text-xs border ${PRIORITY_COLORS[notif.priority] || PRIORITY_COLORS.INFO}`}>
+                      <span>{getPriorityIcon(notif.priority)}</span>
+                      {notif.priority}
+                    </span>
+                  </td>
+                  <td className="px-4 py-3">
+                    <div className="font-medium">{notif.title}</div>
+                    <div className="text-xs text-gray-500 mt-1 line-clamp-2">{notif.message}</div>
+                  </td>
+                  <td className="px-4 py-3">
+                    <span className="text-xs font-medium">{notif.scope || 'N/A'}</span>
+                  </td>
+                  <td className="px-4 py-3">
+                    <span className="text-xs text-gray-500">{notif.source || '-'}</span>
+                  </td>
+                  <td className="px-4 py-3">
+                    <span className="text-xs text-gray-500">{new Date(notif.createdAt).toLocaleString()}</span>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        )}
+
+        {/* Pagination */}
+        {pagination.total > 0 && (
+          <div className="flex items-center justify-between px-4 py-3 border-t" style={{ borderColor: '#dee2e6' }}>
+            <div className="text-sm text-gray-500">
+              Showing {Math.min((pagination.page - 1) * pagination.pageSize + 1, pagination.total)} to{' '}
+              {Math.min(pagination.page * pagination.pageSize, pagination.total)} of {pagination.total} notifications
+            </div>
+            <div className="flex items-center gap-2">
+              <button
+                onClick={() => handlePageChange(pagination.page - 1)}
+                disabled={pagination.page <= 1}
+                className="px-3 py-1 text-sm border rounded hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed"
+                style={{ borderColor: '#dee2e6' }}
+              >
+                Previous
+              </button>
+              <span className="text-sm text-gray-500">Page {pagination.page} of {Math.ceil(pagination.total / pagination.pageSize)}</span>
+              <button
+                onClick={() => handlePageChange(pagination.page + 1)}
+                disabled={pagination.page >= Math.ceil(pagination.total / pagination.pageSize)}
+                className="px-3 py-1 text-sm border rounded hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed"
+                style={{ borderColor: '#dee2e6' }}
+              >
+                Next
+              </button>
+            </div>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}

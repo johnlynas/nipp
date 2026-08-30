@@ -10,7 +10,8 @@ import globalDb from '@/lib/global-db';
 import { requireSuperAdmin } from '@/lib/require-super-admin';
 import { recordAuditLog } from '@/lib/audit-log';
 import { logger } from '@/lib/logger';
-import { wrapPiiRoute } from '@/lib/payload-middleware';
+import { wrapPiiRoute, PiiRouteParams } from '@/lib/payload-middleware';
+import { checkAdminRateLimit } from '@/lib/rate-limiter';
 
 export const runtime = 'nodejs';
 export const revalidate = 0;
@@ -36,6 +37,12 @@ export const PATCH = wrapPiiRoute(async (request, decryptedBody, params) => {
   }
 
   const session = authResult.session!;
+
+  // Rate limit admin write operations by session
+  if (!checkAdminRateLimit(session.user.id)) {
+    logger.warn({ userId: session.user.id }, 'Admin write rate limited');
+    return NextResponse.json({ error: 'rate_limited' }, { status: 429 });
+  }
 
   // Get body from decrypted payload or parse JSON
   let body: { name?: string; slug?: string; status?: 'PENDING' | 'ACTIVE' | 'SUSPENDED' | 'ARCHIVED' };
@@ -138,7 +145,7 @@ export const PATCH = wrapPiiRoute(async (request, decryptedBody, params) => {
   } catch (error) {
     const isDbError =
       error instanceof Error &&
-      (error.message.includes('Can\'t reach database server') || error.message.includes('Platform organization not found'));
+      (error.message.includes("Can't reach database server") || error.message.includes('Platform organization not found'));
     logger.error({ err: error, orgId }, isDbError ? 'Database unavailable updating settings' : 'Unexpected error updating settings');
     return NextResponse.json({ error: isDbError ? 'Database unavailable' : 'Internal Server Error' }, { status: isDbError ? 503 : 500 });
   }

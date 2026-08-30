@@ -1,5 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { requireSuperAdmin } from '@/lib/require-super-admin';
+import { checkAdminRateLimit } from '@/lib/rate-limiter';
+
 import { RoleService } from '@/services/role-service';
 
 export const runtime = 'nodejs';

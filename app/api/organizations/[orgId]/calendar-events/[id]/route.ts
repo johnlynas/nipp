@@ -13,6 +13,7 @@ import { superAdminStorage } from '@/lib/global-db-guard';
 import { resolveTenantAccess } from '@/lib/tenant-access';
 import { CalendarEventService } from '@/services/calendar-event-service';
 import { isSameSiteRequest } from '@/lib/csrf';
+import { checkCalendarRateLimit } from '@/lib/rate-limiter';
 import {
   applyEditScopeThis,
   applyEditScopeFollowing,
@@ -95,6 +96,12 @@ export async function PATCH(
   if (access.ctx.role === 'MEMBER') {
     return NextResponse.json({ error: 'Forbidden: admin access required' }, { status: 403 });
   }
+
+  // Rate limit calendar write operations by session
+  if (!checkCalendarRateLimit(session.user.id)) {
+    return NextResponse.json({ error: 'rate_limited' }, { status: 429 });
+  }
+
   const ctx = access.ctx;
 
   const body = await req.json();
@@ -238,6 +245,12 @@ export async function DELETE(
   if (access.ctx.role === 'MEMBER') {
     return NextResponse.json({ error: 'Forbidden: admin access required' }, { status: 403 });
   }
+
+  // Rate limit calendar write operations by session
+  if (!checkCalendarRateLimit(session.user.id)) {
+    return NextResponse.json({ error: 'rate_limited' }, { status: 429 });
+  }
+
   const ctx = access.ctx;
 
   try {

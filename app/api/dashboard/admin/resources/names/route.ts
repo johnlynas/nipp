@@ -1,5 +1,7 @@
 import { NextResponse } from 'next/server';
 import { requireSuperAdmin } from '@/lib/require-super-admin';
+import { checkAdminRateLimit } from '@/lib/rate-limiter';
+
 import globalDb from '@/lib/global-db';
 
 export const runtime = 'nodejs';

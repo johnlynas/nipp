@@ -30,6 +30,27 @@ import {
   REVOKE_RATE_LIMIT_WINDOW,
 } from '@/lib/rate-limiter';
 
+import {
+  checkAuthRateLimit,
+  resetAuthRateLimitStore,
+  AUTH_RATE_LIMIT_MAX,
+  AUTH_RATE_LIMIT_WINDOW,
+} from '@/lib/rate-limiter';
+
+import {
+  checkAdminRateLimit,
+  resetAdminRateLimitStore,
+  ADMIN_RATE_LIMIT_MAX,
+  ADMIN_RATE_LIMIT_WINDOW,
+} from '@/lib/rate-limiter';
+
+import {
+  checkCalendarRateLimit,
+  resetCalendarRateLimitStore,
+  CALENDAR_RATE_LIMIT_MAX,
+  CALENDAR_RATE_LIMIT_WINDOW,
+} from '@/lib/rate-limiter';
+
 // ---------------------------------------------------------------------------
 // Hoisted mock state — must be before any vi.mock() calls (which are hoisted).
 // ---------------------------------------------------------------------------
@@ -532,5 +553,280 @@ describe('Payload Key Revoke Endpoint — Rate Limiting (integration)', () => {
     }
 
     resetRevokeRateLimitStore();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Auth endpoint rate limiting (IP-based, brute-force protection)
+// ---------------------------------------------------------------------------
+
+describe('Auth Endpoint — Rate Limiting (integration)', () => {
+  beforeEach(() => {
+    resetAuthRateLimitStore();
+  });
+
+  it('should allow requests up to AUTH_RATE_LIMIT_MAX per window', async () => {
+    resetAuthRateLimitStore();
+    const results: boolean[] = [];
+
+    // AUTH_RATE_LIMIT_MAX is 5 per window
+    for (let i = 0; i < 5; i++) {
+      results.push(checkAuthRateLimit('192.168.1.100'));
+    }
+
+    // All 5 should be allowed
+    expect(results.every((r) => r === true)).toBe(true);
+
+    // The 6th should be rate limited
+    expect(checkAuthRateLimit('192.168.1.100')).toBe(false);
+
+    resetAuthRateLimitStore();
+  });
+
+  it('should rate limit after exceeding the maximum', async () => {
+    resetAuthRateLimitStore();
+
+    // Exhaust the limit (5 requests)
+    for (let i = 0; i < 5; i++) {
+      checkAuthRateLimit('192.168.1.100');
+    }
+
+    // Next request should be rate limited
+    expect(checkAuthRateLimit('192.168.1.100')).toBe(false);
+
+    resetAuthRateLimitStore();
+  });
+
+  it('should allow different IPs independently', async () => {
+    resetAuthRateLimitStore();
+
+    // Exhaust IP A's limit
+    for (let i = 0; i < 5; i++) {
+      checkAuthRateLimit('192.168.1.100');
+    }
+
+    // IP A should be rate limited
+    expect(checkAuthRateLimit('192.168.1.100')).toBe(false);
+
+    // IP B should still be allowed
+    expect(checkAuthRateLimit('10.0.0.50')).toBe(true);
+
+    resetAuthRateLimitStore();
+  });
+
+  it('should expose correct rate limit constants', async () => {
+    expect(AUTH_RATE_LIMIT_MAX).toBe(5);
+    expect(AUTH_RATE_LIMIT_WINDOW).toBe(60); // 60 seconds = 1 minute
+  });
+
+  it('should be stricter than payload-key issuance (brute-force protection)', async () => {
+    // Auth (5) should be stricter than issuance (30)
+    expect(AUTH_RATE_LIMIT_MAX).toBeLessThan(RATE_LIMIT_MAX);
+  });
+
+  it('should track separate counters per IP address', async () => {
+    resetAuthRateLimitStore();
+
+    // Each IP gets 5 requests
+    const ips = ['192.168.1.1', '192.168.1.2', '192.168.1.3'];
+    const results: Record<string, boolean[]> = {};
+
+    for (const ip of ips) {
+      results[ip] = [];
+      for (let i = 0; i < 7; i++) {
+        results[ip].push(checkAuthRateLimit(ip));
+      }
+    }
+
+    // Each IP should have exactly 5 true, then false
+    for (const ip of ips) {
+      const allowed = results[ip].filter((r) => r === true).length;
+      expect(allowed).toBe(5);
+
+      const rateLimited = results[ip].filter((r) => r === false).length;
+      expect(rateLimited).toBe(2); // 7 - 5 = 2
+    }
+
+    resetAuthRateLimitStore();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Admin write endpoint rate limiting (session-based, bulk operations)
+// ---------------------------------------------------------------------------
+
+describe('Admin Write Endpoints — Rate Limiting (integration)', () => {
+  beforeEach(() => {
+    resetAdminRateLimitStore();
+  });
+
+  it('should allow requests up to ADMIN_RATE_LIMIT_MAX per window', async () => {
+    resetAdminRateLimitStore();
+    const results: boolean[] = [];
+
+    // ADMIN_RATE_LIMIT_MAX is 30 per window
+    for (let i = 0; i < 30; i++) {
+      results.push(checkAdminRateLimit('user:admin-1'));
+    }
+
+    // All 30 should be allowed
+    expect(results.every((r) => r === true)).toBe(true);
+
+    // The 31st should be rate limited
+    expect(checkAdminRateLimit('user:admin-1')).toBe(false);
+
+    resetAdminRateLimitStore();
+  });
+
+  it('should rate limit after exceeding the maximum', async () => {
+    resetAdminRateLimitStore();
+
+    // Exhaust the limit (30 requests)
+    for (let i = 0; i < 30; i++) {
+      checkAdminRateLimit('user:admin-1');
+    }
+
+    // Next request should be rate limited
+    expect(checkAdminRateLimit('user:admin-1')).toBe(false);
+
+    resetAdminRateLimitStore();
+  });
+
+  it('should allow different users independently', async () => {
+    resetAdminRateLimitStore();
+
+    // Exhaust user A's limit
+    for (let i = 0; i < 30; i++) {
+      checkAdminRateLimit('user:admin-a');
+    }
+
+    // User A should be rate limited
+    expect(checkAdminRateLimit('user:admin-a')).toBe(false);
+
+    // User B should still be allowed
+    expect(checkAdminRateLimit('user:admin-b')).toBe(true);
+
+    resetAdminRateLimitStore();
+  });
+
+  it('should expose correct rate limit constants', async () => {
+    expect(ADMIN_RATE_LIMIT_MAX).toBe(30);
+    expect(ADMIN_RATE_LIMIT_WINDOW).toBe(60); // 60 seconds = 1 minute
+  });
+
+  it('should track separate counters per user ID', async () => {
+    resetAdminRateLimitStore();
+
+    // Each user gets 30 requests
+    const users = ['user:admin-1', 'user:admin-2'];
+    const results: Record<string, boolean[]> = {};
+
+    for (const userId of users) {
+      results[userId] = [];
+      for (let i = 0; i < 32; i++) {
+        results[userId].push(checkAdminRateLimit(userId));
+      }
+    }
+
+    // Each user should have exactly 30 true, then false
+    for (const userId of users) {
+      const allowed = results[userId].filter((r) => r === true).length;
+      expect(allowed).toBe(30);
+
+      const rateLimited = results[userId].filter((r) => r === false).length;
+      expect(rateLimited).toBe(2); // 32 - 30 = 2
+    }
+
+    resetAdminRateLimitStore();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Calendar event write endpoint rate limiting (session-based, CRUD)
+// ---------------------------------------------------------------------------
+
+describe('Calendar Event Endpoints — Rate Limiting (integration)', () => {
+  beforeEach(() => {
+    resetCalendarRateLimitStore();
+  });
+
+  it('should allow requests up to CALENDAR_RATE_LIMIT_MAX per window', async () => {
+    resetCalendarRateLimitStore();
+    const results: boolean[] = [];
+
+    // CALENDAR_RATE_LIMIT_MAX is 30 per window
+    for (let i = 0; i < 30; i++) {
+      results.push(checkCalendarRateLimit('user:calendar-admin'));
+    }
+
+    // All 30 should be allowed
+    expect(results.every((r) => r === true)).toBe(true);
+
+    // The 31st should be rate limited
+    expect(checkCalendarRateLimit('user:calendar-admin')).toBe(false);
+
+    resetCalendarRateLimitStore();
+  });
+
+  it('should rate limit after exceeding the maximum', async () => {
+    resetCalendarRateLimitStore();
+
+    // Exhaust the limit (30 requests)
+    for (let i = 0; i < 30; i++) {
+      checkCalendarRateLimit('user:calendar-admin');
+    }
+
+    // Next request should be rate limited
+    expect(checkCalendarRateLimit('user:calendar-admin')).toBe(false);
+
+    resetCalendarRateLimitStore();
+  });
+
+  it('should allow different users independently', async () => {
+    resetCalendarRateLimitStore();
+
+    // Exhaust user A's limit
+    for (let i = 0; i < 30; i++) {
+      checkCalendarRateLimit('user:calendar-a');
+    }
+
+    // User A should be rate limited
+    expect(checkCalendarRateLimit('user:calendar-a')).toBe(false);
+
+    // User B should still be allowed
+    expect(checkCalendarRateLimit('user:calendar-b')).toBe(true);
+
+    resetCalendarRateLimitStore();
+  });
+
+  it('should expose correct rate limit constants', async () => {
+    expect(CALENDAR_RATE_LIMIT_MAX).toBe(30);
+    expect(CALENDAR_RATE_LIMIT_WINDOW).toBe(60); // 60 seconds = 1 minute
+  });
+
+  it('should track separate counters per user ID', async () => {
+    resetCalendarRateLimitStore();
+
+    // Each user gets 30 requests
+    const users = ['user:cal-1', 'user:cal-2'];
+    const results: Record<string, boolean[]> = {};
+
+    for (const userId of users) {
+      results[userId] = [];
+      for (let i = 0; i < 32; i++) {
+        results[userId].push(checkCalendarRateLimit(userId));
+      }
+    }
+
+    // Each user should have exactly 30 true, then false
+    for (const userId of users) {
+      const allowed = results[userId].filter((r) => r === true).length;
+      expect(allowed).toBe(30);
+
+      const rateLimited = results[userId].filter((r) => r === false).length;
+      expect(rateLimited).toBe(2); // 32 - 30 = 2
+    }
+
+    resetCalendarRateLimitStore();
   });
 });

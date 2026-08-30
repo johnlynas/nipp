@@ -16,6 +16,7 @@ import { handleServiceError } from '@/lib/services/error-handler';
 import { ServiceContext } from '@/lib/services/types';
 import { recordAuditLog } from '@/lib/audit-log';
 import { logger } from '@/lib/logger';
+import { checkAdminRateLimit } from '@/lib/rate-limiter';
 
 export const runtime = 'nodejs';
 export const revalidate = 30;
@@ -108,6 +109,12 @@ export async function PATCH(
 
   const session = authResult.session!;
   const { orgId } = await params;
+
+  // Rate limit admin write operations by session
+  if (!checkAdminRateLimit(session.user.id)) {
+    logger.warn({ userId: session.user.id }, 'Admin write rate limited');
+    return NextResponse.json({ error: 'rate_limited' }, { status: 429 });
+  }
 
   let body: { assignments: Array<{ roleId: string; permissionKey: string; assign: boolean }> };
   try {
@@ -209,7 +216,7 @@ export async function PATCH(
  * Handle both database errors (503) and service-layer errors.
  */
 function handleDbOrServiceError(error: unknown): ReturnType<typeof NextResponse.json> {
-  const isDbError = error instanceof Error && error.message.includes('Can\'t reach database server');
+  const isDbError = error instanceof Error && error.message.includes("Can't reach database server");
   if (isDbError) {
     return NextResponse.json({ error: 'Database unavailable' }, { status: 503 });
   }

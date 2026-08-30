@@ -35,11 +35,12 @@ export const auth = betterAuth({
       // trustedProxies: ['10.0.0.0/8', '172.16.0.0/12'],
     },
     // SECURITY (S11): Force Secure cookie attribute + SameSite=Lax for all cookies.
-    // useSecureCookies: true ensures the Secure flag is set even in dev (localhost).
+    // useSecureCookies: true in production ensures the Secure flag is set (required for HTTPS).
+    // In dev (localhost) we skip it so cookies work over plain HTTP.
     // defaultCookieAttributes.sameSite: 'Lax' is the CSRF-safe default — cookies are
     // sent on top-level GET navigations (e.g., following a link) but blocked on
     // cross-site POST/PUT/PATCH/DELETE requests.
-    useSecureCookies: true,
+    useSecureCookies: env.NODE_ENV !== 'development',
     defaultCookieAttributes: {
       sameSite: 'lax',
     },
@@ -264,6 +265,11 @@ export const auth = betterAuth({
         let isSuperAdmin = false;
         let permissions: string[] = [];
 
+        // Prefer session's activeOrganizationId (from test mocks or Node.js runtime),
+        // fall back to DB lookup for Edge Runtime where the callback is skipped.
+        const sessionOrgId = (session as { activeOrganizationId?: string | null }).activeOrganizationId;
+        const effectiveOrgId = sessionOrgId ?? currentUser?.activeOrganizationId ?? null;
+
         if (platformOrgId) {
           // Check if user is a super admin (member of platform org)
           isSuperAdmin = await checkIsSuperAdmin(user.id, platformOrgId);
@@ -271,15 +277,15 @@ export const auth = betterAuth({
           if (isSuperAdmin) {
             // Super admins get wildcard permission
             permissions = ['*'];
-          } else if (session.activeOrganizationId) {
+          } else if (effectiveOrgId) {
             // Non-super admins get org-specific permissions
-            const orgId = session.activeOrganizationId;
-            permissions = await resolvePermissions(user.id, orgId);
+            permissions = await resolvePermissions(user.id, effectiveOrgId);
           }
         }
 
         return {
           ...session,
+          activeOrganizationId: effectiveOrgId,
           user: {
             ...session.user,
             permissions,

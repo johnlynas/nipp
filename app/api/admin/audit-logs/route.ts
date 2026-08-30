@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
 import globalDb from '@/lib/global-db';
 import { requireSuperAdmin } from '@/lib/require-super-admin';
+import { checkAdminRateLimit } from '@/lib/rate-limiter';
 import { logger } from '@/lib/logger';
 import { wrapPiiRoute } from '@/lib/payload-middleware';
 
@@ -16,6 +17,11 @@ export const GET = wrapPiiRoute(async (request) => {
     }
 
     const session = authResult.session!;
+
+    // Rate limit admin operations by session
+    if (!checkAdminRateLimit(session.user.id)) {
+      return NextResponse.json({ error: 'rate_limited' }, { status: 429 });
+    }
 
     const url = new URL(request.url);
     const page = parseInt(url.searchParams.get('page') || '1', 10);

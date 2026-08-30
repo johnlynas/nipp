@@ -13,6 +13,7 @@
 
 import { NextRequest, NextResponse } from 'next/server';
 import { withSuperAdmin } from '@/lib/middleware/auth';
+import { checkAdminRateLimit } from '@/lib/rate-limiter';
 import { getCacheMetrics, resetMetrics } from '@/lib/cache/health';
 import { resetL1Counters } from '@/lib/cache/metrics';
 import { logger } from '@/lib/logger';
@@ -22,6 +23,11 @@ import { logger } from '@/lib/logger';
 // ---------------------------------------------------------------------------
 
 export const GET = withSuperAdmin(async (request, context) => {
+  // Rate limit admin operations by session
+  if (!checkAdminRateLimit(context.user.id)) {
+    return NextResponse.json({ error: 'rate_limited' }, { status: 429 });
+  }
+
   try {
     const url = new URL(request.url);
     const action = url.searchParams.get('action');

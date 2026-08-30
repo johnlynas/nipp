@@ -14,6 +14,7 @@ import { runWithTenant } from '@/lib/tenant-context';
 import { recordAuditLog } from '@/lib/audit-log';
 import { logger } from '@/lib/logger';
 import { wrapPiiRoute, PiiRouteParams } from '@/lib/payload-middleware';
+import { checkAdminRateLimit } from '@/lib/rate-limiter';
 
 export const runtime = 'nodejs';
 
@@ -59,7 +60,7 @@ export const GET = wrapPiiRoute(async (request, _decryptedBody, params) => {
     logger.info({ userId: session.user.id, orgId: urlOrgId, count: members.length }, 'Fetched tenant members');
     return NextResponse.json({ members });
   } catch (error) {
-    const isDbError = error instanceof Error && error.message.includes('Can\'t reach database server');
+    const isDbError = error instanceof Error && error.message.includes("Can't reach database server");
     logger.error({ err: error, orgId: urlOrgId }, isDbError ? 'Database unavailable fetching members' : 'Unexpected error fetching members');
     return NextResponse.json({ error: isDbError ? 'Database unavailable' : 'Internal Server Error' }, { status: isDbError ? 503 : 500 });
   }
@@ -81,6 +82,12 @@ export const POST = wrapPiiRoute(async (request, decryptedBody, params) => {
   const urlOrgId = params?.orgId;
   if (!urlOrgId) {
     return NextResponse.json({ error: 'Organization ID is required' }, { status: 400 });
+  }
+
+  // Rate limit admin write operations by session
+  if (!checkAdminRateLimit(session.user.id)) {
+    logger.warn({ userId: session.user.id }, 'Admin write rate limited');
+    return NextResponse.json({ error: 'rate_limited' }, { status: 429 });
   }
 
   // Use decryptedBody (already parsed JSON) or fall back to request.json()
@@ -161,7 +168,7 @@ export const POST = wrapPiiRoute(async (request, decryptedBody, params) => {
     logger.info({ userId: session.user.id, orgId: urlOrgId, memberId: member.id }, 'Added member to tenant organization');
     return NextResponse.json({ message: 'Member added successfully', member }, { status: 201 });
   } catch (error) {
-    const isDbError = error instanceof Error && error.message.includes('Can\'t reach database server');
+    const isDbError = error instanceof Error && error.message.includes("Can't reach database server");
     logger.error({ err: error, orgId: urlOrgId }, isDbError ? 'Database unavailable adding member' : 'Unexpected error adding member');
     return NextResponse.json({ error: isDbError ? 'Database unavailable' : 'Internal Server Error' }, { status: isDbError ? 503 : 500 });
   }

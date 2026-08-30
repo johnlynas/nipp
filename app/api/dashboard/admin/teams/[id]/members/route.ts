@@ -1,5 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { requireSuperAdmin } from '@/lib/require-super-admin';
+import { checkAdminRateLimit } from '@/lib/rate-limiter';
+
 import { TeamService } from '@/services/team-service';
 
 export const runtime = 'nodejs';
@@ -46,7 +48,11 @@ export async function POST(
 
   try {
     const id = (await params).id;
-    const body = await request.json();
+    if (!checkAdminRateLimit(auth.session!.user.id)) {
+    return NextResponse.json({'error': 'rate_limited'}, {status: 429});
+  }
+
+  const body = await request.json();
 
     if (!body.userId) {
       return NextResponse.json({ error: 'User ID is required' }, { status: 400 });
@@ -79,7 +85,11 @@ export async function DELETE(
 
   try {
     const id = (await params).id;
-    const body = await request.json();
+    if (!checkAdminRateLimit(auth.session!.user.id)) {
+    return NextResponse.json({'error': 'rate_limited'}, {status: 429});
+  }
+
+  const body = await request.json();
 
     if (!body.userId) {
       return NextResponse.json({ error: 'User ID is required' }, { status: 400 });

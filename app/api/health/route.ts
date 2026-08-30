@@ -1,6 +1,7 @@
 import tenantDb from '@/lib/tenant-db';
 import { getRedis, forceRedisReconnect } from '@/lib/redis';
 import { addSystemLog, getPreviousHealthState, updateHealthState } from '@/lib/system-logs';
+import { notifyDatabaseHealth, notifyCacheHealth, notifyPgbouncerHealth } from '@/lib/notification-push';
 import { PgBouncerMonitor } from '@/lib/pgbouncer-monitor';
 import { NextResponse } from 'next/server';
 
@@ -25,6 +26,8 @@ export async function GET() {
         message: 'Database connectivity restored',
         details: `Database is now healthy (latency: ${checks.database.latency_ms}ms)`,
       });
+      // Push to SSE stream for real-time visibility
+      notifyDatabaseHealth(true);
     }
   } catch (error) {
     const errorMessage = error instanceof Error ? error.message : String(error);
@@ -131,6 +134,44 @@ export async function GET() {
         level: 'error',
         source: 'health-check:pgbouncer',
         message: 'Connection pool connectivity check failed',
+        details: errorMessage,
+      });
+    }
+  }
+
+  // SSE Endpoint Check (Non-critical, graceful degradation)
+  try {
+    const sseStart = Date.now();
+    // Quick probe: make a HEAD-like request to the SSE route to verify it's accepting connections
+    // We use fetch with a short timeout since SSE holds open connections
+    const sseResponse = await fetch(`${process.env.NEXT_PUBLIC_APP_URL || 'http://localhost:3000'}/api/notifications/stream`, {
+      headers: { 'Accept': 'text/event-stream' },
+      signal: AbortSignal.timeout(3000), // 3s timeout — don't wait for SSE to connect
+    });
+    
+    if (sseResponse.ok) {
+      checks.sse = { status: 'healthy', latency_ms: Date.now() - sseStart };
+    } else if (sseResponse.status === 401 || sseResponse.status === 503) {
+      // 401 = auth required (expected without credentials), 503 = at capacity
+      checks.sse = { status: 'degraded', latency_ms: Date.now() - sseStart, message: sseResponse.statusText };
+    } else {
+      checks.sse = { status: 'unhealthy', error: `SSE endpoint returned ${sseResponse.status}` };
+      overallStatus = 'unhealthy';
+    }
+  } catch (error) {
+    const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+    checks.sse = { status: 'unhealthy', error: `SSE endpoint check failed (${errorMessage})` };
+    if (overallStatus === 'healthy') {
+      overallStatus = 'degraded';
+    }
+    
+    // Only log if state changed from healthy to unhealthy
+    const prevSseHealthy = checks.sse?.status !== 'unhealthy';
+    if (prevSseHealthy) {
+      addSystemLog({
+        level: 'error',
+        source: 'health-check:sse',
+        message: 'SSE endpoint check failed',
         details: errorMessage,
       });
     }

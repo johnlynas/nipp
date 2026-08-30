@@ -1,5 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { requireSuperAdmin } from '@/lib/require-super-admin';
+import { checkAdminRateLimit } from '@/lib/rate-limiter';
+
 import { TeamService } from '@/services/team-service';
 
 export const runtime = 'nodejs';
@@ -49,7 +51,11 @@ export async function PATCH(
 
   try {
     const id = (await params).id;
-    const body = await request.json();
+    if (!checkAdminRateLimit(auth.session!.user.id)) {
+    return NextResponse.json({'error': 'rate_limited'}, {status: 429});
+  }
+
+  const body = await request.json();
 
     const result = await TeamService.updateTeam(id, {
       name: body.name,

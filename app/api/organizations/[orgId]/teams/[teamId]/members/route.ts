@@ -11,6 +11,7 @@ import { auth } from '@/lib/auth';
 import globalDb from '@/lib/global-db';
 import { TeamService } from '@/services/team-service';
 import { isSameSiteRequest } from '@/lib/csrf';
+import { checkCalendarRateLimit } from '@/lib/rate-limiter';
 
 export const runtime = 'nodejs';
 
@@ -105,6 +106,11 @@ export async function POST(
   // Only admins can add team members
   if (role === 'MEMBER') {
     return NextResponse.json({ error: 'Forbidden: admin access required' }, { status: 403 });
+  }
+
+  // Rate limit write operations
+  if (!checkCalendarRateLimit(session.user.id)) {
+    return NextResponse.json({ error: 'rate_limited' }, { status: 429 });
   }
 
   const body = await req.json();

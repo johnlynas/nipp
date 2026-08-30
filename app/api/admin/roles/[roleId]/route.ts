@@ -14,6 +14,7 @@ import { recordAuditLog } from '@/lib/audit-log';
 import { logger } from '@/lib/logger';
 import { wrapPiiRoute, PiiRouteParams } from '@/lib/payload-middleware';
 import { env } from '@/lib/env';
+import { checkAdminRateLimit } from '@/lib/rate-limiter';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -55,7 +56,7 @@ export const GET = wrapPiiRoute(async (request, _decryptedBody, params) => {
     if (error instanceof Error && error.name === 'ForbiddenError') {
       return NextResponse.json({ error: error.message }, { status: 403 });
     }
-    const isDbError = error instanceof Error && error.message.includes('Can\'t reach database server');
+    const isDbError = error instanceof Error && error.message.includes("Can't reach database server");
     logger.error({ err: error, route: '/api/admin/roles/[roleId]', method: 'GET' }, isDbError ? '[Roles API] Database unavailable' : '[Roles API] Unexpected error');
     return NextResponse.json({ error: isDbError ? 'Database unavailable' : 'Internal server error' }, { status: isDbError ? 503 : 500 });
   }
@@ -75,6 +76,13 @@ export const PATCH = wrapPiiRoute(async (request, decryptedBody, params) => {
     }
 
     const session = authResult.session!;
+
+    // Rate limit admin write operations by session
+    if (!checkAdminRateLimit(session.user.id)) {
+      logger.warn({ userId: session.user.id }, 'Admin write rate limited');
+      return NextResponse.json({ error: 'rate_limited' }, { status: 429 });
+    }
+
     const roleId = params?.roleId;
     if (!roleId) {
       return NextResponse.json({ error: 'Role ID is required' }, { status: 400 });
@@ -141,7 +149,7 @@ export const PATCH = wrapPiiRoute(async (request, decryptedBody, params) => {
     if (error instanceof Error && error.name === 'ForbiddenError') {
       return NextResponse.json({ error: error.message }, { status: 403 });
     }
-    const isDbError = error instanceof Error && error.message.includes('Can\'t reach database server');
+    const isDbError = error instanceof Error && error.message.includes("Can't reach database server");
     logger.error({ err: error, route: '/api/admin/roles/[roleId]', method: 'PATCH' }, isDbError ? '[Roles API] Database unavailable' : '[Roles API] Unexpected error');
     return NextResponse.json({ error: isDbError ? 'Database unavailable' : 'Internal server error' }, { status: isDbError ? 503 : 500 });
   }
@@ -161,6 +169,13 @@ export const DELETE = wrapPiiRoute(async (request, _decryptedBody, params) => {
     }
 
     const session = authResult.session!;
+
+    // Rate limit admin write operations by session
+    if (!checkAdminRateLimit(session.user.id)) {
+      logger.warn({ userId: session.user.id }, 'Admin write rate limited');
+      return NextResponse.json({ error: 'rate_limited' }, { status: 429 });
+    }
+
     const roleId = params?.roleId;
     if (!roleId) {
       return NextResponse.json({ error: 'Role ID is required' }, { status: 400 });
@@ -194,7 +209,7 @@ export const DELETE = wrapPiiRoute(async (request, _decryptedBody, params) => {
     if (error instanceof Error && error.name === 'ConflictError') {
       return NextResponse.json({ error: error.message }, { status: 409 });
     }
-    const isDbError = error instanceof Error && error.message.includes('Can\'t reach database server');
+    const isDbError = error instanceof Error && error.message.includes("Can't reach database server");
     logger.error({ err: error, route: '/api/admin/roles/[roleId]', method: 'DELETE' }, isDbError ? '[Roles API] Database unavailable' : '[Roles API] Unexpected error');
     return NextResponse.json({ error: isDbError ? 'Database unavailable' : 'Internal server error' }, { status: isDbError ? 503 : 500 });
   }

@@ -13,6 +13,7 @@ import { ServiceContext } from '@/lib/services/types';
 import { recordAuditLog } from '@/lib/audit-log';
 import { logger } from '@/lib/logger';
 import { wrapPiiRoute, PiiRouteParams } from '@/lib/payload-middleware';
+import { checkAdminRateLimit } from '@/lib/rate-limiter';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -52,7 +53,7 @@ export const GET = wrapPiiRoute(async (request, _decryptedBody, params) => {
     if (error instanceof Error && error.name === 'ForbiddenError') {
       return NextResponse.json({ error: error.message }, { status: 403 });
     }
-    const isDbError = error instanceof Error && error.message.includes('Can\'t reach database server');
+    const isDbError = error instanceof Error && error.message.includes("Can't reach database server");
     logger.error({ err: error, route: '/api/admin/users/[userId]', method: 'GET' }, isDbError ? '[Users API] Database unavailable' : '[Users API] Unexpected error');
     return NextResponse.json({ error: isDbError ? 'Database unavailable' : 'Internal server error' }, { status: isDbError ? 503 : 500 });
   }
@@ -72,6 +73,13 @@ export const PATCH = wrapPiiRoute(async (request, decryptedBody, params) => {
     }
 
     const session = authResult.session!;
+
+    // Rate limit admin write operations by session
+    if (!checkAdminRateLimit(session.user.id)) {
+      logger.warn({ userId: session.user.id }, 'Admin write rate limited');
+      return NextResponse.json({ error: 'rate_limited' }, { status: 429 });
+    }
+
     const userId = params?.userId;
     if (!userId) {
       return NextResponse.json({ error: 'User ID is required' }, { status: 400 });
@@ -125,7 +133,7 @@ export const PATCH = wrapPiiRoute(async (request, decryptedBody, params) => {
     if (error instanceof Error && error.name === 'ForbiddenError') {
       return NextResponse.json({ error: error.message }, { status: 403 });
     }
-    const isDbError = error instanceof Error && error.message.includes('Can\'t reach database server');
+    const isDbError = error instanceof Error && error.message.includes("Can't reach database server");
     logger.error({ err: error, route: '/api/admin/users/[userId]', method: 'PATCH' }, isDbError ? '[Users API] Database unavailable' : '[Users API] Unexpected error');
     return NextResponse.json({ error: isDbError ? 'Database unavailable' : 'Internal server error' }, { status: isDbError ? 503 : 500 });
   }
@@ -145,6 +153,13 @@ export const DELETE = wrapPiiRoute(async (request, _decryptedBody, params) => {
     }
 
     const session = authResult.session!;
+
+    // Rate limit admin write operations by session
+    if (!checkAdminRateLimit(session.user.id)) {
+      logger.warn({ userId: session.user.id }, 'Admin write rate limited');
+      return NextResponse.json({ error: 'rate_limited' }, { status: 429 });
+    }
+
     const userId = params?.userId;
     if (!userId) {
       return NextResponse.json({ error: 'User ID is required' }, { status: 400 });
@@ -176,7 +191,7 @@ export const DELETE = wrapPiiRoute(async (request, _decryptedBody, params) => {
     if (error instanceof Error && error.name === 'ForbiddenError') {
       return NextResponse.json({ error: error.message }, { status: 403 });
     }
-    const isDbError = error instanceof Error && error.message.includes('Can\'t reach database server');
+    const isDbError = error instanceof Error && error.message.includes("Can't reach database server");
     logger.error({ err: error, route: '/api/admin/users/[userId]', method: 'DELETE' }, isDbError ? '[Users API] Database unavailable' : '[Users API] Unexpected error');
     return NextResponse.json({ error: isDbError ? 'Database unavailable' : 'Internal server error' }, { status: isDbError ? 503 : 500 });
   }

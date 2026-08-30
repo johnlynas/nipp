@@ -13,6 +13,7 @@ import { RoleService } from '@/services/role-service';
 import { handleServiceError } from '@/lib/services/error-handler';
 import type { ServiceContext } from '@/lib/services/types';
 import { logger } from '@/lib/logger';
+import { checkAdminRateLimit } from '@/lib/rate-limiter';
 
 export const runtime = 'nodejs';
 export const revalidate = 30;
@@ -69,6 +70,13 @@ export async function POST(
   }
 
   const session = authResult.session!;
+
+  // Rate limit admin write operations by session
+  if (!checkAdminRateLimit(session.user.id)) {
+    logger.warn({ userId: session.user.id }, 'Admin write rate limited');
+    return NextResponse.json({ error: 'rate_limited' }, { status: 429 });
+  }
+
   const { orgId } = await params;
 
   let body: { name?: string; description?: string };
@@ -126,7 +134,7 @@ export async function POST(
  * Handle both database errors (503) and service-layer errors.
  */
 function handleDbOrServiceError(error: unknown): ReturnType<typeof NextResponse.json> {
-  const isDbError = error instanceof Error && error.message.includes('Can\'t reach database server');
+  const isDbError = error instanceof Error && error.message.includes("Can't reach database server");
   if (isDbError) {
     return NextResponse.json({ error: 'Database unavailable' }, { status: 503 });
   }
