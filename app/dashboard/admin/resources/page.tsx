@@ -342,17 +342,14 @@ export default function ResourcesPage() {
         />
 
         {/* Pagination */}
-        {pagination.totalPages > 1 && (
-          <div className="mt-4 flex items-center justify-between">
-            <PaginationControls
-              currentPage={pagination.page}
-              totalPages={pagination.totalPages}
-              totalItems={pagination.total}
-              pageSize={pagination.pageSize}
-              showRangeLabel={false}
-              onPageChange={(page) => setPagination((p) => ({ ...p, page }))}
-            />
-          </div>
+        {pagination.total > 0 && (
+          <PaginationControls
+            currentPage={pagination.page}
+            totalPages={pagination.totalPages}
+            totalItems={pagination.total}
+            pageSize={pagination.pageSize}
+            onPageChange={(page) => setPagination((p) => ({ ...p, page }))}
+          />
         )}
       </div>
 

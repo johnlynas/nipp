@@ -185,13 +185,12 @@ export default function NotificationsLogPage() {
         )}
 
         {/* Pagination */}
-        {Math.ceil(pagination.total / pagination.pageSize) > 1 && (
+        {Math.ceil(pagination.total / pagination.pageSize) > 0 && (
           <PaginationControls
             currentPage={pagination.page}
             totalPages={Math.ceil(pagination.total / pagination.pageSize)}
             totalItems={pagination.total}
             pageSize={pagination.pageSize}
-            showRangeLabel={false}
             onPageChange={handlePageChange}
           />
         )}

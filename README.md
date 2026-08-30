@@ -697,9 +697,7 @@ own OpenSpec proposal (see SPECIFICATION_DESIGN_PROCESS.md).
 
 **Deferred work** is tracked in the deferred items registry at
 [openspec/changes/project-initialization/proposal.md](./openspec/changes/project-initialization/proposal.md).
-Notable open threads: production-grade real-time fan-out (the SSE stream is a
-dev simulation), contractor-role feature, property management business flows,
-and the cloud build/deploy pipeline (scripts are placeholders).
+Notable open threads: production-grade real-time,  contractor-role feature, property management business flows and the cloud build/deploy pipeline (scripts are placeholders).
 
 ## License
 
