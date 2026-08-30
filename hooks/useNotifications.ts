@@ -23,6 +23,8 @@ export interface NotificationItem {
   message: string;
   priority: 'INFO' | 'WARNING' | 'ERROR' | 'CRITICAL';
   source?: string | null;
+  organizationId?: string | null;
+  organizationName?: string | null;
   createdAt: string;
 }
 

@@ -344,15 +344,12 @@ export default function ResourcesPage() {
         {/* Pagination */}
         {pagination.totalPages > 1 && (
           <div className="mt-4 flex items-center justify-between">
-            <span className="text-sm" style={{ color: '#6b7280' }}>
-              Showing {pagination.total > 0 ? (pagination.page - 1) * pagination.pageSize + 1 : 0}–
-              {Math.min(pagination.page * pagination.pageSize, pagination.total)} of {pagination.total} results
-            </span>
             <PaginationControls
               currentPage={pagination.page}
               totalPages={pagination.totalPages}
               totalItems={pagination.total}
               pageSize={pagination.pageSize}
+              showRangeLabel={false}
               onPageChange={(page) => setPagination((p) => ({ ...p, page }))}
             />
           </div>

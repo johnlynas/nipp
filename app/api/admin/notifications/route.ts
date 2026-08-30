@@ -139,6 +139,7 @@ export async function GET(request: NextRequest) {
         orderBy: { createdAt: 'desc' },
         skip: (page - 1) * pageSize,
         take: pageSize,
+        include: { organization: { select: { name: true } } },
       }),
       globalDb.notification.count({ where }),
     ]);
@@ -151,6 +152,7 @@ export async function GET(request: NextRequest) {
         priority: n.priority,
         scope: n.scope,
         organizationId: n.organizationId ?? undefined,
+        organizationName: n.organization?.name ?? undefined,
         source: n.source ?? undefined,
         createdAt: n.createdAt.toISOString(),
       })),

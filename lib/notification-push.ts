@@ -29,6 +29,7 @@ interface NotificationPayload {
   scope: NotificationScope;
   source?: string | null;
   organizationId?: string | null;
+  organizationName?: string | null;
   createdAt: string;
 }
 
@@ -133,16 +134,37 @@ export async function pushNotification(payload: Omit<NotificationPayload, 'id' |
   // and the wire payload carry 'INFO'|'WARNING'|... (callers may send 'info').
   const normalizedPriority = normalizePriority(payload.priority);
 
+  // Resolve organization name for display (org-scoped notifications) so SSE
+  // consumers don't need a second lookup. Best effort — missing name is fine.
+  let organizationName: string | undefined;
+  if (payload.organizationId) {
+    const org = await globalDb.organization.findUnique({
+      where: { id: payload.organizationId },
+      select: { name: true },
+    });
+    organizationName = org?.name ?? undefined;
+  }
+
   const notification: NotificationPayload = {
     ...payload,
     priority: normalizedPriority,
+    organizationName,
     id: `notif-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
     createdAt: new Date().toISOString(),
   };
 
-  // Persist to DB for history/replay
+  // Persist to DB for history/replay (model has no organizationName column)
   try {
-    await globalDb.notification.create({ data: notification });
+    await globalDb.notification.create({
+      data: {
+        title: notification.title,
+        message: notification.message,
+        priority: notification.priority,
+        scope: notification.scope,
+        source: notification.source ?? null,
+        organizationId: notification.organizationId ?? null,
+      },
+    });
   } catch (err) {
     console.error('[SSE] Failed to persist notification:', err);
   }

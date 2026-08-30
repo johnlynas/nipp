@@ -9,6 +9,7 @@
 
 import { useState, useEffect, useCallback } from 'react';
 import { useNotifications } from '@/hooks/useNotifications';
+import { PaginationControls } from '@/components/admin/PaginationControls';
 
 // Priority level labels for the events table — plain colored text, no border/icon
 const PRIORITY_LABELS: Record<string, string> = {
@@ -29,6 +30,7 @@ interface NotificationItem {
   priority: 'INFO' | 'WARNING' | 'ERROR' | 'CRITICAL';
   scope?: string;
   organizationId?: string;
+  organizationName?: string;
   source?: string;
   createdAt: string;
 }
@@ -143,12 +145,13 @@ export default function NotificationsLogPage() {
         ) : (
           <table className="w-full text-sm">
             <thead>
-              <tr className="border-b" style={{ borderColor: '#dee2e6', backgroundColor: '#f8f9fa' }}>
-                <th className="px-4 py-3 text-left font-medium" style={{ color: '#1B2A4A' }}>Time</th>
-                <th className="px-4 py-3 text-left font-medium" style={{ color: '#1B2A4A' }}>Priority</th>
-                <th className="px-4 py-3 text-left font-medium" style={{ color: '#1B2A4A' }}>Scope</th>
-                <th className="px-4 py-3 text-left font-medium" style={{ color: '#1B2A4A' }}>Source</th>
-                <th className="px-4 py-3 text-left font-medium" style={{ color: '#1B2A4A' }}>Message</th>
+              <tr className="bg-[#1B2A4A]">
+                <th className="px-4 py-3 text-left text-xs font-medium uppercase tracking-wider text-white" scope="col">Time</th>
+                <th className="px-4 py-3 text-left text-xs font-medium uppercase tracking-wider text-white" scope="col">Priority</th>
+                <th className="px-4 py-3 text-left text-xs font-medium uppercase tracking-wider text-white" scope="col">Scope</th>
+                <th className="px-4 py-3 text-left text-xs font-medium uppercase tracking-wider text-white" scope="col">Organization</th>
+                <th className="px-4 py-3 text-left text-xs font-medium uppercase tracking-wider text-white" scope="col">Source</th>
+                <th className="px-4 py-3 text-left text-xs font-medium uppercase tracking-wider text-white" scope="col">Message</th>
               </tr>
             </thead>
             <tbody>
@@ -166,6 +169,9 @@ export default function NotificationsLogPage() {
                     <span className="text-xs font-medium">{notif.scope || 'N/A'}</span>
                   </td>
                   <td className="px-4 py-3">
+                    <span className="text-xs text-gray-500">{notif.organizationName || '-'}</span>
+                  </td>
+                  <td className="px-4 py-3">
                     <span className="text-xs text-gray-500">{notif.source || '-'}</span>
                   </td>
                   <td className="px-4 py-3">
@@ -179,32 +185,15 @@ export default function NotificationsLogPage() {
         )}
 
         {/* Pagination */}
-        {pagination.total > 0 && (
-          <div className="flex items-center justify-between px-4 py-3 border-t" style={{ borderColor: '#dee2e6' }}>
-            <div className="text-sm text-gray-500">
-              Showing {Math.min((pagination.page - 1) * pagination.pageSize + 1, pagination.total)} to{' '}
-              {Math.min(pagination.page * pagination.pageSize, pagination.total)} of {pagination.total} notifications
-            </div>
-            <div className="flex items-center gap-2">
-              <button
-                onClick={() => handlePageChange(pagination.page - 1)}
-                disabled={pagination.page <= 1}
-                className="px-3 py-1 text-sm border rounded hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed"
-                style={{ borderColor: '#dee2e6' }}
-              >
-                Previous
-              </button>
-              <span className="text-sm text-gray-500">Page {pagination.page} of {Math.ceil(pagination.total / pagination.pageSize)}</span>
-              <button
-                onClick={() => handlePageChange(pagination.page + 1)}
-                disabled={pagination.page >= Math.ceil(pagination.total / pagination.pageSize)}
-                className="px-3 py-1 text-sm border rounded hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed"
-                style={{ borderColor: '#dee2e6' }}
-              >
-                Next
-              </button>
-            </div>
-          </div>
+        {Math.ceil(pagination.total / pagination.pageSize) > 1 && (
+          <PaginationControls
+            currentPage={pagination.page}
+            totalPages={Math.ceil(pagination.total / pagination.pageSize)}
+            totalItems={pagination.total}
+            pageSize={pagination.pageSize}
+            showRangeLabel={false}
+            onPageChange={handlePageChange}
+          />
         )}
       </div>
     </div>

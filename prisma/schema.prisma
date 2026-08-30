@@ -438,8 +438,19 @@ model NotificationLog {
 // ============================================================
 
 /**
- * Notification — In-app notifications visible via SSE stream.
- * Super admins see all notifications regardless of scope.
+ * Notification — In-app events surfaced via SSE stream + notification log.
+ *
+ * Scope semantics (see lib/notification-push.ts, pushNotification):
+ *   - GLOBAL: broadcast to ALL connected subscribers (super admins and every
+ *     tenant). organizationId is intentionally NULL for pure broadcasts, but
+ *     an ADMIN global broadcast sent on behalf of an org (source
+ *     "admin:message") may carry that org's id so the log can display which
+ *     organization initiated it.
+ *   - ORG: delivered only to subscribers of that organization plus super
+ *     admins (whose subscriber orgId is NULL).
+ *
+ * Super admins can view every notification regardless of scope — scope gates
+ * live SSE delivery, not historical visibility in the admin log.
  */
 model Notification {
   id             String   @id @default(cuid())
@@ -447,7 +458,7 @@ model Notification {
   message        String
   priority       NotificationPriority @default(INFO)
   scope          NotificationScope @default(ORG) // ORG = tenant-specific, GLOBAL = broadcast to all
-  source         String?  // e.g., "health-check:database", "admin:message"
+  source         String?  // e.g., "health-check:database", "admin:message", "platform:certs"
 
   /** Organization this notification belongs to (null for global broadcasts) */
   organizationId String?
@@ -458,7 +469,7 @@ model Notification {
 
   @@index([organizationId])
   @@index([createdAt])
-  @@index([scope, createdAt]) // For global notification queries
+  @@index([scope, createdAt]) // For admin log listing (global notification queries)
 }
 
 // ============================================================

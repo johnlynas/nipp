@@ -6,6 +6,8 @@ interface PaginationControlsProps {
   totalItems: number;
   pageSize: number;
   onPageChange: (page: number) => void;
+  /** Show the "Showing X–Y of Z entries" label beside the controls (default true). */
+  showRangeLabel?: boolean;
 }
 
 /**
@@ -18,6 +20,7 @@ export function PaginationControls({
   totalItems,
   pageSize,
   onPageChange,
+  showRangeLabel = true,
 }: PaginationControlsProps) {
   if (totalPages <= 1) return null;
 
@@ -55,9 +58,13 @@ export function PaginationControls({
 
   return (
     <div className="mt-4 flex items-center justify-between px-4 py-3 border-t border-gray-200">
-      <div className="text-sm text-gray-500">
-        Showing {start}–{end} of {totalItems} entries
-      </div>
+      {showRangeLabel ? (
+        <div className="text-sm text-gray-500">
+          Showing {start}–{end} of {totalItems} entries
+        </div>
+      ) : (
+        <div aria-hidden />
+      )}
       <div className="flex items-center gap-1">
         <button
           onClick={() => onPageChange(currentPage - 1)}
