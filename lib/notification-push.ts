@@ -69,6 +69,24 @@ export function getSessionConnectionCount(sessionId: string): number {
 // ---------------------------------------------------------------------------
 
 /**
+ * Normalize a priority (which callers may pass as a lowercase string, e.g.
+ * 'info' from the admin API) into a valid Prisma NotificationPriority member.
+ * Falls back to INFO for anything unrecognized rather than persisting garbage.
+ */
+function normalizePriority(priority: string | NotificationPriority): NotificationPriority {
+  const key = String(priority ?? '').toUpperCase();
+  if (
+    key === NotificationPriority.INFO ||
+    key === NotificationPriority.WARNING ||
+    key === NotificationPriority.ERROR ||
+    key === NotificationPriority.CRITICAL
+  ) {
+    return key as NotificationPriority;
+  }
+  return NotificationPriority.INFO;
+}
+
+/**
  * Register a new SSE subscriber. Returns true if accepted, false if caps exceeded.
  */
 export function addSubscriber(subscriber: SseSubscriber): boolean {
@@ -111,8 +129,13 @@ export function getSubscriberCount(): number {
  * - GLOBAL scope: delivered to all subscribers
  */
 export async function pushNotification(payload: Omit<NotificationPayload, 'id' | 'createdAt'>): Promise<void> {
+  // Normalize priority to a canonical Prisma enum member so both persistence
+  // and the wire payload carry 'INFO'|'WARNING'|... (callers may send 'info').
+  const normalizedPriority = normalizePriority(payload.priority);
+
   const notification: NotificationPayload = {
     ...payload,
+    priority: normalizedPriority,
     id: `notif-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
     createdAt: new Date().toISOString(),
   };
