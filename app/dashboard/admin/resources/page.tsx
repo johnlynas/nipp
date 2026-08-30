@@ -5,7 +5,6 @@ import { Eye, Pencil, Trash2, Layers } from 'lucide-react';
 import { logClientError } from '@/lib/client-error-logger';
 import { SearchBar } from '@/components/dashboard/SearchBar';
 import { DataTable } from '@/components/dashboard/DataTable';
-import { PageHeader } from '@/components/dashboard/PageHeader';
 import { StatCard } from '@/components/dashboard/StatCard';
 import { Modal } from '@/components/dashboard/Modal';
 import { ConfirmDialog } from '@/components/dashboard/ConfirmDialog';
@@ -302,17 +301,6 @@ export default function ResourcesPage() {
 
   return (
     <>
-      <PageHeader title="Resources" description="Feature modules and their role-based access control">
-        <button
-          onClick={() => setCreateModalOpen(true)}
-          className="flex items-center gap-2 rounded px-4 py-2 text-sm font-medium text-white"
-          style={{ backgroundColor: '#F5A623' }}
-        >
-          <Layers className="h-4 w-4" />
-          Create Resource
-        </button>
-      </PageHeader>
-
       {/* Stat Cards */}
       <div className="mb-6 grid grid-cols-1 gap-4 sm:grid-cols-2">
         <StatCard label="Total Resources" value={totalResourcesCount} />
@@ -331,8 +319,18 @@ export default function ResourcesPage() {
         </div>
       )}
 
-      {/* Search */}
-      <SearchBar value={search} onChange={setSearch} placeholder="Search resources..." />
+      {/* Search + Create Resource */}
+      <div className="flex items-center gap-3">
+        <SearchBar value={search} onChange={setSearch} placeholder="Search resources..." />
+        <button
+          onClick={() => setCreateModalOpen(true)}
+          className="flex flex-shrink-0 items-center gap-2 rounded px-4 py-2 text-sm font-medium text-white"
+          style={{ backgroundColor: '#F5A623' }}
+        >
+          <Layers className="h-4 w-4" />
+          Create Resource
+        </button>
+      </div>
 
       {/* Data Table */}
       <div className="mt-4">

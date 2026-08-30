@@ -45,7 +45,7 @@ interface PaginationInfo {
 
 export default function NotificationsLogPage() {
   const [notifications, setNotifications] = useState<NotificationItem[]>([]);
-  const [pagination, setPagination] = useState<PaginationInfo>({ page: 1, pageSize: 50, total: 0 });
+  const [pagination, setPagination] = useState<PaginationInfo>({ page: 1, pageSize: 8, total: 0 });
   const [loading, setLoading] = useState(false);
   const [scopeFilter, setScopeFilter] = useState<string>('');
   const [priorityFilter, setPriorityFilter] = useState<string>('');
@@ -57,7 +57,7 @@ export default function NotificationsLogPage() {
   const fetchNotifications = useCallback(async (page: number) => {
     setLoading(true);
     try {
-      const params = new URLSearchParams({ page: String(page), pageSize: '50' });
+      const params = new URLSearchParams({ page: String(page), pageSize: '8' });
       if (scopeFilter) params.set('scope', scopeFilter);
       if (priorityFilter) params.set('priority', priorityFilter);
 
@@ -87,7 +87,7 @@ export default function NotificationsLogPage() {
           merged.unshift(live as NotificationItem);
         }
       }
-      return merged.slice(0, 50); // Keep max 50 entries visible
+      return merged.slice(0, 8); // Keep max 8 entries visible (matches page size)
     });
   }, [liveNotifications]);
 
@@ -103,11 +103,6 @@ export default function NotificationsLogPage() {
 
   return (
     <div className="space-y-6">
-      {/* Header */}
-      <h2 className="text-xl font-semibold" style={{ color: '#1B2A4A' }}>
-        Notifications Log
-      </h2>
-
       {/* Filters */}
       <div className="flex flex-wrap gap-4">
         <select
@@ -133,13 +128,6 @@ export default function NotificationsLogPage() {
           <option value="ERROR">Error</option>
           <option value="CRITICAL">Critical</option>
         </select>
-
-        <button
-          onClick={() => fetchNotifications(1)}
-          className="px-3 py-2 text-sm font-medium bg-blue-600 text-white rounded hover:bg-blue-700 transition-colors"
-        >
-          Refresh
-        </button>
       </div>
 
       {/* Notifications Table */}
