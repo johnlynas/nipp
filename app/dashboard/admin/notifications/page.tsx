@@ -8,7 +8,15 @@
 'use client';
 
 import { useState, useEffect, useCallback } from 'react';
-import { useNotifications, PRIORITY_COLORS, getPriorityIcon } from '@/hooks/useNotifications';
+import { useNotifications } from '@/hooks/useNotifications';
+
+// Priority level labels for the events table — plain colored text, no border/icon
+const PRIORITY_LABELS: Record<string, string> = {
+  INFO: 'text-blue-500',
+  WARNING: 'text-yellow-500',
+  ERROR: 'text-red-500',
+  CRITICAL: 'text-red-600 font-semibold',
+};
 
 // ---------------------------------------------------------------------------
 // Types
@@ -43,7 +51,7 @@ export default function NotificationsLogPage() {
   const [priorityFilter, setPriorityFilter] = useState<string>('');
 
   // SSE live updates
-  const { notifications: liveNotifications, isConnected } = useNotifications();
+  const { notifications: liveNotifications } = useNotifications();
 
   // Fetch paginated history
   const fetchNotifications = useCallback(async (page: number) => {
@@ -96,15 +104,9 @@ export default function NotificationsLogPage() {
   return (
     <div className="space-y-6">
       {/* Header */}
-      <div className="flex items-center justify-between">
-        <h2 className="text-xl font-semibold" style={{ color: '#1B2A4A' }}>
-          Notifications Log
-        </h2>
-        <div className="flex items-center gap-3">
-          <div className={`w-2 h-2 rounded-full ${isConnected ? 'bg-green-400' : 'bg-red-400 animate-pulse'}`} />
-          <span className="text-xs text-gray-500">{isConnected ? 'Live' : 'Disconnected'}</span>
-        </div>
-      </div>
+      <h2 className="text-xl font-semibold" style={{ color: '#1B2A4A' }}>
+        Notifications Log
+      </h2>
 
       {/* Filters */}
       <div className="flex flex-wrap gap-4">
@@ -154,25 +156,23 @@ export default function NotificationsLogPage() {
           <table className="w-full text-sm">
             <thead>
               <tr className="border-b" style={{ borderColor: '#dee2e6', backgroundColor: '#f8f9fa' }}>
+                <th className="px-4 py-3 text-left font-medium" style={{ color: '#1B2A4A' }}>Time</th>
                 <th className="px-4 py-3 text-left font-medium" style={{ color: '#1B2A4A' }}>Priority</th>
-                <th className="px-4 py-3 text-left font-medium" style={{ color: '#1B2A4A' }}>Title</th>
                 <th className="px-4 py-3 text-left font-medium" style={{ color: '#1B2A4A' }}>Scope</th>
                 <th className="px-4 py-3 text-left font-medium" style={{ color: '#1B2A4A' }}>Source</th>
-                <th className="px-4 py-3 text-left font-medium" style={{ color: '#1B2A4A' }}>Time</th>
+                <th className="px-4 py-3 text-left font-medium" style={{ color: '#1B2A4A' }}>Message</th>
               </tr>
             </thead>
             <tbody>
               {notifications.map((notif) => (
                 <tr key={notif.id} className="border-b hover:bg-gray-50 transition-colors" style={{ borderColor: '#f1f3f4' }}>
                   <td className="px-4 py-3">
-                    <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded text-xs border ${PRIORITY_COLORS[notif.priority] || PRIORITY_COLORS.INFO}`}>
-                      <span>{getPriorityIcon(notif.priority)}</span>
-                      {notif.priority}
-                    </span>
+                    <span className="text-xs text-gray-500">{new Date(notif.createdAt).toLocaleString()}</span>
                   </td>
                   <td className="px-4 py-3">
-                    <div className="font-medium">{notif.title}</div>
-                    <div className="text-xs text-gray-500 mt-1 line-clamp-2">{notif.message}</div>
+                    <span className={`text-xs ${PRIORITY_LABELS[notif.priority] || PRIORITY_LABELS.INFO}`}>
+                      {notif.priority}
+                    </span>
                   </td>
                   <td className="px-4 py-3">
                     <span className="text-xs font-medium">{notif.scope || 'N/A'}</span>
@@ -181,7 +181,8 @@ export default function NotificationsLogPage() {
                     <span className="text-xs text-gray-500">{notif.source || '-'}</span>
                   </td>
                   <td className="px-4 py-3">
-                    <span className="text-xs text-gray-500">{new Date(notif.createdAt).toLocaleString()}</span>
+                    <div className="font-medium">{notif.title}</div>
+                    <div className="text-xs text-gray-500 mt-1 line-clamp-2">{notif.message}</div>
                   </td>
                 </tr>
               ))}
