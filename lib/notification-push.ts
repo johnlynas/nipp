@@ -153,6 +153,29 @@ export async function pushNotification(payload: Omit<NotificationPayload, 'id' |
     createdAt: new Date().toISOString(),
   };
 
+  console.log(`[SSE] pushNotification: ${notification.title} | priority=${notification.priority} scope=${notification.scope} source=${notification.source ?? 'none'} orgId=${notification.organizationId ?? 'none'}`);
+
+  // Dedup: skip if an identical notification was persisted within the last
+  // 10 seconds. This prevents duplicate DB rows when two concurrent requests
+  // (e.g., frontend health polling + external monitor) both read the same
+  // prevState and fire the same notify call.
+  const dedupWindow = new Date(Date.now() - 10_000);
+  const existing = await globalDb.notification.findFirst({
+    where: {
+      title: notification.title,
+      message: notification.message,
+      priority: normalizedPriority,
+      scope: notification.scope,
+      source: notification.source ?? null,
+      organizationId: notification.organizationId ?? null,
+      createdAt: { gte: dedupWindow },
+    },
+  });
+  if (existing) {
+    console.log(`[SSE] Dedup — skipping duplicate notification: ${notification.title}`);
+    return;
+  }
+
   // Persist to DB for history/replay (model has no organizationName column)
   try {
     await globalDb.notification.create({
@@ -165,6 +188,7 @@ export async function pushNotification(payload: Omit<NotificationPayload, 'id' |
         organizationId: notification.organizationId ?? null,
       },
     });
+    console.log(`[SSE] Notification persisted: ${notification.id}`);
   } catch (err) {
     console.error('[SSE] Failed to persist notification:', err);
   }
@@ -173,6 +197,7 @@ export async function pushNotification(payload: Omit<NotificationPayload, 'id' |
   const dataStr = JSON.stringify(notification);
   const message = `data: ${dataStr}\n\n`;
 
+  let deliveredCount = 0;
   for (const [connectionId, sub] of activeSubscribers) {
     try {
       // Filter by scope:
@@ -180,16 +205,24 @@ export async function pushNotification(payload: Omit<NotificationPayload, 'id' |
       // - ORG: deliver only to subscribers in the same org or super admins (orgId=null)
       if (payload.scope === NotificationScope.GLOBAL) {
         await sub.writer.write(sub.encoder.encode(message));
+        deliveredCount++;
       } else if (payload.scope === NotificationScope.ORG) {
         // Super admins (orgId=null) see all notifications; tenant users only see their own org's
         if (!sub.orgId || sub.orgId === payload.organizationId) {
           await sub.writer.write(sub.encoder.encode(message));
+          deliveredCount++;
         }
       }
     } catch {
       // Subscriber disconnected — clean up silently
       removeSubscriber(connectionId);
     }
+  }
+
+  if (activeSubscribers.size === 0) {
+    console.log(`[SSE] No active subscribers — notification ${notification.id} was persisted but not broadcast to SSE`);
+  } else {
+    console.log(`[SSE] Delivered notification ${notification.id} to ${deliveredCount}/${activeSubscribers.size} subscribers`);
   }
 }
 
@@ -241,8 +274,8 @@ startHeartbeat();
 // ---------------------------------------------------------------------------
 
 /** Push a database health event to SSE subscribers. */
-export function notifyDatabaseHealth(healthy: boolean): void {
-  const priority = healthy ? NotificationPriority.INFO : NotificationPriority.ERROR;
+export function notifyDatabaseHealth(healthy: boolean, organizationId?: string | null): void {
+  const priority = healthy ? NotificationPriority.INFO : NotificationPriority.CRITICAL;
   pushNotification({
     title: healthy ? 'Database restored' : 'Database connection lost',
     message: healthy
@@ -251,12 +284,13 @@ export function notifyDatabaseHealth(healthy: boolean): void {
     priority,
     scope: NotificationScope.GLOBAL, // Health events go to everyone
     source: 'health-check:database',
+    organizationId,
   });
 }
 
 /** Push a Redis cache health event to SSE subscribers. */
-export function notifyCacheHealth(healthy: boolean): void {
-  const priority = healthy ? NotificationPriority.INFO : NotificationPriority.WARNING;
+export function notifyCacheHealth(healthy: boolean, organizationId?: string | null): void {
+  const priority = healthy ? NotificationPriority.INFO : NotificationPriority.CRITICAL;
   pushNotification({
     title: healthy ? 'Cache restored' : 'Cache connection lost',
     message: healthy
@@ -265,12 +299,13 @@ export function notifyCacheHealth(healthy: boolean): void {
     priority,
     scope: NotificationScope.GLOBAL, // Health events go to everyone
     source: 'health-check:cache',
+    organizationId,
   });
 }
 
 /** Push a PgBouncer health event to SSE subscribers. */
-export function notifyPgbouncerHealth(healthy: boolean): void {
-  const priority = healthy ? NotificationPriority.INFO : NotificationPriority.ERROR;
+export function notifyPgbouncerHealth(healthy: boolean, organizationId?: string | null): void {
+  const priority = healthy ? NotificationPriority.INFO : NotificationPriority.CRITICAL;
   pushNotification({
     title: healthy ? 'Connection pool restored' : 'Connection pool unavailable',
     message: healthy
@@ -279,6 +314,7 @@ export function notifyPgbouncerHealth(healthy: boolean): void {
     priority,
     scope: NotificationScope.GLOBAL, // Health events go to everyone
     source: 'health-check:pgbouncer',
+    organizationId,
   });
 }
 

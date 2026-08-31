@@ -88,8 +88,18 @@ export default function NotificationsLogPage() {
     criticalCount: 0,
   });
 
-  // SSE live updates
+  // SSE live updates — use a refreshKey to trigger an API refetch when new
+  // notifications arrive, instead of merging two data sources (which races).
   const { notifications: liveNotifications } = useNotifications();
+  const [sseRefreshKey, setSseRefreshKey] = useState(0);
+
+  // When the SSE hook delivers new notifications, bump the refresh key so
+  // fetchNotifications runs again and pulls fresh data from the API.
+  useEffect(() => {
+    if (liveNotifications.length > 0) {
+      setSseRefreshKey((k) => k + 1);
+    }
+  }, [liveNotifications]);
 
   // Fetch organizations list for the filter dropdown
   useEffect(() => {
@@ -115,7 +125,7 @@ export default function NotificationsLogPage() {
     fetchOrgs();
   }, []);
 
-  // Fetch paginated history
+  // Fetch paginated history — also re-fetch when SSE refresh key changes
   const fetchNotifications = useCallback(async (page: number) => {
     setLoading(true);
     try {
@@ -158,20 +168,7 @@ export default function NotificationsLogPage() {
 
   useEffect(() => {
     fetchNotifications(1);
-  }, [fetchNotifications]);
-
-  // Merge live notifications into the list (deduplicate by ID)
-  useEffect(() => {
-    setNotifications((prev) => {
-      const merged = [...prev];
-      for (const live of liveNotifications) {
-        if (!merged.find((n) => n.id === live.id)) {
-          merged.unshift(live as NotificationItem);
-        }
-      }
-      return merged.slice(0, 8); // Keep max 8 entries visible (matches page size)
-    });
-  }, [liveNotifications]);
+  }, [fetchNotifications, sseRefreshKey]);
 
   const handlePageChange = (newPage: number) => {
     if (newPage >= 1 && newPage <= Math.ceil(pagination.total / pagination.pageSize)) {
@@ -248,7 +245,7 @@ export default function NotificationsLogPage() {
         <select
           value={scopeFilter}
           onChange={(e) => handleFilterChange(setScopeFilter, e.target.value)}
-          className="px-3 py-2 border rounded text-sm bg-white"
+          className="px-3 py-2 border rounded text-sm bg-white text-gray-900"
           style={{ borderColor: '#dee2e6' }}
         >
           <option value="">All Scopes</option>
@@ -259,7 +256,7 @@ export default function NotificationsLogPage() {
         <select
           value={priorityFilter}
           onChange={(e) => handleFilterChange(setPriorityFilter, e.target.value)}
-          className="px-3 py-2 border rounded text-sm bg-white"
+          className="px-3 py-2 border rounded text-sm bg-white text-gray-900"
           style={{ borderColor: '#dee2e6' }}
         >
           <option value="">All Priorities</option>
@@ -272,7 +269,7 @@ export default function NotificationsLogPage() {
         <select
           value={organizationFilter}
           onChange={(e) => handleFilterChange(setOrganizationFilter, e.target.value)}
-          className="px-3 py-2 border rounded text-sm bg-white"
+          className="px-3 py-2 border rounded text-sm bg-white text-gray-900"
           style={{ borderColor: '#dee2e6' }}
         >
           <option value="">All Organizations</option>
@@ -284,7 +281,7 @@ export default function NotificationsLogPage() {
         <select
           value={acknowledgedFilter}
           onChange={(e) => handleFilterChange(setAcknowledgedFilter, e.target.value)}
-          className="px-3 py-2 border rounded text-sm bg-white"
+          className="px-3 py-2 border rounded text-sm bg-white text-gray-900"
           style={{ borderColor: '#dee2e6' }}
         >
           <option value="">All Statuses</option>
@@ -297,7 +294,7 @@ export default function NotificationsLogPage() {
           value={searchQuery}
           onChange={(e) => setSearchQuery(e.target.value)}
           placeholder="Search source or message..."
-          className="px-3 py-2 border rounded text-sm bg-white"
+          className="px-3 py-2 border rounded text-sm bg-white text-gray-900"
           style={{ borderColor: '#dee2e6' }}
         />
       </div>
@@ -337,7 +334,7 @@ export default function NotificationsLogPage() {
                     </span>
                   </td>
                   <td className="px-4 py-3">
-                    <span className="text-xs font-medium">{notif.scope || 'N/A'}</span>
+                    <span className="text-xs font-medium text-gray-900">{notif.scope || 'N/A'}</span>
                   </td>
                   <td className="px-4 py-3">
                     <span className="text-xs text-gray-900">{notif.organizationName || '-'}</span>
@@ -346,7 +343,7 @@ export default function NotificationsLogPage() {
                     <span className="text-xs text-gray-900">{notif.source || '-'}</span>
                   </td>
                   <td className="px-4 py-3">
-                    <div className="font-medium">{notif.title}</div>
+                    <div className="font-medium text-gray-900">{notif.title}</div>
                     <div className="text-xs text-gray-500 mt-1 line-clamp-2">{notif.message}</div>
                   </td>
                   <td className="px-4 py-3">
