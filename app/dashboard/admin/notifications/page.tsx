@@ -10,6 +10,7 @@
 import { useState, useEffect, useCallback } from 'react';
 import { useNotifications } from '@/hooks/useNotifications';
 import { PaginationControls } from '@/components/admin/PaginationControls';
+import { encryptedFetch } from '@/lib/api-client';
 
 // Priority level labels for the events table — plain colored text, no border/icon
 const PRIORITY_LABELS: Record<string, string> = {
@@ -41,6 +42,11 @@ interface PaginationInfo {
   total: number;
 }
 
+interface ApiOrganization {
+  id: string;
+  name: string;
+}
+
 // ---------------------------------------------------------------------------
 // Component
 // ---------------------------------------------------------------------------
@@ -51,9 +57,26 @@ export default function NotificationsLogPage() {
   const [loading, setLoading] = useState(false);
   const [scopeFilter, setScopeFilter] = useState<string>('');
   const [priorityFilter, setPriorityFilter] = useState<string>('');
+  const [organizationFilter, setOrganizationFilter] = useState<string>('');
+  const [organizations, setOrganizations] = useState<{ id: string; name: string }[]>([]);
 
   // SSE live updates
   const { notifications: liveNotifications } = useNotifications();
+
+  // Fetch organizations list for the filter dropdown
+  useEffect(() => {
+    const fetchOrgs = async () => {
+      try {
+        const res = await encryptedFetch('/api/admin/organizations?pageSize=200', { pii: true });
+        if (!res.ok) throw new Error('Failed to fetch organizations');
+        const data = await res.json();
+        setOrganizations(data.organizations.map((org: ApiOrganization) => ({ id: org.id, name: org.name })));
+      } catch (err) {
+        console.error('[Notifications Log] Failed to fetch organizations:', err);
+      }
+    };
+    fetchOrgs();
+  }, []);
 
   // Fetch paginated history
   const fetchNotifications = useCallback(async (page: number) => {
@@ -62,6 +85,7 @@ export default function NotificationsLogPage() {
       const params = new URLSearchParams({ page: String(page), pageSize: '8' });
       if (scopeFilter) params.set('scope', scopeFilter);
       if (priorityFilter) params.set('priority', priorityFilter);
+      if (organizationFilter) params.set('organizationId', organizationFilter);
 
       const res = await fetch(`/api/admin/notifications?${params}`);
       if (!res.ok) throw new Error('Failed to fetch notifications');
@@ -74,7 +98,7 @@ export default function NotificationsLogPage() {
     } finally {
       setLoading(false);
     }
-  }, [scopeFilter, priorityFilter]);
+  }, [scopeFilter, priorityFilter, organizationFilter]);
 
   useEffect(() => {
     fetchNotifications(1);
@@ -115,7 +139,7 @@ export default function NotificationsLogPage() {
         >
           <option value="">All Scopes</option>
           <option value="GLOBAL">Global</option>
-          <option value="ORG">Tenant-Specific</option>
+          <option value="ORG">Org</option>
         </select>
 
         <select
@@ -129,6 +153,18 @@ export default function NotificationsLogPage() {
           <option value="WARNING">Warning</option>
           <option value="ERROR">Error</option>
           <option value="CRITICAL">Critical</option>
+        </select>
+
+        <select
+          value={organizationFilter}
+          onChange={(e) => handleFilterChange(setOrganizationFilter, e.target.value)}
+          className="px-3 py-2 border rounded text-sm bg-white"
+          style={{ borderColor: '#dee2e6' }}
+        >
+          <option value="">All Organizations</option>
+          {organizations.map((org) => (
+            <option key={org.id} value={org.id}>{org.name}</option>
+          ))}
         </select>
       </div>
 
@@ -158,7 +194,7 @@ export default function NotificationsLogPage() {
               {notifications.map((notif) => (
                 <tr key={notif.id} className="border-b hover:bg-gray-50 transition-colors" style={{ borderColor: '#f1f3f4' }}>
                   <td className="px-4 py-3">
-                    <span className="text-xs text-gray-500">{new Date(notif.createdAt).toLocaleString()}</span>
+                    <span className="text-xs text-gray-900">{new Date(notif.createdAt).toLocaleString()}</span>
                   </td>
                   <td className="px-4 py-3">
                     <span className={`text-xs ${PRIORITY_LABELS[notif.priority] || PRIORITY_LABELS.INFO}`}>
@@ -169,10 +205,10 @@ export default function NotificationsLogPage() {
                     <span className="text-xs font-medium">{notif.scope || 'N/A'}</span>
                   </td>
                   <td className="px-4 py-3">
-                    <span className="text-xs text-gray-500">{notif.organizationName || '-'}</span>
+                    <span className="text-xs text-gray-900">{notif.organizationName || '-'}</span>
                   </td>
                   <td className="px-4 py-3">
-                    <span className="text-xs text-gray-500">{notif.source || '-'}</span>
+                    <span className="text-xs text-gray-900">{notif.source || '-'}</span>
                   </td>
                   <td className="px-4 py-3">
                     <div className="font-medium">{notif.title}</div>

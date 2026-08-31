@@ -117,12 +117,14 @@ export async function GET(request: NextRequest) {
   let pageSize = 50;
   let scope: string | undefined;
   let priority: string | undefined;
+  let organizationId: string | undefined;
 
   try {
     page = parseInt(url.searchParams.get('page') || '1', 10);
     pageSize = parseInt(url.searchParams.get('pageSize') || '50', 10);
     scope = url.searchParams.get('scope') || undefined;
     priority = url.searchParams.get('priority') || undefined;
+    organizationId = url.searchParams.get('organizationId') || undefined;
 
     // Build where clause
     const where: Record<string, unknown> = {};
@@ -131,6 +133,9 @@ export async function GET(request: NextRequest) {
     }
     if (priority) {
       where.priority = priority;
+    }
+    if (organizationId) {
+      where.organizationId = organizationId;
     }
 
     const [notifications, total] = await Promise.all([
