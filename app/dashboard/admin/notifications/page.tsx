@@ -13,6 +13,7 @@ import { useNotifications } from '@/hooks/useNotifications';
 import { PaginationControls } from '@/components/admin/PaginationControls';
 import { encryptedFetch } from '@/lib/api-client';
 import { ConfirmDialog } from '@/components/dashboard/ConfirmDialog';
+import { StatCard } from '@/components/dashboard/StatCard';
 
 // Priority level labels for the events table — plain colored text, no border/icon
 const PRIORITY_LABELS: Record<string, string> = {
@@ -45,6 +46,16 @@ interface PaginationInfo {
   total: number;
 }
 
+interface NotificationCounts {
+  totalCount: number;
+  acknowledgedCount: number;
+  notAcknowledgedCount: number;
+  infoCount: number;
+  warningCount: number;
+  errorCount: number;
+  criticalCount: number;
+}
+
 interface ApiOrganization {
   id: string;
   name: string;
@@ -67,6 +78,15 @@ export default function NotificationsLogPage() {
   const [deleteModalOpen, setDeleteModalOpen] = useState(false);
 
   const [acknowledgedFilter, setAcknowledgedFilter] = useState<string>('');
+  const [counts, setCounts] = useState<NotificationCounts>({
+    totalCount: 0,
+    acknowledgedCount: 0,
+    notAcknowledgedCount: 0,
+    infoCount: 0,
+    warningCount: 0,
+    errorCount: 0,
+    criticalCount: 0,
+  });
 
   // SSE live updates
   const { notifications: liveNotifications } = useNotifications();
@@ -77,6 +97,15 @@ export default function NotificationsLogPage() {
       try {
         const res = await encryptedFetch('/api/admin/organizations?pageSize=200', { pii: true });
         if (!res.ok) throw new Error('Failed to fetch organizations');
+
+        // Guard against non-JSON responses
+        const contentType = res.headers.get('content-type');
+        if (!contentType || !contentType.includes('application/json')) {
+          const text = await res.text();
+          console.error('[Notifications Log] Organizations API returned non-JSON response:', text.slice(0, 200));
+          return;
+        }
+
         const data = await res.json();
         setOrganizations(data.organizations.map((org: ApiOrganization) => ({ id: org.id, name: org.name })));
       } catch (err) {
@@ -98,6 +127,16 @@ export default function NotificationsLogPage() {
       if (searchQuery.trim()) params.set('search', searchQuery.trim());
 
       const res = await fetch(`/api/admin/notifications?${params}`);
+
+      // Guard against non-JSON responses (auth redirects, 500 error pages, etc.)
+      const contentType = res.headers.get('content-type');
+      if (!contentType || !contentType.includes('application/json')) {
+        const text = await res.text();
+        console.error('[Notifications Log] API returned non-JSON response:', text.slice(0, 200));
+        setNotifications([]);
+        return;
+      }
+
       if (!res.ok) {
         console.warn('[Notifications Log] API returned non-OK status:', res.status);
         setNotifications([]);
@@ -107,6 +146,9 @@ export default function NotificationsLogPage() {
       const data = await res.json();
       setNotifications(data.notifications);
       setPagination(data.pagination);
+      if (data.counts) {
+        setCounts(data.counts);
+      }
     } catch (err) {
       console.error('[Notifications Log] Failed to fetch:', err);
     } finally {
@@ -190,6 +232,17 @@ export default function NotificationsLogPage() {
 
   return (
     <div className="space-y-6">
+      {/* Stat Cards */}
+      <div className="grid grid-cols-2 gap-4 md:grid-cols-7">
+        <StatCard label="Total" value={counts.totalCount} />
+        <StatCard label="Acknowledged" value={counts.acknowledgedCount} color="success" />
+        <StatCard label="Not Acknowledged" value={counts.notAcknowledgedCount} />
+        <StatCard label="Info" value={counts.infoCount} />
+        <StatCard label="Warning" value={counts.warningCount} color="warning" />
+        <StatCard label="Error" value={counts.errorCount} color="danger" />
+        <StatCard label="Critical" value={counts.criticalCount} color="danger" />
+      </div>
+
       {/* Filters */}
       <div className="flex flex-wrap gap-4">
         <select

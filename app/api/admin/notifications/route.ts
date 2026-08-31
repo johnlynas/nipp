@@ -165,6 +165,20 @@ export async function GET(request: NextRequest) {
       globalDb.notification.count({ where }),
     ]);
 
+    // Dashboard counts: always from the full dataset, independent of filters
+    const [totalCount, acknowledgedCount, notAcknowledgedCount] = await Promise.all([
+      globalDb.notification.count(),
+      globalDb.notification.count({ where: { acknowledged: true } }),
+      globalDb.notification.count({ where: { acknowledged: false } }),
+    ]);
+
+    const priorityCounts = await Promise.all([
+      globalDb.notification.count({ where: { priority: 'INFO' } }),
+      globalDb.notification.count({ where: { priority: 'WARNING' } }),
+      globalDb.notification.count({ where: { priority: 'ERROR' } }),
+      globalDb.notification.count({ where: { priority: 'CRITICAL' } }),
+    ]);
+
     return NextResponse.json({
       notifications: notifications.map((n) => ({
         id: n.id,
@@ -179,6 +193,15 @@ export async function GET(request: NextRequest) {
         createdAt: n.createdAt.toISOString(),
       })),
       pagination: { page, pageSize, total },
+      counts: {
+        totalCount,
+        acknowledgedCount,
+        notAcknowledgedCount,
+        infoCount: priorityCounts[0],
+        warningCount: priorityCounts[1],
+        errorCount: priorityCounts[2],
+        criticalCount: priorityCounts[3],
+      },
     });
   } catch (error) {
     logger.error({ err: error, page, pageSize, scope, priority }, 'Failed to fetch notifications');
