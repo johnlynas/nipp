@@ -118,6 +118,7 @@ export async function GET(request: NextRequest) {
   let scope: string | undefined;
   let priority: string | undefined;
   let organizationId: string | undefined;
+  let searchQuery: string | undefined;
 
   try {
     page = parseInt(url.searchParams.get('page') || '1', 10);
@@ -125,6 +126,7 @@ export async function GET(request: NextRequest) {
     scope = url.searchParams.get('scope') || undefined;
     priority = url.searchParams.get('priority') || undefined;
     organizationId = url.searchParams.get('organizationId') || undefined;
+    searchQuery = url.searchParams.get('search') || undefined;
 
     // Build where clause
     const where: Record<string, unknown> = {};
@@ -136,6 +138,12 @@ export async function GET(request: NextRequest) {
     }
     if (organizationId) {
       where.organizationId = organizationId;
+    }
+    if (searchQuery && searchQuery.trim()) {
+      where.OR = [
+        { source: { contains: searchQuery, mode: 'insensitive' } },
+        { message: { contains: searchQuery, mode: 'insensitive' } },
+      ];
     }
 
     const [notifications, total] = await Promise.all([

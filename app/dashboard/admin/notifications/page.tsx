@@ -58,6 +58,7 @@ export default function NotificationsLogPage() {
   const [scopeFilter, setScopeFilter] = useState<string>('');
   const [priorityFilter, setPriorityFilter] = useState<string>('');
   const [organizationFilter, setOrganizationFilter] = useState<string>('');
+  const [searchQuery, setSearchQuery] = useState<string>('');
   const [organizations, setOrganizations] = useState<{ id: string; name: string }[]>([]);
 
   // SSE live updates
@@ -86,6 +87,7 @@ export default function NotificationsLogPage() {
       if (scopeFilter) params.set('scope', scopeFilter);
       if (priorityFilter) params.set('priority', priorityFilter);
       if (organizationFilter) params.set('organizationId', organizationFilter);
+      if (searchQuery.trim()) params.set('search', searchQuery.trim());
 
       const res = await fetch(`/api/admin/notifications?${params}`);
       if (!res.ok) throw new Error('Failed to fetch notifications');
@@ -98,7 +100,7 @@ export default function NotificationsLogPage() {
     } finally {
       setLoading(false);
     }
-  }, [scopeFilter, priorityFilter, organizationFilter]);
+  }, [scopeFilter, priorityFilter, organizationFilter, searchQuery]);
 
   useEffect(() => {
     fetchNotifications(1);
@@ -166,6 +168,15 @@ export default function NotificationsLogPage() {
             <option key={org.id} value={org.id}>{org.name}</option>
           ))}
         </select>
+
+        <input
+          type="text"
+          value={searchQuery}
+          onChange={(e) => setSearchQuery(e.target.value)}
+          placeholder="Search source or message..."
+          className="px-3 py-2 border rounded text-sm bg-white"
+          style={{ borderColor: '#dee2e6' }}
+        />
       </div>
 
       {/* Notifications Table */}
