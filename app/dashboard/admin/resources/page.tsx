@@ -275,6 +275,7 @@ export default function ResourcesPage() {
         <div className="flex items-center gap-1">
           <button
             onClick={() => handleView(r)}
+            title="View"
             className="rounded p-1.5 text-gray-500 hover:bg-[#f8f9fa] transition-colors"
             aria-label="View resource details"
           >
@@ -282,6 +283,7 @@ export default function ResourcesPage() {
           </button>
           <button
             onClick={() => handleEditClick(r)}
+            title="Edit"
             className="rounded p-1.5 text-gray-500 hover:bg-[#f8f9fa] transition-colors"
             aria-label="Edit resource"
           >
@@ -289,7 +291,8 @@ export default function ResourcesPage() {
           </button>
           <button
             onClick={() => handleDeleteClick(r)}
-            className="rounded p-1.5 text-gray-500 hover:bg-[#f8f9fa] transition-colors"
+            title="Delete"
+            className="rounded p-1.5 text-gray-500 hover:bg-red-50 hover:text-red-700 transition-colors"
             aria-label="Delete resource"
           >
             <Trash2 className="h-4 w-4" />

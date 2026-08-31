@@ -12,6 +12,7 @@ import { Check, Trash2 } from 'lucide-react';
 import { useNotifications } from '@/hooks/useNotifications';
 import { PaginationControls } from '@/components/admin/PaginationControls';
 import { encryptedFetch } from '@/lib/api-client';
+import { ConfirmDialog } from '@/components/dashboard/ConfirmDialog';
 
 // Priority level labels for the events table — plain colored text, no border/icon
 const PRIORITY_LABELS: Record<string, string> = {
@@ -61,6 +62,8 @@ export default function NotificationsLogPage() {
   const [organizationFilter, setOrganizationFilter] = useState<string>('');
   const [searchQuery, setSearchQuery] = useState<string>('');
   const [organizations, setOrganizations] = useState<{ id: string; name: string }[]>([]);
+  const [selectedNotification, setSelectedNotification] = useState<NotificationItem | null>(null);
+  const [deleteModalOpen, setDeleteModalOpen] = useState(false);
 
   // SSE live updates
   const { notifications: liveNotifications } = useNotifications();
@@ -132,6 +135,34 @@ export default function NotificationsLogPage() {
 
   const handleFilterChange = (setter: (val: string) => void, value: string) => {
     setter(value);
+  };
+
+  // Handle delete click — open confirmation modal
+  const handleDeleteClick = (n: NotificationItem) => {
+    setSelectedNotification(n);
+    setDeleteModalOpen(true);
+  };
+
+  // Handle delete — call API, close modal, refresh list
+  const handleDelete = async () => {
+    if (!selectedNotification) return;
+
+    try {
+      const res = await fetch(`/api/admin/notifications?id=${encodeURIComponent(selectedNotification.id)}`, {
+        method: 'DELETE',
+      });
+
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}));
+        throw new Error(data.error || 'Failed to delete notification');
+      }
+
+      setDeleteModalOpen(false);
+      fetchNotifications(pagination.page);
+    } catch (err) {
+      const message = err instanceof Error ? err.message : 'Failed to delete notification';
+      console.error('[Notifications Log] Delete failed:', err);
+    }
   };
 
   return (
@@ -241,7 +272,9 @@ export default function NotificationsLogPage() {
                       </button>
                       <button
                         title="Delete"
-                        className="rounded p-1.5 text-gray-500 hover:bg-[#f8f9fa] transition-colors"
+                        onClick={() => handleDeleteClick(notif)}
+                        className="rounded p-1.5 text-gray-400 hover:bg-red-50 hover:text-red-700 transition-colors"
+                        aria-label="Delete notification"
                       >
                         <Trash2 className="h-4 w-4" />
                       </button>
@@ -264,6 +297,17 @@ export default function NotificationsLogPage() {
           />
         )}
       </div>
+
+      {/* Delete Confirmation Dialog */}
+      <ConfirmDialog
+        isOpen={deleteModalOpen}
+        onClose={() => setDeleteModalOpen(false)}
+        onConfirm={handleDelete}
+        title="Delete Notification"
+        message={`Are you sure you want to delete this notification? This action cannot be undone.`}
+        confirmLabel="Delete"
+        variant="danger"
+      />
     </div>
   );
 }

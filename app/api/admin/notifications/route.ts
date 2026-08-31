@@ -180,5 +180,45 @@ export async function GET(request: NextRequest) {
   }
 }
 
+// ---------------------------------------------------------------------------
+// DELETE — Delete a notification by ID
+// ---------------------------------------------------------------------------
+
+export async function DELETE(request: NextRequest) {
+  const auth = await requireSuperAdmin(request.headers);
+  if (!auth.authorized) {
+    return NextResponse.json({ error: auth.error }, { status: auth.status });
+  }
+
+  // Rate limit admin operations by session
+  if (!checkAdminRateLimit(auth.session!.user.id)) {
+    return NextResponse.json({ error: 'rate_limited' }, { status: 429 });
+  }
+
+  try {
+    const url = new URL(request.url);
+    const notificationId = url.searchParams.get('id');
+
+    if (!notificationId) {
+      return NextResponse.json(
+        { error: 'Notification ID is required' },
+        { status: 400 }
+      );
+    }
+
+    await globalDb.notification.delete({
+      where: { id: notificationId },
+    });
+
+    return NextResponse.json({ success: true });
+  } catch (error) {
+    logger.error({ err: error }, 'Failed to delete notification');
+    return NextResponse.json(
+      { error: 'Failed to delete notification' },
+      { status: 500 }
+    );
+  }
+}
+
 export const revalidate = 0;
 export const dynamic = 'force-dynamic';
