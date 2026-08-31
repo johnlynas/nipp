@@ -125,8 +125,7 @@ export default function AdminDashboardLayout({ children }: { children: React.Rea
           </main>
 
           {/* Footer Notification Ticker — always visible so connection status is apparent */}
-          {!isCalendarPage && (
-            <footer className="bg-[#1B2A4A] border-t px-6 py-3 overflow-x-auto whitespace-nowrap" style={{ borderColor: '#24355c' }}>
+          <footer className="bg-[#1B2A4A] border-t px-6 py-3 overflow-x-auto whitespace-nowrap" style={{ borderColor: '#24355c' }}>
               <div className="flex items-center gap-4">
                 {/* Connection status indicator */}
                 <div className="flex items-center gap-2 flex-shrink-0">
@@ -173,7 +172,6 @@ export default function AdminDashboardLayout({ children }: { children: React.Rea
                 )}
               </div>
             </footer>
-          )}
         </div>
       </div>
     </RequireSuperAdmin>
