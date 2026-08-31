@@ -8,6 +8,7 @@
 'use client';
 
 import { useState, useEffect, useCallback } from 'react';
+import { Check, Trash2 } from 'lucide-react';
 import { useNotifications } from '@/hooks/useNotifications';
 import { PaginationControls } from '@/components/admin/PaginationControls';
 import { encryptedFetch } from '@/lib/api-client';
@@ -90,7 +91,11 @@ export default function NotificationsLogPage() {
       if (searchQuery.trim()) params.set('search', searchQuery.trim());
 
       const res = await fetch(`/api/admin/notifications?${params}`);
-      if (!res.ok) throw new Error('Failed to fetch notifications');
+      if (!res.ok) {
+        console.warn('[Notifications Log] API returned non-OK status:', res.status);
+        setNotifications([]);
+        return;
+      }
 
       const data = await res.json();
       setNotifications(data.notifications);
@@ -199,6 +204,7 @@ export default function NotificationsLogPage() {
                 <th className="px-4 py-3 text-left text-xs font-medium uppercase tracking-wider text-white" scope="col">Organization</th>
                 <th className="px-4 py-3 text-left text-xs font-medium uppercase tracking-wider text-white" scope="col">Source</th>
                 <th className="px-4 py-3 text-left text-xs font-medium uppercase tracking-wider text-white" scope="col">Message</th>
+                <th className="px-4 py-3 text-left text-xs font-medium uppercase tracking-wider text-white" scope="col">Actions</th>
               </tr>
             </thead>
             <tbody>
@@ -224,6 +230,22 @@ export default function NotificationsLogPage() {
                   <td className="px-4 py-3">
                     <div className="font-medium">{notif.title}</div>
                     <div className="text-xs text-gray-500 mt-1 line-clamp-2">{notif.message}</div>
+                  </td>
+                  <td className="px-4 py-3">
+                    <div className="flex items-center gap-1">
+                      <button
+                        title="Acknowledge"
+                        className="rounded p-1.5 text-gray-500 hover:bg-[#f8f9fa] transition-colors"
+                      >
+                        <Check className="h-4 w-4" />
+                      </button>
+                      <button
+                        title="Delete"
+                        className="rounded p-1.5 text-gray-500 hover:bg-[#f8f9fa] transition-colors"
+                      >
+                        <Trash2 className="h-4 w-4" />
+                      </button>
+                    </div>
                   </td>
                 </tr>
               ))}
