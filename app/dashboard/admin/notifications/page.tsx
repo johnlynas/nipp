@@ -35,6 +35,7 @@ interface NotificationItem {
   organizationId?: string;
   organizationName?: string;
   source?: string;
+  acknowledged: boolean;
   createdAt: string;
 }
 
@@ -65,6 +66,8 @@ export default function NotificationsLogPage() {
   const [selectedNotification, setSelectedNotification] = useState<NotificationItem | null>(null);
   const [deleteModalOpen, setDeleteModalOpen] = useState(false);
 
+  const [acknowledgedFilter, setAcknowledgedFilter] = useState<string>('');
+
   // SSE live updates
   const { notifications: liveNotifications } = useNotifications();
 
@@ -91,6 +94,7 @@ export default function NotificationsLogPage() {
       if (scopeFilter) params.set('scope', scopeFilter);
       if (priorityFilter) params.set('priority', priorityFilter);
       if (organizationFilter) params.set('organizationId', organizationFilter);
+      if (acknowledgedFilter) params.set('acknowledged', acknowledgedFilter);
       if (searchQuery.trim()) params.set('search', searchQuery.trim());
 
       const res = await fetch(`/api/admin/notifications?${params}`);
@@ -108,7 +112,7 @@ export default function NotificationsLogPage() {
     } finally {
       setLoading(false);
     }
-  }, [scopeFilter, priorityFilter, organizationFilter, searchQuery]);
+  }, [scopeFilter, priorityFilter, organizationFilter, acknowledgedFilter, searchQuery]);
 
   useEffect(() => {
     fetchNotifications(1);
@@ -165,6 +169,25 @@ export default function NotificationsLogPage() {
     }
   };
 
+  // Handle acknowledge — call API and refresh the list so acknowledged field updates
+  const handleAcknowledge = async (n: NotificationItem) => {
+    try {
+      const res = await fetch(`/api/admin/notifications?id=${encodeURIComponent(n.id)}`, {
+        method: 'PATCH',
+      });
+
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}));
+        throw new Error(data.error || 'Failed to acknowledge notification');
+      }
+
+      fetchNotifications(pagination.page);
+    } catch (err) {
+      const message = err instanceof Error ? err.message : 'Failed to acknowledge notification';
+      console.error('[Notifications Log] Acknowledge failed:', err);
+    }
+  };
+
   return (
     <div className="space-y-6">
       {/* Filters */}
@@ -203,6 +226,17 @@ export default function NotificationsLogPage() {
           {organizations.map((org) => (
             <option key={org.id} value={org.id}>{org.name}</option>
           ))}
+        </select>
+
+        <select
+          value={acknowledgedFilter}
+          onChange={(e) => handleFilterChange(setAcknowledgedFilter, e.target.value)}
+          className="px-3 py-2 border rounded text-sm bg-white"
+          style={{ borderColor: '#dee2e6' }}
+        >
+          <option value="">All Statuses</option>
+          <option value="true">Acknowledged</option>
+          <option value="false">Not Acknowledged</option>
         </select>
 
         <input
@@ -265,8 +299,15 @@ export default function NotificationsLogPage() {
                   <td className="px-4 py-3">
                     <div className="flex items-center gap-1">
                       <button
-                        title="Acknowledge"
-                        className="rounded p-1.5 text-gray-500 hover:bg-[#f8f9fa] transition-colors"
+                        title={notif.acknowledged ? 'Acknowledged' : 'Acknowledge'}
+                        onClick={() => handleAcknowledge(notif)}
+                        disabled={notif.acknowledged}
+                        className={`rounded p-1.5 transition-colors ${
+                          notif.acknowledged
+                            ? 'text-green-400 cursor-default'
+                            : 'text-gray-400 hover:bg-[#f8f9fa] cursor-pointer'
+                        }`}
+                        aria-label={notif.acknowledged ? 'Acknowledged notification' : 'Acknowledge notification'}
                       >
                         <Check className="h-4 w-4" />
                       </button>

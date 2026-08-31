@@ -118,6 +118,7 @@ export async function GET(request: NextRequest) {
   let scope: string | undefined;
   let priority: string | undefined;
   let organizationId: string | undefined;
+  let acknowledged: boolean | undefined;
   let searchQuery: string | undefined;
 
   try {
@@ -126,6 +127,10 @@ export async function GET(request: NextRequest) {
     scope = url.searchParams.get('scope') || undefined;
     priority = url.searchParams.get('priority') || undefined;
     organizationId = url.searchParams.get('organizationId') || undefined;
+    const acknowledgedParam = url.searchParams.get('acknowledged');
+    if (acknowledgedParam !== null) {
+      acknowledged = acknowledgedParam === 'true';
+    }
     searchQuery = url.searchParams.get('search') || undefined;
 
     // Build where clause
@@ -138,6 +143,9 @@ export async function GET(request: NextRequest) {
     }
     if (organizationId) {
       where.organizationId = organizationId;
+    }
+    if (acknowledged !== undefined) {
+      where.acknowledged = acknowledged;
     }
     if (searchQuery && searchQuery.trim()) {
       where.OR = [
@@ -167,6 +175,7 @@ export async function GET(request: NextRequest) {
         organizationId: n.organizationId ?? undefined,
         organizationName: n.organization?.name ?? undefined,
         source: n.source ?? undefined,
+        acknowledged: n.acknowledged,
         createdAt: n.createdAt.toISOString(),
       })),
       pagination: { page, pageSize, total },
@@ -215,6 +224,47 @@ export async function DELETE(request: NextRequest) {
     logger.error({ err: error }, 'Failed to delete notification');
     return NextResponse.json(
       { error: 'Failed to delete notification' },
+      { status: 500 }
+    );
+  }
+}
+
+// ---------------------------------------------------------------------------
+// PATCH — Toggle acknowledged state on a notification
+// ---------------------------------------------------------------------------
+
+export async function PATCH(request: NextRequest) {
+  const auth = await requireSuperAdmin(request.headers);
+  if (!auth.authorized) {
+    return NextResponse.json({ error: auth.error }, { status: auth.status });
+  }
+
+  // Rate limit admin operations by session
+  if (!checkAdminRateLimit(auth.session!.user.id)) {
+    return NextResponse.json({ error: 'rate_limited' }, { status: 429 });
+  }
+
+  try {
+    const url = new URL(request.url);
+    const notificationId = url.searchParams.get('id');
+
+    if (!notificationId) {
+      return NextResponse.json(
+        { error: 'Notification ID is required' },
+        { status: 400 }
+      );
+    }
+
+    const notification = await globalDb.notification.update({
+      where: { id: notificationId },
+      data: { acknowledged: true },
+    });
+
+    return NextResponse.json({ success: true, acknowledged: notification.acknowledged });
+  } catch (error) {
+    logger.error({ err: error }, 'Failed to acknowledge notification');
+    return NextResponse.json(
+      { error: 'Failed to acknowledge notification' },
       { status: 500 }
     );
   }

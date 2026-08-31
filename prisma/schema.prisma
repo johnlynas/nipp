@@ -467,6 +467,9 @@ model Notification {
   createdAt      DateTime @default(now())
   updatedAt      DateTime @updatedAt
 
+  /** Whether this notification has been acknowledged by an admin */
+  acknowledged   Boolean  @default(false)
+
   @@index([organizationId])
   @@index([createdAt])
   @@index([scope, createdAt]) // For admin log listing (global notification queries)

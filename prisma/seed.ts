@@ -226,6 +226,7 @@ async function seedNotificationEvent(params: {
       scope: params.scope,
       source: params.source,
       organizationId: params.organizationId ?? null,
+      acknowledged: false,
       // Stagger timestamps so the admin log has history rather than a wall of now()
       createdAt: new Date(Date.now() - params.ageMinutesAgo * 60 * 1000),
     },
