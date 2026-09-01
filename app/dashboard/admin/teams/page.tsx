@@ -449,7 +449,7 @@ export default function TeamsPage() {
               value={createForm.name}
               onChange={(e) => setCreateForm((f) => ({ ...f, name: e.target.value }))}
               className="w-full rounded border px-3 py-2 text-sm focus:outline-none"
-              style={{ borderColor: '#dee2e6' }}
+              style={{ borderColor: '#dee2e6', color: '#1B2A4A' }}
               placeholder="Team name"
             />
           </div>
@@ -460,7 +460,7 @@ export default function TeamsPage() {
               value={createForm.description}
               onChange={(e) => setCreateForm((f) => ({ ...f, description: e.target.value }))}
               className="w-full rounded border px-3 py-2 text-sm focus:outline-none"
-              style={{ borderColor: '#dee2e6' }}
+              style={{ borderColor: '#dee2e6', color: '#1B2A4A' }}
               placeholder="Team description"
               rows={3}
             />

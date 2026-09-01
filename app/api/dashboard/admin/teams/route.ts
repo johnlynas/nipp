@@ -4,6 +4,7 @@ import { checkAdminRateLimit } from '@/lib/rate-limiter';
 
 import globalDb from '@/lib/global-db';
 import { TeamService } from '@/services/team-service';
+import { notifyTeamOperation } from '@/lib/notification-push';
 
 export const runtime = 'nodejs';
 
@@ -100,20 +101,38 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: 'rate_limited' }, { status: 429 });
     }
 
-    const body = await request.json();
-    const organizationId = body.organizationId;
-
-    if (!organizationId) {
-      return NextResponse.json({ error: 'Organization ID is required' }, { status: 400 });
+    let body: { name?: string; slug?: string; description?: string | null; organizationId?: string };
+    try {
+      body = await request.json();
+    } catch {
+      return NextResponse.json({ error: 'Invalid JSON body' }, { status: 400 });
     }
 
-    const result = await TeamService.createTeam(
-      { name: body.name, slug: body.slug, description: body.description },
-      organizationId,
-      { userId: auth.session!.user.id, role: 'PLATFORM_ADMIN' }
-    );
+    const targetLabel = body.name ? `Team "${body.name}"` : 'team';
 
-    return NextResponse.json(result, { status: 201 });
+    if (!body.organizationId) {
+      return NextResponse.json({ error: 'Organization ID is required' }, { status: 400 });
+    }
+    if (!body.name) {
+      return NextResponse.json({ error: 'Name is required' }, { status: 400 });
+    }
+
+    try {
+      const result = await TeamService.createTeam(
+        { name: body.name, slug: body.slug, description: body.description ?? undefined },
+        body.organizationId,
+        { userId: auth.session!.user.id, role: 'PLATFORM_ADMIN' }
+      );
+
+      await notifyTeamOperation('create', targetLabel, true, undefined, result.organizationId);
+
+      return NextResponse.json(result, { status: 201 });
+    } catch (error) {
+      console.error('Failed to create team:', error);
+      const message = error instanceof Error && error.message ? error.message : 'Failed to create team';
+      await notifyTeamOperation('create', targetLabel, false, message, body.organizationId);
+      return NextResponse.json({ error: 'Failed to create team' }, { status: 500 });
+    }
   } catch (error) {
     console.error('Failed to create team:', error);
     return NextResponse.json({ error: 'Failed to create team' }, { status: 500 });

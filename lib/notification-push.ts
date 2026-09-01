@@ -439,6 +439,40 @@ export async function notifyOrganizationOperation(
   });
 }
 
+/**
+ * Push a platform team-management event (create/update/delete) to SSE subscribers.
+ * - Success: INFO priority
+ * - Failure: ERROR priority
+ *
+ * GLOBAL scope (platform-wide super-admin operations). `organizationId` is
+ * passed through when known (usually the team's organization) so the history
+ * table and per-org consumers can show which organization was affected.
+ */
+export async function notifyTeamOperation(
+  operation: 'create' | 'update' | 'delete',
+  targetLabel: string,
+  success: boolean,
+  errorMessage?: string,
+  organizationId?: string | null,
+): Promise<void> {
+  const titles: Record<typeof operation, [string, string]> = {
+    create: ['Team created', 'Failed to create team'],
+    update: ['Team updated', 'Failed to update team'],
+    delete: ['Team deleted', 'Failed to delete team'],
+  };
+  const [successTitle, failureTitle] = titles[operation];
+  await pushNotification({
+    title: success ? successTitle : failureTitle,
+    message: success
+      ? `${targetLabel} was ${operation === 'create' ? 'created' : `${operation}d`} successfully.`
+      : `The ${operation} operation failed for ${targetLabel}. ${errorMessage ?? 'No error details available.'}`,
+    priority: success ? NotificationPriority.INFO : NotificationPriority.ERROR,
+    scope: NotificationScope.GLOBAL,
+    source: 'admin:team-management',
+    organizationId: organizationId ?? null,
+  });
+}
+
 // ---------------------------------------------------------------------------
 // Cleanup — periodically remove stale entries (safety net)
 // ---------------------------------------------------------------------------
