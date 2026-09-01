@@ -52,9 +52,38 @@ const HEARTBEAT_INTERVAL_MS = Number(process.env.SSE_HEARTBEAT_INTERVAL ?? 15000
 
 // ---------------------------------------------------------------------------
 // Connection tracking — in-memory store keyed by session ID
+//
+// CRITICAL: all mutable module state below must be process-unique, not
+// module-instance-unique. Next.js dev mode (and some bundling configs) can
+// evaluate the same module more than once per process; a plain `new Map()`
+// then gives each copy its own store — which is exactly why the SSE route's
+// subscribers were "invisible" to pushNotification() in another copy.
+// Keying by name on globalThis makes every copy share one store, matching
+// production (single module instance) behavior, and is harmless for tests
+// (vitest gives each test file a fresh worker/global scope).
 // ---------------------------------------------------------------------------
 
-const activeSubscribers = new Map<string, SseSubscriber>();
+type SseState = {
+  subscribers: Map<string, SseSubscriber>;
+  heartbeatTimer: ReturnType<typeof setInterval> | null;
+  cleanupTimer: ReturnType<typeof setInterval> | null;
+};
+
+function getSseState(): SseState {
+  const g = globalThis as unknown as Record<string, SseState>;
+  if (!g.sseNotificationPushState) {
+    g.sseNotificationPushState = {
+      subscribers: new Map(),
+      heartbeatTimer: null,
+      cleanupTimer: null,
+    };
+  }
+  // Return a stable view so `activeSubscribers` below keeps working everywhere.
+  return g.sseNotificationPushState;
+}
+
+const sseState = getSseState();
+const activeSubscribers = sseState.subscribers;
 
 /** Get count of active connections for a session. */
 export function getSessionConnectionCount(sessionId: string): number {
@@ -243,26 +272,28 @@ export async function sendHeartbeat(): Promise<void> {
 
 /**
  * Start the heartbeat interval. Safe to call multiple times (idempotent).
+ * The timer handle lives in shared process state so duplicate module copies
+ * (see connection-tracking note above) never run two heartbeats.
  */
-let heartbeatTimer: ReturnType<typeof setInterval> | null = null;
-
 export function startHeartbeat(): void {
-  if (heartbeatTimer) return; // Already running
+  if (sseState.heartbeatTimer) return; // Already running
 
-  heartbeatTimer = setInterval(() => {
+  const timer = setInterval(() => {
     sendHeartbeat().catch(console.error);
   }, HEARTBEAT_INTERVAL_MS);
 
-  if (typeof heartbeatTimer.unref === 'function') {
-    heartbeatTimer.unref(); // Don't prevent process exit
+  sseState.heartbeatTimer = timer;
+
+  if (typeof timer.unref === 'function') {
+    timer.unref(); // Don't prevent process exit
   }
 }
 
 /** Stop the heartbeat (useful for tests). */
 export function stopHeartbeat(): void {
-  if (heartbeatTimer) {
-    clearInterval(heartbeatTimer);
-    heartbeatTimer = null;
+  if (sseState.heartbeatTimer) {
+    clearInterval(sseState.heartbeatTimer);
+    sseState.heartbeatTimer = null;
   }
 }
 
@@ -335,24 +366,58 @@ export function notifyAdminMessage(
   });
 }
 
+/**
+ * Push a platform user-management event (create/update/delete) to SSE subscribers.
+ * - Success: INFO priority
+ * - Failure: ERROR priority
+ *
+ * GLOBAL scope (platform-wide super-admin operations), but `organizationId` is
+ * passed through when known so the history table and per-org consumers can show
+ * which organization the affected user belongs to.
+ */
+export async function notifyUserOperation(
+  operation: 'create' | 'update' | 'delete',
+  targetLabel: string,
+  success: boolean,
+  errorMessage?: string,
+  organizationId?: string | null,
+): Promise<void> {
+  const titles: Record<typeof operation, [string, string]> = {
+    create: ['User created', 'Failed to create user'],
+    update: ['User updated', 'Failed to update user'],
+    delete: ['User deleted', 'Failed to delete user'],
+  };
+  const [successTitle, failureTitle] = titles[operation];
+  await pushNotification({
+    title: success ? successTitle : failureTitle,
+    message: success
+      ? `${targetLabel} was ${operation === 'create' ? 'created' : `${operation}d`} successfully.`
+      : `The ${operation} operation failed for ${targetLabel}. ${errorMessage ?? 'No error details available.'}`,
+    priority: success ? NotificationPriority.INFO : NotificationPriority.ERROR,
+    scope: NotificationScope.GLOBAL,
+    source: 'admin:user-management',
+    organizationId: organizationId ?? null,
+  });
+}
+
 // ---------------------------------------------------------------------------
 // Cleanup — periodically remove stale entries (safety net)
 // ---------------------------------------------------------------------------
 
-let cleanupTimer: ReturnType<typeof setInterval> | null = null;
-
 function startCleanup(): void {
-  if (cleanupTimer) return;
+  if (sseState.cleanupTimer) return;
 
-  cleanupTimer = setInterval(() => {
+  const timer = setInterval(() => {
     // Log subscriber count for monitoring (every 5 minutes)
     if (activeSubscribers.size > 0) {
       console.debug(`[SSE] Active subscribers: ${activeSubscribers.size}`);
     }
   }, 5 * 60 * 1000);
 
-  if (typeof cleanupTimer.unref === 'function') {
-    cleanupTimer.unref();
+  sseState.cleanupTimer = timer;
+
+  if (typeof timer.unref === 'function') {
+    timer.unref();
   }
 }
 
