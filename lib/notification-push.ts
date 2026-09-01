@@ -400,6 +400,45 @@ export async function notifyUserOperation(
   });
 }
 
+/**
+ * Push a platform organization-management event (create/update/archive) to SSE subscribers.
+ * - Success: INFO priority
+ * - Failure: ERROR priority
+ *
+ * GLOBAL scope (platform-wide super-admin operations). `organizationId` is
+ * passed through when known (usually the affected organization itself) so the
+ * history table and per-org consumers can show which organization was affected.
+ *
+ * Note: organizations cannot be hard-deleted — archiving is the terminal
+ * removal, hence the 'archive' operation.
+ */
+export async function notifyOrganizationOperation(
+  operation: 'create' | 'update' | 'archive',
+  targetLabel: string,
+  success: boolean,
+  errorMessage?: string,
+  organizationId?: string | null,
+): Promise<void> {
+  const titles: Record<typeof operation, [string, string]> = {
+    create: ['Organization created', 'Failed to create organization'],
+    update: ['Organization updated', 'Failed to update organization'],
+    archive: ['Organization archived', 'Failed to archive organization'],
+  };
+  const [successTitle, failureTitle] = titles[operation];
+  await pushNotification({
+    title: success ? successTitle : failureTitle,
+    message: success
+      ? `${targetLabel} was ${
+          operation === 'create' ? 'created' : operation === 'update' ? 'updated' : 'archived'
+        } successfully.`
+      : `The ${operation} operation failed for ${targetLabel}. ${errorMessage ?? 'No error details available.'}`,
+    priority: success ? NotificationPriority.INFO : NotificationPriority.ERROR,
+    scope: NotificationScope.GLOBAL,
+    source: 'admin:organization-management',
+    organizationId: organizationId ?? null,
+  });
+}
+
 // ---------------------------------------------------------------------------
 // Cleanup — periodically remove stale entries (safety net)
 // ---------------------------------------------------------------------------
