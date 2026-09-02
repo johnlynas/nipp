@@ -168,6 +168,13 @@ function startConnection() {
             };
             emitChange();
 
+            // Mirror to a CustomEvent so pages can react to SSE without
+            // holding their own connection (SystemHealthCard re-fetches on
+            // health-check sources; the admin ticker renders everything).
+            if (typeof window !== 'undefined') {
+              window.dispatchEvent(new CustomEvent('sse-notification', { detail: notification }));
+            }
+
             scheduleDismiss(notification.id, notification.priority);
           } catch (_err) {
             console.error('[useNotifications] Failed to parse SSE message:', _err);

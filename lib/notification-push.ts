@@ -49,6 +49,7 @@ interface SseSubscriber {
 const MAX_CONNECTIONS_PER_USER = Number(process.env.SSE_MAX_CONNECTIONS_PER_USER ?? 3);
 const MAX_GLOBAL_CONNECTIONS = Number(process.env.SSE_MAX_GLOBAL_CONNECTIONS ?? 500);
 const HEARTBEAT_INTERVAL_MS = Number(process.env.SSE_HEARTBEAT_INTERVAL ?? 15000); // 15s
+const DEDUP_WINDOW_MS = 10_000;
 
 // ---------------------------------------------------------------------------
 // Connection tracking — in-memory store keyed by session ID
@@ -153,6 +154,71 @@ export function getSubscriberCount(): number {
   return activeSubscribers.size;
 }
 
+// ---------------------------------------------------------------------------
+// In-process dedup index — synchronous gate in front of pushNotification()
+//
+// The DB-based dedup is an async findFirst → create sequence, so two truly
+// concurrent calls (e.g. two /api/health requests racing on boot, both seeing
+// previousState === null) can both pass the check before either persists —
+// producing duplicated boot notifications. This map closes that TOCTOU gap:
+// it is checked AND marked synchronously at the top of pushNotification(),
+// which is atomic on the single-threaded event loop regardless of awaits.
+// The DB check remains as a safety net across multiple server instances.
+// ---------------------------------------------------------------------------
+
+function getDedupIndex(): Map<string, number> {
+  const g = globalThis as unknown as Record<string, Map<string, number>>;
+  if (!g.sseNotificationDedupIndex) {
+    g.sseNotificationDedupIndex = new Map();
+  }
+  return g.sseNotificationDedupIndex;
+}
+
+function buildDedupKey(params: {
+  title: string;
+  message: string;
+  priority: NotificationPriority;
+  scope: NotificationScope;
+  source?: string | null;
+  organizationId?: string | null;
+}): string {
+  return [
+    params.priority,
+    params.scope,
+    params.source ?? null,
+    params.organizationId ?? null,
+    params.title,
+    params.message,
+  ].join('\u0000');
+}
+
+/** Returns true if this exact notification was already pushed within the window. */
+function isDuplicateNotification(params: {
+  title: string;
+  message: string;
+  priority: NotificationPriority;
+  scope: NotificationScope;
+  source?: string | null;
+  organizationId?: string | null;
+}): boolean {
+  const index = getDedupIndex();
+  const now = Date.now();
+  // Opportunistic cleanup so the map stays small under load
+  if (index.size > 256) {
+    for (const [key, at] of index) {
+      if (now - at > DEDUP_WINDOW_MS) index.delete(key);
+    }
+  }
+  const key = buildDedupKey(params);
+  const lastPushedAt = index.get(key);
+  if (lastPushedAt !== undefined && now - lastPushedAt < DEDUP_WINDOW_MS) {
+    return true;
+  }
+  // Mark synchronously — see note above about atomicity.
+  index.set(key, now);
+  return false;
+}
+
 /**
  * Push a notification to all matching subscribers.
  * - ORG scope: delivered only to subscribers in the same org (or super admins with no orgId)
@@ -162,6 +228,20 @@ export async function pushNotification(payload: Omit<NotificationPayload, 'id' |
   // Normalize priority to a canonical Prisma enum member so both persistence
   // and the wire payload carry 'INFO'|'WARNING'|... (callers may send 'info').
   const normalizedPriority = normalizePriority(payload.priority);
+
+  // Synchronous in-process dedup — catches concurrent identical pushes that
+  // the async DB check below can't (e.g. boot-time health race).
+  if (isDuplicateNotification({
+    title: payload.title,
+    message: payload.message,
+    priority: normalizedPriority,
+    scope: payload.scope,
+    source: payload.source,
+    organizationId: payload.organizationId,
+  })) {
+    console.log(`[SSE] Dedup (in-process) — skipping duplicate notification: ${payload.title}`);
+    return;
+  }
 
   // Resolve organization name for display (org-scoped notifications) so SSE
   // consumers don't need a second lookup. Best effort — missing name is fine.
@@ -184,11 +264,10 @@ export async function pushNotification(payload: Omit<NotificationPayload, 'id' |
 
   console.log(`[SSE] pushNotification: ${notification.title} | priority=${notification.priority} scope=${notification.scope} source=${notification.source ?? 'none'} orgId=${notification.organizationId ?? 'none'}`);
 
-  // Dedup: skip if an identical notification was persisted within the last
-  // 10 seconds. This prevents duplicate DB rows when two concurrent requests
-  // (e.g., frontend health polling + external monitor) both read the same
-  // prevState and fire the same notify call.
-  const dedupWindow = new Date(Date.now() - 10_000);
+  // Dedup (multi-instance safety net — the in-process index above already
+  // catches same-process races): skip if an identical notification was
+  // persisted within the last window.
+  const dedupWindow = new Date(Date.now() - DEDUP_WINDOW_MS);
   const existing = await globalDb.notification.findFirst({
     where: {
       title: notification.title,
@@ -301,51 +380,42 @@ export function stopHeartbeat(): void {
 startHeartbeat();
 
 // ---------------------------------------------------------------------------
-// Health event integration — convenience wrappers for system health changes
+// Health event integration — convenience wrapper for system health changes
 // ---------------------------------------------------------------------------
 
-/** Push a database health event to SSE subscribers. */
-export function notifyDatabaseHealth(healthy: boolean, organizationId?: string | null): void {
-  const priority = healthy ? NotificationPriority.INFO : NotificationPriority.CRITICAL;
-  pushNotification({
-    title: healthy ? 'Database restored' : 'Database connection lost',
-    message: healthy
-      ? 'Database connectivity has been restored.'
-      : 'Unable to reach the database. Operations may be degraded.',
-    priority,
-    scope: NotificationScope.GLOBAL, // Health events go to everyone
-    source: 'health-check:database',
-    organizationId,
-  });
-}
+export type HealthService = 'database' | 'cache' | 'pgbouncer';
 
-/** Push a Redis cache health event to SSE subscribers. */
-export function notifyCacheHealth(healthy: boolean, organizationId?: string | null): void {
-  const priority = healthy ? NotificationPriority.INFO : NotificationPriority.CRITICAL;
-  pushNotification({
-    title: healthy ? 'Cache restored' : 'Cache connection lost',
-    message: healthy
-      ? 'Redis cache connectivity has been restored.'
-      : 'Cache is unavailable. The system will fall back to direct database queries.',
-    priority,
-    scope: NotificationScope.GLOBAL, // Health events go to everyone
-    source: 'health-check:cache',
-    organizationId,
-  });
-}
+const HEALTH_SERVICE_META: Record<HealthService, { title: string; source: string }> = {
+  database: { title: 'Database health check', source: 'health-check:database' },
+  cache: { title: 'Cache health check', source: 'health-check:cache' },
+  pgbouncer: { title: 'Connection pool health check', source: 'health-check:pgbouncer' },
+};
 
-/** Push a PgBouncer health event to SSE subscribers. */
-export function notifyPgbouncerHealth(healthy: boolean, organizationId?: string | null): void {
-  const priority = healthy ? NotificationPriority.INFO : NotificationPriority.CRITICAL;
-  pushNotification({
-    title: healthy ? 'Connection pool restored' : 'Connection pool unavailable',
+/**
+ * Push a system health event for a monitored service to SSE subscribers.
+ * - Healthy (success / recovery): INFO priority
+ * - Unhealthy (first failure): CRITICAL priority — persists until dismissed
+ *
+ * GLOBAL scope (health events go to everyone). The platform organization id
+ * is passed through when known so the history table can show which org's
+ * infrastructure was checked. Callers are responsible for calling this only
+ * on state transitions, not on every poll tick.
+ */
+export async function notifyHealthCheck(
+  service: HealthService,
+  healthy: boolean,
+  organizationId?: string | null,
+): Promise<void> {
+  const { title, source } = HEALTH_SERVICE_META[service];
+  await pushNotification({
+    title: `${title} ${healthy ? 'passed' : 'failed'}`,
     message: healthy
-      ? 'PgBouncer connection pool has been restored.'
-      : 'Unable to reach the connection pool. Database connections may fail.',
-    priority,
+      ? `${title} passed. Service is responsive.`
+      : `${title} failed. The service is unreachable and may degrade platform operations.`,
+    priority: healthy ? NotificationPriority.INFO : NotificationPriority.CRITICAL,
     scope: NotificationScope.GLOBAL, // Health events go to everyone
-    source: 'health-check:pgbouncer',
-    organizationId,
+    source,
+    organizationId: organizationId ?? null,
   });
 }
 
@@ -609,4 +679,9 @@ export function resetSubscriberStore(): void {
     }
   }
   activeSubscribers.clear();
+}
+
+/** Clear the in-process dedup index (useful for tests). */
+export function resetNotificationDedupIndex(): void {
+  getDedupIndex().clear();
 }

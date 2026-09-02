@@ -1,7 +1,7 @@
 import tenantDb from '@/lib/tenant-db';
 import { getRedis, forceRedisReconnect } from '@/lib/redis';
 import { addSystemLog, getPreviousHealthState, updateHealthState } from '@/lib/system-logs';
-import { notifyDatabaseHealth, notifyCacheHealth, notifyPgbouncerHealth } from '@/lib/notification-push';
+import { notifyHealthCheck } from '@/lib/notification-push';
 import { PgBouncerMonitor } from '@/lib/pgbouncer-monitor';
 import globalDb from '@/lib/global-db';
 import { env } from '@/lib/env';
@@ -47,10 +47,10 @@ export async function GET() {
         message: 'Database connectivity restored',
         details: `Database is now healthy (latency: ${checks.database.latency_ms}ms)`,
       });
-      await notifyDatabaseHealth(true, platformOrgId);
+      await notifyHealthCheck('database', true, platformOrgId);
     } else if (prevState.database !== 'healthy') {
       // First healthy check after boot — notify so admins know DB is up
-      await notifyDatabaseHealth(true, platformOrgId);
+      await notifyHealthCheck('database', true, platformOrgId);
     }
   } catch (error) {
     const errorMessage = error instanceof Error ? error.message : String(error);
@@ -65,7 +65,7 @@ export async function GET() {
         message: 'Database connectivity check failed',
         details: errorMessage,
       });
-      await notifyDatabaseHealth(false, platformOrgId);
+      await notifyHealthCheck('database', false, platformOrgId);
     }
   }
 
@@ -100,10 +100,10 @@ export async function GET() {
           message: 'Cache connectivity restored',
           details: `Cache is now healthy (latency: ${checks.cache.latency_ms}ms)`,
         });
-        await notifyCacheHealth(true, platformOrgId);
+        await notifyHealthCheck('cache', true, platformOrgId);
       } else if (prevState.cache !== 'healthy') {
         // First healthy check after boot
-        await notifyCacheHealth(true, platformOrgId);
+        await notifyHealthCheck('cache', true, platformOrgId);
       }
     } else {
       checks.cache = { status: 'skipped', message: 'Cache not configured' };
@@ -123,7 +123,7 @@ export async function GET() {
         message: 'Cache connectivity check failed',
         details: errorMessage,
       });
-      await notifyCacheHealth(false, platformOrgId);
+      await notifyHealthCheck('cache', false, platformOrgId);
     }
   }
 
@@ -153,10 +153,10 @@ export async function GET() {
         message: 'Connection pool connectivity restored',
         details: `Connection pool is now healthy (latency: ${checks["connection-pool"].latency_ms}ms)`,
       });
-      await notifyPgbouncerHealth(true, platformOrgId);
+      await notifyHealthCheck('pgbouncer', true, platformOrgId);
     } else if (prevState.pgbouncer !== 'healthy') {
       // First healthy check after boot
-      await notifyPgbouncerHealth(true, platformOrgId);
+      await notifyHealthCheck('pgbouncer', true, platformOrgId);
     }
   } catch (error) {
     const errorMessage = error instanceof Error ? error.message : String(error);
@@ -171,7 +171,7 @@ export async function GET() {
         message: 'Connection pool connectivity check failed',
         details: errorMessage,
       });
-      await notifyPgbouncerHealth(false, platformOrgId);
+      await notifyHealthCheck('pgbouncer', false, platformOrgId);
     }
   }
 
