@@ -4,6 +4,7 @@ import { checkAdminRateLimit } from '@/lib/rate-limiter';
 
 import globalDb from '@/lib/global-db';
 import { RoleService } from '@/services/role-service';
+import { notifyRoleOperation } from '@/lib/notification-push';
 import type { Prisma } from '@prisma/client';
 
 export const runtime = 'nodejs';
@@ -135,17 +136,28 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: 'Organization ID is required' }, { status: 400 });
     }
 
-    const result = await RoleService.create(
-      { name: body.name, description: body.description, isDefault: body.isDefault ?? false },
-      organizationId,
-      { userId: auth.session!.user.id, role: 'PLATFORM_ADMIN' }
-    );
+    const targetLabel = body.name ? `Role "${body.name}"` : 'role';
 
-    return NextResponse.json(result, { status: 201 });
-  } catch (error) {
-    if (error instanceof Error && error.message?.includes('already exists')) {
-      return NextResponse.json({ error: error.message }, { status: 409 });
+    try {
+      const result = await RoleService.create(
+        { name: body.name, description: body.description, isDefault: body.isDefault ?? false },
+        organizationId,
+        { userId: auth.session!.user.id, role: 'PLATFORM_ADMIN' }
+      );
+
+      await notifyRoleOperation('create', targetLabel, true, undefined, result.organizationId);
+
+      return NextResponse.json(result, { status: 201 });
+    } catch (error) {
+      const message = error instanceof Error && error.message ? error.message : 'Failed to create role';
+      await notifyRoleOperation('create', targetLabel, false, message, organizationId);
+      if (error instanceof Error && error.message?.includes('already exists')) {
+        return NextResponse.json({ error: error.message }, { status: 409 });
+      }
+      console.error('Failed to create role:', error);
+      return NextResponse.json({ error: 'Failed to create role' }, { status: 500 });
     }
+  } catch (error) {
     console.error('Failed to create role:', error);
     return NextResponse.json({ error: 'Failed to create role' }, { status: 500 });
   }

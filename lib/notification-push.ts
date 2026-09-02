@@ -473,6 +473,40 @@ export async function notifyTeamOperation(
   });
 }
 
+/**
+ * Push a platform role-management event (create/update/delete) to SSE subscribers.
+ * - Success: INFO priority
+ * - Failure: ERROR priority
+ *
+ * GLOBAL scope (platform-wide super-admin operations). `organizationId` is
+ * passed through when known (the role's organization) so the history table
+ * and per-org consumers can show which organization was affected.
+ */
+export async function notifyRoleOperation(
+  operation: 'create' | 'update' | 'delete',
+  targetLabel: string,
+  success: boolean,
+  errorMessage?: string,
+  organizationId?: string | null,
+): Promise<void> {
+  const titles: Record<typeof operation, [string, string]> = {
+    create: ['Role created', 'Failed to create role'],
+    update: ['Role updated', 'Failed to update role'],
+    delete: ['Role deleted', 'Failed to delete role'],
+  };
+  const [successTitle, failureTitle] = titles[operation];
+  await pushNotification({
+    title: success ? successTitle : failureTitle,
+    message: success
+      ? `${targetLabel} was ${operation === 'create' ? 'created' : `${operation}d`} successfully.`
+      : `The ${operation} operation failed for ${targetLabel}. ${errorMessage ?? 'No error details available.'}`,
+    priority: success ? NotificationPriority.INFO : NotificationPriority.ERROR,
+    scope: NotificationScope.GLOBAL,
+    source: 'admin:role-management',
+    organizationId: organizationId ?? null,
+  });
+}
+
 // ---------------------------------------------------------------------------
 // Cleanup — periodically remove stale entries (safety net)
 // ---------------------------------------------------------------------------
