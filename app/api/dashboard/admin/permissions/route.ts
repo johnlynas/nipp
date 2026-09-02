@@ -3,6 +3,7 @@ import { requireSuperAdmin } from '@/lib/require-super-admin';
 import { checkAdminRateLimit } from '@/lib/rate-limiter';
 
 import { PermissionService } from '@/services/permission-service';
+import { notifyPermissionOperation } from '@/lib/notification-push';
 
 export const runtime = 'nodejs';
 
@@ -63,16 +64,27 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: 'Key, resource, and action are required' }, { status: 400 });
     }
 
-    const result = await PermissionService.create(
-      { key: body.key, resource: body.resource, action: body.action, description: body.description, isDefault: body.isDefault ?? false },
-      { userId: auth.session!.user.id, role: 'PLATFORM_ADMIN' }
-    );
+    const targetLabel = body.key ? `Permission "${body.key}"` : 'permission';
 
-    return NextResponse.json(result, { status: 201 });
-  } catch (error) {
-    if (error instanceof Error && error.message?.includes('already exists')) {
-      return NextResponse.json({ error: error.message }, { status: 409 });
+    try {
+      const result = await PermissionService.create(
+        { key: body.key, resource: body.resource, action: body.action, description: body.description, isDefault: body.isDefault ?? false },
+        { userId: auth.session!.user.id, role: 'PLATFORM_ADMIN' }
+      );
+
+      await notifyPermissionOperation('create', targetLabel, true);
+
+      return NextResponse.json(result, { status: 201 });
+    } catch (error) {
+      const message = error instanceof Error && error.message ? error.message : 'Failed to create permission';
+      await notifyPermissionOperation('create', targetLabel, false, message);
+      if (error instanceof Error && error.message?.includes('already exists')) {
+        return NextResponse.json({ error: error.message }, { status: 409 });
+      }
+      console.error('Failed to create permission:', error);
+      return NextResponse.json({ error: 'Failed to create permission' }, { status: 500 });
     }
+  } catch (error) {
     console.error('Failed to create permission:', error);
     return NextResponse.json({ error: 'Failed to create permission' }, { status: 500 });
   }

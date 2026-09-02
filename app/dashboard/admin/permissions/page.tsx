@@ -57,6 +57,8 @@ export default function PermissionsPage() {
 
   // Resource names for filter dropdown (fetched from the resources catalog)
   const [resources, setResources] = useState<string[]>([]);
+  const [resourcesLoading, setResourcesLoading] = useState(true);
+  const [resourcesLoadError, setResourcesLoadError] = useState(false);
 
   // Reset to page 1 when filters change
   useEffect(() => {
@@ -89,20 +91,31 @@ export default function PermissionsPage() {
     fetchTotalCount();
   }, []);
 
-  // Fetch resource names from the resources catalog for the filter dropdown
+  // Fetch resource names from the resources catalog for the filter and modal dropdowns
   useEffect(() => {
+    let cancelled = false;
     async function fetchResourceNames() {
       try {
         const res = await fetch('/api/dashboard/admin/resources/names');
-        if (res.ok) {
-          const data = await res.json();
-          setResources(data.names || []);
+        if (!res.ok) throw new Error('Failed to fetch resource names');
+        const data = await res.json();
+        // De-duplicate defensively and keep the DB's ascending sort order
+        const names = Array.from(new Set<string>(data.names || [])).sort((a, b) => a.localeCompare(b));
+        if (!cancelled) {
+          setResources(names);
+          setResourcesLoadError(false);
         }
       } catch (err) {
-        console.error('Failed to fetch resource names:', err);
+        if (!cancelled) {
+          console.error('Failed to fetch resource names:', err);
+          setResourcesLoadError(true);
+        }
+      } finally {
+        if (!cancelled) setResourcesLoading(false);
       }
     }
     fetchResourceNames();
+    return () => { cancelled = true; };
   }, []);
 
   // Fetch permissions
@@ -425,6 +438,12 @@ export default function PermissionsPage() {
                   style={{ borderColor: '#dee2e6', color: '#1B2A4A' }}
                 >
                   <option value="" disabled>Select resource</option>
+                  {resourcesLoading && <option value="" disabled>Loading resources...</option>}
+                  {!resourcesLoading && resourcesLoadError && <option value="" disabled>Failed to load resources — try again later</option>}
+                  {/* Keep the current value selectable even if it predates the resource catalog */}
+                  {editForm.resource && !resources.includes(editForm.resource) && (
+                    <option key={editForm.resource} value={editForm.resource}>{editForm.resource}</option>
+                  )}
                   {resources.map((r) => (
                     <option key={r} value={r}>{r}</option>
                   ))}

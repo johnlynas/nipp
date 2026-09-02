@@ -2,9 +2,24 @@ import { NextRequest, NextResponse } from 'next/server';
 import { requireSuperAdmin } from '@/lib/require-super-admin';
 import { checkAdminRateLimit } from '@/lib/rate-limiter';
 
+import globalDb from '@/lib/global-db';
 import { PermissionService } from '@/services/permission-service';
+import { notifyPermissionOperation } from '@/lib/notification-push';
 
 export const runtime = 'nodejs';
+
+/** Best effort: resolve a permission's key for notification labels. */
+async function getPermissionLabel(id: string): Promise<string> {
+  try {
+    const permission = await globalDb.permission.findUnique({
+      where: { id },
+      select: { key: true },
+    });
+    return permission ? `Permission "${permission.key}" (${id})` : id;
+  } catch {
+    return id;
+  }
+}
 
 /**
  * GET /api/dashboard/admin/permissions/[id]
@@ -57,22 +72,35 @@ export async function PATCH(
 
   const body = await request.json();
 
-    const result = await PermissionService.update(id, {
-      key: body.key,
-      resource: body.resource,
-      action: body.action,
-      description: body.description,
-      isDefault: body.isDefault,
-    }, { userId: auth.session!.user.id, role: 'PLATFORM_ADMIN' });
+    // Capture the permission key for notification labels before a rename happens
+    const targetLabel = await getPermissionLabel(id);
 
-    return NextResponse.json(result);
+    try {
+      const result = await PermissionService.update(id, {
+        key: body.key,
+        resource: body.resource,
+        action: body.action,
+        description: body.description,
+        isDefault: body.isDefault,
+      }, { userId: auth.session!.user.id, role: 'PLATFORM_ADMIN' });
+
+      await notifyPermissionOperation('update', targetLabel, true);
+
+      return NextResponse.json(result);
+    } catch (error) {
+      if (error instanceof Error && error.message === 'Permission not found') {
+        await notifyPermissionOperation('update', id, false, 'Permission not found');
+        return NextResponse.json({ error: 'Permission not found' }, { status: 404 });
+      }
+      console.error('Failed to update permission:', error);
+      const message = error instanceof Error && error.message ? error.message : 'Failed to update permission';
+      await notifyPermissionOperation('update', targetLabel, false, message);
+      if (error instanceof Error && error.message?.includes('already exists')) {
+        return NextResponse.json({ error: error.message }, { status: 409 });
+      }
+      return NextResponse.json({ error: 'Failed to update permission' }, { status: 500 });
+    }
   } catch (error) {
-    if (error instanceof Error && error.message === 'Permission not found') {
-      return NextResponse.json({ error: 'Permission not found' }, { status: 404 });
-    }
-    if (error instanceof Error && error.message?.includes('already exists')) {
-      return NextResponse.json({ error: error.message }, { status: 409 });
-    }
     console.error('Failed to update permission:', error);
     return NextResponse.json({ error: 'Failed to update permission' }, { status: 500 });
   }
@@ -93,11 +121,24 @@ export async function DELETE(
 
   try {
     const id = (await params).id;
-    const result = await PermissionService.delete(id, { userId: auth.session!.user.id, role: 'PLATFORM_ADMIN' });
+
+    // Capture a label for the notification before the permission disappears
+    const targetLabel = await getPermissionLabel(id);
+
+    let result;
+    try {
+      result = await PermissionService.delete(id, { userId: auth.session!.user.id, role: 'PLATFORM_ADMIN' });
+    } catch (error) {
+      await notifyPermissionOperation('delete', id, false, error instanceof Error && error.message ? error.message : 'Failed to delete permission');
+      throw error;
+    }
 
     if (result === null) {
+      await notifyPermissionOperation('delete', targetLabel, false, 'Cannot delete permission — it is either assigned to roles or is a default (bootstrapped) permission');
       return NextResponse.json({ error: 'Cannot delete permission — it is either assigned to roles or is a default (bootstrapped) permission' }, { status: 409 });
     }
+
+    await notifyPermissionOperation('delete', targetLabel, true);
 
     return NextResponse.json({ success: true });
   } catch (error) {

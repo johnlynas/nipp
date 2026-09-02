@@ -507,6 +507,38 @@ export async function notifyRoleOperation(
   });
 }
 
+/**
+ * Push a platform permission-management event (create/update/delete) to SSE subscribers.
+ * - Success: INFO priority
+ * - Failure: ERROR priority
+ *
+ * GLOBAL scope (platform-wide super-admin operations). Permissions are
+ * global (non-org-scoped) catalog entries, so no organizationId is attached.
+ */
+export async function notifyPermissionOperation(
+  operation: 'create' | 'update' | 'delete',
+  targetLabel: string,
+  success: boolean,
+  errorMessage?: string,
+): Promise<void> {
+  const titles: Record<typeof operation, [string, string]> = {
+    create: ['Permission created', 'Failed to create permission'],
+    update: ['Permission updated', 'Failed to update permission'],
+    delete: ['Permission deleted', 'Failed to delete permission'],
+  };
+  const [successTitle, failureTitle] = titles[operation];
+  await pushNotification({
+    title: success ? successTitle : failureTitle,
+    message: success
+      ? `${targetLabel} was ${operation === 'create' ? 'created' : `${operation}d`} successfully.`
+      : `The ${operation} operation failed for ${targetLabel}. ${errorMessage ?? 'No error details available.'}`,
+    priority: success ? NotificationPriority.INFO : NotificationPriority.ERROR,
+    scope: NotificationScope.GLOBAL,
+    source: 'admin:permission-management',
+    organizationId: null,
+  });
+}
+
 // ---------------------------------------------------------------------------
 // Cleanup — periodically remove stale entries (safety net)
 // ---------------------------------------------------------------------------
