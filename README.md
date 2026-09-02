@@ -76,7 +76,7 @@ Self-service registration is not available (`/register` redirects to
 | **Interactive Calendar** | Month/week/day/year views, drag-and-drop rescheduling, RFC 5545 (rrule) recurrence, event modals, quick-add |
 | **Calendar Notifications** | Rate-limited email alerts for today's events, delivery logged to `NotificationLog` |
 | **Hybrid caching** | L1 in-memory + L2 Redis cache with stampede protection, warming, and live metrics |
-| **Real-time notifications** | Server-Sent Events bridge (dev) with browser-aware polling that sleeps when tabs are backgrounded |
+| **Real-time notifications** | Live server-side SSE broadcast (health checks + all admin management events) with org/global scoping, deduplication, and a persisted notification log |
 | **Security hardening** | CSP in Report-Only mode, AES-256-GCM PII encryption at rest, optional payload encryption in transit, pre-commit secret scanning |
 
 ## Project layout
@@ -203,6 +203,7 @@ from reusable components (`components/dashboard/`):
 | `/dashboard/admin/resources` | Feature resources and role-to-resource bindings |
 | `/dashboard/admin/teams` | Teams, members, and team-level roles |
 | `/dashboard/admin/calendar` | The interactive calendar (see below) |
+| `/dashboard/admin/notifications` | Live notification log: stat cards, filters, search, acknowledge/delete actions |
 
 These pages talk to REST endpoints under `/api/dashboard/admin/*`. Role-based
 routing (`lib/dashboard-router.ts`) maps a user's role to their dashboard; the
@@ -318,17 +319,81 @@ Redis) → log each delivery.
 
 ## 8. Real-Time Notifications
 
-The notification bell (`features/notifications/`) combines:
+In-app real-time updates are pushed over Server-Sent Events (SSE) from a
+single production-ready endpoint, `GET /api/notifications/stream`. Any event
+worth surfacing to operators goes through one central push service
+(`lib/notification-push.ts`), which deduplicates, persists the notification to
+a database log, and broadcasts it to every connected SSE client.
 
-- **SSE bridge** — `EventSource` to `/api/notifications/stream`; incoming
-  events are injected directly into the React Query cache so the UI updates
-  without a refresh. The connection only opens while the tab is focused.
-  **Note:** this endpoint currently sends a simulated stream in development;
-  in production it returns `501` until it is backed by Redis Pub/Sub or a
-  message queue (tracked as future work).
-- **Browser-aware polling** — React Query refetches while the window is
-  focused and sleeps when it is backgrounded, conserving battery and server
-  load.
+### What gets pushed
+
+Every notable platform event is emitted as an SSE notification:
+
+| Event family | Source tag | Priority (success / failure) | Scope |
+|--------------|-----------|------------------------------|-------|
+| Health checks — database, cache/Redis, PgBouncer (state transitions and first check after boot) | `health-check:database` / `health-check:cache` / `health-check:pgbouncer` | INFO / CRITICAL | GLOBAL |
+| User management (create / update / delete) | `admin:user-management` | INFO / ERROR | GLOBAL |
+| Organization management (create / update / archive) | `admin:organization-management` | INFO / ERROR | GLOBAL |
+| Team management (create / update / delete) | `admin:team-management` | INFO / ERROR | GLOBAL |
+| Role management (create / update / delete) | `admin:role-management` | INFO / ERROR | GLOBAL |
+| Permission catalog changes (create / update / delete) | `admin:permission-management` | INFO / ERROR | GLOBAL |
+| Resource catalog changes (create / update / delete) | `admin:resource-management` | INFO / ERROR | GLOBAL |
+| Admin broadcast messages (sent through the console) | `admin:message` | configurable (default INFO) | GLOBAL or ORG |
+
+Org-level operations carry the affected organization id, so the history log
+can show which tenant was impacted; pure global catalog entries (permissions,
+resources) are sent without one. A full per-family API reference lives in
+[ARCHITECTURE.md §8](./ARCHITECTURE.md#8-real-time-notificationssystem-sse).
+
+### Delivery model
+
+- **Scoping** — a notification is either `GLOBAL` (every connected user) or
+  `ORG` (only subscribers of that tenant, plus Super Admins). Super Admins
+  subscribe without an org context and see everything.
+- **Deduplication** — two layers stop duplicate spam: a synchronous in-process
+  index (10 s window) closes the race where concurrent boot-time `/api/health`
+  calls would each push a "first healthy" notification, and a DB lookup is the
+  multi-instance safety net.
+- **Persistence** — every notification is written to the `Notification` model
+  before broadcast, giving a replayable history and admin log even for clients
+  that were offline.
+- **Connection governance** — requires a valid session; max 3 concurrent
+  connections per user (extra tabs get HTTP 429) and a global cap of 500
+  (HTTP 503 when saturated); a 15 s SSE heartbeat keeps proxies from closing
+  idle streams.
+
+### The client side
+
+A singleton `useNotifications` hook (`hooks/useNotifications.ts`) owns the one
+SSE connection per browser tab — components never open their own (that is what
+caused 429 churn under React StrictMode). It:
+
+1. Streams `data:` JSON frames off `/api/notifications/stream` using
+   fetch/ReadableStream (cookie auth, so no EventSource query hacks needed),
+   with exponential-backoff reconnects (1 s → 30 s max) and client-side id
+   deduplication (max 20 items kept).
+2. Renders a **footer ticker** in the Super Admin console *and* the tenant
+   dashboard layouts (`app/admin/layout.tsx`, `app/dashboard/admin/layout.tsx`).
+   INFO/WARNING items auto-dismiss after 10 s; ERROR/CRITICAL items persist
+   until manually dismissed.
+3. **Mirrors every received message to an `sse-notification` CustomEvent**, so
+   pages can react without owning a connection — e.g., the system-health card
+   re-fetches `/api/health` immediately when a health-check source notifies,
+   instead of waiting for its 60 s poll.
+
+### Notification log (history & triage)
+
+The persisted history is browsable at `/dashboard/admin/notifications`:
+
+- Stat cards: total, acknowledged / not-acknowledged, and per-priority counts.
+- Filters: priority, scope, organization, acknowledged state, plus server-side
+  free-text search over source and message.
+- Actions: **Acknowledge** per row and **Delete** (with confirmation modal),
+  backed by `/api/admin/notifications` (`GET` list, `PATCH` acknowledge,
+  `DELETE`, and `POST` for sending admin broadcasts).
+
+**Email calendar notifications** (today's events) remain a separate,
+rate-limited flow described in section 7.
 
 ## 9. Caching
 
@@ -654,7 +719,7 @@ Prisma models (`prisma/schema.prisma`), grouped by domain:
 | Teams | `Team`, `TeamMember`, `TeamRole` |
 | RBAC | `Permission`, `Role`, `RolePermission`, `MemberRole`, `Resource`, `ResourceRole` |
 | Calendar | `Calendar`, `CalendarEvent` (rrule JSON + exdates, optional `propertyId`) |
-| Audit & notifications | `AuditLog`, `NotificationLog` |
+| Audit & notifications | `AuditLog`, `Notification` (SSE in-app events, org/global scope, acknowledged flag), `NotificationLog` (email deliveries) |
 
 All organization-scoped models carry an `organizationId` and are covered by
 the two-layer isolation strategy (Prisma extension + RLS).
@@ -697,7 +762,10 @@ own OpenSpec proposal (see SPECIFICATION_DESIGN_PROCESS.md).
 
 **Deferred work** is tracked in the deferred items registry at
 [openspec/changes/project-initialization/proposal.md](./openspec/changes/project-initialization/proposal.md).
-Notable open threads: production-grade real-time,  contractor-role feature, property management business flows and the cloud build/deploy pipeline (scripts are placeholders).
+Notable open threads: multi-instance SSE fan-out (the broadcast layer is
+in-process today; multiple server instances would need a Redis Pub/Sub relay),
+contractor-role feature, property management business flows and the cloud
+build/deploy pipeline (scripts are placeholders).
 
 ## License
 

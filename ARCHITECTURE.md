@@ -40,7 +40,23 @@ This document is organized by **functional area**. Use the table of contents bel
   - [Relationships](#relationships)
   - [Indexing Strategy](#indexing-strategy)
   - [Connection Pooling (PgBouncer)](#connection-pooling-pgbouncer)
-- [8. Cache Architecture](#8-cache-architecture)
+- [8. Real-Time Notification System (SSE)](#8-real-time-notification-system-sse)
+  - [System Overview](#system-overview)
+  - [Core Components](#core-components)
+  - [Data Model: Scope & Priority](#data-model-scope--priority)
+  - [Event Source Catalog](#event-source-catalog)
+  - [Connection Security, Caps & Lifecycle](#connection-security-caps--lifecycle)
+  - [Deduplication & Delivery Flow](#deduplication--delivery-flow)
+  - [Client Architecture](#client-architecture-react-side)
+  - [Health Event Integration](#health-event-integration)
+  - [Notification Log API](#notification-log-api)
+  - [Testing](#testing)
+  - [Multi-Instance Limitation](#multi-instance-limitation)
+- [9. Calendar System](#9-calendar-system)
+  - [Models & Services](#models--services)
+  - [Recurrence Handling](#recurrence-handling)
+  - [Authorization](#authorization)
+- [10. Cache Architecture](#10-cache-architecture)
   - [Overview](#overview)
   - [Layer 1: In-Memory LRU Cache](#layer-1-in-memory-lru-cache)
   - [Layer 2: Redis (Distributed Cache)](#layer-2-redis-distributed-cache)
@@ -49,19 +65,14 @@ This document is organized by **functional area**. Use the table of contents bel
   - [Cross-Instance Invalidation](#cross-instance-invalidation)
   - [Stampede Protection](#stampede-protection)
   - [Cache Monitoring & Metrics](#cache-monitoring--metrics)
-- [9. Calendar System](#9-calendar-system)
-  - [Models & Services](#models--services)
-  - [Recurrence Handling](#recurrence-handling)
-  - [Real-Time Notifications (SSE)](#real-time-notifications-ssq)
-  - [Authorization](#authorization)
-- [10. Security](#10-security)
+- [11. Security](#11-security)
   - [Content Security Policy (CSP)](#content-security-policy-csp)
   - [Data-in-Transit Payload Encryption](#data-in-transit-payload-encryption)
   - [CSRF Protection](#csrf-protection)
   - [Secrets Management](#secrets-management)
   - [PII Logging Policy](#pii-logging-policy)
-- [11. Project Structure](#11-project-structure)
-- [12. Development & Testing](#12-development--testing)
+- [12. Project Structure](#12-project-structure)
+- [13. Development & Testing](#13-development--testing)
   - [Local Setup](#local-setup)
   - [Running Tests](#running-tests)
   - [Database Migrations](#database-migrations)
@@ -132,9 +143,11 @@ flowchart TB
 
         subgraph Business_Logic [Business Logic]
             API --> Services[Service Layer<br/>Core Logic]
+            Services --> SSEHub[SSE Notification Push Hub<br/>lib/notification-push.ts]
         end
 
         ReactApp[<b>React Client</b>] -.->|REST & SSE Events| API
+        SSEHub -.->|SSE stream<br/>(/api/notifications/stream)| ReactApp
         ReactApp -.->|State Mgmt<br/>TanStack Query| Browser[(Browser State)]
     end
 
@@ -161,6 +174,7 @@ flowchart TB
 | **Service Layer** (`services/`, `lib/services/`) | Business logic: slug generation, complex transactions, multi-step bootstrapping. | Node |
 | **Data Layer** (`prisma/schema.prisma`) | Schema definition, relations, RLS policies. | PostgreSQL |
 | **Cache Layer** (`lib/cache/`, `lib/redis.ts`) | L1 in-memory + L2 Redis caching with stampede protection and cross-instance invalidation. | Node / Redis |
+| **Real-Time Push** (`lib/notification-push.ts`, `app/api/notifications/stream/route.ts`) | SSE notification hub: subscriber registry, two-layer dedup, DB persistence, scope-filtered fan-out to admin & tenant browsers (Section 8). | Node |
 
 ---
 
@@ -347,6 +361,7 @@ A dedicated `services/` layer sits between the API routes and the database (Pris
 | `ResourceRole` | Global | Junction linking Resources to org-scoped Roles (feature-level access control) |
 | `AuditLog` | Global | Security audit trail recording admin actions across all organizations |
 | `NotificationLog` | Global | Tracks email notifications sent by the notification system |
+| `Notification` | Global | In-app events pushed over SSE: title, message, priority (`INFO`/`WARNING`/`ERROR`/`CRITICAL`), scope (`GLOBAL`/`ORG`), source tag, optional `organizationId`, and an `acknowledged` admin flag |
 | `Calendar` | Org-scoped | Container/namespace for calendar events (one default per org) |
 | `CalendarEvent` | Org-scoped | Individual events within a calendar (local datetimes, optional property association) |
 | `CalendarRecurrence` | Org-scoped | 1:1 recurrence rule per event (iCal-inspired fields, `excludedDates` JSON array) |
@@ -363,6 +378,7 @@ A dedicated `services/` layer sits between the API routes and the database (Pris
 - `Resource` → `Role`: Via `ResourceRole` (many-to-many, global junction)
 - `Calendar` → `CalendarEvent`: One-to-many cascading delete
 - `CalendarEvent` ↔ `CalendarRecurrence`: One-to-one via `eventId @unique`
+- `Notification` → `Organization`: Optional many-to-one (`SetNull` on org delete) — carries the affected tenant for org-level events; NULL for pure global broadcasts
 
 ### Indexing Strategy
 
@@ -381,11 +397,11 @@ The system uses **PgBouncer** as a connection pooler between the Node.js applica
 
 ---
 
-## 8. Cache Architecture
+## 10. Cache Architecture
 
 The portal implements a **multi-layered caching strategy** combining Next.js ISR, L1 in-memory LRU cache, Redis (L2), TanStack Query (client-side), and SSE for real-time updates. This section covers the server-side cache layers in detail.
 
-For client-side caching and SSE details, see [CACHING_ARCHITECTURE.md](./CACHING_ARCHITECTURE.md).
+For client-side caching, see [CACHING_ARCHITECTURE.md](./CACHING_ARCHITECTURE.md); for the SSE real-time notification system, see [Section 8](#8-real-time-notification-system-sse).
 
 ### Overview
 
@@ -498,6 +514,272 @@ The admin dashboard includes a cache metrics page at `/admin/cache-metrics`. A p
 
 ---
 
+## 8. Real-Time Notification System (SSE)
+
+The platform pushes in-app notifications to every connected browser over a
+single Server-Sent Events (SSE) endpoint, `GET /api/notifications/stream`. One
+central push service owns the wire format, scoping, deduplication, and
+persistence, so any server-side code path — health checks, admin management
+APIs, future domain events — can surface an event with a one-line call.
+
+### System Overview
+
+```mermaid
+flowchart TB
+    subgraph Producers["Event producers (Node runtime)"]
+        HC["/api/health<br/>notifyHealthCheck(service, healthy)"]
+        ADM["Admin management API routes<br/>*management/* — users · orgs · teams · roles ·<br/>permissions · resources<br/>notifyXxxOperation(op, target, success)"]
+        MSG["POST /api/admin/notifications<br/>notifyAdminMessage()"]
+    end
+
+    subgraph Push["lib/notification-push.ts (in-process pub/sub hub)"]
+        DEDUP["Dedup gate<br/>1. sync in-process index (10s)<br/>2. DB lookup (multi-instance net)"]
+        NORM["Priority normalization<br/>+ org name resolution"]
+        STORE["Subscribed SSE clients<br/>(Map keyed by connection id)"]
+    end
+
+    DB[("PostgreSQL<br/>Notification model")]
+
+    subgraph Stream["GET /api/notifications/stream"]
+        AUTH2["Session auth · org check<br/>caps: 3/user · 500 global"]
+        RS["ReadableStream<br/>data: {json} frames + 15s heartbeat"]
+    end
+
+    subgraph Client["Browser (one connection per tab)"]
+        HOOK["hooks/useNotifications.ts<br/>singleton store · fetch/ReadableStream<br/>exponential-backoff reconnect"]
+        TICKER["Footer ticker in admin + tenant layouts<br/>auto-dismiss INFO/WARNING · persist ERROR/CRITICAL"]
+        CE["CustomEvent 'sse-notification'<br/>→ SystemHealthCard re-fetch /api/health"]
+    end
+
+    LOGUI["/dashboard/admin/notifications<br/>history page: stat cards, filters,<br/>search, acknowledge, delete"]
+
+    HC --> NORM
+    ADM --> NORM
+    MSG --> NORM
+    NORM --> DEDUP
+    DEDUP -- "identical in window → drop" --> DROP(["skip"])
+    DEDUP -- "new" --> PERSIST["persist Notification row"]
+    PERSIST --> DB
+    PERSIST --> SER["JSON.stringify once"]
+    SER --> STORE
+    STORE -- "scope-filtered broadcast" --> RS
+    AUTH2 --> RS
+    RS <-. "SSE frames" .-> HOOK
+    HOOK --> TICKER
+    HOOK --> CE
+    DB -- "REST /api/admin/notifications" --> LOGUI
+
+    linkStyle default interpolate spline;
+```
+
+Step by step, a notification travels this path:
+
+1. **A producer emits an event** — e.g. `/api/health` detects that the
+   database just recovered, or a team-management route finishes a role
+   deletion. All producers call one of the typed wrappers in
+   `lib/notification-push.ts` (see [Core Components](#core-components)).
+2. **The push service normalizes and deduplicates** — priority is coerced to a
+   canonical Prisma enum value, then two dedup layers run (see [Deduplication &
+   Delivery Flow](#deduplication--delivery-flow)).
+3. **It persists before it broadcasts** — every notification is written to the
+   `Notification` table first, so history survives even when zero clients are
+   connected.
+4. **It serializes once and fans out** — the JSON frame is written to each
+   matching subscriber's stream: `GLOBAL` goes to everyone; `ORG` goes only to
+   that tenant's subscribers plus Super Admins (who have no org binding).
+5. **The route handler ships it over SSE** — each connection is a web
+   `ReadableStream` with proper `text/event-stream` headers, a 15-second
+   heartbeat comment frame (`: heartbeat`) so proxies don't drop idle streams,
+   and backlog protection that disconnects clients falling more than 1 MiB behind.
+6. **The browser reacts** — the singleton hook appends the item to its store
+   (max 20 kept), renders the footer ticker, and mirrors the message to an
+   `sse-notification` CustomEvent for pages that want a reaction without a
+   connection of their own.
+
+### Core Components
+
+| Component | File | Responsibility |
+|-----------|------|----------------|
+| SSE endpoint | `app/api/notifications/stream/route.ts` | Auth, org validation, connection caps, `ReadableStream` response, connect frame, disconnect cleanup (`force-dynamic`) |
+| Push hub | `lib/notification-push.ts` | Subscriber registry, dedup index, persistence, scope-filtered broadcast, heartbeat loop, and all typed producer wrappers |
+| Client hook | `hooks/useNotifications.ts` | Singleton connection + store (via `useSyncExternalStore`), reconnect with backoff, auto-dismiss timers, CustomEvent mirroring |
+| Ticker UI | `app/admin/layout.tsx`, `app/dashboard/admin/layout.tsx` | Footer ticker rendered once per layout — every admin/tenant page inherits it |
+| Reactive consumers | `components/admin/SystemHealthCard.tsx` | Listens for the mirrored `sse-notification` event; re-fetches `/api/health` immediately on health-check sources (60 s poll remains as safety net) |
+| History API + UI | `app/api/admin/notifications/route.ts`, `app/dashboard/admin/notifications/page.tsx` | Notification log: filters, search, stat cards, acknowledge/delete |
+
+### Data Model: Scope & Priority
+
+Events are stored in the global `Notification` model (distinct from
+`NotificationLog`, which tracks *email* deliveries for calendar events):
+
+| Field | Values | Meaning |
+|-------|--------|---------|
+| `priority` | `INFO` · `WARNING` · `ERROR` · `CRITICAL` | Display weighting. `INFO`/`WARNING` auto-dismiss from the ticker after 10 s; `ERROR`/`CRITICAL` persist until manually dismissed. Health failures push `CRITICAL`. |
+| `scope` | `GLOBAL` · `ORG` (default) | **Who receives it live over SSE.** `GLOBAL` = every connected subscriber; `ORG` = that tenant's subscribers plus Super Admins only. |
+| `source` | e.g. `health-check:database`, `admin:role-management` | Machine-readable event family; powers filters, search, and page-level reactions (health card keys off these). |
+| `organizationId` | nullable | Carries the affected tenant for org-level operations so the log can attribute them; NULL for pure global broadcasts. Org deletion is `SetNull`. |
+| `acknowledged` | boolean, default `false` | Admin triage flag; toggled from the notification log page. |
+
+Key rule: **scope gates live delivery, not historical visibility.** Super
+Admins see every persisted notification in the log regardless of scope.
+
+### Event Source Catalog
+
+Every currently wired producer, with its success/failure priorities:
+
+| Source | Wrapper (`lib/notification-push.ts`) | Events | Success / Failure priority | Scope |
+|--------|--------------------------------------|--------|----------------------------|-------|
+| `health-check:database` | `notifyHealthCheck('database', …)` | DB down / first healthy after boot / recovery | INFO / **CRITICAL** | GLOBAL |
+| `health-check:cache` | `notifyHealthCheck('cache', …)` | Redis up/down transitions | INFO / CRITICAL | GLOBAL |
+| `health-check:pgbouncer` | `notifyHealthCheck('pgbouncer', …)` | Pooler up/down transitions | INFO / CRITICAL | GLOBAL |
+| `admin:user-management` | `notifyUserOperation(op, target, success, err?)` | user create · update · delete | INFO / ERROR | GLOBAL¹ |
+| `admin:organization-management` | `notifyOrganizationOperation(…)` | org create · update · **archive** (no hard deletes — archive is terminal) | INFO / ERROR | GLOBAL¹ |
+| `admin:team-management` | `notifyTeamOperation(…)` | team create · update · delete | INFO / ERROR | GLOBAL¹ |
+| `admin:role-management` | `notifyRoleOperation(…)` | role create · update · delete | INFO / ERROR | GLOBAL¹ |
+| `admin:permission-management` | `notifyPermissionOperation(…)` | permission create · update · delete | INFO / ERROR | GLOBAL (no org — global catalog) |
+| `admin:resource-management` | `notifyResourceOperation(…)` | resource create · update · delete | INFO / ERROR | GLOBAL (no org — global catalog) |
+| `admin:message` | `notifyAdminMessage(title, message, orgId?, priority?)` | Admin broadcast via `POST /api/admin/notifications` | caller-selected (default INFO) | GLOBAL or ORG |
+
+¹ Sent `GLOBAL` so all Super Admins see platform operations everywhere, but the
+affected `organizationId` is passed through so the log attributes the event to
+the right tenant.
+
+### Connection Security, Caps & Lifecycle
+
+The stream endpoint enforces:
+
+- **Authentication** — 401 without a valid BetterAuth session; anonymous access is impossible.
+- **Org binding** — 403 for non-admin users with no active organization (they have nothing to receive); an optional `?orgId=` param may override the connection's scope only if it matches the user's own org, or for Super Admins (who see all).
+- **Per-user cap** — max **3** SSE connections per session (extra tabs: 429), preventing StrictMode/tab-doubling abuse.
+- **Global cap** — max **500** total connections (503 when saturated), bounding memory on long-lived streams.
+- **Backpressure** — a client whose stream backlog exceeds 1 MiB is dropped rather than allowed to grow unbounded.
+
+```mermaid
+sequenceDiagram
+    participant B as Browser tab
+    participant R as /api/notifications/stream
+    participant H as notification-push hub
+    participant S as /api/health (producer)
+
+    B->>R: GET stream (session cookie)
+    R->>R: getSession() · resolve orgId · super-admin?
+    alt caps exceeded or unauthenticated
+        R-->>B: 401 / 403 / 429 / 503
+    end
+    R->>H: addSubscriber({connectionId, sessionId, orgId, writer})
+    H-->>R: accepted
+    R-->>B: text/event-stream + connect frame (id "system")
+    loop every 15 s
+        H->>B: ": heartbeat\n\n" (comment frame)
+    end
+    S->>H: notifyHealthCheck('database', false, orgId)
+    H->>H: dedup gate → persist Notification row
+    H->>R: write "data: {json}" to matching subscribers (scope filter)
+    R-->>B: notification frame
+    B->>B: tick + CustomEvent 'sse-notification'
+    Note over S: an admin makes a mutation (e.g. role delete)
+    S->>H: notifyRoleOperation('delete', 'Manager', true)
+    H->>R: write frame (GLOBAL scope)
+    R-->>B: notification frame
+    B--xR: tab closed / navigation
+    R->>R: request.signal abort → idempotent closeConnection()
+    R->>H: removeSubscriber(connectionId)
+```
+
+### Deduplication & Delivery Flow
+
+High-frequency producers (health polling is the main case) can emit the same
+title/message in a very short window — e.g. two `/api/health` requests racing
+at boot both see "no previous state" and would each push a "first healthy"
+notification. Two layers prevent that:
+
+```mermaid
+flowchart LR
+    A["pushNotification(payload)"] --> B{"In-process dedup index<br/>(sync, 10 s window,<br/>keyed on priority+scope+source+org+title+message)"}
+    B -- hit --> X["drop (log only)"]
+    B -- miss --> N["normalize priority · resolve org name"]
+    N --> P["persist Notification row<br/>(DB history — survives zero subscribers)"]
+    P --> C{"DB dedup lookup<br/>(cross-instance safety net)"}
+    C -- hit --> X2["drop (log only)"]
+    C -- miss --> J["JSON.stringify once"]
+    J --> F{"for each subscriber<br/>scope filter"}
+    F -- "GLOBAL" --> W["write frame"]
+    F -- "ORG → same org or super admin" --> W
+    F -- no match --> SKIP["skip subscriber"]
+```
+
+- **Layer 1 — synchronous in-process index.** Checked *and* marked atomically
+  (single-threaded event loop) before any `await`, closing the TOCTOU gap the
+  DB check has. Window: 10 s; entries opportunistically pruned past 256.
+- **Layer 2 — database lookup.** An identical persisted row within the window
+  means another instance (or a previous race in this process) already pushed it.
+- The hub state (subscriber map, dedup index, heartbeat timer) lives on
+  `globalThis` deliberately: Next.js dev mode can evaluate a module twice per
+  process, and plain module-level state would give each copy an invisible
+  separate subscriber registry — the "my subscribers are invisible to
+  pushNotification" bug.
+
+### Client Architecture (React Side)
+
+- **One connection per tab, full stop.** `hooks/useNotifications.ts` starts a
+  module-level singleton (100 ms after load so React StrictMode's double mount
+  settles); every component consumes the shared store through
+  `useSyncExternalStore` instead of opening its own stream.
+- **Transport:** plain `fetch('/api/notifications/stream', {credentials:
+  'include'})` reading a `ReadableStream` — cookie auth with no token-in-URL,
+  which native `EventSource` can't do. Frames are parsed off the `data:` prefix,
+  deduplicated by id, and capped at 20 in memory.
+- **Reconnect:** exponential backoff `min(1s · 2^attempts, 30s)`; a clean
+  stream end retries after 2 s; attempts reset on success.
+- **Ticker behavior:** INFO/WARNING auto-dismiss after 10 s; ERROR/CRITICAL
+  remain until dismissed; per-item dismiss and "clear all" are exposed by the
+  hook.
+- **Event mirroring:** each received message is re-dispatched as a
+  `sse-notification` window CustomEvent, so any page can react (the system
+  health card refetches on `health-check:*` sources) without holding its own SSE
+  connection or duplicating state.
+- The legacy bell in `features/notifications/` is a separate,
+  poll-based inbox (React Query, 30 s when focused, paused when backgrounded —
+  see `tests/integration/notification-reliability.test.tsx`); it intentionally
+  never opens its own SSE connection so the per-user cap isn't a footgun.
+
+### Health Event Integration
+
+`/api/health` (`app/api/health/route.ts`) tracks each service's previous state
+via `lib/system-logs.ts` and calls `notifyHealthCheck(service, healthy,
+platformOrgId)` **only on transitions**: first check after boot (so admins know
+the DB is up), failure onset (CRITICAL), and recovery (INFO). Polling ticks
+that see no change push nothing — the dedup gate above remains as a backstop.
+
+### Notification Log API
+
+| Method | Route | Auth | Purpose |
+|--------|-------|------|---------|
+| `GET` | `/api/notifications/stream[?orgId=]` | valid session | Open the live SSE stream (401/403/429/503 as above) |
+| `POST` | `/api/admin/notifications` | Super Admin + rate limit | Broadcast: `{title, message, scope: 'global'\|'org', organizationId?, priority?}` — scope requires a valid org id either way (a global sent on behalf of an org carries that org in the log) |
+| `GET` | `/api/admin/notifications` | Super Admin | List with filters: `page`, `pageSize` (50), `scope`, `priority`, `organizationId`, `acknowledged`, `search` (source/message). Returns rows plus `counts` (total, per-priority, acknowledged) for the stat cards |
+| `PATCH` | `/api/admin/notifications?id=…` | Super Admin | Mark acknowledged |
+| `DELETE` | `/api/admin/notifications?id=…` | Super Admin | Remove a log entry |
+
+### Testing
+
+- **Unit** — one suite per producer family: `tests/unit/notify-health-check.test.ts`, `notify-user-operation.test.ts`, `notify-organization-operation.test.ts`, `notify-team-operation.test.ts`, `notify-role-operation.test.ts`, `notify-permission-operation.test.ts`, `notify-resource-operation.test.ts`. Coverage includes success/failure titles, priority selection, `source` and `organizationId` propagation, concurrent-push deduplication, org scope non-dedup, and swallowed persistence failures.
+- **Integration** — `tests/integration/notification-reliability.test.tsx` verifies the client's focus/blur-aware polling logic (listener attach/detach, event response) for the poll-based inbox hook.
+
+### Multi-Instance Limitation
+
+The subscriber registry and dedup index are **in-process** (`globalThis`) by
+design of a single-instance deployment: a push only reaches clients connected
+to *this* server process. Cross-instance, every instance still persists to the
+shared `Notification` table, so history in the log is complete regardless of
+which instance handled the event — but a client on instance B would not
+instantly receive an event pushed by instance A. Scaling out requires relaying
+pushes through a shared broker (e.g. the same Redis Pub/Sub pattern used for
+cache invalidation) plus a shared dedup store; this is tracked as deferred work
+(see README, Appendix F).
+
+---
+
 ## 9. Calendar System
 
 ### Models & Services
@@ -520,16 +802,18 @@ Recurrence handling is supported by:
 
 ### Real-Time Notifications (SSE)
 
-The system handles high-frequency data using a **Hybrid SSE-to-Cache Injection** pattern:
+In-app real-time updates are delivered by the platform-wide SSE notification
+system documented in [Section 8 — Real-Time Notification System](#8-real-time-notification-system-sse): a single
+`/api/notifications/stream` endpoint, the central push service in
+`lib/notification-push.ts`, and the singleton `useNotifications` client hook.
+Calendar pages inherit that live feed through the dashboard layout's footer
+ticker rather than running a calendar-specific stream, and they receive
+platform health events like any other page.
 
-1. **The Stream (Server):** A dedicated SSE endpoint (`/api/notifications/stream`) maintains a long-lived connection, pushing lightweight JSON events.
-2. **The Bridge (Client Hook):** The `useNotifications` hook manages the lifecycle of the `EventSource`.
-3. **The Injection (Cache):** When a new event arrives, the hook uses `queryClient.setQueryData` to manually inject the new item into the top of the existing list in the React Query cache.
-4. **The UI (Reaction):** Components subscribed to the React Query key re-render instantly.
-
-**Intelligent Polling (Safety Net):** When the browser tab is in focus, a slow poll (60s) runs as fallback. When blurred, polling pauses entirely to conserve battery and server bandwidth. On tab focus return, a fresh fetch reconciles any missed data.
-
-Notification dispatch is handled by `lib/notifications/dispatcher.ts`, with email delivery via `lib/notifications/email.ts` and event definitions in `lib/notifications/events.ts`.
+The only calendar-owned notification flow is **email** dispatch for today's
+events, handled by `lib/notifications/dispatcher.ts`, with delivery via
+`lib/notifications/email.ts` (nodemailer) and event definitions in
+`lib/notifications/events.ts`.
 
 ### Authorization
 
@@ -537,7 +821,7 @@ Every `/api/organizations/[orgId]/calendar*` route verifies the session (401) an
 
 ---
 
-## 10. Security
+## 11. Security
 
 ### Content Security Policy (CSP)
 
@@ -638,7 +922,7 @@ Payload encryption does **not** replace CSRF protection. PII mutating routes mus
 
 ---
 
-## 11. Project Structure
+## 12. Project Structure
 
 ```
 nipp/
@@ -654,18 +938,19 @@ nipp/
 │   │   ├── system-logs/page.tsx  # System log viewer
 │   │   └── users/                # User management (list, create, edit, view, delete)
 │   ├── api/                      # API endpoints (RESTful routes)
-│   │   ├── admin/                # Super admin APIs (audit-logs, cache metrics, orgs, permissions, roles, users)
+│   │   ├── admin/                # Super admin APIs (audit-logs, cache metrics, notifications log, orgs, permissions, roles, users)
 │   │   ├── auth/                 # BetterAuth catch-all + user endpoints
 │   │   ├── cache/metrics/        # Cache metrics endpoint
 │   │   ├── csp-report/           # CSP violation reporting
 │   │   ├── dashboard/admin/      # Dashboard admin APIs (orgs, permissions, resources, roles, teams, users)
-│   │   ├── health/               # Health check endpoint
-│   │   ├── notifications/stream/# SSE notification stream
+│   │   ├── health/               # Health check endpoint (transition events pushed via SSE)
+│   │   ├── notifications/stream/# Live SSE notification stream (auth, caps, heartbeat)
 │   │   ├── organizations/[orgId]/# Org-scoped APIs (calendar, teams)
 │   │   ├── roles/                # Role-related APIs
 │   │   └── security/payload-key/# Payload encryption key management
-│   ├── dashboard/                # Tenant dashboard layouts & pages
+│   ├── dashboard/                # Tenant dashboard layouts & pages (layouts carry the SSE footer ticker)
 │   │   ├── admin/                # Super admin tenant view (calendar, orgs, permissions, resources, roles, teams, users)
+│   │   │   └── notifications/    # Notification log: history, filters, search, acknowledge/delete
 │   │   └── contractor/           # Contractor-specific dashboard
 │   ├── org/[orgId]/              # Org-scoped pages (roles)
 │   ├── layout.tsx                # Root layout (CSP, inactivity timeout provider)
@@ -678,9 +963,10 @@ nipp/
 │   ├── calendar/                 # Interactive calendar (month/week/day/year views, DnD, recurrence)
 │   ├── dashboard/                # Dashboard UI (ConfirmDialog, DataTable)
 │   └── ui/                       # Shared UI primitives
-├── features/                     # Feature modules (permissions index)
+├── features/                     # Client feature modules (auth, notifications inbox, org, permissions, user)
 ├── hooks/                        # Custom React hooks
 │   ├── useInactivityTimeout.ts   # Auto-logout on inactivity
+│   ├── useNotifications.ts       # Singleton SSE connection + footer ticker store
 │   └── usePermission.ts          # Three-state permission check (null/loading/true/false)
 ├── lib/                          # Core business logic & utilities
 │   ├── api-client.ts             # Encrypted fetch wrapper for PII calls
@@ -703,7 +989,8 @@ nipp/
 │   ├── ip.ts                     # IP address utilities
 │   ├── logger.ts                 # Pino logger with PII redaction
 │   ├── middleware/auth.ts        # Auth middleware utilities
-│   ├── notifications/            # Notification system (dispatcher, email, events)
+│   ├── notification-push.ts      # In-process SSE push hub: subscriber registry, dedup, persist & broadcast (Section 8)
+│   ├── notifications/            # Email notification system (dispatcher, email, events — calendar today-events flow)
 │   ├── org-bootstrap.ts          # Organization bootstrapping logic
 │   ├── organization-context.tsx  # React context for organization state
 │   ├── organization.ts           # Organization utilities
@@ -788,7 +1075,7 @@ nipp/
 
 ---
 
-## 12. Development & Testing
+## 13. Development & Testing
 
 ### Local Setup
 
@@ -827,5 +1114,5 @@ npm run dev                      # Start development server
 
 ---
 
-*Last Updated: 26/08/26*
+*Last Updated: 02/09/26*
 *Maintained by: Property NI Development Team*
