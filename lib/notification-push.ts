@@ -539,6 +539,38 @@ export async function notifyPermissionOperation(
   });
 }
 
+/**
+ * Push a platform resource-management event (create/update/delete) to SSE subscribers.
+ * - Success: INFO priority
+ * - Failure: ERROR priority
+ *
+ * GLOBAL scope (platform-wide super-admin operations). Resources are
+ * global (non-org-scoped) catalog entries, so no organizationId is attached.
+ */
+export async function notifyResourceOperation(
+  operation: 'create' | 'update' | 'delete',
+  targetLabel: string,
+  success: boolean,
+  errorMessage?: string,
+): Promise<void> {
+  const titles: Record<typeof operation, [string, string]> = {
+    create: ['Resource created', 'Failed to create resource'],
+    update: ['Resource updated', 'Failed to update resource'],
+    delete: ['Resource deleted', 'Failed to delete resource'],
+  };
+  const [successTitle, failureTitle] = titles[operation];
+  await pushNotification({
+    title: success ? successTitle : failureTitle,
+    message: success
+      ? `${targetLabel} was ${operation === 'create' ? 'created' : `${operation}d`} successfully.`
+      : `The ${operation} operation failed for ${targetLabel}. ${errorMessage ?? 'No error details available.'}`,
+    priority: success ? NotificationPriority.INFO : NotificationPriority.ERROR,
+    scope: NotificationScope.GLOBAL,
+    source: 'admin:resource-management',
+    organizationId: null,
+  });
+}
+
 // ---------------------------------------------------------------------------
 // Cleanup — periodically remove stale entries (safety net)
 // ---------------------------------------------------------------------------
