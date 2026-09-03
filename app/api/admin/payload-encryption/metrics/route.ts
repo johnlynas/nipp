@@ -7,6 +7,7 @@
 
 import { NextResponse } from 'next/server';
 import { requireSuperAdmin } from '@/lib/require-super-admin';
+import { checkAdminRateLimit } from '@/lib/rate-limiter';
 import { getMetricsSnapshot, resetMetrics } from '@/lib/payload-metrics';
 
 export const dynamic = 'force-dynamic';

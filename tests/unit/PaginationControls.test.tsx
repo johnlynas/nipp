@@ -21,9 +21,16 @@ describe('PaginationControls', () => {
 
   // ── Rendering ───────────────────────────────────────────────
 
-  it('renders nothing when there is only one page', () => {
+  it('renders a single-page footer with range label and inert controls', () => {
     const { container } = renderComponent({ ...defaultProps, totalPages: 1 });
-    expect(container.firstChild).toBeNull();
+    // One page still shows the "Showing X–Y of Z entries" row (consistent
+    // with the multi-page layout); Previous/Next are inert spans, not buttons.
+    expect(container.firstChild).not.toBeNull();
+    expect(screen.getByText(/Showing 1–8 of 40 entries/)).toBeInTheDocument();
+    expect(screen.queryByRole('button')).not.toBeInTheDocument();
+    expect(screen.getByText('Previous')).toHaveClass('opacity-40');
+    expect(screen.getByText('Next')).toHaveClass('opacity-40');
+    expect(screen.getByText('1')).toHaveClass('bg-[#1B2A4A]');
   });
 
   it('renders nothing when there are zero pages', () => {

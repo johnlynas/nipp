@@ -6,6 +6,8 @@ interface PaginationControlsProps {
   totalItems: number;
   pageSize: number;
   onPageChange: (page: number) => void;
+  /** Show the "Showing X–Y of Z entries" label beside the controls (default true). */
+  showRangeLabel?: boolean;
 }
 
 /**
@@ -18,7 +20,30 @@ export function PaginationControls({
   totalItems,
   pageSize,
   onPageChange,
+  showRangeLabel = true,
 }: PaginationControlsProps) {
+  const safeTotalPages = Math.max(1, totalPages);
+  if (safeTotalPages <= 1 && totalPages > 0) {
+    // Single page: still render the "Showing X–Y of Z entries" label and
+    // inert prev/next so the layout is consistent across admin pages.
+    return (
+      <div className="mt-4 flex items-center justify-between px-4 py-3 border-t border-gray-200">
+        {showRangeLabel ? (
+          <div className="text-sm text-gray-500">
+            Showing 1–{Math.min(totalItems, pageSize)} of {totalItems} entries
+          </div>
+        ) : (
+          <div aria-hidden />
+        )}
+        <div className="flex items-center gap-1">
+          <span className="rounded border border-gray-300 text-gray-700 px-3 py-1 text-sm opacity-40">Previous</span>
+          <span className="rounded bg-[#1B2A4A] text-white px-3 py-1 text-sm">1</span>
+          <span className="rounded border border-gray-300 text-gray-700 px-3 py-1 text-sm opacity-40">Next</span>
+        </div>
+      </div>
+    );
+  }
+
   if (totalPages <= 1) return null;
 
   const start = (currentPage - 1) * pageSize + 1;
@@ -55,9 +80,13 @@ export function PaginationControls({
 
   return (
     <div className="mt-4 flex items-center justify-between px-4 py-3 border-t border-gray-200">
-      <div className="text-sm text-gray-500">
-        Showing {start}–{end} of {totalItems} entries
-      </div>
+      {showRangeLabel ? (
+        <div className="text-sm text-gray-500">
+          Showing {start}–{end} of {totalItems} entries
+        </div>
+      ) : (
+        <div aria-hidden />
+      )}
       <div className="flex items-center gap-1">
         <button
           onClick={() => onPageChange(currentPage - 1)}

@@ -8,6 +8,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { auth } from '@/lib/auth';
 import globalDb from '@/lib/global-db';
 import { CalendarNotificationService } from '@/services/calendar-notification-service';
+import { checkCalendarRateLimit } from '@/lib/rate-limiter';
 
 export const runtime = 'nodejs';
 
@@ -23,6 +24,11 @@ export async function GET(
 
   if (!session?.user) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+  }
+
+  // Rate limit operations by session
+  if (!checkCalendarRateLimit(session.user.id)) {
+    return NextResponse.json({ error: 'rate_limited' }, { status: 429 });
   }
 
   const orgId = (await params).orgId;

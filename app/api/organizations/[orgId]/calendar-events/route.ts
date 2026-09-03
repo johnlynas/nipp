@@ -11,6 +11,7 @@ import { superAdminStorage } from '@/lib/global-db-guard';
 import { resolveTenantAccess } from '@/lib/tenant-access';
 import { CalendarEventService } from '@/services/calendar-event-service';
 import { isSameSiteRequest } from '@/lib/csrf';
+import { checkCalendarRateLimit } from '@/lib/rate-limiter';
 
 export const runtime = 'nodejs';
 
@@ -107,6 +108,11 @@ export async function POST(
   // Only admins (tenant admin or platform super admin) can create events
   if (ctx.role === 'MEMBER') {
     return NextResponse.json({ error: 'Forbidden: admin access required' }, { status: 403 });
+  }
+
+  // Rate limit calendar write operations by session
+  if (!checkCalendarRateLimit(session.user.id)) {
+    return NextResponse.json({ error: 'rate_limited' }, { status: 429 });
   }
 
   const body = await req.json();

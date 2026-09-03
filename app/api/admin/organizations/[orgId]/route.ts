@@ -5,6 +5,7 @@ import { requireSuperAdmin } from '@/lib/require-super-admin';
 import { recordAuditLog } from '@/lib/audit-log';
 import { logger } from '@/lib/logger';
 import { wrapPiiRoute, PiiRouteParams } from '@/lib/payload-middleware';
+import { checkAdminRateLimit } from '@/lib/rate-limiter';
 
 export const runtime = 'nodejs';
 export const revalidate = 0;
@@ -65,7 +66,7 @@ export const GET = wrapPiiRoute(async (request, _decryptedBody, params) => {
       memberCount: organization.members.length, customRoleCount: organization.roles.length,
     });
   } catch (error) {
-    const isDbError = error instanceof Error && error.message.includes('Can\'t reach database server');
+    const isDbError = error instanceof Error && error.message.includes("Can't reach database server");
     logger.error({ err: error, method: 'GET' }, isDbError ? 'Database unavailable fetching org details' : 'Unexpected error fetching org details');
     return NextResponse.json({ error: isDbError ? 'Database unavailable' : 'Internal server error' }, { status: isDbError ? 503 : 500 });
   }
@@ -83,6 +84,12 @@ export const PATCH = wrapPiiRoute(async (request, decryptedBody, params) => {
     }
 
     const session = authResult.session!;
+
+    // Rate limit admin write operations by session
+    if (!checkAdminRateLimit(session.user.id)) {
+      logger.warn({ userId: session.user.id }, 'Admin write rate limited');
+      return NextResponse.json({ error: 'rate_limited' }, { status: 429 });
+    }
 
     // Extract orgId from route params (provided by wrapPiiRoute)
     const orgId = params?.orgId;
@@ -154,7 +161,7 @@ export const PATCH = wrapPiiRoute(async (request, decryptedBody, params) => {
 
     return NextResponse.json({ message: 'Organization updated', organization: updatedOrg });
   } catch (error) {
-    const isDbError = error instanceof Error && error.message.includes('Can\'t reach database server');
+    const isDbError = error instanceof Error && error.message.includes("Can't reach database server");
     logger.error({ err: error, method: 'PATCH' }, isDbError ? 'Database unavailable updating org details' : 'Unexpected error updating org details');
     return NextResponse.json({ error: isDbError ? 'Database unavailable' : 'Internal server error' }, { status: isDbError ? 503 : 500 });
   }
@@ -175,6 +182,12 @@ export const DELETE = wrapPiiRoute(async (request, _decryptedBody, params) => {
     }
 
     const session = authResult.session!;
+
+    // Rate limit admin write operations by session
+    if (!checkAdminRateLimit(session.user.id)) {
+      logger.warn({ userId: session.user.id }, 'Admin write rate limited');
+      return NextResponse.json({ error: 'rate_limited' }, { status: 429 });
+    }
 
     // Extract orgId from route params (provided by wrapPiiRoute)
     const orgId = params?.orgId;
@@ -235,7 +248,7 @@ export const DELETE = wrapPiiRoute(async (request, _decryptedBody, params) => {
     logger.info({ orgId, fromStatus: existingOrg.status }, 'Archived organization');
     return NextResponse.json({ message: 'Organization archived' });
   } catch (error) {
-    const isDbError = error instanceof Error && error.message.includes('Can\'t reach database server');
+    const isDbError = error instanceof Error && error.message.includes("Can't reach database server");
     logger.error({ err: error, method: 'DELETE' }, isDbError ? 'Database unavailable archiving org' : 'Unexpected error archiving org');
     return NextResponse.json({ error: isDbError ? 'Database unavailable' : 'Internal server error' }, { status: isDbError ? 503 : 500 });
   }

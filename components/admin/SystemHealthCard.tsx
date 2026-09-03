@@ -2,6 +2,14 @@
 
 import { useEffect, useState } from 'react';
 
+// Sources emitted by lib/notification-push.ts — any of these means the
+// monitored services changed state and the health card must re-fetch.
+const HEALTH_CHECK_SOURCES = new Set([
+  'health-check:database',
+  'health-check:cache',
+  'health-check:pgbouncer',
+]);
+
 type HealthStatus = 'healthy' | 'degraded' | 'unhealthy' | 'loading';
 
 interface HealthCheck {
@@ -26,21 +34,42 @@ export default function SystemHealthCard() {
   const [status, setStatus] = useState<HealthStatus>('loading');
 
   useEffect(() => {
+    let cancelled = false;
+
     const fetchHealth = async () => {
       try {
         const res = await fetch('/api/health', { cache: 'no-store' });
         const data = await res.json();
+        if (cancelled) return;
         setHealth(data);
         setStatus(data.status);
       } catch {
-        setStatus('unhealthy');
+        if (!cancelled) setStatus('unhealthy');
       }
     };
 
     fetchHealth();
-    // Poll every 60 seconds
+
+    // Safety-net polling (the SSE feed is the primary refresh path)
     const interval = setInterval(fetchHealth, 60000);
-    return () => clearInterval(interval);
+
+    // Live updates: when any health check notifies a state change over SSE
+    // (pushed by /api/health via notifyHealthCheck), re-fetch immediately.
+    // The singleton useNotifications connection mirrors every SSE message to
+    // a 'sse-notification' CustomEvent; we filter to health-check sources.
+    const onNotification = (event: Event) => {
+      const { detail } = event as { detail?: { source?: string | null } };
+      if (detail?.source && HEALTH_CHECK_SOURCES.has(detail.source)) {
+        fetchHealth();
+      }
+    };
+    window.addEventListener('sse-notification', onNotification);
+
+    return () => {
+      cancelled = true;
+      clearInterval(interval);
+      window.removeEventListener('sse-notification', onNotification);
+    };
   }, []);
 
   const getStatusColor = () => {
@@ -74,7 +103,7 @@ export default function SystemHealthCard() {
       <div className="flex justify-between items-center mb-4">
         <span className="text-sm font-mono">Uptime: {formatUptime(Math.floor(health?.uptime || 0))}</span>
       </div>
-      
+
       <div className="grid grid-cols-3 gap-4">
         <div>
           <p className="text-xs font-semibold opacity-75">Database</p>
@@ -86,7 +115,7 @@ export default function SystemHealthCard() {
             <p className="text-xs text-red-600 mt-1">{health.checks.database.error}</p>
           )}
         </div>
-        
+
         <div>
           <p className="text-xs font-semibold opacity-75">Cache</p>
           <p className="font-medium">{health?.checks.cache.status}</p>
@@ -112,7 +141,7 @@ export default function SystemHealthCard() {
           )}
         </div>
       </div>
-      
+
       <p className="text-xs opacity-75 mt-4">Last checked: {new Date(health?.timestamp || '').toLocaleTimeString()}</p>
     </div>
   );

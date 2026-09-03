@@ -19,6 +19,7 @@ import { env } from '@/lib/env';
 import { logger } from '@/lib/logger';
 import { issuePayloadKey, getPayloadKeyStore, startKeyCleanupScheduler } from '@/lib/payload-key-server';
 import { incrementMetric } from '@/lib/payload-metrics';
+import { checkRateLimit, resetRateLimitStore, RATE_LIMIT_MAX, RATE_LIMIT_WINDOW } from '@/lib/rate-limiter';
 
 // ---------------------------------------------------------------------------
 // CSRF / origin validation
@@ -69,81 +70,6 @@ function isTrustedOrigin(request: NextRequest): boolean {
 
   return false;
 }
-
-// ---------------------------------------------------------------------------
-// Rate limiting (simple in-memory counter)
-// ---------------------------------------------------------------------------
-
-const rateLimitWindow = 60; // seconds
-const rateLimitMax = 30;    // requests per window
-
-interface RateLimitEntry {
-  count: number;
-  windowStart: number;
-}
-
-const rateLimitStore = new Map<string, RateLimitEntry>();
-
-/**
- * Get the trusted client IP.
- * Uses session ID after authentication (more reliable than X-Forwarded-For,
- * which can be spoofed unless proxy headers are explicitly trusted).
- */
-function getClientIdentifier(sessionId: string | null, request: NextRequest): string {
-  if (sessionId) {
-    return `session:${sessionId}`;
-  }
-  // Fall back to X-Forwarded-For for unauthenticated requests,
-  // but only if trusted proxies are configured.
-  const trustedProxies = env.TRUSTED_PROXY_CIDRS;
-  if (trustedProxies) {
-    const forwardedFor = request.headers.get('x-forwarded-for');
-    if (forwardedFor) {
-      return `ip:${forwardedFor.split(',')[0]?.trim()}`;
-    }
-  }
-  return 'unknown';
-}
-
-function checkRateLimit(clientId: string): boolean {
-  const now = Math.floor(Date.now() / 1000);
-
-  let entry = rateLimitStore.get(clientId);
-  if (!entry || now - entry.windowStart > rateLimitWindow) {
-    // New window
-    entry = { count: 1, windowStart: now };
-    rateLimitStore.set(clientId, entry);
-    return true;
-  }
-
-  if (entry.count >= rateLimitMax) {
-    return false; // Rate limited
-  }
-
-  entry.count++;
-  return true;
-}
-
-// ---------------------------------------------------------------------------
-// Cleanup old rate-limit entries (lazy singleton, not module-level)
-// ---------------------------------------------------------------------------
-
-let cleanupTimer: ReturnType<typeof setInterval> | null = null;
-
-function startRateLimitCleanup(): void {
-  if (cleanupTimer) return; // Already running
-  cleanupTimer = setInterval(() => {
-    const now = Math.floor(Date.now() / 1000);
-    for (const [clientId, entry] of rateLimitStore.entries()) {
-      if (now - entry.windowStart > rateLimitWindow * 2) {
-        rateLimitStore.delete(clientId);
-      }
-    }
-  }, 5 * 60 * 1000);
-}
-
-// Start cleanup on first request (avoids issues in dev/tests/serverless)
-startRateLimitCleanup();
 
 // Start the payload key cleanup scheduler (lazy, unref'd)
 startKeyCleanupScheduler();

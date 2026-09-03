@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { requireSuperAdmin } from '@/lib/require-super-admin';
+import { checkAdminRateLimit } from '@/lib/rate-limiter';
 import { logger } from '@/lib/logger';
 
 export const runtime = 'nodejs';
@@ -12,6 +13,11 @@ export async function POST(request: NextRequest) {
   const auth = await requireSuperAdmin(request.headers);
   if (!auth.authorized) {
     return NextResponse.json({ error: auth.error }, { status: auth.status });
+  }
+
+  // Rate limit admin operations by session
+  if (!checkAdminRateLimit(auth.session!.user.id)) {
+    return NextResponse.json({ error: 'rate_limited' }, { status: 429 });
   }
 
   try {

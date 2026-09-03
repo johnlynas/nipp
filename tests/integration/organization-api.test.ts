@@ -10,9 +10,18 @@ describe('Organization API / Update Integrity', () => {
   let testOrgId: string;
 
   afterAll(async () => {
-    // Cleanup test orgs by slug to ensure no leakage
+    // Cleanup ONLY this file's test orgs (by slug prefix) so parallel
+    // workers don't delete other suites' data — e.g. org-lifecycle.test.ts
+    // uses the `test-lifecycle-org` / `test-invalid-transition` slugs.
     await prisma.organization.deleteMany({
-      where: { slug: { in: ['test-lifecycle-org', 'test-invalid-transition', `test-api-update-${Date.now()}`, `test-api-slug-${Date.now()}`] } },
+      where: {
+        OR: [
+          { slug: { startsWith: 'test-api-update-' } },
+          { slug: { startsWith: 'test-api-slug-' } },
+          { slug: { startsWith: 'test-api-partial-' } },
+          { slug: { startsWith: 'new-improved-slug-' } },
+        ],
+      },
     });
   });
 

@@ -14,6 +14,7 @@ import { runWithTenant } from '@/lib/tenant-context';
 import { recordAuditLog } from '@/lib/audit-log';
 import { logger } from '@/lib/logger';
 import { wrapPiiRoute, PiiRouteParams } from '@/lib/payload-middleware';
+import { checkAdminRateLimit } from '@/lib/rate-limiter';
 
 export const runtime = 'nodejs';
 
@@ -104,7 +105,7 @@ export const PATCH = wrapPiiRoute(async (request, decryptedBody, params) => {
     logger.info({ userId: session.user.id, orgId: urlOrgId, memberId: urlMemberId, role }, 'Updated member role in tenant organization');
     return NextResponse.json({ message: 'Member role updated', member: updatedMember });
   } catch (error) {
-    const isDbError = error instanceof Error && error.message.includes('Can\'t reach database server');
+    const isDbError = error instanceof Error && error.message.includes("Can't reach database server");
     logger.error({ err: error, orgId: urlOrgId, memberId: urlMemberId }, isDbError ? 'Database unavailable updating member' : 'Unexpected error updating member');
     return NextResponse.json({ error: isDbError ? 'Database unavailable' : 'Internal Server Error' }, { status: isDbError ? 503 : 500 });
   }
@@ -122,6 +123,12 @@ export const DELETE = wrapPiiRoute(async (request, _decryptedBody, params) => {
   }
 
   const session = authResult.session!;
+
+  // Rate limit admin write operations by session
+  if (!checkAdminRateLimit(session.user.id)) {
+    logger.warn({ userId: session.user.id }, 'Admin write rate limited');
+    return NextResponse.json({ error: 'rate_limited' }, { status: 429 });
+  }
 
   // Extract orgId and memberId from route params (provided by wrapPiiRoute)
   const urlOrgId = params?.orgId;
@@ -169,7 +176,7 @@ export const DELETE = wrapPiiRoute(async (request, _decryptedBody, params) => {
     logger.info({ userId: session.user.id, orgId: urlOrgId, memberId: urlMemberId }, 'Removed member from tenant organization');
     return NextResponse.json({ message: 'Member removed successfully' });
   } catch (error) {
-    const isDbError = error instanceof Error && error.message.includes('Can\'t reach database server');
+    const isDbError = error instanceof Error && error.message.includes("Can't reach database server");
     logger.error({ err: error, orgId: urlOrgId, memberId: urlMemberId }, isDbError ? 'Database unavailable removing member' : 'Unexpected error removing member');
     return NextResponse.json({ error: isDbError ? 'Database unavailable' : 'Internal Server Error' }, { status: isDbError ? 503 : 500 });
   }

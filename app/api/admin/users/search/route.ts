@@ -11,6 +11,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import tenantDb from '@/lib/tenant-db';
 import { requireSuperAdmin } from '@/lib/require-super-admin';
+import { checkAdminRateLimit } from '@/lib/rate-limiter';
 import { logger } from '@/lib/logger';
 import { wrapPiiRoute } from '@/lib/payload-middleware';
 
@@ -42,6 +43,11 @@ export const GET = wrapPiiRoute(async (request) => {
   }
 
   const session = authResult.session!;
+
+    // Rate limit admin operations by session
+    if (!checkAdminRateLimit(session.user.id)) {
+      return NextResponse.json({ error: 'rate_limited' }, { status: 429 });
+    }
 
   try {
     const url = new URL(request.url);
@@ -99,7 +105,7 @@ export const GET = wrapPiiRoute(async (request) => {
     return NextResponse.json({ results, total });
 
   } catch (error) {
-    const isDbError = error instanceof Error && error.message.includes('Can\'t reach database server');
+    const isDbError = error instanceof Error && error.message.includes("Can't reach database server");
     logger.error(
       { err: error, route: '/api/admin/users/search', method: 'GET' },
       isDbError ? 'Database unavailable in user search' : 'Unexpected error in user search'

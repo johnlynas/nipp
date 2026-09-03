@@ -14,6 +14,7 @@ import { requireSuperAdmin } from '@/lib/require-super-admin';
 import { recordAuditLog } from '@/lib/audit-log';
 import { logger } from '@/lib/logger';
 import { wrapPiiRoute, PiiRouteParams } from '@/lib/payload-middleware';
+import { checkAdminRateLimit } from '@/lib/rate-limiter';
 
 export const runtime = 'nodejs';
 export const revalidate = 0;
@@ -40,6 +41,12 @@ export const PATCH = wrapPiiRoute(async (request, decryptedBody, params) => {
   }
 
   const session = authResult.session!;
+
+  // Rate limit admin write operations by session
+  if (!checkAdminRateLimit(session.user.id)) {
+    logger.warn({ userId: session.user.id }, 'Admin write rate limited');
+    return NextResponse.json({ error: 'rate_limited' }, { status: 429 });
+  }
 
   try {
     logger.info('[ORG_STATUS_API] PATCH request received');

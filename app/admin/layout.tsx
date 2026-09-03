@@ -5,10 +5,12 @@ import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import { authClient } from '@/lib/auth-client';
 import { RequireSuperAdmin } from '@/components/auth/RequireSuperAdmin';
+import { useNotifications, PRIORITY_COLORS, getPriorityIcon } from '@/hooks/useNotifications';
 
 export default function AdminLayout({ children }: { children: React.ReactNode }) {
   const router = useRouter();
   const pathname = usePathname();
+  const { notifications, isConnected, dismissNotification, clearNotifications } = useNotifications();
 
   const handleLogout = async () => {
     try {
@@ -80,6 +82,55 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
         <main className="flex-1 p-8 overflow-y-auto">
           <RequireSuperAdmin>{children}</RequireSuperAdmin>
         </main>
+
+        {/* Footer Notification Ticker — SSE live updates */}
+        <footer className="bg-[#1B2A4A] border-t px-6 py-3 overflow-x-auto whitespace-nowrap" style={{ borderColor: '#24355c' }}>
+          <div className="flex items-center gap-4">
+            {/* Connection status indicator */}
+            <div className="flex items-center gap-2 flex-shrink-0">
+              <div className={`w-2 h-2 rounded-full ${isConnected ? 'bg-green-400' : 'bg-red-400 animate-pulse'}`} />
+              <span className="text-xs text-gray-400">{isConnected ? 'Live' : 'Reconnecting...'}</span>
+            </div>
+
+            {/* Divider */}
+            <div className="w-px h-4 bg-gray-600" />
+
+            {/* Notification items — ticker style */}
+            {notifications.length > 0 ? (
+              <div className="flex items-center gap-6 overflow-x-auto flex-1">
+                {notifications.map((notif) => (
+                  <div
+                    key={notif.id}
+                    className={`flex items-center gap-2 px-3 py-1 rounded text-sm border ${PRIORITY_COLORS[notif.priority] || PRIORITY_COLORS.INFO}`}
+                  >
+                    <span className="text-xs">{getPriorityIcon(notif.priority)}</span>
+                    <span className="font-medium truncate max-w-[200px]">{notif.title}</span>
+                    <button
+                      onClick={() => dismissNotification(notif.id)}
+                      className="ml-1 text-current opacity-50 hover:opacity-100"
+                      aria-label="Dismiss notification"
+                    >
+                      ✕
+                    </button>
+                  </div>
+                ))}
+              </div>
+            ) : (
+              <span className="text-xs text-gray-500 italic">No active notifications</span>
+            )}
+
+            {/* Clear all */}
+            {notifications.length > 0 && (
+              <button
+                onClick={clearNotifications}
+                className="text-xs text-gray-400 hover:text-white flex-shrink-0"
+                aria-label="Clear all notifications"
+              >
+                Clear all
+              </button>
+            )}
+          </div>
+        </footer>
       </div>
     </div>
   );

@@ -5,6 +5,7 @@ import { ServiceContext } from '@/lib/services/types';
 import { recordAuditLog } from '@/lib/audit-log';
 import { logger } from '@/lib/logger';
 import { wrapPiiRoute } from '@/lib/payload-middleware';
+import { checkAdminRateLimit } from '@/lib/rate-limiter';
 
 // Disable Next.js ISR caching — this is a dynamic admin API with query params
 export const dynamic = 'force-dynamic';
@@ -57,6 +58,12 @@ export const POST = wrapPiiRoute(async (request, decryptedBody) => {
   }
 
   const session = authResult.session!;
+
+  // Rate limit admin write operations by session
+  if (!checkAdminRateLimit(session.user.id)) {
+    logger.warn({ userId: session.user.id }, 'Admin write rate limited');
+    return NextResponse.json({ error: 'rate_limited' }, { status: 429 });
+  }
 
   try {
     logger.info({ route: '/api/admin/organizations', method: 'POST' }, 'Request received');

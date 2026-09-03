@@ -3,9 +3,10 @@
 import { useState, useMemo } from 'react';
 import { useRouter, usePathname } from 'next/navigation';
 import Link from 'next/link';
-import { Menu, X, UserRound, Building2, UsersRound, Shield, Key, Layers, LogOut, CalendarDays } from 'lucide-react';
+import { Menu, X, UserRound, Building2, UsersRound, Shield, Key, Layers, LogOut, CalendarDays, Bell, XCircle } from 'lucide-react';
 import { authClient } from '@/lib/auth-client';
 import { RequireSuperAdmin } from '@/components/auth/RequireSuperAdmin';
+import { useNotifications, PRIORITY_COLORS, getPriorityIcon } from '@/hooks/useNotifications';
 
 const navItems = [
   { href: '/dashboard/admin/users', label: 'Users', icon: UserRound },
@@ -14,6 +15,7 @@ const navItems = [
   { href: '/dashboard/admin/roles', label: 'Roles', icon: Shield },
   { href: '/dashboard/admin/permissions', label: 'Permissions', icon: Key },
   { href: '/dashboard/admin/resources', label: 'Resources', icon: Layers },
+  { href: '/dashboard/admin/notifications', label: 'Notifications', icon: Bell },
   { href: '/dashboard/admin/calendar', label: 'Calendar', icon: CalendarDays },
 ];
 
@@ -22,6 +24,7 @@ export default function AdminDashboardLayout({ children }: { children: React.Rea
   const router = useRouter();
   const pathname = usePathname();
   const isCalendarPage = useMemo(() => pathname === '/dashboard/admin/calendar', [pathname]);
+  const { notifications, isConnected, dismissNotification, clearNotifications } = useNotifications();
 
   const handleLogout = async () => {
     try {
@@ -120,6 +123,55 @@ export default function AdminDashboardLayout({ children }: { children: React.Rea
           <main className={`flex-1 min-h-0 min-w-0 ${isCalendarPage ? 'flex flex-col overflow-hidden' : 'p-6 overflow-y-auto'}`}>
             {children}
           </main>
+
+          {/* Footer Notification Ticker — always visible so connection status is apparent */}
+          <footer className="bg-[#1B2A4A] border-t px-6 py-3 overflow-x-auto whitespace-nowrap" style={{ borderColor: '#24355c' }}>
+              <div className="flex items-center gap-4">
+                {/* Connection status indicator */}
+                <div className="flex items-center gap-2 flex-shrink-0">
+                  <div className={`w-2 h-2 rounded-full ${isConnected ? 'bg-green-400' : 'bg-red-400 animate-pulse'}`} />
+                  <span className="text-xs text-gray-400">{isConnected ? 'Live' : 'Reconnecting...'}</span>
+                </div>
+
+                {/* Divider */}
+                <div className="w-px h-4 bg-gray-600" />
+
+                {/* Notification items — ticker style like stock quotes */}
+                {notifications.length > 0 ? (
+                  <div className="flex items-center gap-6 overflow-x-auto flex-1">
+                    {notifications.map((notif) => (
+                      <div
+                        key={notif.id}
+                        className={`flex items-center gap-2 px-3 py-1 rounded text-sm border ${PRIORITY_COLORS[notif.priority] || PRIORITY_COLORS.INFO}`}
+                      >
+                        <span className="text-xs">{getPriorityIcon(notif.priority)}</span>
+                        <span className="font-medium truncate max-w-[200px]">{notif.title}</span>
+                        <button
+                          onClick={() => dismissNotification(notif.id)}
+                          className="ml-1 text-current opacity-50 hover:opacity-100"
+                          aria-label="Dismiss notification"
+                        >
+                          <XCircle className="h-3 w-3" />
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                ) : (
+                  <span className="text-xs text-gray-500 italic">No active notifications</span>
+                )}
+
+                {/* Clear all */}
+                {notifications.length > 0 && (
+                  <button
+                    onClick={clearNotifications}
+                    className="text-xs text-gray-400 hover:text-white flex-shrink-0"
+                    aria-label="Clear all notifications"
+                  >
+                    Clear all
+                  </button>
+                )}
+              </div>
+            </footer>
         </div>
       </div>
     </RequireSuperAdmin>

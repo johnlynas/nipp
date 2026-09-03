@@ -9,6 +9,7 @@ import { auth } from '@/lib/auth';
 import { superAdminStorage } from '@/lib/global-db-guard';
 import { resolveTenantAccess } from '@/lib/tenant-access';
 import { CalendarEventService } from '@/services/calendar-event-service';
+import { checkCalendarRateLimit } from '@/lib/rate-limiter';
 
 export const runtime = 'nodejs';
 
@@ -24,6 +25,11 @@ export async function GET(
 
   if (!session?.user) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+  }
+
+  // Rate limit operations by session
+  if (!checkCalendarRateLimit(session.user.id)) {
+    return NextResponse.json({ error: 'rate_limited' }, { status: 429 });
   }
 
   const orgId = (await params).orgId;

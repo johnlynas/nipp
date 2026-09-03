@@ -1,4 +1,4 @@
-import { PrismaClient } from '@prisma/client';
+import { PrismaClient, type NotificationPriority, type NotificationScope } from '@prisma/client';
 import { hashPassword } from 'better-auth/crypto';
 
 const prisma = new PrismaClient();
@@ -191,6 +191,121 @@ async function addUserToTeam(userId: string, teamId: string, orgId: string): Pro
       }
     }
   }
+}
+
+/**
+ * Seeding helper — idempotently create a persisted SSE Notification (in-app
+ * event). Dedupe key: scope + organizationId + title, mirroring the ad-hoc
+ * shapes in pushNotification (lib/notification-push.ts) and notifyAdminMessage.
+ */
+async function seedNotificationEvent(params: {
+  scope: NotificationScope;
+  organizationId?: string | null;
+  teamSlug: string;
+  title: string;
+  message: string;
+  priority: NotificationPriority;
+  source: string;
+  ageMinutesAgo: number;
+}): Promise<boolean> {
+  const existing = await prisma.notification.findFirst({
+    where: {
+      scope: params.scope,
+      organizationId: params.organizationId ?? null,
+      title: params.title,
+    },
+  });
+
+  if (existing) return false;
+
+  await prisma.notification.create({
+    data: {
+      title: params.title,
+      message: params.message,
+      priority: params.priority,
+      scope: params.scope,
+      source: params.source,
+      organizationId: params.organizationId ?? null,
+      acknowledged: false,
+      // Stagger timestamps so the admin log has history rather than a wall of now()
+      createdAt: new Date(Date.now() - params.ageMinutesAgo * 60 * 1000),
+    },
+  });
+
+  return true;
+}
+
+/**
+ * Seed 25 SSE events per tenant profile: 5 GLOBAL (broadcast) + 20 ORG-scoped
+ * (10 attributed to each of the two teams seeded for the tenant org).
+ * Idempotent: dedupes on scope + org + title; returns number of rows created.
+ */
+async function seedNotificationEvents(
+  platformOrgId: string,
+  tenantOrgs: Array<{ id: string; name: string; teamA: { slug: string; label: string }; teamB: { slug: string; label: string } }>,
+): Promise<number> {
+  let created = 0;
+  const baseMin = 40;
+
+  // --- 5 GLOBAL events (broadcast to all subscribers; org id retained for admin log) ---
+  const globalEvents = [
+    { title: 'Scheduled maintenance window', message: 'Platform maintenance is scheduled for this Sunday 02:00–04:00. Sign-ins may be temporarily unavailable.', priority: 'WARNING' as NotificationPriority, source: 'platform:maintenance', orgId: null, age: baseMin },
+    { title: 'TLS certificate renewal pending', message: 'The edge certificate for api.nipp.gov.uk expires in 7 days. Auto-renewal is queued but requires admin approval.', priority: 'ERROR' as NotificationPriority, source: 'platform:certs', orgId: null, age: baseMin + 2 },
+    { title: 'Database restored', message: 'Database connectivity has been restored after a 4-minute outage.', priority: 'INFO' as NotificationPriority, source: 'health-check:database', orgId: null, age: baseMin + 35 },
+    { title: 'New sign-in policy enforced', message: 'Password minimum length raised to 12 characters. Affected members will be prompted at next login.', priority: 'INFO' as NotificationPriority, source: 'admin:message', orgId: platformOrgId, age: baseMin + 90 },
+    { title: 'Redis cache connection lost', message: 'Cache is unavailable. The system will fall back to direct database queries.', priority: 'WARNING' as NotificationPriority, source: 'health-check:cache', orgId: null, age: baseMin + 140 },
+  ];
+
+  for (const e of globalEvents) {
+    if (await seedNotificationEvent({ scope: 'GLOBAL', organizationId: e.orgId, teamSlug: 'platform', title: e.title, message: e.message, priority: e.priority, source: e.source, ageMinutesAgo: e.age })) created++;
+  }
+
+  // --- ORG-scoped events per tenant org (20 per org = 25 total with 5 global) ---
+  for (const org of tenantOrgs) {
+    const opsLabel = org.teamA.label; // Operations-like team
+    const membersLabel = org.teamB.label; // Members team
+
+    // 10 events attributed to the operations-flavoured team + 10 to the Members team.
+    const orgEvents: Array<{ title: string; message: string; priority: NotificationPriority; source: string; team: string | null; age: number }> = [
+      // --- Team A (operations) — 10 events ---
+      { title: 'Lease renewal due', message: `A lease under ${opsLabel} management expires within 14 days. Please schedule the renewal before occupancy lapses.`, priority: 'WARNING', source: 'admin:message', team: org.teamA.slug, age: baseMin },
+      { title: 'Emergency repair logged', message: `HVAC failure reported at the Ballymoney portfolio site. ${opsLabel} has been paged and on-site contractor requested.`, priority: 'CRITICAL', source: 'properties:incident', team: org.teamA.slug, age: baseMin + 1 },
+      { title: 'Rent arrears alert', message: `Three tenancies assigned to ${opsLabel} are 30+ days in arrears. Collection review required this week.`, priority: 'WARNING', source: 'payments:arrears', team: org.teamA.slug, age: baseMin + 8 },
+      { title: 'Inspection scheduled', message: `Quarterly compliance inspection confirmed for the Derry portfolio block. ${opsLabel} to accompany the inspector.`, priority: 'INFO', source: 'calendar:inspection', team: org.teamA.slug, age: baseMin + 15 },
+      { title: 'Key exchange completed', message: `Keys returned for 4 Antrim Road, Unit 2. Handed over by ${opsLabel} during the midday window.`, priority: 'INFO', source: 'properties:key-exchange', team: org.teamA.slug, age: baseMin + 30 },
+      { title: 'Work order closed', message: `Leaking pipe at 12 High St resolved by ${opsLabel}. Follow-up check booked for Friday.`, priority: 'INFO', source: 'maintenance:closed', team: org.teamA.slug, age: baseMin + 45 },
+      { title: 'Team role change effective', message: `${opsLabel}: senior manager role now includes lease-signing authority for renewals under 12 months.`, priority: 'WARNING', source: 'rbac:role-change', team: org.teamA.slug, age: baseMin + 48 },
+      { title: 'Rent statement batch issued', message: `Rent statements prepared by ${opsLabel} for the current billing cycle issued to all tenancies in ${org.name}.`, priority: 'INFO', source: 'payments:statements', team: org.teamA.slug, age: baseMin + 33 },
+      { title: 'Vacant unit flagged', message: `Two units managed by ${opsLabel} marked vacant awaiting letting decisions. Marketing briefs queued.`, priority: 'WARNING', source: 'properties:vacancy', team: org.teamA.slug, age: baseMin + 80 },
+      { title: 'Upcoming lease review meeting', message: `Lease portfolio review for ${opsLabel} scheduled next Tuesday 10:00. Calendar invites sent to the team.`, priority: 'INFO', source: 'calendar:meeting', team: org.teamA.slug, age: baseMin + 46 },
+      // --- Team B (Members) — 10 events ---
+      { title: 'Team roster update', message: `${membersLabel} onboarding: two new members will be provisioned with Viewer access in the next 48 hours.`, priority: 'INFO', source: 'admin:message', team: org.teamB.slug, age: baseMin + 20 },
+      { title: 'New member invited', message: `Invitation sent for a new joiner to the ${membersLabel} team. They will receive Viewer access on acceptance.`, priority: 'INFO', source: 'team:invitation', team: org.teamB.slug, age: baseMin + 25 },
+      { title: 'Members team policy reminder', message: `${membersLabel}: data retention policy refresher due by end of month — completion tracked in settings.`, priority: 'WARNING', source: 'admin:message', team: org.teamB.slug, age: baseMin + 55 },
+      { title: 'Portfolio occupancy report ready', message: `Monthly occupancy report collated by ${membersLabel} for ${org.name}. Available in the Reports module.`, priority: 'INFO', source: 'reports:generated', team: org.teamB.slug, age: baseMin + 10 },
+      { title: 'Document retention sweep completed', message: `${membersLabel} archived documents over 5 years flagged for purging in ${org.name}. Purge window opens next quarter.`, priority: 'WARNING', source: 'documents:retention', team: org.teamB.slug, age: baseMin + 22 },
+      { title: 'Security notice: failed logins', message: `Multiple failed sign-in attempts detected for ${membersLabel} admin accounts in ${org.name}. Password review recommended.`, priority: 'CRITICAL', source: 'security:failed-logins', team: org.teamB.slug, age: baseMin + 120 },
+      { title: 'Onboarding checklist completed', message: `${membersLabel} welcome pack issued to this week's new joiners — access requests pending final approval.`, priority: 'INFO', source: 'team:onboarding', team: org.teamB.slug, age: baseMin + 65 },
+      { title: 'Members meeting minutes published', message: `${membersLabel} weekly sync notes are available in the shared drive. Action items assigned.`, priority: 'INFO', source: 'team:meeting', team: org.teamB.slug, age: baseMin + 95 },
+      { title: 'Access request approved', message: `A pending read access request for ${membersLabel} was approved by an organization admin.`, priority: 'INFO', source: 'rbac:access-granted', team: org.teamB.slug, age: baseMin + 105 },
+      { title: 'Training completion report', message: `${membersLabel}: compliance training at 92% completion for ${org.name}. Reminders sent to outstanding members.`, priority: 'WARNING', source: 'team:training', team: org.teamB.slug, age: baseMin + 130 },
+    ];
+
+    for (const e of orgEvents) {
+      if (await seedNotificationEvent({
+        scope: 'ORG',
+        organizationId: org.id,
+        teamSlug: e.team ?? 'org-wide',
+        title: e.title,
+        message: e.message,
+        priority: e.priority,
+        source: e.source,
+        ageMinutesAgo: e.age,
+      })) created++;
+    }
+  }
+
+  return created;
 }
 
 async function main() {
@@ -907,6 +1022,24 @@ async function main() {
     });
   }
   console.log(`✅ Resource catalog overwritten/ensured: ${RESOURCES.length} resources`);
+
+  // =========================================================================
+  // 10.5. SSE NOTIFICATION EVENTS (IN-APP — GLOBAL + ORG-SCOPED)
+  // 25 events: 5 global broadcasts + 10 per seeded team (the two teams
+  // created for each tenant profile, e.g., Operations/QA Operations and
+  // Members). Idempotent — dedupes on scope + org + title.
+  // =========================================================================
+  const notificationTenantOrgs = [
+    ...(testTenantOrg
+      ? [{ id: testTenantOrg.id, name: 'Test Tenant Ltd', teamA: { slug: 'qa-operations', label: 'QA Operations' }, teamB: { slug: 'members', label: 'Members' } }]
+      : []),
+    ...(devTenantOrg
+      ? [{ id: devTenantOrg.id, name: 'Dev Tenant Ltd', teamA: { slug: 'operations', label: 'Operations' }, teamB: { slug: 'members', label: 'Members' } }]
+      : []),
+  ];
+
+  const notificationsCreated = await seedNotificationEvents(platformOrgId, notificationTenantOrgs);
+  console.log(`🔔 Seeded ${notificationsCreated} new SSE notification events (deduplicated on scope + org + title)`);
 
   // =========================================================================
   // 11. FINAL OUTPUT & INSTRUCTIONS

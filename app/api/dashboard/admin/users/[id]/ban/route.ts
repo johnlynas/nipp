@@ -1,5 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { requireSuperAdmin } from '@/lib/require-super-admin';
+import { checkAdminRateLimit } from '@/lib/rate-limiter';
+
 import globalDb from '@/lib/global-db';
 import { logger } from '@/lib/logger';
 
@@ -20,7 +22,11 @@ export async function POST(
 
   try {
     const id = (await params).id;
-    const body = await request.json();
+    if (!checkAdminRateLimit(auth.session!.user.id)) {
+    return NextResponse.json({'error': 'rate_limited'}, {status: 429});
+  }
+
+  const body = await request.json();
 
     const user = await globalDb.user.findUnique({ where: { id } });
     if (!user) {

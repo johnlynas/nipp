@@ -1,6 +1,9 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { requireSuperAdmin } from '@/lib/require-super-admin';
+import { checkAdminRateLimit } from '@/lib/rate-limiter';
+
 import { OrganizationService } from '@/services/organization-service';
+import { notifyOrganizationOperation } from '@/lib/notification-push';
 
 export const runtime = 'nodejs';
 
@@ -40,19 +43,44 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: auth.error }, { status: auth.status });
   }
 
+  // Rate limit write operations by session
+  if (!checkAdminRateLimit(auth.session!.user.id)) {
+    return NextResponse.json({ error: 'rate_limited' }, { status: 429 });
+  }
+
+  let body: { name?: string; slug?: string; description?: string | null };
   try {
-    const body = await request.json();
-    const result = await OrganizationService.createOrganization(body, {
-      userId: auth.session!.user.id,
-      role: 'PLATFORM_ADMIN',
-    });
+    body = await request.json();
+  } catch {
+    return NextResponse.json({ error: 'Invalid JSON body' }, { status: 400 });
+  }
+
+  const targetLabel = body.name ? `Organization "${body.name}"` : 'organization';
+
+  if (!body.name) {
+    return NextResponse.json({ error: 'Name is required' }, { status: 400 });
+  }
+
+  try {
+    const result = await OrganizationService.createOrganization(
+      { name: body.name, slug: body.slug, description: body.description },
+      {
+        userId: auth.session!.user.id,
+        role: 'PLATFORM_ADMIN',
+      }
+    );
+
+    await notifyOrganizationOperation('create', targetLabel, true, undefined, result.id);
 
     return NextResponse.json(result, { status: 201 });
   } catch (error) {
     if (error instanceof Error && error.message === 'An organization with this name already exists') {
+      await notifyOrganizationOperation('create', targetLabel, false, error.message);
       return NextResponse.json({ error: error.message }, { status: 409 });
     }
     console.error('Failed to create organization:', error);
+    const message = error instanceof Error && error.message ? error.message : 'Failed to create organization';
+    await notifyOrganizationOperation('create', targetLabel, false, message);
     return NextResponse.json({ error: 'Failed to create organization' }, { status: 500 });
   }
 }

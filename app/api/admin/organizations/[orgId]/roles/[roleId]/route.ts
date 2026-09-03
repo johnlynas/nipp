@@ -13,6 +13,7 @@ import tenantDb from '@/lib/tenant-db';
 import { runWithTenant } from '@/lib/tenant-context';
 import { recordAuditLog } from '@/lib/audit-log';
 import { logger } from '@/lib/logger';
+import { checkAdminRateLimit } from '@/lib/rate-limiter';
 
 export const runtime = 'nodejs';
 export const revalidate = 30;
@@ -31,6 +32,13 @@ export async function PATCH(
   }
 
   const session = authResult.session!;
+
+  // Rate limit admin write operations by session
+  if (!checkAdminRateLimit(session.user.id)) {
+    logger.warn({ userId: session.user.id }, 'Admin write rate limited');
+    return NextResponse.json({ error: 'rate_limited' }, { status: 429 });
+  }
+
   const { orgId, roleId } = await params;
 
   let body: { name?: string; description?: string };
@@ -83,7 +91,7 @@ export async function PATCH(
     logger.info({ userId: session.user.id, orgId, roleId }, 'Updated role in tenant organization');
     return NextResponse.json({ message: 'Role updated', role: updatedRole });
   } catch (error) {
-    const isDbError = error instanceof Error && error.message.includes('Can\'t reach database server');
+    const isDbError = error instanceof Error && error.message.includes("Can't reach database server");
     logger.error({ err: error, orgId, roleId }, isDbError ? 'Database unavailable updating role' : 'Unexpected error updating role');
     return NextResponse.json({ error: isDbError ? 'Database unavailable' : 'Internal Server Error' }, { status: isDbError ? 503 : 500 });
   }
@@ -103,6 +111,13 @@ export async function DELETE(
   }
 
   const session = authResult.session!;
+
+  // Rate limit admin write operations by session
+  if (!checkAdminRateLimit(session.user.id)) {
+    logger.warn({ userId: session.user.id }, 'Admin write rate limited');
+    return NextResponse.json({ error: 'rate_limited' }, { status: 429 });
+  }
+
   const { orgId, roleId } = await params;
 
   try {
@@ -149,7 +164,7 @@ export async function DELETE(
     logger.info({ userId: session.user.id, orgId, roleId }, 'Deleted role from tenant organization');
     return NextResponse.json({ message: 'Role deleted successfully' });
   } catch (error) {
-    const isDbError = error instanceof Error && error.message.includes('Can\'t reach database server');
+    const isDbError = error instanceof Error && error.message.includes("Can't reach database server");
     logger.error({ err: error, orgId, roleId }, isDbError ? 'Database unavailable deleting role' : 'Unexpected error deleting role');
     return NextResponse.json({ error: isDbError ? 'Database unavailable' : 'Internal Server Error' }, { status: isDbError ? 503 : 500 });
   }

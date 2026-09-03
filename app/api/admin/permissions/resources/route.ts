@@ -7,6 +7,7 @@
 import { NextResponse } from 'next/server';
 import globalDb from '@/lib/global-db';
 import { requireSuperAdmin } from '@/lib/require-super-admin';
+import { checkAdminRateLimit } from '@/lib/rate-limiter';
 import { wrapPiiRoute } from '@/lib/payload-middleware';
 
 export const dynamic = 'force-dynamic';
@@ -17,6 +18,11 @@ export const GET = wrapPiiRoute(async (request) => {
     const authResult = await requireSuperAdmin(request.headers);
     if (!authResult.authorized) {
       return NextResponse.json({ error: authResult.error || 'Unauthorized' }, { status: authResult.status });
+    }
+
+    // Rate limit admin operations by session
+    if (!checkAdminRateLimit(authResult.session!.user.id)) {
+      return NextResponse.json({ error: 'rate_limited' }, { status: 429 });
     }
 
     const resources = await globalDb.permission.findMany({

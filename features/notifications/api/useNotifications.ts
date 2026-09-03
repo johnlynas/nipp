@@ -1,5 +1,5 @@
 import { useQuery, useQueryClient } from '@tanstack/react-query';
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useCallback } from 'react';
 import { notificationKeys } from './notification.keys';
 
 export interface Notification {
@@ -26,6 +26,16 @@ async function fetchUnreadCount(): Promise<number> {
   return response.json();
 }
 
+/**
+ * Inbox notifications hook (NotificationBell / NotificationDropdown).
+ *
+ * Uses React Query polling for eventual consistency.
+ *
+ * NOTE: Real-time SSE push is handled by the singleton `@/hooks/useNotifications`
+ * (the system ticker). This hook intentionally does NOT open its own SSE connection
+ * to avoid duplicate connections that trigger 429 (Too Many Requests) errors
+ * against the per-user connection cap.
+ */
 export const useNotifications = () => {
   const queryClient = useQueryClient();
   const [isWindowFocused, setIsWindowFocused] = useState(true);
@@ -44,61 +54,27 @@ export const useNotifications = () => {
     };
   }, []);
 
-  // --- SSE BRIDGE: Real-time Injection ---
-  useEffect(() => {
-    // Only connect if window is focused to prevent stale/useless connections in background
-    if (!isWindowFocused) return;
-
-    const eventSource = new EventSource('/api/notifications/stream');
-
-    eventSource.onmessage = (event) => {
-      try {
-        const newNotification: Notification = JSON.parse(event.data);
-
-        // 1. Inject into the Notifications List cache
-        queryClient.setQueryData(notificationKeys.list({}), (old: Notification[] | undefined) => {
-          if (!old) return [newNotification];
-          // Prepend the new notification to the top of the list
-          return [newNotification, ...old];
-        });
-
-        // 2. Increment the Unread Count cache (Optimistic update for the count)
-        queryClient.setQueryData(notificationKeys.unreadCount(), (old: number | undefined) => {
-          return (old ?? 0) + 1;
-        });
-
-      } catch (error) {
-        console.error('Failed to parse SSE notification:', error);
-      }
-    };
-
-    eventSource.onerror = (error) => {
-      console.error('SSE connection error:', error);
-      eventSource.close();
-    };
-
-    return () => {
-      eventSource.close();
-    };
-  }, [isWindowFocused, queryClient]);
-
-  // 1. Main Notifications List Hook (Uses Polling as fallback/sync)
+  // 1. Main Notifications List Hook (Polling-based)
   const notificationsQuery = useQuery({
     queryKey: notificationKeys.list({}),
     queryFn: fetchNotifications,
-    // We keep polling at a very slow rate now (e.g., 60s) because SSE handles the 'push'
-    // This acts as a safety net to ensure eventual consistency if a socket event was missed.
-    refetchInterval: isWindowFocused ? 60000 : 0,
-    refetchOnWindowFocus: true, 
+    // Poll every 30s when focused, 0 when not focused
+    refetchInterval: isWindowFocused ? 30000 : 0,
+    refetchOnWindowFocus: true,
   });
 
-  // 2. Unread Count Hook (Lightweight)
+  // 2. Unread Count Hook (Lightweight polling)
   const unreadCountQuery = useQuery({
     queryKey: notificationKeys.unreadCount(),
     queryFn: fetchUnreadCount,
-    refetchInterval: isWindowFocused ? 60000 : 0,
+    refetchInterval: isWindowFocused ? 30000 : 0,
     refetchOnWindowFocus: true,
   });
+
+  // Invalidate caches to force refetch (for use after marking as read, etc.)
+  const refresh = useCallback(() => {
+    queryClient.invalidateQueries({ queryKey: notificationKeys.all });
+  }, [queryClient]);
 
   return {
     notifications: notificationsQuery.data ?? [],
@@ -106,5 +82,6 @@ export const useNotifications = () => {
     isError: notificationsQuery.isError,
     unreadCount: unreadCountQuery.data ?? 0,
     isPolling: isWindowFocused,
+    refresh,
   };
 };

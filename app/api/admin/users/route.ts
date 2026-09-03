@@ -12,6 +12,7 @@ import { ServiceContext } from '@/lib/services/types';
 import { recordAuditLog } from '@/lib/audit-log';
 import { logger } from '@/lib/logger';
 import { wrapPiiRoute } from '@/lib/payload-middleware';
+import { checkAdminRateLimit } from '@/lib/rate-limiter';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -51,7 +52,7 @@ export const GET = wrapPiiRoute(async (request) => {
       headers: { 'Cache-Control': 'no-store, no-cache, must-revalidate' },
     });
   } catch (error) {
-    const isDbError = error instanceof Error && error.message.includes('Can\'t reach database server');
+    const isDbError = error instanceof Error && error.message.includes("Can't reach database server");
     logger.error({ err: error, route: '/api/admin/users', method: 'GET' }, isDbError ? '[Users API] Database unavailable' : '[Users API] Unexpected error');
     return NextResponse.json({ error: isDbError ? 'Database unavailable' : 'Internal server error' }, { status: isDbError ? 503 : 500 });
   }
@@ -71,6 +72,12 @@ export const POST = wrapPiiRoute(async (request, decryptedBody) => {
     }
 
     const session = authResult.session!;
+
+    // Rate limit admin write operations by session
+    if (!checkAdminRateLimit(session.user.id)) {
+      logger.warn({ userId: session.user.id }, 'Admin write rate limited');
+      return NextResponse.json({ error: 'rate_limited' }, { status: 429 });
+    }
 
     // Parse body from decrypted payload or raw JSON
     let body: CreateUserInput;
@@ -121,7 +128,7 @@ export const POST = wrapPiiRoute(async (request, decryptedBody) => {
     if (error instanceof Error && error.message === 'A user with this email already exists') {
       return NextResponse.json({ error: 'A user with this email already exists' }, { status: 409 });
     }
-    const isDbError = error instanceof Error && error.message.includes('Can\'t reach database server');
+    const isDbError = error instanceof Error && error.message.includes("Can't reach database server");
     logger.error({ err: error, route: '/api/admin/users', method: 'POST' }, isDbError ? '[Users API] Database unavailable' : '[Users API] Unexpected error');
     return NextResponse.json({ error: isDbError ? 'Database unavailable' : 'Internal server error' }, { status: isDbError ? 503 : 500 });
   }

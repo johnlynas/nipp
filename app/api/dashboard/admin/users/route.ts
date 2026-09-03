@@ -1,7 +1,10 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { requireSuperAdmin } from '@/lib/require-super-admin';
+import { checkAdminRateLimit } from '@/lib/rate-limiter';
+
 import { UserService } from '@/services/user-service';
 import { TeamService } from '@/services/team-service';
+import { notifyUserOperation } from '@/lib/notification-push';
 import globalDb from '@/lib/global-db';
 import type { Prisma } from '@prisma/client';
 
@@ -113,18 +116,37 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: auth.error }, { status: auth.status });
   }
 
+  // Rate limit write operations by session
+  if (!checkAdminRateLimit(auth.session!.user.id)) {
+    return NextResponse.json({ error: 'rate_limited' }, { status: 429 });
+  }
+
+  let body: { name?: string; email?: string; password?: string; organizationId?: string };
   try {
-    const body = await request.json();
-    const organizationId = body.organizationId;
+    body = await request.json();
+  } catch {
+    return NextResponse.json({ error: 'Invalid JSON body' }, { status: 400 });
+  }
 
-    if (!organizationId) {
-      return NextResponse.json({ error: 'Organization is required' }, { status: 400 });
-    }
+  const organizationId = body.organizationId;
+  const targetLabel = body.email ? `${body.name ?? 'Unknown'} (${body.email})` : 'unknown user';
 
-    const result = await UserService.create(body, {
-      userId: auth.session!.user.id,
-      role: 'PLATFORM_ADMIN',
-    });
+  if (!organizationId) {
+    return NextResponse.json({ error: 'Organization is required' }, { status: 400 });
+  }
+
+  if (!body.name || !body.email) {
+    return NextResponse.json({ error: 'Name and email are required' }, { status: 400 });
+  }
+
+  try {
+    const result = await UserService.create(
+      { name: body.name, email: body.email, password: body.password, organizationId },
+      {
+        userId: auth.session!.user.id,
+        role: 'PLATFORM_ADMIN',
+      }
+    );
 
     // Auto-add user to the "Members" team in their organization
     const membersTeam = await globalDb.team.findFirst({
@@ -145,12 +167,17 @@ export async function POST(request: NextRequest) {
       console.warn('Members team not found for organization', organizationId);
     }
 
+    await notifyUserOperation('create', targetLabel, true, undefined, organizationId);
+
     return NextResponse.json(result, { status: 201 });
   } catch (error) {
     if (error instanceof Error && error.message === 'A user with this email already exists') {
+      await notifyUserOperation('create', targetLabel, false, error.message, organizationId);
       return NextResponse.json({ error: error.message }, { status: 409 });
     }
     console.error('Failed to create user:', error);
+    const message = error instanceof Error && error.message ? error.message : 'Failed to create user';
+    await notifyUserOperation('create', targetLabel, false, message, organizationId);
     return NextResponse.json({ error: 'Failed to create user' }, { status: 500 });
   }
 }

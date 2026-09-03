@@ -14,6 +14,7 @@ import { logger } from '@/lib/logger';
 import { wrapPiiRoute } from '@/lib/payload-middleware';
 import { env } from '@/lib/env';
 import globalDb from '@/lib/global-db';
+import { checkAdminRateLimit } from '@/lib/rate-limiter';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -80,7 +81,7 @@ export const GET = wrapPiiRoute(async (request) => {
       headers: { 'Cache-Control': 'no-store, no-cache, must-revalidate' },
     });
   } catch (error) {
-    const isDbError = error instanceof Error && error.message.includes('Can\'t reach database server');
+    const isDbError = error instanceof Error && error.message.includes("Can't reach database server");
     logger.error({ err: error, route: '/api/admin/roles', method: 'GET' }, isDbError ? '[Roles API] Database unavailable' : '[Roles API] Unexpected error');
     return NextResponse.json({ error: isDbError ? 'Database unavailable' : 'Internal server error' }, { status: isDbError ? 503 : 500 });
   }
@@ -100,6 +101,12 @@ export const POST = wrapPiiRoute(async (request, decryptedBody) => {
     }
 
     const session = authResult.session!;
+
+    // Rate limit admin write operations by session
+    if (!checkAdminRateLimit(session.user.id)) {
+      logger.warn({ userId: session.user.id }, 'Admin write rate limited');
+      return NextResponse.json({ error: 'rate_limited' }, { status: 429 });
+    }
 
     // Parse body from decrypted payload or raw JSON
     let body: CreateRoleInput;
@@ -153,7 +160,7 @@ export const POST = wrapPiiRoute(async (request, decryptedBody) => {
     if (error instanceof Error && error.name === 'ForbiddenError') {
       return NextResponse.json({ error: error.message }, { status: 403 });
     }
-    const isDbError = error instanceof Error && error.message.includes('Can\'t reach database server');
+    const isDbError = error instanceof Error && error.message.includes("Can't reach database server");
     logger.error({ err: error, route: '/api/admin/roles', method: 'POST' }, isDbError ? '[Roles API] Database unavailable' : '[Roles API] Unexpected error');
     return NextResponse.json({ error: isDbError ? 'Database unavailable' : 'Internal server error' }, { status: isDbError ? 503 : 500 });
   }

@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
 import globalDb from '@/lib/global-db';
 import { requireSuperAdmin } from '@/lib/require-super-admin';
+import { checkAdminRateLimit } from '@/lib/rate-limiter';
 import { headers as nextHeaders } from 'next/headers';
 
 // Disable caching — this is a dynamic admin API
@@ -18,6 +19,11 @@ export async function GET() {
     const authResult = await requireSuperAdmin(await nextHeaders());
     if (!authResult.authorized) {
       return NextResponse.json({ error: authResult.error || 'Unauthorized' }, { status: authResult.status });
+    }
+
+    // Rate limit admin operations by session
+    if (!checkAdminRateLimit(authResult.session!.user.id)) {
+      return NextResponse.json({ error: 'rate_limited' }, { status: 429 });
     }
 
     const organizations = await globalDb.organization.findMany({

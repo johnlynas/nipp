@@ -13,6 +13,7 @@ import tenantDb from '@/lib/tenant-db';
 import { recordAuditLog } from '@/lib/audit-log';
 import { getClientIp } from '@/lib/ip';
 import { isSameSiteRequest } from '@/lib/csrf';
+import { checkAdminRateLimit } from '@/lib/rate-limiter';
 
 export const runtime = 'nodejs';
 
@@ -36,6 +37,11 @@ export async function DELETE(
 
   if (!session?.user) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+  }
+
+  // Rate limit write operations by session
+  if (!checkAdminRateLimit(session.user.id)) {
+    return NextResponse.json({ error: 'rate_limited' }, { status: 429 });
   }
 
   const { roleId } = await params;

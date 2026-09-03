@@ -5,14 +5,18 @@
 import { describe, it, expect } from 'vitest';
 
 describe('Notification Dispatcher — Rate Limiting', () => {
-  it('should define rate limit of max 5 per event type per 24h', async () => {
+  it('should define rate limit of max 5 per event type per 24h (configurable via env)', async () => {
     const fs = await import('fs');
     const path = await import('path');
     const eventsPath = path.join(process.cwd(), 'lib/notifications/events.ts');
     const content = fs.readFileSync(eventsPath, 'utf-8');
 
-    expect(content).toContain('maxPerWindow: 5');
-    expect(content).toContain('windowHours: 24');
+    // Values are now read from env vars with defaults — verify the pattern exists
+    expect(content).toContain('RATE_LIMIT_NOTIFICATION_MAX');
+    expect(content).toContain('RATE_LIMIT_NOTIFICATION_WINDOW_HOURS');
+    // Verify defaults match the original hardcoded values
+    expect(content).toContain('?? 5');
+    expect(content).toContain('?? 24');
   });
 
   it('should check rate limits before sending', async () => {

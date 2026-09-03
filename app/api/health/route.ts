@@ -1,12 +1,34 @@
 import tenantDb from '@/lib/tenant-db';
 import { getRedis, forceRedisReconnect } from '@/lib/redis';
 import { addSystemLog, getPreviousHealthState, updateHealthState } from '@/lib/system-logs';
+import { notifyHealthCheck } from '@/lib/notification-push';
 import { PgBouncerMonitor } from '@/lib/pgbouncer-monitor';
+import globalDb from '@/lib/global-db';
+import { env } from '@/lib/env';
 import { NextResponse } from 'next/server';
+
+/** Resolve the platform organization ID at runtime. */
+async function getPlatformOrgId(): Promise<string | null> {
+  // Prefer the pinned env value
+  if (env.PLATFORM_ORGANIZATION_ID) return env.PLATFORM_ORGANIZATION_ID;
+  // Fall back to a DB lookup (single query, cheap)
+  try {
+    const org = await globalDb.organization.findFirst({
+      where: { slug: 'platform' },
+      select: { id: true },
+    });
+    return org?.id ?? null;
+  } catch {
+    return null;
+  }
+}
 
 export async function GET() {
   const checks: Record<string, { status: string; latency_ms?: number; error?: string; message?: string; total_connections?: number }> = {};
   let overallStatus = 'healthy';
+
+  // Resolve platform org ID once — used as the source for all health notifications
+  const platformOrgId = await getPlatformOrgId();
 
   // Get previous state
   const prevState = getPreviousHealthState();
@@ -17,7 +39,7 @@ export async function GET() {
     await tenantDb.$queryRaw`SELECT 1`;
     checks.database = { status: 'healthy', latency_ms: Date.now() - dbStart };
     
-    // Log recovery if it was previously down
+    // Notify on state transitions (up or down)
     if (prevState.database === 'unhealthy') {
       addSystemLog({
         level: 'info',
@@ -25,13 +47,17 @@ export async function GET() {
         message: 'Database connectivity restored',
         details: `Database is now healthy (latency: ${checks.database.latency_ms}ms)`,
       });
+      await notifyHealthCheck('database', true, platformOrgId);
+    } else if (prevState.database !== 'healthy') {
+      // First healthy check after boot — notify so admins know DB is up
+      await notifyHealthCheck('database', true, platformOrgId);
     }
   } catch (error) {
     const errorMessage = error instanceof Error ? error.message : String(error);
     checks.database = { status: 'unhealthy', error: 'Database connection failed' };
     overallStatus = 'unhealthy';
     
-    // Only log if state changed from healthy to unhealthy
+    // Notify on first failure (deduplicated by prev state)
     if (prevState.database !== 'unhealthy') {
       addSystemLog({
         level: 'error',
@@ -39,6 +65,7 @@ export async function GET() {
         message: 'Database connectivity check failed',
         details: errorMessage,
       });
+      await notifyHealthCheck('database', false, platformOrgId);
     }
   }
 
@@ -65,7 +92,7 @@ export async function GET() {
       
       checks.cache = { status: 'healthy', latency_ms: Date.now() - cacheStart };
       
-      // Log recovery if it was previously down
+      // Notify on state transitions (up or down)
       if (prevState.cache === 'unhealthy') {
         addSystemLog({
           level: 'info',
@@ -73,6 +100,10 @@ export async function GET() {
           message: 'Cache connectivity restored',
           details: `Cache is now healthy (latency: ${checks.cache.latency_ms}ms)`,
         });
+        await notifyHealthCheck('cache', true, platformOrgId);
+      } else if (prevState.cache !== 'healthy') {
+        // First healthy check after boot
+        await notifyHealthCheck('cache', true, platformOrgId);
       }
     } else {
       checks.cache = { status: 'skipped', message: 'Cache not configured' };
@@ -84,7 +115,7 @@ export async function GET() {
       overallStatus = 'degraded';
     }
     
-    // Only log if state changed from healthy to unhealthy
+    // Notify on first failure (deduplicated by prev state)
     if (prevState.cache !== 'unhealthy') {
       addSystemLog({
         level: 'error',
@@ -92,6 +123,7 @@ export async function GET() {
         message: 'Cache connectivity check failed',
         details: errorMessage,
       });
+      await notifyHealthCheck('cache', false, platformOrgId);
     }
   }
 
@@ -113,6 +145,7 @@ export async function GET() {
       total_connections: health.totalConnections,
     };
 
+    // Notify on state transitions (up or down)
     if (prevState.pgbouncer === 'unhealthy') {
       addSystemLog({
         level: 'info',
@@ -120,17 +153,61 @@ export async function GET() {
         message: 'Connection pool connectivity restored',
         details: `Connection pool is now healthy (latency: ${checks["connection-pool"].latency_ms}ms)`,
       });
+      await notifyHealthCheck('pgbouncer', true, platformOrgId);
+    } else if (prevState.pgbouncer !== 'healthy') {
+      // First healthy check after boot
+      await notifyHealthCheck('pgbouncer', true, platformOrgId);
     }
   } catch (error) {
     const errorMessage = error instanceof Error ? error.message : String(error);
     checks["connection-pool"] = { status: 'unhealthy', error: 'Connection pool connection failed' };
     overallStatus = 'unhealthy';
 
+    // Notify on first failure (deduplicated by prev state)
     if (prevState.pgbouncer !== 'unhealthy') {
       addSystemLog({
         level: 'error',
         source: 'health-check:pgbouncer',
         message: 'Connection pool connectivity check failed',
+        details: errorMessage,
+      });
+      await notifyHealthCheck('pgbouncer', false, platformOrgId);
+    }
+  }
+
+  // SSE Endpoint Check (Non-critical, graceful degradation)
+  try {
+    const sseStart = Date.now();
+    // Quick probe: make a HEAD-like request to the SSE route to verify it's accepting connections
+    // We use fetch with a short timeout since SSE holds open connections
+    const sseResponse = await fetch(`${process.env.NEXT_PUBLIC_APP_URL || 'http://localhost:3000'}/api/notifications/stream`, {
+      headers: { 'Accept': 'text/event-stream' },
+      signal: AbortSignal.timeout(3000), // 3s timeout — don't wait for SSE to connect
+    });
+    
+    if (sseResponse.ok) {
+      checks.sse = { status: 'healthy', latency_ms: Date.now() - sseStart };
+    } else if (sseResponse.status === 401 || sseResponse.status === 503) {
+      // 401 = auth required (expected without credentials), 503 = at capacity
+      checks.sse = { status: 'degraded', latency_ms: Date.now() - sseStart, message: sseResponse.statusText };
+    } else {
+      checks.sse = { status: 'unhealthy', error: `SSE endpoint returned ${sseResponse.status}` };
+      overallStatus = 'unhealthy';
+    }
+  } catch (error) {
+    const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+    checks.sse = { status: 'unhealthy', error: `SSE endpoint check failed (${errorMessage})` };
+    if (overallStatus === 'healthy') {
+      overallStatus = 'degraded';
+    }
+    
+    // Only log if state changed from healthy to unhealthy
+    const prevSseHealthy = checks.sse?.status !== 'unhealthy';
+    if (prevSseHealthy) {
+      addSystemLog({
+        level: 'error',
+        source: 'health-check:sse',
+        message: 'SSE endpoint check failed',
         details: errorMessage,
       });
     }
