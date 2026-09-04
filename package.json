@@ -9,7 +9,7 @@
     "dev": "next dev",
     "dev:https": "next dev --experimental-https",
     "build": "next build",
-    "start": "tsx scripts/startup-health-check.ts && next start",
+    "start": "next start",
     "lint": "next lint",
     "type-check": "tsc --noEmit",
     "db:migrate": "prisma migrate dev",

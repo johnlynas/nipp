@@ -5,6 +5,9 @@ import { Providers } from './providers';
 import { InactivityTimeoutProvider } from '@/components/providers/InactivityTimeoutConfig';
 import { env } from '@/lib/env';
 
+// Start background health checks on first request (Node.js context — not Edge).
+import '@/lib/background-health-check';
+
 const inter = Inter({
   subsets: ['latin'],
   display: 'swap',
