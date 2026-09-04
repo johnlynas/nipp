@@ -39,17 +39,16 @@ export async function GET() {
     await tenantDb.$queryRaw`SELECT 1`;
     checks.database = { status: 'healthy', latency_ms: Date.now() - dbStart };
     
-    // Notify on state transitions (up or down)
-    if (prevState.database === 'unhealthy') {
+    // Notify on state transitions, or on first check if service was previously down
+    const isDbRecovery = prevState.database === 'unhealthy';
+    const isFirstCheckDbHealthy = prevState.database === null && checks.database.status === 'healthy';
+    if (isDbRecovery || isFirstCheckDbHealthy) {
       addSystemLog({
         level: 'info',
         source: 'health-check:database',
-        message: 'Database connectivity restored',
-        details: `Database is now healthy (latency: ${checks.database.latency_ms}ms)`,
+        message: isDbRecovery ? 'Database connectivity restored' : 'Database health check — initial state healthy',
+        details: isDbRecovery ? `Database is now healthy (latency: ${checks.database.latency_ms}ms)` : undefined,
       });
-      await notifyHealthCheck('database', true, platformOrgId);
-    } else if (prevState.database !== 'healthy') {
-      // First healthy check after boot — notify so admins know DB is up
       await notifyHealthCheck('database', true, platformOrgId);
     }
   } catch (error) {
@@ -57,8 +56,9 @@ export async function GET() {
     checks.database = { status: 'unhealthy', error: 'Database connection failed' };
     overallStatus = 'unhealthy';
     
-    // Notify on first failure (deduplicated by prev state)
-    if (prevState.database !== 'unhealthy') {
+    // Notify on state transitions, or on first check if service is down
+    const isFirstCheckDbDown = prevState.database === null && checks.database.status === 'unhealthy';
+    if (prevState.database === 'healthy' || isFirstCheckDbDown) {
       addSystemLog({
         level: 'error',
         source: 'health-check:database',
@@ -92,17 +92,16 @@ export async function GET() {
       
       checks.cache = { status: 'healthy', latency_ms: Date.now() - cacheStart };
       
-      // Notify on state transitions (up or down)
-      if (prevState.cache === 'unhealthy') {
+      // Notify on state transitions, or on first check if service was previously down
+      const isCacheRecovery = prevState.cache === 'unhealthy';
+      const isFirstCheckCacheHealthy = prevState.cache === null && checks.cache.status === 'healthy';
+      if (isCacheRecovery || isFirstCheckCacheHealthy) {
         addSystemLog({
           level: 'info',
           source: 'health-check:cache',
-          message: 'Cache connectivity restored',
-          details: `Cache is now healthy (latency: ${checks.cache.latency_ms}ms)`,
+          message: isCacheRecovery ? 'Cache connectivity restored' : 'Cache health check — initial state healthy',
+          details: isCacheRecovery ? `Cache is now healthy (latency: ${checks.cache.latency_ms}ms)` : undefined,
         });
-        await notifyHealthCheck('cache', true, platformOrgId);
-      } else if (prevState.cache !== 'healthy') {
-        // First healthy check after boot
         await notifyHealthCheck('cache', true, platformOrgId);
       }
     } else {
@@ -115,13 +114,14 @@ export async function GET() {
       overallStatus = 'degraded';
     }
     
-    // Notify on first failure (deduplicated by prev state)
-    if (prevState.cache !== 'unhealthy') {
+    // Notify on state transitions, or on first check if service is down
+    const isFirstCheckCacheDown = prevState.cache === null && checks.cache.status === 'unhealthy';
+    if (prevState.cache === 'healthy' || isFirstCheckCacheDown) {
       addSystemLog({
         level: 'error',
         source: 'health-check:cache',
-        message: 'Cache connectivity check failed',
-        details: errorMessage,
+        message: isFirstCheckCacheDown ? 'Cache health check — initial state unhealthy' : 'Cache connectivity check failed',
+        details: isFirstCheckCacheDown ? undefined : errorMessage,
       });
       await notifyHealthCheck('cache', false, platformOrgId);
     }
@@ -145,17 +145,16 @@ export async function GET() {
       total_connections: health.totalConnections,
     };
 
-    // Notify on state transitions (up or down)
-    if (prevState.pgbouncer === 'unhealthy') {
+    // Notify on state transitions, or on first check if service was previously down
+    const isPgbouncerRecovery = prevState.pgbouncer === 'unhealthy';
+    const isFirstCheckPgbouncerHealthy = prevState.pgbouncer === null && checks["connection-pool"].status === 'healthy';
+    if (isPgbouncerRecovery || isFirstCheckPgbouncerHealthy) {
       addSystemLog({
         level: 'info',
         source: 'health-check:pgbouncer',
-        message: 'Connection pool connectivity restored',
-        details: `Connection pool is now healthy (latency: ${checks["connection-pool"].latency_ms}ms)`,
+        message: isPgbouncerRecovery ? 'Connection pool connectivity restored' : 'Connection pool health check — initial state healthy',
+        details: isPgbouncerRecovery ? `Connection pool is now healthy (latency: ${checks["connection-pool"].latency_ms}ms)` : undefined,
       });
-      await notifyHealthCheck('pgbouncer', true, platformOrgId);
-    } else if (prevState.pgbouncer !== 'healthy') {
-      // First healthy check after boot
       await notifyHealthCheck('pgbouncer', true, platformOrgId);
     }
   } catch (error) {
@@ -163,13 +162,14 @@ export async function GET() {
     checks["connection-pool"] = { status: 'unhealthy', error: 'Connection pool connection failed' };
     overallStatus = 'unhealthy';
 
-    // Notify on first failure (deduplicated by prev state)
-    if (prevState.pgbouncer !== 'unhealthy') {
+    // Notify on state transitions, or on first check if service is down
+    const isFirstCheckPgbouncerDown = prevState.pgbouncer === null && checks["connection-pool"].status === 'unhealthy';
+    if (prevState.pgbouncer === 'healthy' || isFirstCheckPgbouncerDown) {
       addSystemLog({
         level: 'error',
         source: 'health-check:pgbouncer',
-        message: 'Connection pool connectivity check failed',
-        details: errorMessage,
+        message: isFirstCheckPgbouncerDown ? 'Connection pool health check — initial state unhealthy' : 'Connection pool connectivity check failed',
+        details: isFirstCheckPgbouncerDown ? undefined : errorMessage,
       });
       await notifyHealthCheck('pgbouncer', false, platformOrgId);
     }

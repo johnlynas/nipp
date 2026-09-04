@@ -934,7 +934,6 @@ nipp/
 │   │   ├── organizations/        # Org management (list, create, edit, delete, members, permissions, roles, settings)
 │   │   ├── permissions/          # Permission catalog (list, create, edit, view, delete)
 │   │   ├── roles/                # Role management (list, create, edit, view, delete)
-│   │   ├── system-health/page.tsx# System health dashboard
 │   │   ├── system-logs/page.tsx  # System log viewer
 │   │   └── users/                # User management (list, create, edit, view, delete)
 │   ├── api/                      # API endpoints (RESTful routes)
@@ -949,7 +948,7 @@ nipp/
 │   │   ├── roles/                # Role-related APIs
 │   │   └── security/payload-key/# Payload encryption key management
 │   ├── dashboard/                # Tenant dashboard layouts & pages (layouts carry the SSE footer ticker)
-│   │   ├── admin/                # Super admin tenant view (calendar, orgs, permissions, resources, roles, teams, users)
+│   │   ├── admin/                # Super admin tenant view (calendar, orgs, permissions, resources, roles, teams, users, system health)
 │   │   │   └── notifications/    # Notification log: history, filters, search, acknowledge/delete
 │   │   └── contractor/           # Contractor-specific dashboard
 │   ├── org/[orgId]/              # Org-scoped pages (roles)

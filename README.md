@@ -177,7 +177,7 @@ client-side by `<RequireSuperAdmin>`) get a console for platform operations:
 | `/admin/permissions` | Global permission catalog (resources, search, CRUD) |
 | `/admin/audit-logs` | Cross-tenant security audit log viewer with filters |
 | `/admin/cache-metrics` | Live L1/L2 cache hit-rate metrics |
-| `/admin/system-health` | Dependency health card (database, cache) |
+| `/dashboard/admin/system-health` | Dependency health card (database, cache) |
 | `/admin/system-logs` | Application/system log browser |
 
 Backed by REST endpoints under `/api/admin/*` (organizations, members, roles,
