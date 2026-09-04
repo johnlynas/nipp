@@ -130,35 +130,35 @@ The following diagram illustrates the core components, data flow, and security b
 ```mermaid
 flowchart TB
     %% --- Clients & Entry Points ---
-    User((External Users / Super Admins)) -->|HTTPS Request| Middleware[Next.js Edge<br/>Middleware]
+    User((External Users / Super Admins)) -->|HTTPS Request| Middleware[Next.js Edge Middleware]
 
     %% --- Security & Routing Layer ---
-    subgraph Security_Layer [Security Layer<br/>Edge Runtime]
-        Middleware -->|Session Validation & CSP| Authm[Auth Guard<br/>BetterAuth]
+    subgraph Security_Layer [Security Layer - Edge Runtime]
+        Middleware -->|Session Validation & CSP| Authm[Auth Guard - BetterAuth]
     end
 
     %% --- Application Layer ---
-    subgraph App_Layer [Application Layer<br/>Node Runtime]
+    subgraph App_Layer [Application Layer - Node Runtime]
         Authm --> API[API Routes / Actions]
 
         subgraph Business_Logic [Business Logic]
-            API --> Services[Service Layer<br/>Core Logic]
-            Services --> SSEHub[SSE Notification Push Hub<br/>lib/notification-push.ts]
+            API --> Services[Service Layer - Core Logic]
+            Services --> SSEHub[SSE Notification Push Hub - lib/notification-push.ts]
         end
 
-        ReactApp[<b>React Client</b>] -.->|REST & SSE Events| API
-        SSEHub -.->|SSE stream<br/>(/api/notifications/stream)| ReactApp
-        ReactApp -.->|State Mgmt<br/>TanStack Query| Browser[(Browser State)]
+        ReactApp[React Client] -.->|REST & SSE Events| API
+        SSEHub -.->|SSE stream /api/notifications/stream| ReactApp
+        ReactApp -.->|State Mgmt TanStack Query| Browser[(Browser State)]
     end
 
     %% --- Data Persistence Layer ---
-    subgraph Data_Layer [Data Persistence<br/>Database]
-        Services --> Postgres[(PostgreSQL 16+<br/>Row Level Security)]
+    subgraph Data_Layer [Data Persistence - Database]
+        Services --> Postgres[(PostgreSQL 16+ Row Level Security)]
     end
 
     %% --- Performance Caching Layer ---
     subgraph Cache_Layer [Performance & Caching]
-        Authm -.->|Session / Token<br/>Cache| Cookie[(Cookie Cache)]
+        Authm -.->|Session / Token Cache| Cookie[(Cookie Cache)]
         Services -.->|L1 + L2 Caching| Redis[(Redis)]
     end
 
