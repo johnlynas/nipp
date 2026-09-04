@@ -29,8 +29,6 @@ function getHealthState(): HealthState {
   return g.__nipp_healthState;
 }
 
-let currentHealthState = getHealthState();
-
 export function getPreviousHealthState(): HealthState {
   // Always read from the shared global state (may have been replaced by another module instance)
   return getHealthState();

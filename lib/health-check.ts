@@ -5,7 +5,7 @@
 
 import tenantDb from '@/lib/tenant-db';
 import { getRedis } from '@/lib/redis';
-import { addSystemLog, getPreviousHealthState, updateHealthState } from '@/lib/system-logs';
+import { updateHealthState } from '@/lib/system-logs';
 import { PgBouncerMonitor } from '@/lib/pgbouncer-monitor';
 
 export type HealthCheckResult = Record<string, {
@@ -32,15 +32,12 @@ export async function checkHealthStatus(): Promise<HealthResponse> {
   const checks: HealthCheckResult = {};
   let overallStatus = 'healthy';
 
-  const prevState = getPreviousHealthState();
-
   // --- Database Check (Critical) ---
   try {
     const dbStart = Date.now();
     await tenantDb.$queryRaw`SELECT 1`;
     checks.database = { status: 'healthy', latency_ms: Date.now() - dbStart };
-  } catch (error) {
-    const errorMessage = error instanceof Error ? error.message : String(error);
+  } catch {
     checks.database = { status: 'unhealthy', error: 'Database connection failed' };
     overallStatus = 'unhealthy';
   }
@@ -91,8 +88,7 @@ export async function checkHealthStatus(): Promise<HealthResponse> {
 
     await pgbouncer.disconnect();
   } catch (error) {
-    const errorMessage = error instanceof Error ? error.message : String(error);
-    checks["connection-pool"] = { status: 'unhealthy', error: 'Connection pool connection failed' };
+    checks["connection-pool"] = { status: 'unhealthy', error: `Connection pool connection failed (${error instanceof Error ? error.message : String(error)})` };
     overallStatus = 'unhealthy';
   }
 
