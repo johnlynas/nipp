@@ -32,7 +32,7 @@ interface PaginationState {
 
 export default function OrganizationsPage() {
   const [organizations, setOrganizations] = useState<Organization[]>([]);
-  const [pagination, setPagination] = useState<PaginationState>({ page: 1, pageSize: 8, total: 0, totalPages: 0 });
+  const [pagination, setPagination] = useState<PaginationState>({ page: 1, pageSize: 9999, total: 0, totalPages: 0 });
   const [globalTotal, setGlobalTotal] = useState(0);
   const [statusCounts, setStatusCounts] = useState<Record<string, number>>({ ACTIVE: 0, PENDING: 0, SUSPENDED: 0, ARCHIVED: 0 });
   const [search, setSearch] = useState('');
@@ -348,25 +348,25 @@ export default function OrganizationsPage() {
       <Modal isOpen={createModalOpen} onClose={() => setCreateModalOpen(false)} title="Create Organization" size="md">
         <div className="space-y-4">
           <div>
-            <label htmlFor="org-name" className="mb-1 block text-sm font-medium" style={{ color: '#6c757d' }}>Name</label>
+            <label htmlFor="org-name" className="mb-1 block text-sm font-medium" style={{ color: '#1B2A4A' }}>Name</label>
             <input
               id="org-name"
               type="text"
               value={createForm.name}
               onChange={(e) => setCreateForm((f) => ({ ...f, name: e.target.value }))}
               className="w-full rounded border px-3 py-2 text-sm focus:outline-none"
-              style={{ borderColor: '#dee2e6' }}
+              style={{ borderColor: '#dee2e6', color: '#1B2A4A' }}
               placeholder="Organization name"
             />
           </div>
           <div>
-            <label htmlFor="org-description" className="mb-1 block text-sm font-medium" style={{ color: '#6c757d' }}>Description</label>
+            <label htmlFor="org-description" className="mb-1 block text-sm font-medium" style={{ color: '#1B2A4A' }}>Description</label>
             <textarea
               id="org-description"
               value={createForm.description}
               onChange={(e) => setCreateForm((f) => ({ ...f, description: e.target.value }))}
               className="w-full rounded border px-3 py-2 text-sm focus:outline-none resize-y"
-              style={{ borderColor: '#dee2e6' }}
+              style={{ borderColor: '#dee2e6', color: '#1B2A4A' }}
               rows={3}
               placeholder="Organization description"
             />
