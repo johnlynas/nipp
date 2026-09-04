@@ -27,7 +27,7 @@ export default async function HomePage() {
 
   // 4. If Super Admin, redirect immediately via HTTP 307/308.
   if (user?.role === 'super_admin') {
-    redirect('/admin/organizations');
+    redirect('/dashboard/admin/users');
   }
 
   // 5. If we reach here, the user is a standard Tenant User.

@@ -14,18 +14,24 @@ const MAX_LOG_ENTRIES = 100;
 const logStore: SystemLogEntry[] = [];
 
 // Track previous health state to avoid duplicate logs
-let previousHealthState: {
+type HealthState = {
   database: 'healthy' | 'unhealthy' | null;
   cache: 'healthy' | 'unhealthy' | null;
   pgbouncer: 'healthy' | 'unhealthy' | null;
-} = {
-  database: null,
-  cache: null,
-  pgbouncer: null,
 };
 
-export function getPreviousHealthState() {
-  return previousHealthState;
+/** Shared across all module instances (Next.js dev mode can load the same module twice). */
+function getHealthState(): HealthState {
+  const g = globalThis as unknown as Record<string, HealthState>;
+  if (!g.__nipp_healthState) {
+    g.__nipp_healthState = { database: null, cache: null, pgbouncer: null };
+  }
+  return g.__nipp_healthState;
+}
+
+export function getPreviousHealthState(): HealthState {
+  // Always read from the shared global state (may have been replaced by another module instance)
+  return getHealthState();
 }
 
 export function updateHealthState(
@@ -33,7 +39,18 @@ export function updateHealthState(
   cache: 'healthy' | 'unhealthy',
   pgbouncer?: 'healthy' | 'unhealthy'
 ) {
-  previousHealthState = { database, cache, pgbouncer: pgbouncer || null };
+  // Update the shared global state object (not a new one) so all module instances see the same values
+  const shared = getHealthState();
+  shared.database = database;
+  shared.cache = cache;
+  shared.pgbouncer = pgbouncer || null;
+}
+
+export function clearHealthState() {
+  const shared = getHealthState();
+  shared.database = null;
+  shared.cache = null;
+  shared.pgbouncer = null;
 }
 
 export function addSystemLog(entry: Omit<SystemLogEntry, 'timestamp'>) {

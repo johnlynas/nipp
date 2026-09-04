@@ -61,7 +61,7 @@ export default function RolesPage() {
   useEffect(() => {
     async function fetchOrganizations() {
       try {
-        const res = await fetch('/api/dashboard/admin/organizations?page=1&pageSize=500');
+        const res = await fetch('/api/dashboard/admin/organizations?page=1&pageSize=9999');
         if (res.ok) {
           const data = await res.json();
           setOrganizations(data.organizations || []);
@@ -446,25 +446,25 @@ export default function RolesPage() {
             </select>
           </div>
           <div>
-            <label htmlFor="role-name" className="mb-1 block text-sm font-medium" style={{ color: '#6c757d' }}>Name</label>
+            <label htmlFor="role-name" className="mb-1 block text-sm font-medium" style={{ color: '#1B2A4A' }}>Name</label>
             <input
               id="role-name"
               type="text"
               value={createForm.name}
               onChange={(e) => setCreateForm((f) => ({ ...f, name: e.target.value }))}
               className="w-full rounded border px-3 py-2 text-sm focus:outline-none"
-              style={{ borderColor: '#dee2e6' }}
+              style={{ borderColor: '#dee2e6', color: '#1B2A4A' }}
               placeholder="Role name"
             />
           </div>
           <div>
-            <label htmlFor="role-desc" className="mb-1 block text-sm font-medium" style={{ color: '#6c757d' }}>Description (optional)</label>
+            <label htmlFor="role-desc" className="mb-1 block text-sm font-medium" style={{ color: '#1B2A4A' }}>Description (optional)</label>
             <textarea
               id="role-desc"
               value={createForm.description}
               onChange={(e) => setCreateForm((f) => ({ ...f, description: e.target.value }))}
               className="w-full rounded border px-3 py-2 text-sm focus:outline-none"
-              style={{ borderColor: '#dee2e6' }}
+              style={{ borderColor: '#dee2e6', color: '#1B2A4A' }}
               placeholder="Role description"
               rows={3}
             />

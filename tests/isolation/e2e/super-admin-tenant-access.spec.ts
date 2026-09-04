@@ -174,7 +174,7 @@ test.describe('Super Admin Tenant Data Access', () => {
 
   test('super admin can access system-health page', async ({ page }) => {
     await login(page, ADMIN_EMAIL, ADMIN_PASSWORD);
-    const response = await page.goto('/admin/system-health', { waitUntil: 'load' });
+    const response = await page.goto('/dashboard/admin/system-health', { waitUntil: 'load' });
 
     expect(response?.status()).toBe(200);
     await expect(page.locator('h1', { hasText: /System Health/i })).toBeVisible({ timeout: 10_000 });

@@ -59,7 +59,7 @@ export default function TeamsPage() {
   useEffect(() => {
     async function fetchOrganizations() {
       try {
-        const res = await fetch('/api/dashboard/admin/organizations?page=1&pageSize=500');
+        const res = await fetch('/api/dashboard/admin/organizations?page=1&pageSize=9999');
         if (res.ok) {
           const data = await res.json();
           setOrganizations(data.organizations || []);

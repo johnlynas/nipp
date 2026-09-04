@@ -3,7 +3,7 @@
 import { useState, useMemo } from 'react';
 import { useRouter, usePathname } from 'next/navigation';
 import Link from 'next/link';
-import { Menu, X, UserRound, Building2, UsersRound, Shield, Key, Layers, LogOut, CalendarDays, Bell, XCircle } from 'lucide-react';
+import { Menu, X, UserRound, Building2, UsersRound, Shield, Key, Layers, LogOut, CalendarDays, Bell, XCircle, HeartPulse, ChartNoAxesCombined } from 'lucide-react';
 import { authClient } from '@/lib/auth-client';
 import { RequireSuperAdmin } from '@/components/auth/RequireSuperAdmin';
 import { useNotifications, PRIORITY_COLORS, getPriorityIcon } from '@/hooks/useNotifications';
@@ -17,6 +17,8 @@ const navItems = [
   { href: '/dashboard/admin/resources', label: 'Resources', icon: Layers },
   { href: '/dashboard/admin/notifications', label: 'Notifications', icon: Bell },
   { href: '/dashboard/admin/calendar', label: 'Calendar', icon: CalendarDays },
+  { href: '/dashboard/admin/system-health', label: 'System Health', icon: HeartPulse },
+  { href: '/dashboard/admin/cache-metrics', label: 'Cache Metrics', icon: ChartNoAxesCombined },
 ];
 
 export default function AdminDashboardLayout({ children }: { children: React.ReactNode }) {

@@ -33,7 +33,7 @@ export default function AdminContent({ children }: { children: React.ReactNode }
     { href: '/admin/permissions', label: 'Permissions' },
     { href: '/admin/cache-metrics', label: 'Cache Metrics' },
     { href: '/admin/audit-logs', label: 'Security Audit Logs' },
-    { href: '/admin/system-health', label: 'System Health' },
+    { href: '/dashboard/admin/system-health', label: 'System Health' },
     { href: '/admin/system-logs', label: 'System Logs' },
   ];
 

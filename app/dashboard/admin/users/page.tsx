@@ -82,7 +82,7 @@ export default function UsersPage() {
   useEffect(() => {
     async function fetchOrganizations() {
       try {
-        const res = await fetch('/api/dashboard/admin/organizations?page=1&pageSize=500');
+        const res = await fetch('/api/dashboard/admin/organizations?page=1&pageSize=9999');
         if (res.ok) {
           const data = await res.json();
           setOrganizations(data.organizations || []);
@@ -529,38 +529,38 @@ export default function UsersPage() {
       <Modal isOpen={createModalOpen} onClose={() => setCreateModalOpen(false)} title="Create User" size="md">
         <div className="space-y-4">
           <div>
-            <label htmlFor="create-name" className="mb-1 block text-sm font-medium" style={{ color: '#6c757d' }}>Name</label>
+            <label htmlFor="create-name" className="mb-1 block text-sm font-medium" style={{ color: '#1B2A4A' }}>Name</label>
             <input
               id="create-name"
               type="text"
               value={createForm.name}
               onChange={(e) => setCreateForm((f) => ({ ...f, name: e.target.value }))}
               className="w-full rounded border px-3 py-2 text-sm focus:outline-none"
-              style={{ borderColor: '#dee2e6' }}
+              style={{ borderColor: '#dee2e6', color: '#1B2A4A' }}
               placeholder="User name"
             />
           </div>
           <div>
-            <label htmlFor="create-email" className="mb-1 block text-sm font-medium" style={{ color: '#6c757d' }}>Email</label>
+            <label htmlFor="create-email" className="mb-1 block text-sm font-medium" style={{ color: '#1B2A4A' }}>Email</label>
             <input
               id="create-email"
               type="email"
               value={createForm.email}
               onChange={(e) => setCreateForm((f) => ({ ...f, email: e.target.value }))}
               className="w-full rounded border px-3 py-2 text-sm focus:outline-none"
-              style={{ borderColor: '#dee2e6' }}
+              style={{ borderColor: '#dee2e6', color: '#1B2A4A' }}
               placeholder="user@example.com"
             />
           </div>
           <div>
-            <label htmlFor="create-password" className="mb-1 block text-sm font-medium" style={{ color: '#6c757d' }}>Password (optional)</label>
+            <label htmlFor="create-password" className="mb-1 block text-sm font-medium" style={{ color: '#1B2A4A' }}>Password (optional)</label>
             <input
               id="create-password"
               type="password"
               value={createForm.password}
               onChange={(e) => setCreateForm((f) => ({ ...f, password: e.target.value }))}
               className="w-full rounded border px-3 py-2 text-sm focus:outline-none"
-              style={{ borderColor: '#dee2e6' }}
+              style={{ borderColor: '#dee2e6', color: '#1B2A4A' }}
               placeholder="Leave blank to send invite email"
             />
           </div>
