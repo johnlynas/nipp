@@ -685,3 +685,73 @@ export function resetSubscriberStore(): void {
 export function resetNotificationDedupIndex(): void {
   getDedupIndex().clear();
 }
+
+// ---------------------------------------------------------------------------
+// Organization lifecycle notifications — suspension, archival, reactivation
+// ---------------------------------------------------------------------------
+
+/**
+ * Push an SSE notification when an organization is suspended and all users are banned.
+ * - Priority: WARNING
+ * - Scope: GLOBAL (platform-wide)
+ */
+export async function notifyOrganizationSuspension(
+  orgId: string,
+  orgName: string,
+  userCount: number,
+  adminName?: string,
+): Promise<void> {
+  await pushNotification({
+    title: `Organization "${orgName}" suspended`,
+    message: `All ${userCount} user(s) in organization "${orgName}" (ID: ${orgId}) have been banned and can no longer log in. This action was triggered by Super Admin ${adminName ?? 'a platform administrator'}.`,
+    priority: NotificationPriority.WARNING,
+    scope: NotificationScope.GLOBAL,
+    source: 'admin:organization-suspension',
+    organizationId: orgId ?? null,
+  });
+}
+
+/**
+ * Push an SSE notification when an organization is archived and all users are banned.
+ * - Priority: WARNING
+ * - Scope: GLOBAL (platform-wide)
+ *
+ * Archiving is permanent — users cannot be automatically reactivated.
+ * A platform user must manually unblock each banned user and add them to another organization.
+ */
+export async function notifyOrganizationArchival(
+  orgId: string,
+  orgName: string,
+  userCount: number,
+  adminName?: string,
+): Promise<void> {
+  await pushNotification({
+    title: `Organization "${orgName}" archived`,
+    message: `All ${userCount} user(s) in organization "${orgName}" (ID: ${orgId}) have been banned and can no longer log in. This action was triggered by Super Admin ${adminName ?? 'a platform administrator'}. Note: Archiving is permanent. Users cannot be automatically reactivated — a platform user must manually unblock each banned user and add them to another organization.`,
+    priority: NotificationPriority.WARNING,
+    scope: NotificationScope.GLOBAL,
+    source: 'admin:organization-archival',
+    organizationId: orgId ?? null,
+  });
+}
+
+/**
+ * Push an SSE notification when a previously suspended organization is reactivated and all users are unbanned.
+ * - Priority: INFO
+ * - Scope: GLOBAL (platform-wide)
+ */
+export async function notifyOrganizationReactivation(
+  orgId: string,
+  orgName: string,
+  userCount: number,
+  adminName?: string,
+): Promise<void> {
+  await pushNotification({
+    title: `Organization "${orgName}" reactivated`,
+    message: `All ${userCount} user(s) in organization "${orgName}" (ID: ${orgId}) have been reactivated and can now log in again. This action was triggered by Super Admin ${adminName ?? 'a platform administrator'}.`,
+    priority: NotificationPriority.INFO,
+    scope: NotificationScope.GLOBAL,
+    source: 'admin:organization-reactivation',
+    organizationId: orgId ?? null,
+  });
+}

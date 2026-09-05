@@ -82,7 +82,7 @@ export default function UsersPage() {
   useEffect(() => {
     async function fetchOrganizations() {
       try {
-        const res = await fetch('/api/dashboard/admin/organizations?page=1&pageSize=9999');
+        const res = await fetch('/api/dashboard/admin/organizations?page=1&pageSize=8');
         if (res.ok) {
           const data = await res.json();
           setOrganizations(data.organizations || []);
@@ -504,15 +504,58 @@ export default function UsersPage() {
       </Modal>
 
       {/* Ban/Unban Confirm Dialog */}
-      <ConfirmDialog
-        isOpen={banModalOpen}
-        onClose={() => { setBanModalOpen(false); setBanReason(''); }}
-        onConfirm={handleBanToggle}
-        title={banAction === 'ban' ? 'Ban User' : 'Unban User'}
-        message={banAction === 'ban' ? `Are you sure you want to ban ${selectedUser?.name || selectedUser?.email}?` : `Are you sure you want to unban ${selectedUser?.name || selectedUser?.email}?`}
-        confirmLabel={banAction === 'ban' ? 'Ban User' : 'Unban User'}
-        variant={banAction === 'ban' ? 'danger' : 'default'}
-      />
+      {banAction === 'ban' ? (
+        <Modal isOpen={banModalOpen} onClose={() => { setBanModalOpen(false); setBanReason(''); }} title="Ban User" size="md">
+          {selectedUser && (
+            <div className="space-y-4">
+              <p className="text-sm" style={{ color: '#6c757d' }}>
+                Are you sure you want to ban <strong>{selectedUser.name || selectedUser.email}</strong>?
+                This will prevent them from logging in.
+              </p>
+              <div>
+                <label htmlFor="ban-reason" className="mb-1 block text-sm font-medium" style={{ color: '#6c757d' }}>Reason for banning <span className="text-red-500">*</span></label>
+                <textarea
+                  id="ban-reason"
+                  value={banReason}
+                  onChange={(e) => setBanReason(e.target.value)}
+                  className="w-full rounded border px-3 py-2 text-sm focus:outline-none"
+                  style={{ borderColor: '#dee2e6', color: '#1B2A4A' }}
+                  rows={3}
+                  placeholder="e.g. Violation of terms of service"
+                  required
+                />
+              </div>
+              <div className="flex justify-end gap-3">
+                <button
+                  onClick={() => { setBanModalOpen(false); setBanReason(''); }}
+                  className="rounded border px-4 py-2 text-sm font-medium transition-colors hover:bg-gray-50"
+                  style={{ borderColor: '#dee2e6', color: '#1B2A4A' }}
+                >
+                  Cancel
+                </button>
+                <button
+                  onClick={handleBanToggle}
+                  disabled={!banReason.trim()}
+                  className="rounded px-4 py-2 text-sm font-medium text-white transition-colors hover:opacity-90 disabled:opacity-50"
+                  style={{ backgroundColor: '#dc3545' }}
+                >
+                  Ban User
+                </button>
+              </div>
+            </div>
+          )}
+        </Modal>
+      ) : (
+        <ConfirmDialog
+          isOpen={banModalOpen}
+          onClose={() => { setBanModalOpen(false); setBanReason(''); }}
+          onConfirm={handleBanToggle}
+          title="Unban User"
+          message={`Are you sure you want to unban ${selectedUser?.name || selectedUser?.email}? They will be able to log in again.`}
+          confirmLabel="Unban User"
+          variant="default"
+        />
+      )}
 
       {/* Delete Confirm Dialog */}
       <ConfirmDialog
