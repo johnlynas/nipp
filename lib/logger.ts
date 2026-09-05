@@ -51,9 +51,17 @@ const stream = isProduction
       ignore: 'hostname,pid',
     });
 
+// Custom pino levels — extend the standard scale with `critical` (severity 6,
+// between `error` 5 and `fatal` 60). Used by the rate-limiter to surface
+// throttled requests that may indicate brute-force / abuse attempts.
+const loggerCustomLevels = {
+  critical: 6,
+};
+
 export const logger = pino(
-  {
+   {
     level: logLevel,
+    customLevels: loggerCustomLevels,
     redact: {
       paths: piiFields.map((field) => `*.${field}`),
       censor: '***REDACTED***',

@@ -736,22 +736,104 @@ export async function notifyOrganizationArchival(
 }
 
 /**
- * Push an SSE notification when a previously suspended organization is reactivated and all users are unbanned.
+ * Push an SSE notification when an organization is reactivated and all users are unbanned.
  * - Priority: INFO
  * - Scope: GLOBAL (platform-wide)
  */
 export async function notifyOrganizationReactivation(
-  orgId: string,
-  orgName: string,
-  userCount: number,
-  adminName?: string,
+    orgId: string,
+    orgName: string,
+    userCount: number,
+    adminName?: string,
 ): Promise<void> {
-  await pushNotification({
-    title: `Organization "${orgName}" reactivated`,
-    message: `All ${userCount} user(s) in organization "${orgName}" (ID: ${orgId}) have been reactivated and can now log in again. This action was triggered by Super Admin ${adminName ?? 'a platform administrator'}.`,
-    priority: NotificationPriority.INFO,
-    scope: NotificationScope.GLOBAL,
-    source: 'admin:organization-reactivation',
-    organizationId: orgId ?? null,
-  });
+    await pushNotification({
+        title: `Organization "${orgName}" reactivated`,
+        message: `All ${userCount} user(s) in organization "${orgName}" (ID: ${orgId}) have been reactivated and can now log in again. This action was triggered by Super Admin ${adminName ?? 'a platform administrator'}.`,
+        priority: NotificationPriority.INFO,
+        scope: NotificationScope.GLOBAL,
+        source: 'admin:organization-reactivation',
+        organizationId: orgId ?? null,
+      });
+}
+
+// ---------------------------------------------------------------------------
+// Rate-limit notifications — throttled requests reported as CRITICAL
+// ---------------------------------------------------------------------------
+
+/** Identifies which rate limit bucket was tripped. */
+export type RateLimitCategory =
+    | 'auth'
+    | 'payload-key'
+    | 'revoke'
+    | 'admin'
+    | 'calendar';
+
+/** Stable source tag for rate-limit notifications (mirrors the bucket name). */
+const RATE_LIMIT_SOURCE: Record<RateLimitCategory, string> = {
+    auth: 'rate-limit:auth',
+    'payload-key': 'rate-limit:payload-key',
+    revoke: 'rate-limit:revoke',
+    admin: 'rate-limit:admin',
+    calendar: 'rate-limit:calendar',
+};
+
+const RATE_LIMIT_TITLE: Record<RateLimitCategory, string> = {
+    auth: 'Auth rate limit exceeded',
+    'payload-key': 'Payload key rate limit exceeded',
+    revoke: 'Payload key revoke rate limit exceeded',
+    admin: 'Admin write rate limit exceeded',
+    calendar: 'Calendar rate limit exceeded',
+};
+
+const RATE_LIMIT_CATEGORY_ORDER: RateLimitCategory[] = [
+    'auth',
+    'payload-key',
+    'revoke',
+    'admin',
+    'calendar',
+];
+
+/** Normalize a caller-supplied category into a known RateLimitCategory. */
+export function normalizeRateLimitCategory(category: unknown): RateLimitCategory {
+    const key = String(category ?? '').toLowerCase();
+    if (key === 'payloadkey' || key === 'payload_key') return 'payload-key';
+    if (RATE_LIMIT_CATEGORY_ORDER.includes(key as RateLimitCategory)) {
+        return key as RateLimitCategory;
+    }
+    return 'admin';
+}
+
+/**
+ * Push an SSE notification when a client is rate-limited, reported as a
+ * CRITICAL event so it stays persistent in admin dashboards and alerts.
+ *
+ * - Priority: CRITICAL (rate-limit hits can signal brute-force / abuse)
+ * - Scope: GLOBAL (platform-wide — visible to all subscribers)
+ *
+ * `count` (when known) records how many hits tripped the limiter; `window`
+ * is the window length in seconds so admins can tell the throttle apart from
+ * a single spike. Any failure to broadcast is swallowed — a rate-limit alert
+ * must never crash the request that triggered it.
+ */
+export async function notifyRateLimited(params: {
+    category: RateLimitCategory;
+    clientId: string;
+    max?: number;
+    window?: number;
+    count?: number;
+}): Promise<void> {
+    const category = normalizeRateLimitCategory(params.category);
+    const { max, window, count } = params;
+
+    await pushNotification({
+        title: RATE_LIMIT_TITLE[category],
+        message:
+            `Client ${params.clientId} exceeded the rate limit for ${RATE_LIMIT_SOURCE[category]}` +
+            `${max !== undefined ? ` (${max} per ${window ?? 60}s)` : ''}` +
+            `${count !== undefined ? ` — current count: ${count}` : ''}.`,
+        priority: NotificationPriority.CRITICAL,
+        scope: NotificationScope.GLOBAL,
+        source: RATE_LIMIT_SOURCE[category],
+        organizationId: null,
+    });
 }

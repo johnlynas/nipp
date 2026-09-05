@@ -20,6 +20,8 @@
 
 import { env } from '@/lib/env';
 import { auth } from '@/lib/auth';
+import { logger } from '@/lib/logger';
+import { notifyRateLimited, type RateLimitCategory } from '@/lib/notification-push';
 
 // ---------------------------------------------------------------------------
 // Helpers — session extraction (used by route wrappers)
@@ -40,6 +42,66 @@ export function getClientIp(request: Request): string {
   const forwarded = request.headers.get('x-forwarded-for');
   if (forwarded) return forwarded.split(',')[0].trim();
   return request.headers.get('x-real-ip') ?? 'unknown';
+}
+
+// ---------------------------------------------------------------------------
+// Throttle reporting — CRITICAL pino log + CRITICAL-priority SSE alert
+//
+// Shared by every check*RateLimit function so all 73 rate-limit call sites
+// (auth brute-force, payload-key issuance/revoke, admin writes, calendar CRUD)
+// are alerted the moment a client is throttled. A rate-limit hit can signal
+// brute-force / abuse, so both channels use CRITICAL severity.
+// ---------------------------------------------------------------------------
+
+/**
+ * Report that a client has been rate-limited.
+ *
+ * - Emits a **critical-level** pino log record (surfaceable by alerting / log
+ *   shippers that watch for critical severity).
+ * - Fires a **CRITICAL-priority GLOBAL SSE notification** so the admin
+ *   dashboard is alerted in real time.
+ *
+ * The pino log is synchronous. The SSE notification is best-effort and
+ * fire-and-forget: this is a synchronous, hot, shared path and the check
+ * signature must stay `boolean` (73 call sites depend on it), so we must not
+ * `await` here. `notifyRateLimited` already captures its own broadcast/persist
+ * failures, and the `.catch()` below guarantees no unhandled rejection.
+ */
+function reportThrottle(params: {
+    category: RateLimitCategory;
+    clientId: string;
+    max: number;
+    window: number;
+    count?: number;
+}): void {
+    const message =
+        `${params.category} rate limit exceeded for client ${params.clientId}` +
+         ` (${params.max} per ${params.window}s)` +
+         (params.count !== undefined ? ` — count: ${params.count}` : '');
+
+    // Critical log — synchronous, always emitted.
+    logger.critical(
+        {
+        limiter: 'rate-limiter',
+        category: params.category,
+        clientId: params.clientId,
+        max: params.max,
+        window: params.window,
+         ...(params.count !== undefined ? { count: params.count } : {}),
+       },
+       message,
+    );
+
+    // CRITICAL SSE alert — best-effort, non-blocking.
+    void notifyRateLimited({
+        category: params.category,
+        clientId: params.clientId,
+        max: params.max,
+        window: params.window,
+        count: params.count,
+     }).catch((err: unknown) => {
+      logger.error({ err }, 'Failed to broadcast rate-limit notification');
+     });
 }
 
 // ---------------------------------------------------------------------------
@@ -99,6 +161,13 @@ export function checkRateLimit(clientId: string): boolean {
   }
 
   if (entry.count >= RATE_LIMIT_MAX) {
+    reportThrottle({
+        category: 'payload-key',
+        clientId,
+        max: RATE_LIMIT_MAX,
+        window: RATE_LIMIT_WINDOW,
+        count: entry.count,
+       });
     return false; // Rate limited
   }
 
@@ -158,6 +227,13 @@ export function checkRevokeRateLimit(clientId: string): boolean {
   }
 
   if (entry.count >= REVOKE_RATE_LIMIT_MAX) {
+    reportThrottle({
+        category: 'revoke',
+        clientId,
+        max: REVOKE_RATE_LIMIT_MAX,
+        window: REVOKE_RATE_LIMIT_WINDOW,
+        count: entry.count,
+       });
     return false; // Rate limited
   }
 
@@ -221,6 +297,13 @@ export function checkAuthRateLimit(ipAddress: string): boolean {
   }
 
   if (entry.count >= AUTH_RATE_LIMIT_MAX) {
+    reportThrottle({
+        category: 'auth',
+        clientId: ipAddress,
+        max: AUTH_RATE_LIMIT_MAX,
+        window: AUTH_RATE_LIMIT_WINDOW,
+        count: entry.count,
+       });
     return false; // Rate limited
   }
 
@@ -284,6 +367,13 @@ export function checkAdminRateLimit(sessionId: string): boolean {
   }
 
   if (entry.count >= ADMIN_RATE_LIMIT_MAX) {
+    reportThrottle({
+        category: 'admin',
+        clientId: sessionId,
+        max: ADMIN_RATE_LIMIT_MAX,
+        window: ADMIN_RATE_LIMIT_WINDOW,
+        count: entry.count,
+       });
     return false; // Rate limited
   }
 
@@ -351,6 +441,13 @@ export function checkCalendarRateLimit(sessionId: string): boolean {
   }
 
   if (entry.count >= CALENDAR_RATE_LIMIT_MAX) {
+    reportThrottle({
+        category: 'calendar',
+        clientId: sessionId,
+        max: CALENDAR_RATE_LIMIT_MAX,
+        window: CALENDAR_RATE_LIMIT_WINDOW,
+        count: entry.count,
+       });
     return false; // Rate limited
   }
 
