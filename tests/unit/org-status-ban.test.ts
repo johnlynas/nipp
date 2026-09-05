@@ -284,7 +284,7 @@ describe('Admin status route — org suspend/archive/reactivate', () => {
     expect(response.status).toBe(400);
   });
 
-  it('should return 503 when database is unavailable', async () => {
+  it('should return 500 when database is unavailable', async () => {
     vi.mocked(globalDb.organization.findUnique).mockRejectedValue(new Error('DB connection refused'));
 
     const response = await adminPatch(createRequest({ status: 'SUSPENDED' }), adminParams());
@@ -534,6 +534,15 @@ describe('Admin status route — org suspend/archive/reactivate', () => {
 
     const banCall = (globalDb.user.updateMany as any).mock.calls[0][0];
     expect(banCall.data.banReason).toBe('Banned due to organization "Acme Corp" being suspended.');
+  });
+
+  it('should ban with correct reason string for archival', async () => {
+    vi.mocked(globalDb.organization.update).mockResolvedValue(mockFullOrg('ARCHIVED'));
+
+    await adminPatch(createRequest({ status: 'ARCHIVED' }), adminParams());
+
+    const banCall = (globalDb.user.updateMany as any).mock.calls[0][0];
+    expect(banCall.data.banReason).toBe('Banned due to organization "Acme Corp" being archived.');
   });
 
   it('should set banExpires to null on ban', async () => {
@@ -864,7 +873,7 @@ describe('Dashboard status route — org suspend/archive/reactivate', () => {
     expect(response.status).toBe(400);
   });
 
-  it('should return 503 when database is unavailable', async () => {
+  it('should return 500 when database is unavailable', async () => {
     vi.mocked(globalDb.organization.findUnique).mockRejectedValue(new Error('DB connection refused'));
 
     const response = await dashboardPatch(createDashboardRequest({ status: 'SUSPENDED' }), dashboardParams());

@@ -130,7 +130,7 @@ export const PATCH = wrapPiiRoute(async (request, decryptedBody, params) => {
           toStatus: newStatus,
         }, `[ORG_STATUS_API] ${actionLabel} organization — banning all member users`);
 
-        userCount = await banOrgUsers(orgId, org.name, session.user.id);
+        userCount = await banOrgUsers(orgId, org.name, session.user.id, newStatus);
       } else if (org.status === 'SUSPENDED' && newStatus === 'ACTIVE') {
         logger.info({
           userId: session.user.id,
@@ -248,7 +248,7 @@ async function invalidateOrgSessions(orgId: string) {
  * Ban all users who are members of an organization.
  * Returns the number of users banned.
  */
-async function banOrgUsers(orgId: string, orgName: string, adminUserId: string): Promise<number> {
+async function banOrgUsers(orgId: string, orgName: string, adminUserId: string, newStatus: string): Promise<number> {
   try {
     const members = await globalDb.member.findMany({
       where: { orgId },
@@ -261,7 +261,7 @@ async function banOrgUsers(orgId: string, orgName: string, adminUserId: string):
         where: { id: { in: userIds } },
         data: {
           banned: true,
-          banReason: `Banned due to organization "${orgName}" being suspended.`,
+          banReason: `Banned due to organization "${orgName}" being ${newStatus === 'SUSPENDED' ? 'suspended' : 'archived'}.`,
           banExpires: null, // permanent ban until org is reactivated
         },
       });
