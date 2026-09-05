@@ -32,7 +32,7 @@ interface PaginationState {
 
 export default function OrganizationsPage() {
   const [organizations, setOrganizations] = useState<Organization[]>([]);
-  const [pagination, setPagination] = useState<PaginationState>({ page: 1, pageSize: 9999, total: 0, totalPages: 0 });
+  const [pagination, setPagination] = useState<PaginationState>({ page: 1, pageSize: 8, total: 0, totalPages: 0 });
   const [globalTotal, setGlobalTotal] = useState(0);
   const [statusCounts, setStatusCounts] = useState<Record<string, number>>({ ACTIVE: 0, PENDING: 0, SUSPENDED: 0, ARCHIVED: 0 });
   const [search, setSearch] = useState('');
@@ -171,20 +171,50 @@ export default function OrganizationsPage() {
     }
   };
 
-  // Handle edit org
+  // Handle edit org — delegate status changes to the /status endpoint so ban/unban logic fires.
   const handleEdit = async () => {
     if (!selectedOrg) return;
 
     try {
-      const res = await fetch(`/api/dashboard/admin/organizations/${selectedOrg.id}`, {
-        method: 'PATCH',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(editForm),
-      });
+      // If status changed, use the /status endpoint (has ban/unban logic)
+      if (editForm.status && editForm.status !== selectedOrg.status) {
+        const res = await fetch(`/api/dashboard/admin/organizations/${selectedOrg.id}/status`, {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ status: editForm.status }),
+        });
 
-      if (!res.ok) {
-        const data = await res.json().catch(() => ({}));
-        throw new Error(data.error || 'Failed to update organization');
+        if (!res.ok) {
+          const data = await res.json().catch(() => ({}));
+          throw new Error(data.error || 'Failed to update organization status');
+        }
+
+        // Also update name/description via the generic endpoint if they changed
+        const nameChanged = editForm.name !== selectedOrg.name;
+        const descChanged = (editForm.description || '') !== (selectedOrg.description || '');
+        if (nameChanged || descChanged) {
+          const nameRes = await fetch(`/api/dashboard/admin/organizations/${selectedOrg.id}`, {
+            method: 'PATCH',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ name: editForm.name, description: editForm.description }),
+          });
+          if (!nameRes.ok) {
+            const data = await nameRes.json().catch(() => ({}));
+            throw new Error(data.error || 'Failed to update organization details');
+          }
+        }
+      } else {
+        // Only name/description changed — use generic update
+        const res = await fetch(`/api/dashboard/admin/organizations/${selectedOrg.id}`, {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ name: editForm.name, description: editForm.description }),
+        });
+
+        if (!res.ok) {
+          const data = await res.json().catch(() => ({}));
+          throw new Error(data.error || 'Failed to update organization');
+        }
       }
 
       setEditModalOpen(false);

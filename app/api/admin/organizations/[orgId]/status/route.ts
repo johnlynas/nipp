@@ -15,6 +15,7 @@ import { recordAuditLog } from '@/lib/audit-log';
 import { logger } from '@/lib/logger';
 import { wrapPiiRoute, PiiRouteParams } from '@/lib/payload-middleware';
 import { checkAdminRateLimit } from '@/lib/rate-limiter';
+import { notifyOrganizationSuspension, notifyOrganizationArchival, notifyOrganizationReactivation } from '@/lib/notification-push';
 
 export const runtime = 'nodejs';
 export const revalidate = 0;
@@ -116,8 +117,64 @@ export const PATCH = wrapPiiRoute(async (request, decryptedBody, params) => {
         select: { id: true, name: true, status: true },
       });
 
-      // Invalidate sessions if suspending
-      if (newStatus === 'SUSPENDED') {
+      // Ban all users in the org when suspending or archiving
+      let userCount = 0;
+      if (newStatus === 'SUSPENDED' || newStatus === 'ARCHIVED') {
+        const actionLabel = newStatus === 'SUSPENDED' ? 'suspend' : 'archive';
+        logger.warn({
+          userId: session.user.id,
+          userName: (session.user as { name?: string }).name ?? undefined,
+          orgId,
+          orgName: org.name,
+          fromStatus: org.status,
+          toStatus: newStatus,
+        }, `[ORG_STATUS_API] ${actionLabel} organization — banning all member users`);
+
+        userCount = await banOrgUsers(orgId, org.name, session.user.id);
+      } else if (org.status === 'SUSPENDED' && newStatus === 'ACTIVE') {
+        logger.info({
+          userId: session.user.id,
+          userName: (session.user as { name?: string }).name ?? undefined,
+          orgId,
+          orgName: org.name,
+          fromStatus: org.status,
+          toStatus: newStatus,
+        }, `[ORG_STATUS_API] Reactivating organization — unbanning all member users`);
+
+        userCount = await unbanOrgUsers(orgId, session.user.id);
+      }
+
+      // Push SSE notifications for org lifecycle events (after ban/unban)
+      if (newStatus === 'SUSPENDED' && userCount > 0) {
+        await notifyOrganizationSuspension(
+          orgId,
+          org.name,
+          userCount,
+          (session.user as { name?: string }).name ?? undefined,
+        );
+        logger.info({ userId: session.user.id, orgId, userCount }, '[ORG_STATUS_API] SSE notification dispatched — organization suspended');
+      } else if (newStatus === 'ARCHIVED' && userCount > 0) {
+        await notifyOrganizationArchival(
+          orgId,
+          org.name,
+          userCount,
+          (session.user as { name?: string }).name ?? undefined,
+        );
+        logger.info({ userId: session.user.id, orgId, userCount }, '[ORG_STATUS_API] SSE notification dispatched — organization archived');
+      } else if (org.status === 'SUSPENDED' && newStatus === 'ACTIVE' && userCount > 0) {
+        await notifyOrganizationReactivation(
+          orgId,
+          org.name,
+          userCount,
+          (session.user as { name?: string }).name ?? undefined,
+        );
+        logger.info({ userId: session.user.id, orgId, userCount }, '[ORG_STATUS_API] SSE notification dispatched — organization reactivated');
+      } else if (userCount === 0) {
+        logger.info({ userId: session.user.id, orgId, newStatus }, '[ORG_STATUS_API] No members to ban/unban — skipping SSE notification');
+      }
+
+      // Invalidate sessions if suspending or archiving
+      if (newStatus === 'SUSPENDED' || newStatus === 'ARCHIVED') {
         await invalidateOrgSessions(orgId);
       }
 
@@ -184,5 +241,75 @@ async function invalidateOrgSessions(orgId: string) {
   } catch (error) {
     logger.error({ err: error }, '[ORG_STATUS_API] Failed to invalidate sessions');
     // Don't fail the status change if session invalidation fails
+  }
+}
+
+/**
+ * Ban all users who are members of an organization.
+ * Returns the number of users banned.
+ */
+async function banOrgUsers(orgId: string, orgName: string, adminUserId: string): Promise<number> {
+  try {
+    const members = await globalDb.member.findMany({
+      where: { orgId },
+      select: { userId: true },
+    });
+
+    const userIds = members.map((m) => m.userId);
+    if (userIds.length > 0) {
+      await globalDb.user.updateMany({
+        where: { id: { in: userIds } },
+        data: {
+          banned: true,
+          banReason: `Banned due to organization "${orgName}" being suspended.`,
+          banExpires: null, // permanent ban until org is reactivated
+        },
+      });
+
+      logger.info({ userIds, count: userIds.length }, `[ORG_STATUS_API] Banned all users of org ${orgId}`);
+      return userIds.length;
+    } else {
+      logger.info({ orgId }, '[ORG_STATUS_API] No members found to ban for org');
+      return 0;
+    }
+  } catch (error) {
+    logger.error({ err: error }, '[ORG_STATUS_API] Failed to ban org users');
+    // Don't fail the status change if user banning fails
+    return 0;
+  }
+}
+
+/**
+ * Unban all users who are members of an organization (on reactivation).
+ * Returns the number of users unbanned.
+ */
+async function unbanOrgUsers(orgId: string, adminUserId: string): Promise<number> {
+  try {
+    const members = await globalDb.member.findMany({
+      where: { orgId },
+      select: { userId: true },
+    });
+
+    const userIds = members.map((m) => m.userId);
+    if (userIds.length > 0) {
+      await globalDb.user.updateMany({
+        where: { id: { in: userIds } },
+        data: {
+          banned: false,
+          banReason: null,
+          banExpires: null,
+        },
+      });
+
+      logger.info({ userIds, count: userIds.length }, `[ORG_STATUS_API] Unbanned all users of org ${orgId}`);
+      return userIds.length;
+    } else {
+      logger.info({ orgId }, '[ORG_STATUS_API] No members found to unban for org');
+      return 0;
+    }
+  } catch (error) {
+    logger.error({ err: error }, '[ORG_STATUS_API] Failed to unban org users');
+    // Don't fail the status change if user unbanning fails
+    return 0;
   }
 }
