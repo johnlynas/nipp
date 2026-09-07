@@ -54,6 +54,9 @@ const stream = isProduction
 export const logger = pino(
   {
     level: logLevel,
+    customLevels: {
+      critical: 55, // Custom level between error (50) and fatal (60); used for rate-limit alerts
+    },
     redact: {
       paths: piiFields.map((field) => `*.${field}`),
       censor: '***REDACTED***',
