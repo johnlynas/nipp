@@ -9,7 +9,7 @@
  *   RATE_LIMIT_PAYLOAD_KEY_MAX          — max requests per window (default 30)
  *   RATE_LIMIT_PAYLOAD_KEY_WINDOW       — window in seconds (default 60)
  *   RATE_LIMIT_PAYLOAD_KEY_REVOKE_MAX   — max revoke requests per window (default 5)
- *   RATE_LIMIT_PAYLOAD_KEY_REVOKE_WINDOW — window in seconds (default 60)
+ *   RATE_LIMIT_PAYLOAD_KEY_REVOKE_WINDOW — window in seconds for revoke (default 60)
  *   RATE_LIMIT_AUTH_MAX                 — max requests per window for auth endpoints (default 5)
  *   RATE_LIMIT_AUTH_WINDOW              — window in seconds for auth endpoints (default 60)
  *   RATE_LIMIT_ADMIN_MAX                — max requests per window for admin writes (default 30)
@@ -20,6 +20,9 @@
 
 import { env } from '@/lib/env';
 import { auth } from '@/lib/auth';
+import { logger as rootLogger } from '@/lib/logger';
+import { pushNotification } from '@/lib/notification-push';
+import { NotificationPriority, NotificationScope } from '@prisma/client';
 
 // ---------------------------------------------------------------------------
 // Helpers — session extraction (used by route wrappers)
@@ -99,6 +102,7 @@ export function checkRateLimit(clientId: string): boolean {
   }
 
   if (entry.count >= RATE_LIMIT_MAX) {
+    reportThrottle('payload-key', clientId, entry.count);
     return false; // Rate limited
   }
 
@@ -158,6 +162,7 @@ export function checkRevokeRateLimit(clientId: string): boolean {
   }
 
   if (entry.count >= REVOKE_RATE_LIMIT_MAX) {
+    reportThrottle('revoke', clientId, entry.count);
     return false; // Rate limited
   }
 
@@ -221,6 +226,7 @@ export function checkAuthRateLimit(ipAddress: string): boolean {
   }
 
   if (entry.count >= AUTH_RATE_LIMIT_MAX) {
+    reportThrottle('auth', ipAddress, entry.count);
     return false; // Rate limited
   }
 
@@ -284,6 +290,7 @@ export function checkAdminRateLimit(sessionId: string): boolean {
   }
 
   if (entry.count >= ADMIN_RATE_LIMIT_MAX) {
+    reportThrottle('admin', sessionId, entry.count);
     return false; // Rate limited
   }
 
@@ -351,6 +358,7 @@ export function checkCalendarRateLimit(sessionId: string): boolean {
   }
 
   if (entry.count >= CALENDAR_RATE_LIMIT_MAX) {
+    reportThrottle('calendar', sessionId, entry.count);
     return false; // Rate limited
   }
 
@@ -388,3 +396,50 @@ export function startCalendarRateLimitCleanup(): void {
 }
 
 startCalendarRateLimitCleanup();
+
+// ---------------------------------------------------------------------------
+// Throttle reporting — pino critical log + SSE notification
+// ---------------------------------------------------------------------------
+
+/** Category metadata for alerting. */
+interface ThrottleCategory {
+  name: string;
+  sourceTag: string;
+  max: number;
+  window: number;
+}
+
+const CATEGORIES: Record<string, ThrottleCategory> = {
+  'payload-key': { name: 'Payload key issuance', sourceTag: 'rate-limit:payload-key', max: RATE_LIMIT_MAX, window: RATE_LIMIT_WINDOW },
+  'revoke': { name: 'Payload key revocation', sourceTag: 'rate-limit:revoke', max: REVOKE_RATE_LIMIT_MAX, window: REVOKE_RATE_LIMIT_WINDOW },
+  'auth': { name: 'Authentication', sourceTag: 'rate-limit:auth', max: AUTH_RATE_LIMIT_MAX, window: AUTH_RATE_LIMIT_WINDOW },
+  'admin': { name: 'Admin write', sourceTag: 'rate-limit:admin', max: ADMIN_RATE_LIMIT_MAX, window: ADMIN_RATE_LIMIT_WINDOW },
+  'calendar': { name: 'Calendar CRUD', sourceTag: 'rate-limit:calendar', max: CALENDAR_RATE_LIMIT_MAX, window: CALENDAR_RATE_LIMIT_WINDOW },
+};
+
+/**
+ * Report a throttle event — emits a CRITICAL pino log and fires an SSE notification.
+ * The SSE call is fire-and-forget (caught by .catch) so it never crashes the request path.
+ */
+export function reportThrottle(category: string, clientId: string, count: number): void {
+  const meta = CATEGORIES[category];
+  if (!meta) return; // Unknown category — nothing to report
+
+  // Synchronous pino critical log
+  rootLogger.critical(
+    { limiter: 'rate-limiter', category, clientId, max: meta.max, window: meta.window, count },
+    `${meta.name} rate limit exceeded for ${category}`,
+  );
+
+  // Fire-and-forget SSE notification — never throws into the request path
+  void pushNotification({
+    title: `${meta.name} rate limit exceeded`,
+    message: `Client ${clientId} exceeded the rate limit for ${meta.sourceTag} (${meta.max} per ${meta.window}s) — current count: ${count}.`,
+    priority: NotificationPriority.CRITICAL,
+    scope: NotificationScope.GLOBAL,
+    source: meta.sourceTag,
+    organizationId: null,
+  }).catch((err) => {
+    rootLogger.error({ err }, 'Failed to send rate-limit SSE notification');
+  });
+}
