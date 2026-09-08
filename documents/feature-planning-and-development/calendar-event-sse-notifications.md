@@ -170,11 +170,11 @@ The scan window is **`(now, now + LEAD_TIME_MINUTES]`** — exclusive lower boun
 timeline
     title A 15-minute lead window observed by consecutive ticks (30s interval)
     section Ticks
-        Tick 1 t=10:14:30 : window (10:14:30, 10:29:30]
-        Tick 2 t=10:15:00 : window (10:15:00, 10:30:00] — event E at 10:25 enters, NOTIFIED once
-        Tick 3 t=10:15:30 : E still in window but key already fired → skipped
-        ...          : every tick until E starts
-        Tick N t≈10:25   : E is due; later ticks no longer match it (start ≤ now)
+        Tick 1 : t = 10:14:30 → window (10:14:30, 10:29:30]
+        Tick 2 : t = 10:15:00 → window (10:15:00, 10:30:00] — event E at 10:25 enters, NOTIFIED once
+        Tick 3 : t = 10:15:30 → E still in window but key already fired, SKIPPED
+          ...        : every tick until E starts
+        Tick N : t ≈ 10:25 → E is due, later ticks no longer match it (start ≤ now)
 ```
 
 The DB query uses `startDate >= now` as the primary gate (inclusive at the boundary, which is why the code re-checks `start > now && start <= windowEnd` before accepting a row — this also keeps behavior identical for mocks and for the recurring path).
