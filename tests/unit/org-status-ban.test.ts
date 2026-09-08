@@ -31,6 +31,28 @@ vi.mock('@/lib/require-super-admin', () => ({
   requireSuperAdmin: vi.fn(),
 }));
 
+// The status routes' invalidateOrgSessions() dynamically imports @/lib/redis and
+// awaits redis.del(...) BEFORE reaching globalDb.session.deleteMany(). Without a
+// mock, the real ioredis client is instantiated and, when Redis is unreachable
+// (e.g. CI), del() blocks/errors — the try/catch swallows it and session
+// invalidation is silently skipped, making these tests flaky. Mock it to return
+// a fake client whose del() resolves, matching the convention in
+// permissions-resolver.test.ts / cache/hybrid.test.ts.
+const mockRedisClient = {
+  get: vi.fn(),
+  set: vi.fn(),
+  del: vi.fn(),
+  keys: vi.fn(),
+  scan: vi.fn(),
+} as any;
+
+vi.mock('@/lib/redis', () => ({
+  getRedis: vi.fn(() => mockRedisClient),
+  redisGet: vi.fn(),
+  redisSet: vi.fn(),
+  redisDel: vi.fn(),
+}));
+
 vi.mock('@/lib/audit-log', () => ({
   recordAuditLog: vi.fn().mockResolvedValue(undefined),
 }));
