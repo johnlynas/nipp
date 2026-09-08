@@ -7,6 +7,8 @@ import { env } from '@/lib/env';
 
 // Start background health checks on first request (Node.js context — not Edge).
 import '@/lib/background-health-check';
+// Start the calendar "due to start" SSE scanner (same Node.js boot path).
+import '@/lib/calendar-event-scheduler';
 
 const inter = Inter({
   subsets: ['latin'],
