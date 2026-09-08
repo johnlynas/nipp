@@ -261,7 +261,7 @@ export async function runCalendarEventScan(now: Date = new Date()): Promise<numb
       await pushNotification({
         title,
         message,
-        priority: NotificationPriority.INFO,
+        priority: NotificationPriority.CALENDAR,
         scope: NotificationScope.ORG,
         source: 'calendar:event-upcoming',
         organizationId: instance.organizationId,

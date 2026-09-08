@@ -55,8 +55,9 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    // Validate priority (optional, defaults to INFO)
-    const validPriorities = ['info', 'warning', 'error', 'critical'] as const;
+    // Validate priority (optional, defaults to INFO). CALENDAR is the
+    // "event due to start" reminder priority emitted by the calendar scheduler.
+    const validPriorities = ['info', 'warning', 'error', 'critical', 'calendar'] as const;
     const resolvedPriority = validPriorities.includes(priority) ? priority : 'info';
 
     // Validate orgId — required for both scopes
@@ -85,7 +86,7 @@ export async function POST(request: NextRequest) {
       title,
       message,
       organizationId,
-      resolvedPriority as 'INFO' | 'WARNING' | 'ERROR' | 'CRITICAL'
+      resolvedPriority as 'INFO' | 'WARNING' | 'ERROR' | 'CRITICAL' | 'CALENDAR'
     );
 
     return NextResponse.json({ success: true });
@@ -177,6 +178,7 @@ export async function GET(request: NextRequest) {
       globalDb.notification.count({ where: { priority: 'WARNING' } }),
       globalDb.notification.count({ where: { priority: 'ERROR' } }),
       globalDb.notification.count({ where: { priority: 'CRITICAL' } }),
+      globalDb.notification.count({ where: { priority: 'CALENDAR' } }),
     ]);
 
     return NextResponse.json({
@@ -191,7 +193,7 @@ export async function GET(request: NextRequest) {
         source: n.source ?? undefined,
         acknowledged: n.acknowledged,
         createdAt: n.createdAt.toISOString(),
-      })),
+       })),
       pagination: { page, pageSize, total },
       counts: {
         totalCount,
@@ -201,8 +203,9 @@ export async function GET(request: NextRequest) {
         warningCount: priorityCounts[1],
         errorCount: priorityCounts[2],
         criticalCount: priorityCounts[3],
-      },
-    });
+        calendarCount: priorityCounts[4],
+       },
+     });
   } catch (error) {
     logger.error({ err: error, page, pageSize, scope, priority }, 'Failed to fetch notifications');
     return NextResponse.json(

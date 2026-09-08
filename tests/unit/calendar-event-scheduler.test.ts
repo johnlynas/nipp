@@ -191,7 +191,7 @@ describe('findDueToStartEvents', () => {
 // ---------------------------------------------------------------------------
 
 describe('runCalendarEventScan', () => {
-  it('pushes an ORG-scoped INFO notification for each event due to start', async () => {
+  it('pushes an ORG-scoped CALENDAR notification for each event due to start', async () => {
     (globalDb.calendarEvent.findMany as unknown as ReturnType<typeof vi.fn>)
       .mockResolvedValueOnce([makeDbEvent()])
       .mockResolvedValueOnce([]);
@@ -202,14 +202,14 @@ describe('runCalendarEventScan', () => {
 
     const payload = mockPush.mock.calls[0][0];
     expect(payload.scope).toBe('ORG');
-    expect(payload.priority).toBe('INFO');
+    expect(payload.priority).toBe('CALENDAR');
     expect(payload.source).toBe('calendar:event-upcoming');
     expect(payload.organizationId).toBe('org-1');
     expect(payload.title).toContain('due to start');
     expect(payload.message).toContain('Viewing: 12 Foyle St');
     // Message carries the start time in en-GB format.
     expect(payload.message).toContain('10:45');
-  });
+   });
 
   it('notifies each event only once — repeat scans are no-ops', async () => {
     const dbFindMany = globalDb.calendarEvent.findMany as unknown as ReturnType<typeof vi.fn>;

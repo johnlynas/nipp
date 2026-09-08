@@ -72,12 +72,21 @@ enum NotificationScope {
   ORG
 }
 
-/** Notification priority levels */
+/**
+ * Notification priority levels.
+ *
+ * CALENDAR is the priority for "event due to start" SSE notifications emitted
+ * by lib/calendar-event-scheduler.ts. It behaves like CRITICAL in the ticker:
+ * it persists until the user dismisses it manually (it does NOT auto-dismiss
+ * like INFO/WARNING). It is rendered in bright green to distinguish upcoming
+ * calendar reminders from operational alerts.
+ */
 enum NotificationPriority {
   INFO
   WARNING
   ERROR
   CRITICAL
+  CALENDAR
 }
 
 // ============================================================
