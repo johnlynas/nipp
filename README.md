@@ -37,6 +37,7 @@ Self-service registration is not available (`/register` redirects to
     - [Resources & feature-level access control](#resources-feature-level-access-control)
   - [Roles, Permissions & Teams (RBAC)](#5-roles-permissions-teams-rbac)
   - [Interactive Calendar](#6-interactive-calendar)
+    - [Live "due to start" SSE alerts](#live-due-to-start-sse-alerts)
   - [Calendar Notifications](#7-calendar-notifications)
   - [Real-Time Notifications](#8-real-time-notifications)
   - [Caching](#9-caching)
@@ -73,10 +74,10 @@ Self-service registration is not available (`/register` redirects to
 | **Teams** | Sub-organizational groupings with role inheritance |
 | **Super Admin console** | Manage organizations, users, roles, permissions, audit logs, cache metrics, system health/logs |
 | **Tenant dashboard** | Integrated dashboard for users, organizations, roles, permissions, resources, teams, and the calendar |
-| **Interactive Calendar** | Month/week/day/year views, drag-and-drop rescheduling, RFC 5545 (rrule) recurrence, event modals, quick-add |
+| **Interactive Calendar** | Month/week/day/year views, drag-and-drop rescheduling, RFC 5545 (rrule) recurrence, event modals, quick-add, live "due to start" SSE alerts |
 | **Calendar Notifications** | Rate-limited email alerts for today's events, delivery logged to `NotificationLog` |
 | **Hybrid caching** | L1 in-memory + L2 Redis cache with stampede protection, warming, and live metrics |
-| **Real-time notifications** | Live server-side SSE broadcast (health checks + all admin management events) with org/global scoping, deduplication, and a persisted notification log |
+| **Real-time notifications** | Live server-side SSE broadcast (health checks, all admin management events, and upcoming calendar events) with org/global scoping, deduplication, and a persisted notification log |
 | **Security hardening** | CSP in Report-Only mode, AES-256-GCM PII encryption at rest, optional payload encryption in transit, pre-commit secret scanning |
 
 ## Project layout
@@ -272,12 +273,33 @@ calendar (more can be added per org).
 - **Color-coded event types**: viewings, inspections, maintenance, lease
   events, key exchange, other — with per-event color overrides.
 
-**Recurrence:** rules are stored as RFC 5545 `rrule` JSON on the event
-(`rrule` column) with `exdates` for excluded dates; expansion happens in
-`lib/recurrence-rrule.ts` (the `rrule` library, with QUARTERLY and
-SEMI_ANNUALLY mapped onto monthly intervals). Supported frequencies:
-`DAILY`, `WEEKLY`, `MONTHLY`, `QUARTERLY`, `SEMI_ANNUALLY`, `ANNUALLY`,
-each with an interval plus optional end-date or occurrence-count limit.
+**Recurrence:** rules are stored as RFC 5545 `rrule` JSON on the event itself
+(`CalendarEvent.rrule` / `CalendarEvent.exdates` Json columns) with `exdates` for
+excluded dates; expansion happens in `lib/recurrence-rrule.ts` (the `rrule`
+library, with QUARTERLY and SEMI_ANNUALLY mapped onto monthly intervals).
+Supported frequencies: `DAILY`, `WEEKLY`, `MONTHLY`, `QUARTERLY`,
+`SEMI_ANNUALLY`, `ANNUALLY`, each with an interval plus optional end-date or
+occurrence-count limit.
+
+### Live "due to start" SSE alerts
+
+A background scheduler (`lib/calendar-event-scheduler.ts`) scans the calendar
+every 30 seconds and pushes a real-time **ORG-scoped INFO** notification (`source:
+calendar:event-upcoming`) for every event — single *or* recurring, including
+exdate handling — that starts within its lead window (default the next **15
+minutes**). Recurring series are expanded with the same rrule engine used by the
+calendar UI, so alerts always match rendered instances. It rides the platform SSE
+pipeline from [section 8](#8-real-time-notifications), so the dashboard's footer
+ticker surfaces "Calendar event due to start: …" messages live — no client-side
+polling.
+
+Each `event + instance` pair is notified exactly once per process lifetime via an
+in-memory dedup set (no schema change); a failed push is dropped rather than
+retried (lost-not-resent, by design). Tunables: `CALENDAR_EVENT_SCAN_INTERVAL_MS`
+(30000), `CALENDAR_LEAD_TIME_MINUTES` (15), `CALENDAR_MAX_EVENTS_PER_SCAN` (20). It
+boots alongside the background health checks via an import in `app/layout.tsx`.
+Full design, trade-offs, and known limitations:
+[documents/feature-planning-and-development/calendar-event-sse-notifications.md](./documents/feature-planning-and-development/calendar-event-sse-notifications.md).
 
 **API:**
 
@@ -339,6 +361,7 @@ Every notable platform event is emitted as an SSE notification:
 | Permission catalog changes (create / update / delete) | `admin:permission-management` | INFO / ERROR | GLOBAL |
 | Resource catalog changes (create / update / delete) | `admin:resource-management` | INFO / ERROR | GLOBAL |
 | Admin broadcast messages (sent through the console) | `admin:message` | configurable (default INFO) | GLOBAL or ORG |
+| Upcoming calendar events — due to start within the 15-minute lead window, from the background scheduler | `calendar:event-upcoming` | INFO | ORG (event's tenant) |
 
 Org-level operations carry the affected organization id, so the history log
 can show which tenant was impacted; pure global catalog entries (permissions,
@@ -626,16 +649,19 @@ Start from `.env.example` (committed, placeholders only).
 
 **Data protection**
 
-| Variable | Required | Purpose |
-|----------|----------|---------|
-| `PII_ENCRYPTION_KEY` | yes (64 hex chars) | AES-256-GCM key for PII at rest |
-| `PAYLOAD_ENCRYPTION_MODE` | no (`disabled`) | `disabled` \| `permissive` \| `enforce` — payload encryption in transit |
-| `PAYLOAD_ENCRYPTION_MAX_BYTES` | no (65536) | Max encrypted request body size |
-| `PAYLOAD_ENCRYPTION_KEY_TTL_SECONDS` | no (300) | Payload key lifetime |
-| `PAYLOAD_ENCRYPTION_REPLAY_WINDOW_SECONDS` | no (30) | Replay-protection window |
-| `PAYLOAD_ENCRYPTION_NONCE_TTL_SECONDS` | no (60) | Nonce cache TTL |
-| `PAYLOAD_ENCRYPTION_REPLAY_CACHE` | no (`redis`) | `memory` \| `redis` replay-dedup backend |
-| `PAYLOAD_ENCRYPTION_REQUIRE_REPLAY_CACHE` | no (`false`) | Fail closed in enforce mode if the replay cache is unavailable |
+| Variable | Required | Default | Purpose |
+|----------|----------|---------|---------|
+| `CALENDAR_EVENT_SCAN_INTERVAL_MS` | no | 30000 | Interval between "due to start" calendar scans (see §6) |
+| `CALENDAR_LEAD_TIME_MINUTES` | no | 15 | Lead window: notify when an event starts within this many minutes |
+| `CALENDAR_MAX_EVENTS_PER_SCAN` | no | 20 | Per-scan cap on upcoming-event notifications (burst protection) |
+| `PII_ENCRYPTION_KEY` | yes (64 hex chars) | — | AES-256-GCM key for PII at rest |
+| `PAYLOAD_ENCRYPTION_MODE` | no | `disabled` | `disabled` \| `permissive` \| `enforce` — payload encryption in transit |
+| `PAYLOAD_ENCRYPTION_MAX_BYTES` | no | 65536 | Max encrypted request body size |
+| `PAYLOAD_ENCRYPTION_KEY_TTL_SECONDS` | no | 300 | Payload key lifetime |
+| `PAYLOAD_ENCRYPTION_REPLAY_WINDOW_SECONDS` | no | 30 | Replay-protection window |
+| `PAYLOAD_ENCRYPTION_NONCE_TTL_SECONDS` | no | 60 | Nonce cache TTL |
+| `PAYLOAD_ENCRYPTION_REPLAY_CACHE` | no | `redis` | `memory` \| `redis` replay-dedup backend |
+| `PAYLOAD_ENCRYPTION_REQUIRE_REPLAY_CACHE` | no | `false` | Fail closed in enforce mode if the replay cache is unavailable |
 
 **Seed credentials** — never shared in committed files; see Appendix B.
 

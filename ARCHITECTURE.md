@@ -54,7 +54,7 @@ This document is organized by **functional area**. Use the table of contents bel
   - [Multi-Instance Limitation](#multi-instance-limitation)
 - [9. Calendar System](#9-calendar-system)
   - [Models & Services](#models--services)
-  - [Recurrence Handling](#recurrence-handling)
+  - [Due-to-Start SSE Notifications](#due-to-start-sse-notifications)
   - [Authorization](#authorization)
 - [10. Cache Architecture](#10-cache-architecture)
   - [Overview](#overview)
@@ -308,7 +308,7 @@ PostgreSQL Row Level Security policies are applied to tenant-scoped tables as a 
 
 | Scope | Models |
 |-------|--------|
-| **Tenant-Scoped** (protected by Prisma extension + RLS) | `Role`, `RolePermission`, `MemberRole`, `Team`, `TeamMember`, `TeamRole`, `Calendar`, `CalendarEvent`, `CalendarRecurrence` |
+| **Tenant-Scoped** (protected by Prisma extension + RLS) | `Role`, `RolePermission`, `MemberRole`, `Team`, `TeamMember`, `TeamRole`, `Calendar`, `CalendarEvent` |
 | **Global** (not org-scoped; require explicit authorization) | `User`, `Organization`, `Member`, `Permission`, `AuditLog`, `NotificationLog`, `Resource`, `ResourceRole` |
 
 ---
@@ -363,8 +363,7 @@ A dedicated `services/` layer sits between the API routes and the database (Pris
 | `NotificationLog` | Global | Tracks email notifications sent by the notification system |
 | `Notification` | Global | In-app events pushed over SSE: title, message, priority (`INFO`/`WARNING`/`ERROR`/`CRITICAL`), scope (`GLOBAL`/`ORG`), source tag, optional `organizationId`, and an `acknowledged` admin flag |
 | `Calendar` | Org-scoped | Container/namespace for calendar events (one default per org) |
-| `CalendarEvent` | Org-scoped | Individual events within a calendar (local datetimes, optional property association) |
-| `CalendarRecurrence` | Org-scoped | 1:1 recurrence rule per event (iCal-inspired fields, `excludedDates` JSON array) |
+| `CalendarEvent` | Org-scoped | Individual events within a calendar (local datetimes, optional `propertyId`; recurrence stored as RFC 5545 `rrule` JSON + `exdates` Json columns, not a separate model) |
 
 ### Relationships
 
@@ -377,7 +376,6 @@ A dedicated `services/` layer sits between the API routes and the database (Pris
 - `TeamRole` → `Role`: Many-to-one mapping to org-scoped roles (role inheritance)
 - `Resource` → `Role`: Via `ResourceRole` (many-to-many, global junction)
 - `Calendar` → `CalendarEvent`: One-to-many cascading delete
-- `CalendarEvent` ↔ `CalendarRecurrence`: One-to-one via `eventId @unique`
 - `Notification` → `Organization`: Optional many-to-one (`SetNull` on org delete) — carries the affected tenant for org-level events; NULL for pure global broadcasts
 
 ### Indexing Strategy
@@ -520,7 +518,8 @@ The platform pushes in-app notifications to every connected browser over a
 single Server-Sent Events (SSE) endpoint, `GET /api/notifications/stream`. One
 central push service owns the wire format, scoping, deduplication, and
 persistence, so any server-side code path — health checks, admin management
-APIs, future domain events — can surface an event with a one-line call.
+APIs, or background schedulers such as the calendar "due to start" scanner
+(Section 9) — can surface an event with a one-line call.
 
 ### System Overview
 
@@ -530,6 +529,7 @@ flowchart TB
         HC["/api/health<br/>notifyHealthCheck(service, healthy)"]
         ADM["Admin management API routes<br/>*management/* — users · orgs · teams · roles ·<br/>permissions · resources<br/>notifyXxxOperation(op, target, success)"]
         MSG["POST /api/admin/notifications<br/>notifyAdminMessage()"]
+        CAL["Calendar due-to-start scheduler<br/>lib/calendar-event-scheduler.ts<br/>(background 30 s scan, Section 9)<br/>pushNotification(scope ORG, INFO)"]
     end
 
     subgraph Push["lib/notification-push.ts (in-process pub/sub hub)"]
@@ -556,6 +556,7 @@ flowchart TB
     HC --> NORM
     ADM --> NORM
     MSG --> NORM
+    CAL --> NORM
     NORM --> DEDUP
     DEDUP -- "identical in window → drop" --> DROP(["skip"])
     DEDUP -- "new" --> PERSIST["persist Notification row"]
@@ -639,10 +640,14 @@ Every currently wired producer, with its success/failure priorities:
 | `admin:permission-management` | `notifyPermissionOperation(…)` | permission create · update · delete | INFO / ERROR | GLOBAL (no org — global catalog) |
 | `admin:resource-management` | `notifyResourceOperation(…)` | resource create · update · delete | INFO / ERROR | GLOBAL (no org — global catalog) |
 | `admin:message` | `notifyAdminMessage(title, message, orgId?, priority?)` | Admin broadcast via `POST /api/admin/notifications` | caller-selected (default INFO) | GLOBAL or ORG |
+| `calendar:event-upcoming` | direct `pushNotification(...)` from `lib/calendar-event-scheduler.ts` | One alert per event instance that starts within the lead window (default 15 min), single + recurring (exdate-aware) | INFO | ORG (event's tenant)² |
 
 ¹ Sent `GLOBAL` so all Super Admins see platform operations everywhere, but the
 affected `organizationId` is passed through so the log attributes the event to
 the right tenant.
+² The scheduler runs outside request scope and scans **all** organizations;
+tenant isolation is enforced at delivery via the ORG scope + the event's own
+`organizationId` (only that tenant's subscribers plus Super Admins receive it).
 
 ### Connection Security, Caps & Lifecycle
 
@@ -764,6 +769,7 @@ that see no change push nothing — the dedup gate above remains as a backstop.
 ### Testing
 
 - **Unit** — one suite per producer family: `tests/unit/notify-health-check.test.ts`, `notify-user-operation.test.ts`, `notify-organization-operation.test.ts`, `notify-team-operation.test.ts`, `notify-role-operation.test.ts`, `notify-permission-operation.test.ts`, `notify-resource-operation.test.ts`. Coverage includes success/failure titles, priority selection, `source` and `organizationId` propagation, concurrent-push deduplication, org scope non-dedup, and swallowed persistence failures.
+- **Calendar scheduler** — `tests/unit/calendar-event-scheduler.test.ts` covers the "due to start" producer: lead-window discovery, recurring expansion with exdates, per-instance (not once-ever) dedup, ORG-scoped payload shape, lost-not-resent push-failure semantics, DB-failure resilience, per-scan cap, and timer idempotency (Section 9).
 - **Integration** — `tests/integration/notification-reliability.test.tsx` verifies the client's focus/blur-aware polling logic (listener attach/detach, event response) for the poll-based inbox hook.
 
 ### Multi-Instance Limitation
@@ -776,7 +782,10 @@ which instance handled the event — but a client on instance B would not
 instantly receive an event pushed by instance A. Scaling out requires relaying
 pushes through a shared broker (e.g. the same Redis Pub/Sub pattern used for
 cache invalidation) plus a shared dedup store; this is tracked as deferred work
-(see README, Appendix F).
+(see README, Appendix F). The calendar due-to-start scheduler (Section 9) has
+the same per-process property: its `firedKeys` set lives on `globalThis`, so N
+instances would each emit one alert per detected event instance — another
+input to the shared-dedup-store work above.
 
 ---
 
@@ -787,30 +796,74 @@ cache invalidation) plus a shared dedup store; this is tracked as deferred work
 | Model | Scope | Description |
 |-------|-------|-------------|
 | `Calendar` | Org-scoped | Container/namespace for events (one default per org, multiple supported) |
-| `CalendarEvent` | Org-scoped | Individual events (local datetimes, optional property association) |
-| `CalendarRecurrence` | Org-scoped | 1:1 recurrence rule per event (`eventId @unique`, iCal-inspired fields, `excludedDates` JSON array for drag-and-drop instance exclusion) |
+| `CalendarEvent` | Org-scoped | Individual events (local datetimes, optional `propertyId`; RFC 5545 `rrule` JSON + `exdates` Json columns on the event itself — there is no separate recurrence model) |
 
 Services:
 - `services/calendar-service.ts` — Calendar CRUD, default-calendar bootstrapping (org-scoped)
 - `services/calendar-event-service.ts` — Event CRUD, recurrence expansion, upcoming events
 - `services/calendar-notification-service.ts` — Today's-events email notifications
+- `lib/calendar-event-scheduler.ts` — "Due to start" background scan that pushes live SSE notifications (see below; not a request-scoped service)
 
 Recurrence handling is supported by:
-- `lib/recurrence.ts` — Core recurrence expansion logic
-- `lib/recurrence-rrule.ts` — rrule library integration for iCal-compatible rules
+- `lib/recurrence-rrule.ts` — rrule library integration (RFC 5545 rules stored as JSON on the event); shared by the API service *and* the due-to-start scheduler so both expand instances identically
+- `lib/recurrence.ts` — Display/formatting helpers
 - `lib/recurrence-scopes.ts` — Scoping logic for recurrence instances
 
-### Real-Time Notifications (SSE)
+### Due-to-Start SSE Notifications
 
-In-app real-time updates are delivered by the platform-wide SSE notification
-system documented in [Section 8 — Real-Time Notification System](#8-real-time-notification-system-sse): a single
-`/api/notifications/stream` endpoint, the central push service in
-`lib/notification-push.ts`, and the singleton `useNotifications` client hook.
-Calendar pages inherit that live feed through the dashboard layout's footer
-ticker rather than running a calendar-specific stream, and they receive
-platform health events like any other page.
+Calendar events push live "due to start" alerts through the platform SSE system
+documented in [Section 8 — Real-Time Notification System](#8-real-time-notification-system-sse) —
+no calendar-specific stream or client-side polling exists. The producer is
+`lib/calendar-event-scheduler.ts`, a background scanner booted once per server
+process alongside the health checks (side-effect import in `app/layout.tsx`,
+`globalThis`-keyed state so dev-mode's duplicate module evaluation can't fork it):
 
-The only calendar-owned notification flow is **email** dispatch for today's
+```mermaid
+flowchart LR
+    L["app/layout.tsx<br/>import on server boot"] --> S[startCalendarEventScheduler<br/>setInterval 30 s · unref]
+    S --> T[runCalendarEventScan<br/>each tick]
+    T --> Q1["findMany<br/>startDate in [now, now+lead]"]
+    T --> Q2["findMany series with<br/>startDate ≤ now+lead"]
+    Q2 --> X["expandRecurrenceWithRrule<br/>(same engine as the UI)<br/>honors exdates"]
+    Q1 --> F["merge + sort by start time"]
+    X --> F
+    F --> D{"firedKeys: Set<br/>(event id · instance start MS)<br/>on globalThis"}
+    D -- already fired --> SKIP[skip]
+    D -- new key --> C["claim key synchronously<br/>BEFORE the push"]
+    C --> P["pushNotification(scope ORG,<br/>priority INFO,<br/>source calendar:event-upcoming)"]
+```
+
+Key properties:
+
+- **Lead window** `(now, now + LEAD_TIME_MINUTES]` (default 15 min). An event is
+  in scope while it starts between "just after the last tick" and the end of the
+  window; each new instance inside it is notified exactly once per process
+  lifetime via the `firedKeys` in-memory set. No schema migration was needed —
+  the accepted cost is that a restart can re-notify an event still in its lead
+  window, at most one extra time.
+- **Recurring parity** — series are expanded with `expandRecurrenceWithRrule()`
+  (the same function `calendar-event-service.ts` uses), so an alert always
+  matches a rendered calendar instance, and dragged-to-elsewhere occurrences
+  (`exdates`) never alert for their excluded date.
+- **Tenant isolation** — the scanner is request-scope-free and reads *all*
+  orgs' events; isolation is enforced at delivery: each alert carries the event's
+  `organizationId` with `ORG` scope, so only that tenant's subscribers (plus
+  Super Admins) receive it.
+- **Resilience** — a DB failure aborts the tick quietly and retries next interval;
+  a failed push is claimed anyway (lost-not-resent — no retry storms when SSE is
+  down); a per-scan cap (`CALENDAR_MAX_EVENTS_PER_SCAN`, default 20) bounds bursts.
+- **Consumption** — the tenant dashboard's footer ticker renders the message
+  ("Calendar event due to start: …") like any other SSE notification; it is also
+  persisted to the `Notification` table and visible in the admin log, filterable
+  by `source = calendar:event-upcoming`.
+- **Configuration** — `CALENDAR_EVENT_SCAN_INTERVAL_MS` (30 000),
+  `CALENDAR_LEAD_TIME_MINUTES` (15), `CALENDAR_MAX_EVENTS_PER_SCAN` (20).
+
+Full design rationale, trade-offs (restart duplicates, lost-not-resent, per-scan
+cap, cross-process dedup) and limitations:
+[documents/feature-planning-and-development/calendar-event-sse-notifications.md](./documents/feature-planning-and-development/calendar-event-sse-notifications.md).
+
+The other calendar-owned notification flow is **email** dispatch for today's
 events, handled by `lib/notifications/dispatcher.ts`, with delivery via
 `lib/notifications/email.ts` (nodemailer) and event definitions in
 `lib/notifications/events.ts`.
@@ -974,6 +1027,7 @@ nipp/
 │   ├── auth.ts                   # BetterAuth configuration & session callbacks
 │   ├── auth-client.ts            # Client-side auth utilities & hooks
 │   ├── authz-route.ts / authz.ts # Authorization logic (hasPermission, isSuperAdmin)
+│   ├── calendar-event-scheduler.ts  # "Due to start" background scan → ORG-scoped SSE alerts (Section 9)
 │   ├── cache/                    # Cache architecture (hybrid L1+L2, LRU, stampede prevention, health/metrics, warming)
 │   ├── client-error-logger.ts    # Client-side error logging
 │   ├── constants.ts              # Shared constants
@@ -1002,9 +1056,9 @@ nipp/
 │   ├── pgbouncer-monitor.ts      # PgBouncer health monitoring
 │   ├── pii-crypto.ts             # PII-specific cryptographic helpers
 │   ├── pii-routes.ts             # PII route configuration & matcher
-│   ├── recurrence-rrule.ts       # rrule library integration for calendar recurrence
+│   ├── recurrence-rrule.ts       # rrule library expansion (RFC 5545); shared by API service + due-to-start scheduler
 │   ├── recurrence-scopes.ts      # Recurrence instance scoping
-│   ├── recurrence.ts             # Core recurrence expansion logic
+│   ├── recurrence.ts             # Display/format helpers (legacy expansion engine, replaced by recurrence-rrule.ts)
 │   ├── redis.ts                  # Redis client with retry strategy
 │   ├── replay-cache-redis.ts     # Redis-backed replay nonce cache
 │   ├── require-super-admin.ts    # Super admin route guard
