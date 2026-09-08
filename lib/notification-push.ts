@@ -103,6 +103,9 @@ export function getSessionConnectionCount(sessionId: string): number {
  * Normalize a priority (which callers may pass as a lowercase string, e.g.
  * 'info' from the admin API) into a valid Prisma NotificationPriority member.
  * Falls back to INFO for anything unrecognized rather than persisting garbage.
+ *
+ * CALENDAR is a first-class priority (upcoming-event reminders) alongside the
+ * operational INFO/WARNING/ERROR/CRITICAL levels.
  */
 function normalizePriority(priority: string | NotificationPriority): NotificationPriority {
   const key = String(priority ?? '').toUpperCase();
@@ -110,7 +113,8 @@ function normalizePriority(priority: string | NotificationPriority): Notificatio
     key === NotificationPriority.INFO ||
     key === NotificationPriority.WARNING ||
     key === NotificationPriority.ERROR ||
-    key === NotificationPriority.CRITICAL
+    key === NotificationPriority.CRITICAL ||
+    key === NotificationPriority.CALENDAR
   ) {
     return key as NotificationPriority;
   }
