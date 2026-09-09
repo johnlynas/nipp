@@ -3,7 +3,7 @@ import type { NextConfig } from 'next';
 const nextConfig: NextConfig = {
 
   // Keeps the Node.js runtime (Server Components) happy
-  serverExternalPackages: ['ioredis', 'pg'],
+  serverExternalPackages: ['ioredis', 'pg', 'bree', 'graceful', '@breejs/later'],
 
   // Fixes the Edge runtime (Middleware) build error
   webpack(config, { nextRuntime }) {

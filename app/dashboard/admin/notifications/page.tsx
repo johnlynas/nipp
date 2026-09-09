@@ -16,13 +16,15 @@ import { ConfirmDialog } from '@/components/dashboard/ConfirmDialog';
 import { StatCard } from '@/components/dashboard/StatCard';
 
 // Priority level labels for the events table — plain colored text, no border/icon.
-// CALENDAR is the "event due to start" reminder priority, shown in bright green.
+// CALENDAR is the "event due to start" reminder priority; JOB is the job
+// scheduler's success/failure signal.
 const PRIORITY_LABELS: Record<string, string> = {
   INFO: 'text-blue-500',
   WARNING: 'text-yellow-500',
   ERROR: 'text-red-500',
   CRITICAL: 'text-red-600 font-semibold',
   CALENDAR: 'text-green-600 font-semibold',
+  JOB: 'text-purple-600 font-semibold',
 };
 
 // ---------------------------------------------------------------------------
@@ -33,7 +35,7 @@ interface NotificationItem {
   id: string;
   title: string;
   message: string;
-  priority: 'INFO' | 'WARNING' | 'ERROR' | 'CRITICAL' | 'CALENDAR';
+  priority: 'INFO' | 'WARNING' | 'ERROR' | 'CRITICAL' | 'CALENDAR' | 'JOB';
   scope?: string;
   organizationId?: string;
   organizationName?: string;
@@ -267,6 +269,7 @@ export default function NotificationsLogPage() {
           <option value="ERROR">Error</option>
           <option value="CRITICAL">Critical</option>
           <option value="CALENDAR">Calendar</option>
+          <option value="JOB">Job</option>
         </select>
 
         <select

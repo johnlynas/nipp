@@ -114,7 +114,8 @@ function normalizePriority(priority: string | NotificationPriority): Notificatio
     key === NotificationPriority.WARNING ||
     key === NotificationPriority.ERROR ||
     key === NotificationPriority.CRITICAL ||
-    key === NotificationPriority.CALENDAR
+    key === NotificationPriority.CALENDAR ||
+    key === NotificationPriority.JOB
   ) {
     return key as NotificationPriority;
   }

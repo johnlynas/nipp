@@ -87,6 +87,7 @@ enum NotificationPriority {
   ERROR
   CRITICAL
   CALENDAR
+  JOB
 }
 
 // ============================================================
@@ -578,5 +579,80 @@ model CalendarEvent {
   updatedAt   DateTime @updatedAt
 
   @@index([organizationId, startDate]) // Efficient date range queries
-  @@index([propertyId])                // Property-based event lookups (future scheduler)
+  @@index([propertyId])                 // Property-based event lookups (future scheduler)
+}
+
+// ============================================================
+// Background Job Scheduler (job-scheduler-service)
+// Platform-organization only. A job run forks a Bree worker; operator code
+// (Phase 2) is stored in `code` and materialized to a tmp file at exec time
+// (file-based worker — never eval'd).
+// ============================================================
+
+model JobDefinition {
+  id             String  @id @default(cuid())
+  /** Owner = the platform organization only. */
+  platformOrgId  String
+
+  /** Unique within a platformOrgId. */
+  name           String
+  /** Handler registry key → built-in handler or (Phase 2) stored script. */
+  handlerKey     String
+  /**
+   * Operator/script source (Phase 2). Materialized to a tmp file under
+   * job-scheduler-runtime/ at execution time and loaded into the Bree worker
+   * by file path — never stringified/eval'd. Null for built-in handlers.
+  */
+  code           String?
+  /** Schedule: JSON — { 'kind': 'cron'|'interval'|'oneshot', ... }. */
+  scheduleExpr   String
+  /** IANA timezone; default from JOB_SCHEDULER_TIMEZONE. */
+  timezone       String?
+  /** Per-job wall-clock cap (ms); default from JOB_SCHEDULER_DEFAULT_TIMEOUT_MS. */
+  timeoutMs      Int?
+  /** Per-job concurrency limit; default from JOB_SCHEDULER_DEFAULT_CONCURRENCY (1). */
+  concurrencyLimit Int?  @default(1)
+  enabled        Boolean @default(false)
+
+  /** Idempotency marker — doubles as the claim gate for overlapping/restart runs. */
+  lastRunAt      DateTime?
+  /** SUCCEEDED | FAILED | CANCELLED */
+  lastRunStatus  String?
+
+  /** Platform admin user id who created this job. */
+  createdBy      String?
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  executions     JobExecution[]
+
+  @@unique([platformOrgId, name])
+  @@index([platformOrgId, enabled])
+  @@index([platformOrgId, lastRunAt])
+}
+
+model JobExecution {
+  id              String  @id @default(cuid())
+  jobDefinitionId String
+  platformOrgId   String
+
+  startedAt       DateTime @default(now())
+  finishedAt      DateTime?
+  /** PENDING | RUNNING | SUCCEEDED | FAILED | CANCELLED */
+  status          String
+  /** SCHEDULE | MANUAL */
+  trigger         String
+  /** Who triggered a manual run. */
+  actorId         String?
+  error           String?
+  resultJson      Json?
+  /** Always 'job-scheduler:execution'. */
+  source          String
+
+  createdAt       DateTime @default(now())
+
+  jobDefinition   JobDefinition @relation(fields: [jobDefinitionId], references: [id], onDelete: Cascade)
+
+  @@index([jobDefinitionId, startedAt])
+  @@index([platformOrgId, status])
 }

@@ -23,9 +23,10 @@ scheduling, and graceful shutdown.
    - [Boot Path](#boot-path)
    - [Job Execution Lifecycle](#job-execution-lifecycle)
 - [Chosen Engine](#chosen-engine)
-   - [What Bree Provides](#what-bree-provides)
-   - [The Nextjs and Worker Thread Tension](#the-nextjs-and-worker-thread-tension)
-   - [Integration Strategy Decision](#integration-strategy-decision)
+    - [What Bree Provides](#what-bree-provides)
+    - [The Nextjs and Worker Thread Tension](#the-nextjs-and-worker-thread-tension)
+    - [Integration Strategy Decision](#integration-strategy-decision)
+- [Phase 0 Spike Evidence](#phase-0-spike-evidence)
 - [Boot Integration Alongside the Calendar Scheduler](#boot-integration-alongside-the-calendar-scheduler)
 - [The Job Scheduler Service Interface](#the-job-scheduler-service-interface)
 - [Data Model Proposal](#data-model-proposal)
@@ -308,6 +309,136 @@ The `job-scheduler-service` interface (below) is defined so that both strategies
 behind the same API; switching Strategy 1 → 2 is an **internal** change to the handler
 loader and worker bootstrap, invisible to callers.
 
+## Phase 0 Spike Evidence
+
+This section records the empirical findings from the **Phase 0 spike (run 2026-09-09,
+Bree 9.2.9 in an isolated throwaway sandbox — not the repo)**. It closes the primary
+integration risk (R1) that the rest of the plan is gated on. Findings are evidence;
+the decisions they drive are captured in [Open Questions](#open-questions) and
+[Configuration](#configuration).
+
+### R1 — "worker per run" is proven, not assumed (CLOSED)
+
+**Claim under test:** Bree forks a *fresh* worker thread on every run/interval tick —
+there is no long-lived or main-thread execution path — and marshals per-job context
+through `workerData`.
+
+**Result: PER-TICK RE-FORK CONFIRMED.** A 300 ms `interval` job ran ~5 ticks in ~1.5 s
+and forked 5 separate workers, each with a distinct real thread id, and each received
+the parent's `workerData`:
+
+```
+after start: intervals=1  timeouts=0  workers=0
+[FORK #1] thread=? job=tick
+   <worker tid=1> fired; jobData={"hello":"from-parent","orgId":"org_123"}
+[FORK #2] thread=? job=tick
+   <worker tid=2> fired; jobData={"hello":"from-parent","orgId":"org_123"}
+[FORK #3] thread=? job=tick
+   <worker tid=3> fired; jobData={"hello":"from-parent","orgId":"org_123"}
+[FORK #4] thread=? job=tick
+   <worker tid=4> fired; jobData={"hello":"from-parent","orgId":"org_123"}
+t+1500ms  forks=5  deleted=4  liveWorkers=1
+   <worker tid=5> fired; jobData={"hello":"from-parent","orgId":"org_123"}
+R1 RESULT over ~1.5s @ 300ms (expect ~5 ticks):
+  created=5  deleted=4  (5 distinct real thread ids: 1–5)  => PER-TICK RE-FORK CONFIRMED
+```
+
+(The per-tick event log shows `thread=?` at *create* time because Bree reads the
+worker's `threadId` only *after* it is online; the worker itself logs `tid=1…5` at
+fire time, which is the authoritative count — 5 ticks, 5 distinct threads.)
+
+**Source confirmation** (Bree 9.2.9, `src/index.js`):
+
+- `start()` arms the schedule via `setInterval(() => this.run(name), job.interval)`
+  (finite-interval branch, ~line 549–554 / 634–639).
+- `run(name)` does `this.workers.set(name, this.createWorker(job.path, object))`
+  (~line 384).
+- `createWorker(filename, options)` is literally `return new Worker(filename, options)`
+  (~line 763–765) — every run constructs a **new** `worker_threads.Worker`.
+- Per-job guard: if a worker for `name` is already alive, the next tick is **skipped**
+  ("Job is already running", ~line 361–367) — so at most **one live worker per job**
+  at any instant (the `liveWorkers=1` invariant above).
+- A worker is removed only on its `'done'` message or `'exit'`
+  (~line 428–437 / 486–490), then `handleJobCompletion` fires. So each tick =
+  fork → run → signal `done` → terminate → next tick forks again.
+
+**Consequence for the design:** because the worker is re-forked on every tick, a job
+whose source changes between ticks picks up the *new* source automatically on the next
+fork (the worker re-reads the file at fork time). This is the mechanism the handler
+delivery model below relies on.
+
+### R2 — Handler delivery: DB-stored code materialized to a tmp file, file-based only (CLOSED)
+
+The spike proved the **file-based** path (`bree.add({ path: './job-worker.js', … })`)
+runs a worker cleanly end-to-end; the **eval** path (`path` as a stringified function,
+`worker: { eval: true }`) was the source of every earlier spike failure — Bree
+stringifies the handler via `.toString()` and injects it as eval source, which is
+fragile (native/bound fns rejected; whitespace/escaping sensitive).
+
+**Decision (settled): file-based workers only — no eval, no key-dispatch closures.**
+Operator/scripted code is **stored in the database** (a `JobDefinition.code` text
+column) and, at execution time, **materialized to an on-disk file** from which Bree
+forks the worker. This gives:
+
+- **No eval.** Avoids the stringify/`eval:true` fragility entirely.
+- **Edit-and-rerun.** Because the worker re-reads its file on every fork (R1), editing
+  a job's code in the DB and saving makes the *next tick* run the new code — no
+  restart, consistent with the fork-per-run model.
+- **Testable, inspectable handlers.** Files on disk can be read, logged, versioned, and
+  linted; eval source cannot.
+
+**Where the tmp files live:** a gitignored, writable directory **inside the app tree** —
+`job-scheduler-runtime/` (e.g. `job-scheduler-runtime/<platformOrgId>/<jobId>.cjs`).
+Keeping the path *inside the app tree* (rather than an OS `/tmp`) means Node's
+upward `require` resolution finds the app's `node_modules` for free, so a handler that
+imports a project dependency resolves without a custom require shim. It must be a
+writable mount in the Docker image.
+
+**Lifecycle:** the file **persists across ticks** (do *not* delete on completion or the
+next fork can't find it). Reap a file when its job is deleted/discarded, and on boot
+scan `job-scheduler-runtime/` and unlink any file whose `JobDefinition` no longer
+exists. Writes are **atomic** (write a temp sibling + `fs.rename`, atomic on POSIX) so
+a forking worker never reads half-written JS — reinforced by the `liveWorkers=1`
+per-job guard (a job's file is never read by two workers at once).
+
+**Built-in (trusted) handlers** are the same model: each is a small committed `.ts`
+module materialized the same way (or referenced directly), not a JS closure — the
+handler loader resolves `handlerKey` → source text → tmp file → `path` for Bree.
+
+### R3 — Webpack / Next.js bundling — OPEN (next spike task)
+
+Bree's core is CommonJS using `new Worker(filename, …)` over a **file path**. Under a
+Next.js/webpack-bundled server this requires Bree (and its deps `graceful`,
+`@breejs/later`) to be a **serverExternalPackage** (`serverExternalPackages:
+['bree', 'graceful', '@breejs/later']`) so webpack skips it and it runs in Node's raw
+CJS runtime. The file-based worker path (R2) also relies on the tmp file actually
+existing on the filesystem the worker forks in — which, in Docker, must be a writable
+mount. **Not yet validated in-repo.** This is the remaining Phase 0 engineering task
+before Phase 1; it is a configuration/verification task, not a design branch.
+
+### R4 — Per-worker connection pool sizing (P0.5) (CLOSED)
+
+Because each tick forks a fresh worker (R1) and (per resolved item 6) each worker
+acquires a pooled connection rather than a fresh Prisma client, the sizing question
+refines to: *what is the max number of concurrent live workers (= new DB connections
+at a peak tick), and does it fit the pool?*
+
+**Decision (settled): default the DB concurrency ceiling to 100, configurable.**
+`JOB_SCHEDULER_MAX_CONCURRENT` caps simultaneous *job runs* (circuit breaker, default
+5 — unchanged); a new `JOB_SCHEDULER_DB_CONCURRENCY` var sets the **connection-pool
+ceiling** against which per-worker acquisition is bounded.
+
+- **Default `max_client_conn = 100`, configurable via env var**
+  (`JOB_SCHEDULER_DB_CONCURRENCY`, default `100`), sized to a headroom **below** the
+  PgBouncer `max_client_conn` so the scheduler + other app connections coexist.
+- The global `JOB_SCHEDULER_MAX_CONCURRENT` (default 5) is the *runtime* cap that keeps
+  live-worker count — and therefore live DB connections — well under that ceiling
+  except in a true burst, which the pool ceiling backstops.
+
+Full pool wiring (which Prisma pool PgBouncer fronts, and how a worker acquires a
+pooled connection from `workerData` instead of spawning its own `globalThis` client)
+is pinned by the R3 in-repo spike.
+
 ## Boot Integration Alongside the Calendar Scanner
 
 The new module starts in the **same place and the same way** as the calendar
@@ -387,11 +518,15 @@ both **platform-org scoped**.
 ```prisma
 // Suggested (illustrative) — to be finalized in a later change proposal.
 model JobDefinition {
-  id            String   @id @default(cuid())
-  platformOrgId String                    // owner = platform organization only
-  name          String                    // unique within platformOrgId
-  handlerKey    String                    // registry key -> builtin or user script
-  scheduleExpr  String                    // json: cron / interval / oneshot
+  id            String    @id @default(cuid())
+  platformOrgId String                     // owner = platform organization only
+  name          String                     // unique within platformOrgId
+  handlerKey    String                     // registry key -> builtin or user script
+  code          String?                    // R2: operator/script source (Phase 2);
+                                          // materialized to job-scheduler-runtime/
+                                          // at exec time and loaded into the Bree
+                                          // worker by file, never eval'd
+  scheduleExpr  String                     // json: cron / interval / oneshot
   timezone      String?                   // IANA; default from env
   timeoutMs     Int?
   concurrencyLimit Int? @default(1)
@@ -526,11 +661,16 @@ should not perpetuate the unvalidated style.
 | --- | --- | --- |
 | `JOB_SCHEDULER_ENABLED` | `true` | Master on/off for the engine |
 | `JOB_SCHEDULER_TIMEZONE` | `Europe/London` | Default IANA timezone for schedules |
-| `JOB_SCHEDULER_MAX_CONCURRENT` | `5` | Global cap on simultaneous job runs (circuit breaker) |
+| `JOB_SCHEDULER_MAX_CONCURRENT` | `5` | Global cap on simultaneous job runs (runtime circuit breaker) |
 | `JOB_SCHEDULER_DEFAULT_CONCURRENCY` | `1` | Per-job default concurrency limit |
 | `JOB_SCHEDULER_DEFAULT_TIMEOUT_MS` | `300000` | Per-job default wall-clock cap |
 | `JOB_SCHEDULER_BOOT_REGISTRY` | `true` | Load enabled jobs from DB at boot |
 | `JOB_SCHEDULER_DRYRUN_DEFAULT` | `false` | New jobs default to dry-run (Phase 2) |
+| `JOB_SCHEDULER_DB_CONCURRENCY` | `100` | Connection-pool ceiling per forked worker; sized **below** PgBouncer `max_client_conn` so the scheduler and other app connections coexist (backstop for a burst above `MAX_CONCURRENT`) |
+
+The runtime handler materialization directory is fixed at `job-scheduler-runtime/`
+(writable, gitignored — add to `.gitignore`; must be a writable mount in the Docker
+image). See [Phase 0 Spike Evidence → R2](#phase-0-spike-evidence).
 
 Zod form (illustrative):
 
@@ -538,6 +678,7 @@ Zod form (illustrative):
 JOB_SCHEDULER_ENABLED: z.enum(['true','false']).default('true'),
 JOB_SCHEDULER_TIMEZONE: z.string().default('Europe/London'),
 JOB_SCHEDULER_MAX_CONCURRENT: z.string().regex(/^\d+$/).default('5'),
+JOB_SCHEDULER_DB_CONCURRENCY: z.string().regex(/^\d+$/).default('100'),
 ```
 
 ## Access and Security
@@ -576,6 +717,31 @@ be able to define, view, trigger, or cancel jobs.
 restricted API surface (no ambient `globalDb`, no file/network by default, explicit
 capability injection). The service injects a **least-privilege** context and
 records every permission used.
+
+> **Critical caveat — worker-thread isolation is NOT security isolation.** This is the
+> single most important security fact in the plan and the thing **Phase 2 must still
+> solve**. A Bree worker is a real Node `worker_threads` worker with full `require()`;
+> the file-based delivery model (R2) gives the worker a `.cjs` file it can load, and
+> a file loaded with `require()` can, unless blocked, `require('fs')`,
+> `require('child_process')`, `require('net')`/`require('tls')`, reach the real
+> `globalThis`, read any file on the writable mounts, open sockets, and spawn
+> processes — i.e. **the same blast radius as the eval path**. The worker boundary
+> delivers *runtime* isolation (no access to the main thread's `globalThis`
+> singletons such as the Prisma client, plus per-worker `resourceLimits` for
+> CPU/heap/stack), **not** *security* isolation. So:
+>
+> - A restricted API surface is **not enough by itself**; it must be enforced by a
+>  **shimmed/allowlisted `require`** (block `fs`, `child_process`, `net`, `tls`,
+>  `dns`, `os`, …) plus **OS-level sandboxing** (Linux seccomp/landlock, or a
+>  capability-dropped container / restricted mount) and per-worker
+>  `resourceLimits` (CPU/heap/stack caps Bree forwards per job).
+> - Because handlers now load from a file the worker controls
+>  (`job-scheduler-runtime/`, R2), treat that directory and any code it contains as
+>  **untrusted input**; never let it escape the app tree or touch secrets.
+> - Phase 1 runs only the *trusted built-in* set, so these controls need not be
+>  complete yet — but the worker must **not** be assumed sandboxed. The capability
+>  sandbox is Phase 2's explicit work item, and "worker isolation" in earlier
+>  sections means the runtime boundary only, never "safe to run untrusted code."
 
 ## The Automatic Scripting Feature
 
@@ -673,12 +839,13 @@ outside declared capabilities; dry-run produces a diff and commits nothing.
 
 | Risk | Impact | Mitigation |
 | --- | --- | --- |
-| Bree's worker-per-run model vs Next.js bundling | Integration may not boot cleanly | Phase 0 spike confirms worker-per-run with `root:false`; per-worker connection pool + decision recorded |
-| Bree v9 breaking changes | API drift | Pin the exact version; review `UPGRADING.md`; wrap behind the service API |
-| pino vs Bree's Cabin logger | Boot log failures | Thin pino adapter as a Bree `logger` option |
-| Runaway / burst of due jobs | Platform overload | Per-job + global concurrency caps, timeouts, backoff |
+| Bree worker-per-run vs Next.js bundling | Integration may not boot cleanly | R1 **proven** in Phase 0 spike (fork-per-tick, `workerData` reaches worker — [Phase 0 Spike Evidence](#phase-0-spike-evidence)); R3 (Webpack/`serverExternalPackages` + writable tmp mount) is the **remaining in-repo verification** |
+| Bree v9 breaking changes | API drift | Pinned to **bree@9.2.9** (spike); review `UPGRADING.md`; wrap behind the service API |
+| pino vs Bree's Cabin logger | Boot log failures | Thin pino adapter as a Bree `logger` option (BreeLogger = `{info,warn,error}`, trivially satisfiable) |
+| Runaway / burst of due jobs | Platform overload | Per-job + global `JOB_SCHEDULER_MAX_CONCURRENT` (=5) caps + `JOB_SCHEDULER_DB_CONCURRENCY` (=100) pool ceiling |
 | Double execution on restart / overlapping tick | Corrupted state | DB-backed claim (atomic `lastRunAt` gate) |
-| Untrusted user code | Security breach | Sandbox isolation, capability injection, dry-run + approval — Phase 2 only |
+| Untrusted user code — **worker ≠ security isolation** | Security breach | Worker-thread + `resourceLimits` is *runtime* isolation only; phase 2 adds shimmed/allowlisted `require`, OS-level sandbox, capability injection, dry-run + approval. See [Access and Security caveat](#access-and-security) |
+| Handler file on disk (R2) | Malicious code / FS escape | Materialize only to the gitignored, writable `job-scheduler-runtime/`; atomic writes; reap on delete/boot |
 | Horizontal scale / multiple instances | Double runs | DB claim is instance-safe; document before scaling |
 | Secrets/PII in job output | Leakage | pino redaction already in `lib/logger.ts`; applied to all job output |
 
@@ -692,9 +859,12 @@ outside declared capabilities; dry-run produces a diff and commits nothing.
 - **Untrusted-code sandboxing is deferred.** Phase 1 runs only the *trusted built-in*
   handler set inside Bree's workers (worker isolation is present from the start); the
   capability sandbox for operator-authored/untrusted code is Phase 2.
-- **Worker isolation is always-on.** Every run forks a worker (Bree's model), so
-  there is no "in-process" fast path; Phase 1 uses the worker boundary for context
-  reconstruction, and Phase 2 adds capability-based sandboxing on the same boundary.
+- **Worker isolation is always-on (runtime, not security).** Every run forks a worker
+  (proven by the R1 spike: fork-per-tick), so there is no "in-process" fast path.
+  Phase 1 uses the worker boundary for context reconstruction; Phase 2 adds
+  capability-based **security** sandboxing on the same boundary — see the
+  [Access and Security caveat](#access-and-security): a worker thread is not a
+  security boundary, and the file-based handler delivery (R2) does not change that.
 
 ## Open Questions
 
@@ -724,12 +894,26 @@ outside declared capabilities; dry-run produces a diff and commits nothing.
    approve in `app/api/admin/jobs/**`); no user-facing approval UI in Phase 1.
 6. **Per-worker bootstrap — RESOLVED.** **Use a connection pool** (PgBouncer / a
    shared Prisma pool): each forked worker acquires a pooled connection instead of a
-   fresh per-run client. Pool sizing + PgBouncer wiring captured in the Phase 0
-   design note.
+   fresh per-run client. Pool sizing is settled by the Phase 0 spike:
+   `JOB_SCHEDULER_DB_CONCURRENCY` defaults to **100**, configurable, sized **below**
+   PgBouncer `max_client_conn` (see [Configuration](#configuration) and
+   [Phase 0 Spike Evidence → R4](#phase-0-spike-evidence)).
+7. **Worker-per-run model — RESOLVED (empirically).** R1 **confirmed by runtime spike**:
+   Bree forks a fresh worker on every tick, one live worker per job at a time,
+   `workerData` reaches the worker — see [Phase 0 Spike Evidence → R1](#phase-0-spike-evidence).
+8. **Handler delivery — RESOLVED.** **File-based workers only, no eval**: operator code
+   is stored in the DB (`JobDefinition.code`) and materialized to a tmp file in the
+   app-tree `job-scheduler-runtime/` directory at exec time; edit-and-rerun via
+   fork-time re-read. See [Phase 0 Spike Evidence → R2](#phase-0-spike-evidence).
+9. **Webpack / Next.js bundling — OPEN.** Bree must be a `serverExternalPackage`
+   (`serverExternalPackages: ['bree','graceful','@breejs/later']`) and the tmp dir a
+   writable mount — the one remaining in-repo Phase 0 verification (a config/verify task,
+   not a design branch). See [Phase 0 Spike Evidence → R3](#phase-0-spike-evidence).
 
-**No design questions remain open after this revision.** The only item still in flight
-is engineering detail, not a design choice: per-worker pool sizing / PgBouncer
-parameters, which the Phase 0 spike pins in a short design note before Phase 1.
+Design questions are now **closed except R3 (Webpack/Next.js bundling)**, which is an
+engineering-verification task the in-repo Phase 0 spike completes before Phase 1 —
+not a design branch. The spike findings are durable in
+[Phase 0 Spike Evidence](#phase-0-spike-evidence).
 
 ## File and Dependency Impact
 

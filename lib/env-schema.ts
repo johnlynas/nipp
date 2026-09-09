@@ -107,6 +107,38 @@ export const envSchema = z.object({
 
   /** Calendar POST/PATCH/DELETE: window duration in seconds (default 60). */
   RATE_LIMIT_CALENDAR_WINDOW: z.string().regex(/^\d+$/).optional(),
+
+   // ---------------------------------------------------------------------------
+   // Background Job Scheduler (job-scheduler-service / Bree — platform-org only)
+   // ---------------------------------------------------------------------------
+
+   /** Master on/off for the job scheduler engine. */
+  JOB_SCHEDULER_ENABLED: z.enum(['true', 'false']).default('true'),
+
+   /** Default IANA timezone for schedules (default 'Europe/London'). */
+  JOB_SCHEDULER_TIMEZONE: z.string().default('Europe/London'),
+
+   /** Global cap on simultaneous job runs — circuit breaker (default 5). */
+  JOB_SCHEDULER_MAX_CONCURRENT: z.string().regex(/^\d+$/).default('5'),
+
+   /**
+    * Connection-pool ceiling per forked worker, sized BELOW PgBouncer
+    * max_client_conn so the scheduler and other app connections coexist
+    * (default 100).
+   */
+  JOB_SCHEDULER_DB_CONCURRENCY: z.string().regex(/^\d+$/).default('100'),
+
+   /** Per-job default concurrency limit (default 1). */
+  JOB_SCHEDULER_DEFAULT_CONCURRENCY: z.string().regex(/^\d+$/).default('1'),
+
+   /** Per-job default wall-clock cap in ms (default 300000 = 5 min). */
+  JOB_SCHEDULER_DEFAULT_TIMEOUT_MS: z.string().regex(/^\d+$/).default('300000'),
+
+   /** Load enabled jobs from the DB at boot (default true). */
+  JOB_SCHEDULER_BOOT_REGISTRY: z.enum(['true', 'false']).default('true'),
+
+   /** New jobs default to dry-run until approved (Phase 2; default false). */
+  JOB_SCHEDULER_DRYRUN_DEFAULT: z.enum(['true', 'false']).default('false'),
 });
 
 export type Env = z.infer<typeof envSchema>;

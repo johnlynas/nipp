@@ -118,3 +118,10 @@ Thumbs.db
 *.log
 
 certificates
+
+# ==========================
+# Job Scheduler
+# ==========================
+# Materialised operator/script handler temp files (Phase 2).
+# Written at exec time from JobDefinition.code; never committed.
+job-scheduler-runtime/

@@ -32,9 +32,12 @@
   },
   "dependencies": {
     "@better-auth/core": "1.6.23",
+    "@breejs/later": "^4.2.0",
     "@prisma/client": "^6.19.3",
     "@tanstack/react-query": "^5.101.4",
     "better-auth": "1.6.23",
+    "bree": "^9.2.9",
+    "graceful": "^2.0.0",
     "ioredis": "^5.11.1",
     "latest": "^0.2.0",
     "lru-cache": "^11.5.2",
