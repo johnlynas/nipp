@@ -62,7 +62,7 @@ serve as the reusable execution layer for a future "automatic scripting" feature
 which platform users author system-administration scripts to automate portal
 operations.
 
-The service layer for this engine is `lib/services/job-scheduler-service.ts`
+The service layer for this engine is `services/job-scheduler-service.ts`
 (referred to throughout as **job-scheduler-service**). It is the single, stable
 interface between the rest of the platform and the Bree engine beneath it: callers
 never touch Bree directly.
@@ -90,7 +90,7 @@ never touch Bree directly.
 **In scope (this proposal):**
 
 - Add Bree as the job engine dependency.
-- Implement `lib/services/job-scheduler-service.ts` as the interface to the engine.
+- Implement `services/job-scheduler-service.ts` as the interface to the engine.
 - Boot the job scheduler **alongside** the calendar scanner via the existing
   side-effect-import convention.
 - Define the job registry and execution-history data model (proposed schema — no
@@ -120,7 +120,7 @@ flowchart TD
         LAY["app/layout.tsx<br/>(side-effect import)"]
     end
 
-    subgraph Service["lib/services/job-scheduler-service.ts<br/>(public interface)"]
+    subgraph Service["services/job-scheduler-service.ts<br/>(public interface)"]
         API["createJob / updateJob / triggerJob<br/>enableJob / disposeJob / listJobs<br/>getExecutionHistory"]
         REG[("Job registry<br/>(globalThis singleton)")]
     end
@@ -170,7 +170,7 @@ sequenceDiagram
     participant B as Bree core
     participant H as Job handlers
 
-    N->>I: import '@lib/job-scheduler-service'
+    N->>I: import '@lib/job-scheduler-engine'
     I->>S: module evaluated (idempotent start)
     S->>S: getSchedulerState() (create if missing)
     alt scheduler already running
@@ -320,7 +320,7 @@ alongside the existing two (the health check and the calendar scanner):
  // Start the calendar "due to start" SSE scanner (same Node.js boot path).
  import '@/lib/calendar-event-scheduler';
 +// Start the background job scheduler (same boot path; platform-org jobs only).
-+import '@/lib/job-scheduler-service';
++import '@/lib/job-scheduler-engine';
 ```
 
 Because the module self-starts on load (`startJobScheduler()` at module bottom,
@@ -330,14 +330,14 @@ a no-op.
 
 ## The Job Scheduler Service Interface
 
-`lib/services/job-scheduler-service.ts` follows the existing service-layer style
-(`lib/services/base-service.ts`, `ServiceContext`, `ForbiddenError`,
+`services/job-scheduler-service.ts` follows the existing service-layer style
+(`@/lib/services/base-service.ts`, `ServiceContext`, `ForbiddenError`,
 `requirePlatformAdmin(ctx)`). It is the **only** public surface to the engine.
 Proposed API (names for discussion):
 
 ```ts
-// lib/services/job-scheduler-service.ts (interface sketch — not yet implemented)
-import { ServiceContext, ForbiddenError } from './types';
+// services/job-scheduler-service.ts (interface sketch — not yet implemented)
+import { ServiceContext, ForbiddenError, requirePlatformAdmin } from '@/lib/services/types';
 
 export type Schedule =
   | { kind: 'cron'; expr: string; timezone?: string }
@@ -622,7 +622,7 @@ The scripting feature is a **separate** change proposal that consumes this servi
 
 **Phase 1 — Foundation (this proposal's core — the JOB service only; no UX, no
 untrusted-code sandbox).**
-- `lib/services/job-scheduler-service.ts` (the API above).
+- `services/job-scheduler-service.ts` (the API above).
 - Bree boot module + `globalThis` singleton + side-effect import alongside calendar.
 - `JobDefinition` / `JobExecution` models + migration.
 - **Dynamic handler registry/loader** — resolves `handlerKey` → handler; built-in
@@ -735,7 +735,7 @@ parameters, which the Phase 0 spike pins in a short design note before Phase 1.
 
 **New**
 
-- `lib/services/job-scheduler-service.ts` — the public service interface.
+- `services/job-scheduler-service.ts` — the public service interface.
 - A Bree boot/engine module (e.g. `lib/job-scheduler-engine.ts`) holding the
   `globalThis` singleton and the side-effect self-start.
 - `tests/unit/job-scheduler-service.test.ts` (+ integration case).
