@@ -207,7 +207,8 @@ export function registerBuiltinHandlers(): void {
  * The `lastRunAt` field on `JobDefinition` is the authoritative
  * "was this already handled" state.
  */
-function isDueAt(now: Date, scheduleExpr: string, lastRunAt: Date | null): boolean {
+// Exported for tests (see tests/unit/job-scheduler-engine.test.ts).
+export function isDueAt(now: Date, scheduleExpr: string, lastRunAt: Date | null): boolean {
   let schedule: Schedule;
   try {
     schedule = parseSchedule(scheduleExpr);
@@ -242,7 +243,8 @@ function isDueAt(now: Date, scheduleExpr: string, lastRunAt: Date | null): boole
 // Scan: find due jobs, execute them
 // ---------------------------------------------------------------------------
 
-async function scanDueJobs(now = new Date()): Promise<number> {
+// Exported for tests (see tests/unit/job-scheduler-engine.test.ts).
+export async function scanDueJobs(now = new Date()): Promise<number> {
   try {
     const jobs = await globalDb.jobDefinition.findMany({
       // Defence in depth for the approval gate: even if a row were somehow

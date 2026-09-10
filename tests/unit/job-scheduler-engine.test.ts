@@ -30,7 +30,10 @@ vi.mock('@/lib/calendar-event-scheduler', () => ({
   findDueToStartEvents: vi.fn(),
 }));
 
-// The engine imports global-db; keep the boot-time scan a no-op.
+// The engine imports global-db; keep the boot-time scan a no-op. The
+// `findMany` mock is created inline in the factory (vitest hoists vi.mock above
+// every top-level const, so a module-level handle would trip the TDZ) and
+// derived as `mockFindMany` after import below.
 vi.mock('@/lib/global-db', () => ({
   default: { jobDefinition: { findMany: vi.fn().mockResolvedValue([]) } },
 }));
@@ -40,17 +43,24 @@ vi.mock('@/lib/global-db', () => ({
 // registerBuiltinHandlers() is called explicitly.
 vi.mock('@/lib/env', () => ({
   env: {
-    JOB_SCHEDULER_ENABLED: 'false',
-    JOB_SCHEDULER_BOOT_REGISTRY: 'true',
-  },
+   JOB_SCHEDULER_ENABLED: 'false',
+   JOB_SCHEDULER_BOOT_REGISTRY: 'true',
+   },
 }));
 
-// The service gives registerBuiltins + parseSchedule; mock so the engine boots
-// without a real scheduler/role engine and so we can spy on registration.
-vi.mock('@/services/job-scheduler-service', () => ({
-  JobSchedulerService: { registerBuiltins: vi.fn() },
-  parseSchedule: vi.fn((x: string) => JSON.parse(x)),
-}));
+// The service gives registerBuiltins + parseSchedule (+ runJob for the scanner);
+// mock so the engine boots without a real scheduler/role engine and so we can
+// spy on registration and job execution. `runJob` is created inline and derived
+// as `mockRunJob` after import. parseSchedule is spied on the *real*
+// implementation so isDueAt/scanDueJobs exercise genuine schedule parsing.
+vi.mock('@/services/job-scheduler-service', async (importOriginal) => {
+  const actual =
+   await importOriginal<typeof import('@/services/job-scheduler-service')>();
+  return {
+     ...actual,
+     JobSchedulerService: { registerBuiltins: vi.fn(), runJob: vi.fn() },
+   };
+});
 
 vi.mock('@/lib/logger', () => ({
   logger: { info: vi.fn(), warn: vi.fn(), error: vi.fn() },
@@ -64,12 +74,17 @@ import {
   calendarHealthCheckHandler,
   calendarSelfTestHandler,
   registerBuiltinHandlers,
+  isDueAt,
+  scanDueJobs,
+  startJobScheduler,
+  stopJobScheduler,
 } from '@/lib/job-scheduler-engine';
 import { JobSchedulerService } from '@/services/job-scheduler-service';
 import { checkHealthStatus } from '@/lib/health-check';
 import { findDueToStartEvents } from '@/lib/calendar-event-scheduler';
 import { pushNotification } from '@/lib/notification-push';
 import type { JobRunContext } from '@/services/job-scheduler-service';
+import globalDb from '@/lib/global-db';
 
 // --- Typed mock handles ---------------------------------------------------
 
@@ -81,6 +96,12 @@ const mockDue = findDueToStartEvents as unknown as ReturnType<typeof vi.fn>;
 const mockRegister = (JobSchedulerService as unknown as {
   registerBuiltins: ReturnType<typeof vi.fn>;
 }).registerBuiltins;
+const mockRunJob = (JobSchedulerService as unknown as {
+  runJob: ReturnType<typeof vi.fn>;
+}).runJob;
+const mockFindMany =
+ (globalDb as unknown as { jobDefinition: { findMany: ReturnType<typeof vi.fn> } })
+       .jobDefinition.findMany;
 
 const ctx: JobRunContext = {
   jobDefinitionId: 'job-1',
@@ -215,4 +236,244 @@ describe('calendarSelfTestHandler', () => {
       message: 'Custom message',
        });
     });
+});
+
+// --- health-check (additional branches) -----------------------------------
+
+describe('healthCheckHandler — alerts', () => {
+  it('alerts when overall status is healthy but a sub-check is not, listing only the failing check', async () => {
+    mockCheck.mockResolvedValue({
+      status: 'healthy',
+      checks: {
+        database: { status: 'healthy' },
+        cache: { status: 'degraded', error: 'slow' },
+      },
+    });
+
+    const result = (await healthCheckHandler()) as { unhealthy: string[]; status: string };
+    expect(result.unhealthy).toEqual(['cache']);
+    expect(result.status).toBe('healthy');
+    expect(mockPush).toHaveBeenCalledOnce();
+    expect(mockPush.mock.calls.at(-1)![0]).toMatchObject({
+      title: 'Job health-check: platform unhealthy',
+      message: 'Health probe reported: cache.',
+      priority: 'ERROR',
+      scope: 'GLOBAL',
+      source: 'job-scheduler:health-check',
+    });
+  });
+
+  it('alerts (message falls back to status) when a check is unhealthy but reports no unhealthy-key list', async () => {
+    mockCheck.mockResolvedValue({
+      status: 'unhealthy',
+      checks: {},
+    });
+
+    await healthCheckHandler();
+    expect(mockPush).toHaveBeenCalledOnce();
+    expect(mockPush.mock.calls.at(-1)![0]).toMatchObject({
+      message: 'Health probe reported: unhealthy.',
+      priority: 'ERROR',
+    });
+  });
+});
+
+// --- calendar-selftest (additional branches) ------------------------------
+
+describe('calendarSelfTestHandler — input shaping', () => {
+  it('uses a custom title with a default message when only a title is supplied', async () => {
+    await calendarSelfTestHandler({ ...ctx, input: { title: 'Only title' } });
+    expect(mockPush.mock.calls.at(-1)![0]).toMatchObject({
+      title: 'Only title',
+    });
+    const msg = mockPush.mock.calls.at(-1)![0].message as string;
+    expect(msg).toContain('CALENDAR-priority probe emitted');
+  });
+
+  it('falls back to the default title/message when input is undefined', async () => {
+    await calendarSelfTestHandler(ctx);
+    expect(mockPush.mock.calls.at(-1)![0]).toMatchObject({
+      title: 'Calendar notification path: self-test',
+    });
+  });
+});
+
+// --- isDueAt --------------------------------------------------------------
+
+const MINUTE = 60 * 1000;
+
+describe('isDueAt', () => {
+  const now = new Date('2026-01-01T00:00:00.000Z').getTime();
+
+  it('is a no-op when the schedule expression is malformed JSON', () => {
+    expect(isDueAt(new Date(now), 'not-json', null)).toBe(false);
+    expect(isDueAt(new Date(now), '{"kind":"bogus"}', null)).toBe(false);
+  });
+
+  describe('cron (Phase 1 every-N-minutes approximation)', () => {
+    const everyMin = JSON.stringify({ kind: 'cron', expr: '* * * * *' });
+    const every5 = JSON.stringify({ kind: 'cron', expr: '*/5 * * * *' });
+
+    it('treats "* * * * *" as a 1-minute interval, due when no prior run exists', () => {
+      expect(isDueAt(new Date(now), everyMin, null)).toBe(true);
+    });
+
+    it('is not due within the 1-minute window after a recent run', () => {
+      const last = new Date(now - 30_000);
+      expect(isDueAt(new Date(now), everyMin, last)).toBe(false);
+    });
+
+    it('is due once a full minute has elapsed since the last run', () => {
+      const last = new Date(now - MINUTE);
+      expect(isDueAt(new Date(now), everyMin, last)).toBe(true);
+    });
+
+    it('parses "*/N * * * *" as an N-minute interval', () => {
+      expect(isDueAt(new Date(now), every5, null)).toBe(true);
+      expect(isDueAt(new Date(now), every5, new Date(now - 4 * MINUTE))).toBe(false);
+      expect(isDueAt(new Date(now), every5, new Date(now - 5 * MINUTE))).toBe(true);
+    });
+   });
+
+  describe('interval', () => {
+    it('is due immediately when there is no prior run', () => {
+      expect(isDueAt(new Date(now), '{"kind":"interval","everyMs":1000}', null)).toBe(true);
+    });
+
+    it('is not due when less than everyMs has elapsed, and due once it has', () => {
+      const expr = '{"kind":"interval","everyMs":2000}';
+      expect(isDueAt(new Date(now), expr, new Date(now - 500))).toBe(false);
+      expect(isDueAt(new Date(now), expr, null)).toBe(true);
+      expect(isDueAt(new Date(now), expr, new Date(now - 2000))).toBe(true);
+    });
+  });
+
+  describe('oneshot', () => {
+    const at = '2026-01-01T00:00:00.000Z';
+
+    it('is due once the target instant is in the past and it has not fired', () => {
+      expect(isDueAt(new Date(now + 1), `{"kind":"oneshot","at":"${at}"}`, null)).toBe(true);
+    });
+
+    it('is not due when the target instant is still in the future', () => {
+      expect(isDueAt(new Date(now - 1), `{"kind":"oneshot","at":"${at}"}`, null)).toBe(false);
+    });
+
+    it('is idempotent: not due once lastRunAt has reached or passed the target', () => {
+      const fired = new Date(now); // now > at, and lastRunAt(now) >= at
+      expect(isDueAt(new Date(now + 1), `{"kind":"oneshot","at":"${at}"}`, fired)).toBe(false);
+    });
+
+    it('is not due for a non-parseable oneshot instant', () => {
+      expect(isDueAt(new Date(now), '{"kind":"oneshot","at":"not-a-date"}', null)).toBe(false);
+    });
+  });
+});
+
+// --- scanDueJobs ----------------------------------------------------------
+
+describe('scanDueJobs', () => {
+  it('returns 0 and never runs a job when the scanner finds none', async () => {
+    mockFindMany.mockResolvedValueOnce([]);
+    expect(await scanDueJobs(new Date())).toBe(0);
+    expect(mockRunJob).not.toHaveBeenCalled();
+  });
+
+  it('queries only enabled AND approved jobs (defence in depth for the approval gate)', async () => {
+    mockFindMany.mockResolvedValueOnce([]);
+    await scanDueJobs(new Date());
+    expect(mockFindMany).toHaveBeenCalledOnce();
+    const where = mockFindMany.mock.calls.at(-1)![0].where;
+    expect(where).toMatchObject({ enabled: true, approved: true });
+  });
+
+  // The engine applies its cron regex to `schedule.expr`; a bare `*/N` field
+  // works, so a 1-minute cron (default) is "due immediately" when lastRunAt is
+  // null — exactly what these fixtures rely on.
+  const DUE_CRON = JSON.stringify({ kind: 'cron', expr: '* * * * *' });
+
+  it('runs each due job via runJob and returns the execution count', async () => {
+    mockFindMany.mockResolvedValueOnce([
+      { id: 'job-a', name: 'a', scheduleExpr: DUE_CRON, handlerKey: 'noop', lastRunAt: null },
+      { id: 'job-b', name: 'b', scheduleExpr: DUE_CRON, handlerKey: 'noop', lastRunAt: null },
+    ]);
+    mockRunJob.mockResolvedValueOnce({ jobDefinitionId: 'job-a', status: 'SUCCEEDED', claimed: true });
+    mockRunJob.mockResolvedValueOnce({ jobDefinitionId: 'job-b', status: 'SUCCEEDED', claimed: true });
+
+    expect(await scanDueJobs(new Date('2026-01-01T00:00:00.000Z'))).toBe(2);
+    expect(mockRunJob).toHaveBeenCalledTimes(2);
+    expect(mockRunJob.mock.calls[0][1]).toEqual({ trigger: 'SCHEDULE' });
+   });
+
+  it('does not count runs that were skipped by the claim gate (claim lost)', async () => {
+    mockFindMany.mockResolvedValueOnce([
+      { id: 'job-a', name: 'a', scheduleExpr: DUE_CRON, handlerKey: 'noop', lastRunAt: null },
+    ]);
+    mockRunJob.mockResolvedValueOnce({ jobDefinitionId: 'job-a', status: 'SKIPPED', claimed: false });
+
+    expect(await scanDueJobs(new Date('2026-01-01T00:00:00.000Z'))).toBe(0);
+    expect(mockRunJob).toHaveBeenCalledOnce();
+   });
+
+  it('skips jobs that are not due', async () => {
+     // lastRunAt 500 ms ago → not yet due for a 1-minute cron.
+    mockFindMany.mockResolvedValueOnce([
+      {
+        id: 'job-a',
+        name: 'a',
+        scheduleExpr: DUE_CRON,
+        handlerKey: 'noop',
+        lastRunAt: new Date('2026-01-01T00:00:00.500Z'),
+       },
+     ]);
+
+    expect(await scanDueJobs(new Date('2026-01-01T00:00:00.900Z'))).toBe(0);
+    expect(mockRunJob).not.toHaveBeenCalled();
+   });
+
+  it('isolates a single failing job and still runs the others', async () => {
+    mockFindMany.mockResolvedValueOnce([
+      { id: 'job-a', name: 'a', scheduleExpr: DUE_CRON, handlerKey: 'noop', lastRunAt: null },
+      { id: 'job-b', name: 'b', scheduleExpr: DUE_CRON, handlerKey: 'noop', lastRunAt: null },
+    ]);
+    mockRunJob
+       .mockRejectedValueOnce(new Error('boom'))
+       .mockResolvedValueOnce({ jobDefinitionId: 'job-b', status: 'SUCCEEDED', claimed: true });
+
+    const executed = await scanDueJobs(new Date('2026-01-01T00:00:00.000Z'));
+    expect(executed).toBe(1);
+    expect(mockRunJob).toHaveBeenCalledTimes(2);
+   });
+
+  it('returns 0 and logs when the DB query itself fails', async () => {
+    mockFindMany.mockRejectedValueOnce(new Error("Can't reach database server"));
+
+    expect(await scanDueJobs(new Date())).toBe(0);
+    expect(mockRunJob).not.toHaveBeenCalled();
+  });
+});
+
+// --- timer lifecycle ------------------------------------------------------
+
+// NOTE: this test file mocks env.JOB_SCHEDULER_ENABLED='false' so the module
+// import stays hermetic (no timer, no boot scan). `ENABLED` is captured at import
+// time, so startJobScheduler() early-returns in this suite — the assertions
+// below verify that disabled path. The enabled-path wiring (register builtins +
+// unref'd setInterval) is exercised by the live/instantiation tests, and the
+// scan core (isDueAt / scanDueJobs) is covered directly above.
+describe('startJobScheduler / stopJobScheduler — disabled via env', () => {
+  it('does not register built-ins or install a timer when the scheduler is disabled', () => {
+    const state = (globalThis as unknown as { jobSchedulerEngineState: { timer: unknown } })
+        .jobSchedulerEngineState;
+
+    startJobScheduler();
+
+     // Enabled=false means no registration, no timer install.
+    expect(mockRegister).not.toHaveBeenCalled();
+    expect(state.timer).toBeNull();
+   });
+
+  it('stopJobScheduler is a safe no-op when no timer is running', () => {
+    expect(() => stopJobScheduler()).not.toThrow();
+   });
 });
