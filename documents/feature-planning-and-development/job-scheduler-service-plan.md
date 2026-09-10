@@ -1,17 +1,28 @@
 # Background Job Scheduler (job-scheduler-service)
 
-**Status:** Proposed
+**Status:** **Phase 1 implemented** (this branch, `backgroud-job-scheduler`). The
+foundation described below has been built out as uncommitted changes on this
+branch: `lib/job-scheduler-engine.ts`, `services/job-scheduler-service.ts`,
+`prisma/schema.prisma` (`JobDefinition`/`JobExecution` + the
+`20260909190000_add_job_approval_gate` migration), the `app/api/admin/jobs/**`
+routes, and a Vitest suite. The design below remains the reference; see
+[Implementation Status (Phase 1)](#implementation-status-phase-1) for what
+shipped and how it diverges from the original Bree-worker vision.
 **Branch:** `backgroud-job-scheduler`
 **Engine under evaluation:** [Bree](https://jobscheduler.net) — a Node.js job
 scheduler with workers, throttling, concurrency, cancelable jobs, cron/date/interval
-scheduling, and graceful shutdown.
+scheduling, and graceful shutdown. **In Phase 1 the boot target is a main-thread
+scanner; Bree is the chosen engine for the later per-worker phase but is not wired
+in yet** (see [Implementation Status (Phase 1)](#implementation-status-phase-1)).
 **Deliverable:** a Markdown plan. No code is changed by this document.
 
-> **One-line summary.** Integrate Bree as the platform's background job engine,
-> exposing a platform-tenant-only `job-scheduler-service` that boots alongside the
-> existing calendar-event SSE scheduler. This service is the foundation on top of
-> which an **automatic scripting feature** (platform-authored system-administration
-> scripts that automate portal operations) will be built.
+> **One-line summary.** Integrate a background job engine, exposing a
+> platform-tenant-only `job-scheduler-service` that boots alongside the existing
+> calendar-event SSE scheduler. This service is the foundation on top of which an
+> **automatic scripting feature** (platform-authored system-administration scripts
+> that automate portal operations) will be built. **Phase 1 (this branch) ships
+> a main-thread scanner engine with a trusted built-in handler set and a DB-backed
+> approval gate; Bree's worker-per-run execution is the deferred next phase.**
 
 ## Table of Contents
 
@@ -27,6 +38,7 @@ scheduling, and graceful shutdown.
     - [The Nextjs and Worker Thread Tension](#the-nextjs-and-worker-thread-tension)
     - [Integration Strategy Decision](#integration-strategy-decision)
 - [Phase 0 Spike Evidence](#phase-0-spike-evidence)
+- [Implementation Status (Phase 1)](#implementation-status-phase-1)
 - [Boot Integration Alongside the Calendar Scheduler](#boot-integration-alongside-the-calendar-scheduler)
 - [The Job Scheduler Service Interface](#the-job-scheduler-service-interface)
 - [Data Model Proposal](#data-model-proposal)
@@ -438,6 +450,52 @@ ceiling** against which per-worker acquisition is bounded.
 Full pool wiring (which Prisma pool PgBouncer fronts, and how a worker acquires a
 pooled connection from `workerData` instead of spawning its own `globalThis` client)
 is pinned by the R3 in-repo spike.
+
+## Implementation Status (Phase 1)
+
+**What shipped on this branch** (uncommitted working-tree changes — the design below
+is the reference; this section records reality):
+
+| Plan item | Status | What actually shipped |
+|-----------|--------|-----------------------|
+| `services/job-scheduler-service.ts` | **Shipped** | Full service: `createJob`, `updateJob`, `enableJob`, `disableJob`, `approveJob`, `rejectJob`, `disposeJob`, `triggerJob`, `listJobs`, `getJob`, `getExecutionHistory`, `runJob`, `registerBuiltins`. Pure orchestration over `globalDb` + `pushNotification` + `recordAuditLog` (no Bree import). |
+| `lib/job-scheduler-engine.ts` | **Shipped — diverged** | A **main-thread scanner** (`setInterval` every 10 s, `globalThis` singleton, `unref`'d, booted via `app/layout.tsx`), *not* a Bree per-worker engine. Bree is added to `package.json` but **not imported/wired**; the scanner is the boot target. |
+| `JobDefinition` / `JobExecution` + migration | **Shipped** | Both models in `prisma/schema.prisma`; `JobExecution` carries `status` (RUNNING→SUCCEEDED/FAILED), `trigger` (SCHEDULE/MANUAL), `resultJson`. |
+| **Approval gate** | **Shipped** | `approved` / `approvedBy` / `approvedAt` / `approvalNote` on `JobDefinition` (+ migration `20260909190000_add_job_approval_gate`, + index `[platformOrgId, approved]`). New jobs start `enabled:false, approved:false`; `enableJob` / `updateJob(enabled:true)` / `triggerJob` all gate on `approved`; the scanner query requires `approved:true` (defense in depth). |
+| Trusted built-in handlers | **Shipped** | `noop`, `health-check`, `calendar-health-check`, `calendar-selftest` (registered via `registerBuiltinHandlers()`; no untrusted-code path). |
+| Admin API `app/api/admin/jobs/**` | **Shipped** | `GET/POST /api/admin/jobs`, `GET/PATCH /api/admin/jobs/[jobId]`, `POST /api/admin/jobs/[jobId]/approvals` (approve/reject), `POST /api/admin/jobs/[jobId]/trigger` — all `requireSuperAdmin`-guarded, `wrapPiiRoute`-wrapped, write-routes rate-limited. |
+| `JOB` priority (SSE) | **Shipped** | Added to `NotificationPriority` enum + the full `CALENDAR`-style cascade (`normalizePriority`, `notifications/route.ts` counts, dashboard label + filter, `useNotifications.ts` ticker). Success → `JOB` / `job-scheduler:execution`; failure → `ERROR` / `job-scheduler:failure`. |
+| Vitest | **Shipped** | `tests/unit/job-scheduler-service.test.ts` (CRUD, claim gate, approval gate, list filtering, history) + new `tests/unit/job-scheduler-engine.test.ts` (the four built-in handlers + idempotent registration). |
+
+**Divergences from the original Bree-worker design (deferred to the next phase):**
+
+- **Engine = main-thread scanner, not Bree workers.** The Phase 0 spike proved Bree
+  forks a worker *per tick* (R1), so the per-worker context-bootstrap cost was the
+  gating item. Phase 1 sidesteps it: the scanner runs due jobs **inline in the
+  main thread** and reuses the parent's `globalDb`/`pushNotification`/pino context
+  directly (no worker, no per-worker Prisma/RLS reconstruction). Bree's worker
+  model — and the per-worker pool sizing (`JOB_SCHEDULER_DB_CONCURRENCY`) — is the
+  next phase.
+- **`MAX_CONCURRENT` / `DB_CONCURRENCY` / `DRYRUN_DEFAULT` are declared in
+  `lib/env-schema.ts` but not yet consumed** by the scanner (no global circuit
+  breaker, no per-worker pool, no dry-run mode yet). They are forward-declared
+  config for the next phase; the scanner executes due jobs directly.
+- **No `cancelRunningJob` / graceful shutdown yet.** A job is stopped by
+  `disableJob` (the scanner stops picking it up on the next tick); in-flight runs
+  finish. Cancellation of a live run and Bree's `graceful` SIGHUP/SIGINT/SIGTERM
+  handling are next-phase.
+- **Cron is an "every-N-minutes" approximation** (`*/N * * * *` → N-min interval);
+  full IANA cron / timezone-aware `@breejs/later` parsing is next-phase.
+- **Automatic scripting / untrusted `code` / per-worker sandbox** — still
+  Phase 2; the `code` column exists but is unused by built-ins.
+
+**Net:** Phase 1 delivered the data model, the approval gate, the service, a
+trusted handler set, the admin API, the `JOB` priority cascade, and a test suite —
+a working, audited, platform-only job engine on a main-thread scanner. The Bree
+worker-per-run execution, global circuit breaker, full cron, and the untrusted-code
+sandbox are the explicit next phases (see [Phased Delivery Plan](#phased-delivery-plan)).
+
+---
 
 ## Boot Integration Alongside the Calendar Scanner
 

@@ -30,11 +30,17 @@
 import globalDb from '@/lib/global-db';
 import { logger } from '@/lib/logger';
 import { env } from '@/lib/env';
+import { NotificationPriority, NotificationScope } from '@prisma/client';
 import {
   JobSchedulerService,
   parseSchedule,
+  type JobHandler,
+  type JobRunContext,
   type Schedule,
 } from '@/services/job-scheduler-service';
+import { checkHealthStatus, type HealthResponse } from '@/lib/health-check';
+import { findDueToStartEvents } from '@/lib/calendar-event-scheduler';
+import { pushNotification } from '@/lib/notification-push';
 
 // ---------------------------------------------------------------------------
 // Configuration
@@ -76,24 +82,112 @@ const state = getState();
 // run time by the Bree worker runner.
 // ---------------------------------------------------------------------------
 
-function registerBuiltinHandlers(): void {
-  // Phase 1 has no built-in handlers. The registry is empty until the first
-  // built-in job type (e.g., "send-notification", "run-health-check") is
-  // added. A runJob call for an unregistered handlerKey fails gracefully
-  // and is logged.
-  //
-  // Example:
-  //   registerHandler('notify-job', async (ctx) => {
-  //     await pushNotification({
-  //       title: 'Job triggered: ' + ctx.input?.msg,
-  //       message: 'Job triggered via scheduled path.',
-  //       priority: NotificationPriority.INFO,
-  //       scope: NotificationScope.GLOBAL,
-  //       source: 'job-scheduler:custom',
-  //       organizationId: ctx.platformOrgId,
-  //     });
-  //     return { delivered: true };
-  //   });
+// ---------------------------------------------------------------------------
+// Built-in handlers
+//
+// These are the trusted Phase 1 set. Each is a plain, audited function keyed by
+// `handlerKey`; operators reference them via JobDefinition.handlerKey but cannot
+// define new ones (that is Phase 2's sandboxed `code` path). A runJob call for an
+// unregistered key fails gracefully and is surfaced as a FAILED JobExecution.
+//
+// They run in the main-thread scanner (Phase 1 model), so they may use the
+// parent's platform primitives (globalDb, pushNotification, health checks)
+// directly — they never touch untrusted code.
+// ---------------------------------------------------------------------------
+
+/** `noop` — the minimal smoke-test handler. Proves the end-to-end path. */
+export async function noopHandler(ctx: JobRunContext): Promise<unknown> {
+  const input = ctx.input !== undefined ? JSON.stringify(ctx.input) : null;
+  return { ok: true, handler: 'noop', trigger: ctx.trigger, hadInput: input !== null };
+}
+
+/**
+ * `health-check` — run the shared platform health probe and, on an unhealthy
+ * outcome, raise an operational alert. A healthy result is silent (the service's
+ * own "Job completed" notification already confirms the run), so this does not
+ * flood the ticker.
+ */
+export async function healthCheckHandler(): Promise<unknown> {
+  const report: HealthResponse = await checkHealthStatus();
+  const unhealthy = Object.entries(report.checks)
+     .filter(([, c]) => c.status !== 'healthy')
+     .map(([key]) => key);
+
+  if (report.status !== 'healthy' || unhealthy.length > 0) {
+    await pushNotification({
+      title: 'Job health-check: platform unhealthy',
+      message: `Health probe reported: ${unhealthy.length ? unhealthy.join(', ') : report.status}.`,
+      priority: NotificationPriority.ERROR,
+      scope: NotificationScope.GLOBAL,
+      source: 'job-scheduler:health-check',
+     });
+  }
+
+  return {
+     handler: 'health-check',
+     status: report.status,
+     checks: report.checks,
+     unhealthy,
+   };
+}
+
+/**
+ * `calendar-health-check` — probe the calendar "due to start" notification
+ * pipeline by running the same discovery the live scanner uses
+ * (`findDueToStartEvents`). If discovery throws, the job FAILS, so a broken
+ * calendar-notification substrate becomes visible in execution history instead
+ * of failing silently. A clean run reports how many instances are currently due
+ * (normally 0 between events) without emitting its own event.
+ */
+export async function calendarHealthCheckHandler(): Promise<unknown> {
+  const due = await findDueToStartEvents(new Date());
+  return {
+     handler: 'calendar-health-check',
+     pipelineReachable: true,
+     dueInstances: due.length,
+     checkedAt: new Date().toISOString(),
+    };
+}
+
+/**
+ * `calendar-selftest` — prove the CALENDAR-priority notification path is
+ * reachable by emitting exactly one CALENDAR SSE notification through the same
+ * `pushNotification()` the live scanner uses, without needing a real due-to-start
+ * event. It mirrors the scanner's emission (CALENDAR priority, `calendar:*`
+ * source) but stays GLOBAL-scoped and time-stamped so each run is distinct and
+ * lands on the platform-ops ticker rather than a tenant's ORG feed.
+ *
+ * Input: optional `{ message?, title? }` to customise the probe text.
+ */
+export async function calendarSelfTestHandler(ctx: JobRunContext): Promise<unknown> {
+  const input = (ctx.input ?? {}) as { title?: unknown; message?: unknown };
+  const now = new Date();
+  await pushNotification({
+      title: typeof input.title === 'string' ? input.title : 'Calendar notification path: self-test',
+      message:
+        typeof input.message === 'string'
+        ? input.message
+        : `CALENDAR-priority probe emitted at ${now.toISOString()} to verify the calendar notification pipeline.`,
+      priority: NotificationPriority.CALENDAR,
+      scope: NotificationScope.GLOBAL,
+      source: 'job-scheduler:calendar-selftest',
+      organizationId: ctx.platformOrgId,
+      });
+  return { ok: true, handler: 'calendar-selftest', emittedAt: now.toISOString() };
+}
+
+/**
+ * Register the trusted built-in handler set. Idempotent — safe to call on every
+ * boot / module re-evaluation.
+ */
+export function registerBuiltinHandlers(): void {
+  const builtins: Array<{ key: string; handler: JobHandler }> = [
+      { key: 'noop', handler: noopHandler },
+      { key: 'health-check', handler: healthCheckHandler },
+      { key: 'calendar-health-check', handler: calendarHealthCheckHandler },
+      { key: 'calendar-selftest', handler: calendarSelfTestHandler },
+   ];
+  JobSchedulerService.registerBuiltins(builtins);
 }
 
 // ---------------------------------------------------------------------------
@@ -151,7 +245,10 @@ function isDueAt(now: Date, scheduleExpr: string, lastRunAt: Date | null): boole
 async function scanDueJobs(now = new Date()): Promise<number> {
   try {
     const jobs = await globalDb.jobDefinition.findMany({
-      where: { enabled: true },
+      // Defence in depth for the approval gate: even if a row were somehow
+      // enabled without approval (it shouldn't — enableJob/updateJob guard
+      // it), the scheduler never runs an unapproved job.
+      where: { enabled: true, approved: true },
        select: {
          id: true,
          name: true,

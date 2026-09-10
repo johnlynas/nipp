@@ -70,15 +70,19 @@ vi.mock('@/lib/global-db', () => {
          timeoutMs: 300000,
          concurrencyLimit: 1,
          enabled: false,
-         code: null,
-         createdBy: 'user-1',
-         lastRunAt: null,
-         lastRunStatus: null,
-         createdAt: new Date(),
-         updatedAt: new Date(),
-         ...args.data,
-         })),
-         delete: vi.fn().mockResolvedValue({ id: 'job-1', name: 'Test Job', platformOrgId: 'org-1' }),
+         approved: false,
+         approvedBy: null,
+         approvedAt: null,
+         approvalNote: null,
+          code: null,
+          createdBy: 'user-1',
+          lastRunAt: null,
+          lastRunStatus: null,
+          createdAt: new Date(),
+          updatedAt: new Date(),
+          ...args.data,
+          })),
+       delete: vi.fn().mockResolvedValue({ id: 'job-1', name: 'Test Job', platformOrgId: 'org-1' }),
     findUnique: vi.fn().mockResolvedValue({
       id: 'job-1',
       name: 'Test Job',
@@ -89,13 +93,17 @@ vi.mock('@/lib/global-db', () => {
       timeoutMs: 300000,
       concurrencyLimit: 1,
       enabled: true,
+      approved: true,
+      approvedBy: 'user-1',
+      approvedAt: new Date(),
+      approvalNote: null,
       code: null,
       createdBy: 'user-1',
       lastRunAt: null,
       lastRunStatus: null,
       createdAt: new Date(),
       updatedAt: new Date(),
-       }),
+      }),
     updateMany: vi.fn().mockResolvedValue({ count: 1 }),
     findMany: vi.fn().mockResolvedValue([]),
     count: vi.fn().mockResolvedValue(0),
@@ -478,6 +486,118 @@ describe('JobSchedulerService.triggerJob', () => {
       async () => JobSchedulerService.triggerJob(adminCtx, 'job-1'),
      ).rejects.toThrow(ForbiddenError);
    });
+});
+
+// ---------------------------------------------------------------------------
+// Approval gate — the control that lets a job move from "defined" to "may run"
+// ---------------------------------------------------------------------------
+
+describe('JobSchedulerService.approval gate', () => {
+  it('createJob starts a job unapproved and disabled', async () => {
+    const job = await JobSchedulerService.createJob(adminCtx, {
+      name: 'Unapproved',
+      handlerKey: 'noop',
+      scheduleExpr: '{"kind":"interval","everyMs":60000}',
+       });
+    expect((globalDb.jobDefinition.create as any).mock.calls[0][0].data.approved).toBe(false);
+    expect((globalDb.jobDefinition.create as any).mock.calls[0][0].data.enabled).toBe(false);
+     });
+
+  it('enableJob throws ForbiddenError when the job is not yet approved', async () => {
+    (globalDb.jobDefinition.findUnique as any).mockResolvedValueOnce({
+      id: 'job-1',
+      name: 'Unapproved',
+      platformOrgId: 'platform-org-123',
+      handlerKey: 'noop',
+      scheduleExpr: '{"kind":"interval","everyMs":60000}',
+      enabled: false,
+      approved: false,
+       });
+    await expect(
+      JobSchedulerService.enableJob(adminCtx, 'job-1'),
+      ).rejects.toThrow(ForbiddenError);
+     });
+
+  it('updateJob cannot enable an unapproved job via a patch', async () => {
+    (globalDb.jobDefinition.findUnique as any).mockResolvedValueOnce({
+      id: 'job-1',
+      name: 'Unapproved',
+      platformOrgId: 'platform-org-123',
+      handlerKey: 'noop',
+      scheduleExpr: '{"kind":"interval","everyMs":60000}',
+      enabled: false,
+       approved: false,
+        });
+    await expect(
+      JobSchedulerService.updateJob(adminCtx, 'job-1', { enabled: true }),
+      ).rejects.toThrow(ForbiddenError);
+      });
+
+  it('approveJob sets approved=true, records the approver and an audit entry', async () => {
+    (globalDb.jobDefinition.findUnique as any).mockResolvedValueOnce({
+     id: 'job-1',
+     name: 'Unapproved',
+     platformOrgId: 'platform-org-123',
+     handlerKey: 'noop',
+     scheduleExpr: '{"kind":"interval","everyMs":60000}',
+     enabled: false,
+     approved: false,
+       });
+   (globalDb.jobDefinition.update as any).mockResolvedValue({
+     id: 'job-1',
+     name: 'Unapproved',
+     approved: true,
+     approvedBy: 'user-1',
+       });
+   const { recordAuditLog } = await import('@/lib/audit-log');
+   const updated = await JobSchedulerService.approveJob(adminCtx, 'job-1', { note: 'ok' });
+    expect((globalDb.jobDefinition.update as any).mock.calls.at(-1)[0].data.approved).toBe(true);
+   expect(updated).toMatchObject({ approved: true, approvedBy: 'user-1' });
+   expect((recordAuditLog as any)).toHaveBeenCalledWith(
+     expect.objectContaining({ action: 'job.approved', resourceId: 'job-1' }),
+      );
+     });
+
+  it('approveJob is a no-op when the job is already approved', async () => {
+   // Default findUnique already returns approved:true.
+   const { recordAuditLog } = await import('@/lib/audit-log');
+    const updated = await JobSchedulerService.approveJob(adminCtx, 'job-1');
+    expect(updated.approved).toBe(true);
+   expect((globalDb.jobDefinition.update as any)).not.toHaveBeenCalled();
+   expect((recordAuditLog as any)).not.toHaveBeenCalled();
+    });
+
+  it('rejectJob clears approval and disables the job', async () => {
+   (globalDb.jobDefinition.update as any).mockResolvedValue({
+     id: 'job-1',
+     name: 'Test Job',
+     approved: false,
+     enabled: false,
+       });
+   const { recordAuditLog } = await import('@/lib/audit-log');
+   const updated = await JobSchedulerService.rejectJob(adminCtx, 'job-1', { note: 'no' });
+   expect((globalDb.jobDefinition.update as any).mock.calls.at(-1)[0].data.approved).toBe(false);
+   expect((globalDb.jobDefinition.update as any).mock.calls.at(-1)[0].data.enabled).toBe(false);
+   expect(updated).toMatchObject({ approved: false, enabled: false });
+   expect((recordAuditLog as any)).toHaveBeenCalledWith(
+     expect.objectContaining({ action: 'job.rejected', resourceId: 'job-1' }),
+      );
+     });
+
+  it('triggerJob throws ForbiddenError when the job is not approved', async () => {
+   (globalDb.jobDefinition.findUnique as any).mockResolvedValueOnce({
+     id: 'job-1',
+     name: 'EnabledButUnapproved',
+     platformOrgId: 'platform-org-123',
+     handlerKey: 'noop',
+     scheduleExpr: '{"kind":"interval","everyMs":60000}',
+     enabled: true,
+     approved: false,
+      });
+   await expect(
+     JobSchedulerService.triggerJob(adminCtx, 'job-1'),
+     ).rejects.toThrow(ForbiddenError);
+    });
 });
 
 // ---------------------------------------------------------------------------

@@ -41,7 +41,8 @@ Self-service registration is not available (`/register` redirects to
   - [Calendar Notifications](#7-calendar-notifications)
   - [Real-Time Notifications](#8-real-time-notifications)
   - [Caching](#9-caching)
-  - [Data Protection & Security Hardening](#10-data-protection-security-hardening)
+  - [Background Job Scheduler](#10-background-job-scheduler)
+  - [Data Protection & Security Hardening](#11-data-protection-security-hardening)
 - [Getting Started](#getting-started)
   - [Prerequisites](#prerequisites)
   - [Setup (step by step)](#setup-step-by-step)
@@ -78,6 +79,7 @@ Self-service registration is not available (`/register` redirects to
 | **Calendar Notifications** | Rate-limited email alerts for today's events, delivery logged to `NotificationLog` |
 | **Hybrid caching** | L1 in-memory + L2 Redis cache with stampede protection, warming, and live metrics |
 | **Real-time notifications** | Live server-side SSE broadcast (health checks, all admin management events, and upcoming calendar events) with org/global scoping, deduplication, and a persisted notification log |
+| **Background job scheduler** | Platform-only scheduled/one-shot job engine (main-thread scanner) with a trusted built-in handler set, a DB-backed approval gate, execution history, and `job-scheduler:*` SSE telemetry |
 | **Security hardening** | CSP in Report-Only mode, AES-256-GCM PII encryption at rest, optional payload encryption in transit, pre-commit secret scanning |
 
 ## Project layout
@@ -362,6 +364,8 @@ Every notable platform event is emitted as an SSE notification:
 | Resource catalog changes (create / update / delete) | `admin:resource-management` | INFO / ERROR | GLOBAL |
 | Admin broadcast messages (sent through the console) | `admin:message` | configurable (default INFO) | GLOBAL or ORG |
 | Upcoming calendar events — due to start within the 15-minute lead window, from the background scheduler | `calendar:event-upcoming` | INFO | ORG (event's tenant) |
+| Job runs — scheduled or manual triggers succeed | `job-scheduler:execution` | JOB | GLOBAL |
+| Job runs — failed (handler throws or times out) | `job-scheduler:failure` | ERROR | GLOBAL |
 
 Org-level operations carry the affected organization id, so the history log
 can show which tenant was impacted; pure global catalog entries (permissions,
@@ -434,7 +438,69 @@ npx tsx scripts/cache-benchmark.ts   # 8 scenarios: direct DB, L2 hit, L1 hit, e
 See [CACHING_ARCHITECTURE.md](./CACHING_ARCHITECTURE.md) and
 [scripts/README.md](./scripts/README.md).
 
-## 10. Data Protection & Security Hardening
+## 10. Background Job Scheduler
+
+The platform runs a general-purpose **background job scheduler**, booted alongside
+the calendar scanner and health checks by a side-effect import in `app/layout.tsx`
+(`import '@/lib/job-scheduler-engine'`). It is the reusable execution layer for the
+platform's automation tasks and (in a future phase) an automatic-scripting feature.
+It is **platform-organization only** — tenant users get no access.
+
+- **Engine** (`lib/job-scheduler-engine.ts`) — a main-thread scanner that polls the
+  `JobDefinition` table every 10 s and, for each job whose schedule is due, calls
+  `JobSchedulerService.runJob(jobId, { trigger: 'SCHEDULE' })`. State lives on
+  `globalThis` (so Next.js dev-mode's double module evaluation is a no-op) and the
+  timer is `unref`'d. `Bree` is the chosen engine for the later per-worker phase but
+  is not wired in Phase 1 — the scanner is the boot target today.
+- **Service** (`services/job-scheduler-service.ts`) — the single platform-only
+  interface to the engine. It owns the `JobDefinition`/`JobExecution` model, the
+  DB-backed idempotency claim gate, the trusted built-in handler registry, execution
+  lifecycle + SSE, and audit logging. Every method runs `requirePlatformAdmin(ctx)`.
+
+**Schedule kinds** (`cron` / `interval` / `oneshot`) are stored as JSON in
+`scheduleExpr` and parsed by `parseSchedule`. Phase 1 cron is an "every-N-minutes"
+approximation; full cron parsing and per-worker Bree execution are Phase 2.
+
+**Built-in handlers (Phase 1).** Operators reference a handler by `handlerKey`; the
+engine registers a trusted, audited set and there is no untrusted-code path yet:
+
+| handlerKey | Purpose |
+|------------|---------|
+| `noop` | End-to-end smoke test |
+| `health-check` | Probe platform health; raise an `ERROR` alert on an unhealthy check (silent when healthy) |
+| `calendar-health-check` | Probe the calendar "due to start" pipeline; fails if discovery throws |
+| `calendar-selftest` | Emit one `CALENDAR`-priority SSE probe to prove the notification path is reachable |
+
+**Approval gate (defense in depth).** A job starts `enabled: false, approved: false`.
+A platform admin must **approve** it before it can be enabled, manually triggered, or
+run on its schedule — `enableJob`, `updateJob` (enabling via patch), and `triggerJob`
+all throw unless the job is approved, and the scanner additionally requires
+`approved: true` so no job ever runs unreviewed. `approveJob`/`rejectJob` record the
+approver, timestamp, and an optional note, plus a durable `job.approved` /
+`job.rejected` audit entry.
+
+**Lifecycle → SSE.** A successful run emits a `JOB`-priority notification
+(`source: job-scheduler:execution`); a failure emits an `ERROR`
+(`source: job-scheduler:failure`) — both `GLOBAL`, riding the [SSE pipeline](#11-real-time-notifications)
+and the admin ticker/log. The `JOB` priority (added to the `NotificationPriority`
+enum alongside `CALENDAR`) renders in its own colour, so routine job telemetry is
+visually distinct from alert colours.
+
+**Admin API (Super Admin / platform-only).** `requireSuperAdmin`-guarded routes:
+
+| Route | Methods | Purpose |
+|-------|---------|---------|
+| `/api/admin/jobs` | GET, POST | List jobs (filter by `enabled` / `approved` / `limit`) / create a job (starts disabled + unapproved) |
+| `/api/admin/jobs/[jobId]` | GET, PATCH | Read / update a job (enabling via PATCH requires prior approval) |
+| `/api/admin/jobs/[jobId]/approvals` | POST | Approve (default) or reject a job (`{ action, note? }`) |
+| `/api/admin/jobs/[jobId]/trigger` | POST | Execute a job now (highest-risk — requires enabled **and** approved; audited) |
+
+Configuration is via `JOB_SCHEDULER_*` env vars (see
+[Appendix A](#appendix-a-environment-variables)). Design rationale, the Bree
+per-worker direction, and the deferred automatic-scripting feature live in
+[documents/feature-planning-and-development/job-scheduler-service-plan.md](./documents/feature-planning-and-development/job-scheduler-service-plan.md).
+
+## 11. Data Protection & Security Hardening
 
 - **PII at rest:** AES-256-GCM encryption for sensitive columns, keyed by
   `PII_ENCRYPTION_KEY` (`lib/pii-crypto.ts`, `lib/pii-routes.ts`).
@@ -654,6 +720,19 @@ Start from `.env.example` (committed, placeholders only).
 | `CALENDAR_EVENT_SCAN_INTERVAL_MS` | no | 30000 | Interval between "due to start" calendar scans (see §6) |
 | `CALENDAR_LEAD_TIME_MINUTES` | no | 15 | Lead window: notify when an event starts within this many minutes |
 | `CALENDAR_MAX_EVENTS_PER_SCAN` | no | 20 | Per-scan cap on upcoming-event notifications (burst protection) |
+
+**Job scheduler** (see [§10](#10-background-job-scheduler))
+
+| Variable | Required | Default | Purpose |
+|----------|----------|---------|---------|
+| `JOB_SCHEDULER_ENABLED` | no | `true` | Master on/off for the job scheduler engine |
+| `JOB_SCHEDULER_TIMEZONE` | no | `Europe/London` | Default IANA timezone for job schedules |
+| `JOB_SCHEDULER_MAX_CONCURRENT` | no | `5` | Global cap on simultaneous job runs (runtime circuit breaker) |
+| `JOB_SCHEDULER_DB_CONCURRENCY` | no | `100` | Connection-pool ceiling per forked worker, sized below PgBouncer `max_client_conn` |
+| `JOB_SCHEDULER_DEFAULT_CONCURRENCY` | no | `1` | Per-job default concurrency limit |
+| `JOB_SCHEDULER_DEFAULT_TIMEOUT_MS` | no | `300000` | Per-job default wall-clock cap (5 min) |
+| `JOB_SCHEDULER_BOOT_REGISTRY` | no | `true` | Load enabled jobs from the DB at boot |
+| `JOB_SCHEDULER_DRYRUN_DEFAULT` | no | `false` | New jobs default to dry-run until approved (Phase 2) |
 | `PII_ENCRYPTION_KEY` | yes (64 hex chars) | — | AES-256-GCM key for PII at rest |
 | `PAYLOAD_ENCRYPTION_MODE` | no | `disabled` | `disabled` \| `permissive` \| `enforce` — payload encryption in transit |
 | `PAYLOAD_ENCRYPTION_MAX_BYTES` | no | 65536 | Max encrypted request body size |
@@ -746,6 +825,7 @@ Prisma models (`prisma/schema.prisma`), grouped by domain:
 | RBAC | `Permission`, `Role`, `RolePermission`, `MemberRole`, `Resource`, `ResourceRole` |
 | Calendar | `Calendar`, `CalendarEvent` (rrule JSON + exdates, optional `propertyId`) |
 | Audit & notifications | `AuditLog`, `Notification` (SSE in-app events, org/global scope, acknowledged flag), `NotificationLog` (email deliveries) |
+| Job scheduler | `JobDefinition` (platform-org job spec + approval gate), `JobExecution` (run history) |
 
 All organization-scoped models carry an `organizationId` and are covered by
 the two-layer isolation strategy (Prisma extension + RLS).

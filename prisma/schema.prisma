@@ -610,25 +610,40 @@ model JobDefinition {
   timezone       String?
   /** Per-job wall-clock cap (ms); default from JOB_SCHEDULER_DEFAULT_TIMEOUT_MS. */
   timeoutMs      Int?
-  /** Per-job concurrency limit; default from JOB_SCHEDULER_DEFAULT_CONCURRENCY (1). */
-  concurrencyLimit Int?  @default(1)
+  /** Per-job concurrency limit (default from JOB_SCHEDULER_DEFAULT_CONCURRENCY (1). */
+  concurrencyLimit Int?   @default(1)
   enabled        Boolean @default(false)
 
-  /** Idempotency marker — doubles as the claim gate for overlapping/restart runs. */
+   /**
+    * Approval gate — a job cannot be enabled, triggered, or run on its schedule
+    * until a platform admin explicitly approves it. Phase 1 runs this as a
+    * general guardrail so a newly created job (including one that will later
+    * carry operator-authored `code`) never executes unreviewed.
+    */
+  approved     Boolean @default(false)
+   /** Platform admin user id who approved this job (null until approved). */
+  approvedBy   String?
+   /** When the job was last approved. */
+  approvedAt   DateTime?
+   /** Optional note recorded on approval/rejection. */
+  approvalNote String?
+
+   /** Idempotency marker — doubles as the claim gate for overlapping/restart runs. */
   lastRunAt      DateTime?
-  /** SUCCEEDED | FAILED | CANCELLED */
+   /** SUCCEEDED | FAILED | CANCELLED */
   lastRunStatus  String?
 
-  /** Platform admin user id who created this job. */
+   /** Platform admin user id who created this job. */
   createdBy      String?
   createdAt      DateTime @default(now())
   updatedAt      DateTime @updatedAt
 
   executions     JobExecution[]
 
-  @@unique([platformOrgId, name])
-  @@index([platformOrgId, enabled])
-  @@index([platformOrgId, lastRunAt])
+   @@unique([platformOrgId, name])
+   @@index([platformOrgId, enabled])
+   @@index([platformOrgId, lastRunAt])
+   @@index([platformOrgId, approved])
 }
 
 model JobExecution {

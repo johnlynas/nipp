@@ -56,7 +56,13 @@ This document is organized by **functional area**. Use the table of contents bel
   - [Models & Services](#models--services)
   - [Due-to-Start SSE Notifications](#due-to-start-sse-notifications)
   - [Authorization](#authorization)
-- [10. Cache Architecture](#10-cache-architecture)
+  - [10. Job Scheduler](#10-job-scheduler)
+  - [Engine & Service](#engine--service)
+  - [Built-in Handlers](#built-in-handlers)
+  - [Approval Gate](#approval-gate)
+  - [Data Model](#data-model)
+  - [SSE Lifecycle](#sse-lifecycle)
+  - [11. Cache Architecture](#11-cache-architecture)
   - [Overview](#overview)
   - [Layer 1: In-Memory LRU Cache](#layer-1-in-memory-lru-cache)
   - [Layer 2: Redis (Distributed Cache)](#layer-2-redis-distributed-cache)
@@ -65,14 +71,14 @@ This document is organized by **functional area**. Use the table of contents bel
   - [Cross-Instance Invalidation](#cross-instance-invalidation)
   - [Stampede Protection](#stampede-protection)
   - [Cache Monitoring & Metrics](#cache-monitoring--metrics)
-- [11. Security](#11-security)
+  - [12. Security](#12-security)
   - [Content Security Policy (CSP)](#content-security-policy-csp)
   - [Data-in-Transit Payload Encryption](#data-in-transit-payload-encryption)
   - [CSRF Protection](#csrf-protection)
   - [Secrets Management](#secrets-management)
   - [PII Logging Policy](#pii-logging-policy)
-- [12. Project Structure](#12-project-structure)
-- [13. Development & Testing](#13-development--testing)
+  - [13. Project Structure](#13-project-structure)
+  - [14. Development & Testing](#14-development--testing)
   - [Local Setup](#local-setup)
   - [Running Tests](#running-tests)
   - [Database Migrations](#database-migrations)
@@ -106,6 +112,7 @@ This document is organized by **functional area**. Use the table of contents bel
 | Connection Pooler | PgBouncer (port 6432) |
 | Cache / Session Store | Redis (`ioredis`) |
 | In-Memory Cache | `lru-cache` v11 (L1 cache) |
+| Job Engine | Bree v9.2.9 (per-worker phase — not yet wired; a main-thread scanner is the Phase 1 boot target) |
 | Email | Nodemailer v9.0.3 |
 | Logging | Pino (`pino`, `pino-pretty`) |
 | Database Driver | `pg` v8.22.0 |
@@ -175,6 +182,7 @@ flowchart TB
 | **Data Layer** (`prisma/schema.prisma`) | Schema definition, relations, RLS policies. | PostgreSQL |
 | **Cache Layer** (`lib/cache/`, `lib/redis.ts`) | L1 in-memory + L2 Redis caching with stampede protection and cross-instance invalidation. | Node / Redis |
 | **Real-Time Push** (`lib/notification-push.ts`, `app/api/notifications/stream/route.ts`) | SSE notification hub: subscriber registry, two-layer dedup, DB persistence, scope-filtered fan-out to admin & tenant browsers (Section 8). | Node |
+| **Domain Services** (`services/`) | Domain business logic: `job-scheduler-service` (platform job engine), `calendar-event-service`, `team-service`, `organization-service`, … | Node |
 
 ---
 
@@ -338,6 +346,7 @@ A dedicated `services/` layer sits between the API routes and the database (Pris
 | Calendar | `services/calendar-service.ts` | Calendar container CRUD, default-calendar bootstrapping (org-scoped) |
 | Calendar Event | `services/calendar-event-service.ts` | Event CRUD, recurrence expansion, upcoming events |
 | Calendar Notification | `services/calendar-notification-service.ts` | Today's-events email notifications, delivery history |
+| Job Scheduler | `services/job-scheduler-service.ts` | Platform-org job execution layer (main-thread scanner, engine: `lib/job-scheduler-engine.ts`). Job registry, approval gate, execution history, `JOB`/`ERROR` SSE emission. |
 
 ---
 
@@ -364,6 +373,8 @@ A dedicated `services/` layer sits between the API routes and the database (Pris
 | `Notification` | Global | In-app events pushed over SSE: title, message, priority (`INFO`/`WARNING`/`ERROR`/`CRITICAL`), scope (`GLOBAL`/`ORG`), source tag, optional `organizationId`, and an `acknowledged` admin flag |
 | `Calendar` | Org-scoped | Container/namespace for calendar events (one default per org) |
 | `CalendarEvent` | Org-scoped | Individual events within a calendar (local datetimes, optional `propertyId`; recurrence stored as RFC 5545 `rrule` JSON + `exdates` Json columns, not a separate model) |
+| `JobDefinition` | Platform-org | Job specification (platform-org scoped); includes approval gate fields `approved` / `approvedBy` / `approvedAt` / `approvalNote` (migration `20260909190000_add_job_approval_gate`). Phase 1 fields only; `code` is a Phase-2 placeholder. |
+| `JobExecution` | Platform-org | Per-run execution record: status (RUNNING/SUCCEEDED/FAILED), trigger (SCHEDULE/MANUAL), actorId, resultJson, error. Cascading delete from `JobDefinition`. |
 
 ### Relationships
 
@@ -395,7 +406,153 @@ The system uses **PgBouncer** as a connection pooler between the Node.js applica
 
 ---
 
-## 10. Cache Architecture
+## 10. Job Scheduler
+
+### Engine & Service
+
+The platform runs a **background job scheduler** — a general-purpose execution layer
+for platform automation, booting alongside the calendar-event and health-check
+scanners via a side-effect import in `app/layout.tsx`
+(`import '@/lib/job-scheduler-engine'`).
+
+**Two components:**
+
+- **Engine** (`lib/job-scheduler-engine.ts`) — a **main-thread scanner** (Phase 1
+  boot target) that every 10 s polls the `JobDefinition` table for due jobs and
+  calls `JobSchedulerService.runJob(jobId, { trigger: 'SCHEDULE' })` for each. It
+  uses the `globalThis` singleton pattern (so Next.js dev-mode's double module
+  evaluation is a no-op) and an `unref`'d timer so it never blocks process exit.
+  `Bree` (v9.2.9) is the chosen engine for the later per-worker execution phase —
+  a fresh forked worker per run with worker-per-run isolation (proved by the
+  Phase 0 spike in the plan document; see R1) — but it is **not wired in
+  Phase 1**; the main-thread scanner is the current engine.
+- **Service** (`services/job-scheduler-service.ts`) — the single, stable,
+  platform-only interface to the engine. It does **not** import Bree or Prisma
+  directly (pure orchestration over `globalDb`, `pushNotification`, and
+  `recordAuditLog`), which keeps it unit-testable by mocking those three (mirrors
+  the calendar-event-scheduler test). It owns the `JobDefinition` / `JobExecution`
+  model (CRUD + history), the DB-backed idempotency / restart-safety claim gate
+  (an atomic `lastRunAt` update — Bree carries no job state in the DB), the
+  trusted built-in handler registry, the **approval gate**, and execution
+  lifecycle + SSE notification. Every public method runs
+  `requirePlatformAdmin(ctx)`; the highest-risk manual trigger (`triggerJob`)
+  additionally gates on `verifySuperAdmin`. This surface is the **platform
+  organization only** — tenant users cannot define, view, trigger, or cancel
+  jobs.
+
+**Schedule kinds** (`cron` / `interval` / `oneshot`) are stored as JSON in
+`JobDefinition.scheduleExpr` and parsed/validated by `parseSchedule()`. Phase 1
+cron is a "every-N-minutes" approximation (full IANA cron parsing is a Phase 2
+item); `interval` fires strictly every `everyMs`; `oneshot` fires once at the
+`at` instant (idempotent via `lastRunAt`).
+
+### Built-in Handlers
+
+Phase 1 ships a **trusted, audited** built-in handler set — operators reference a
+handler by `handlerKey` (a `JobDefinition.handlerKey` string) but **cannot define
+new handlers** (that is Phase 2's untrusted-script path, gated by the approval
+gate below).
+
+| handlerKey | Purpose | Emission |
+|------------|---------|----------|
+| `noop` | End-to-end smoke test; proves the full path (create → approve → enable → trigger → job execution → SSE). | (result only, no extra SSE) |
+| `health-check` | Probe platform health via `checkHealthStatus()`; on any unhealthy check, raise a `GLOBAL` / `ERROR` alert (`source: job-scheduler:health-check`). Silent when healthy. | `ERROR` on unhealthy |
+| `calendar-health-check` | Probe the calendar "due to start" pipeline via `findDueToStartEvents()`; a thrown discovery **fails** the run (visible in execution history instead of silently failing). | (result only) |
+| `calendar-selftest` | Emit one `GLOBAL` / `CALENDAR`-priority probe via `pushNotification()` to prove the calendar notification path is reachable, with an optional custom `{ title, message }` input. | `CALENDAR` |
+
+Registered idempotently via `registerBuiltinHandlers()` (called on every boot /
+module re-evaluation). Each handler is a plain, standalone function — no closures
+over module state — so it will also survive the Bree worker boundary (a future
+per-worker execution path) without needing per-worker context reconstruction for
+its own logic.
+
+### Approval Gate
+
+Every newly created `JobDefinition` starts `enabled: false, approved: false`.
+
+The **approval gate** is the control that moves a job from "defined" to "may
+execute": a platform admin must call `approveJob(id, { note? })` before the job
+can be enabled, manually triggered, or run on its schedule.
+
+- `enableJob` throws `ForbiddenError` if the job is not yet approved.
+- `updateJob` with `enabled: true` throws if the job is not yet approved.
+- `triggerJob` requires **both** `enabled: true` **and** `approved: true`.
+- The scanner's query additionally requires `approved: true` (defense in depth:
+  even if a row were somehow enabled without approval, the scheduler never
+  runs an unapproved job).
+
+`approveJob` and `rejectJob` record `approved` (`true` / `false`), `approvedBy`
+(acting admin user id), `approvedAt`, and an optional `approvalNote`, plus a
+durable `job.approved` / `job.rejected` audit entry. `approveJob` is idempotent:
+re-approving an already-approved job refreshes the approver/timestamp without
+re-auditing. `rejectJob` clears approval and also disables the job.
+
+### Data Model
+
+Two platform-org-scoped models in `prisma/schema.prisma`:
+
+- **`JobDefinition`** — the job specification: `platformOrgId` (owner), `name`
+  (unique per org), `handlerKey`, `scheduleExpr` (JSON), `timezone`, `timeoutMs`,
+  `concurrencyLimit`, `enabled`, **`approved` / `approvedBy` / `approvedAt` /
+  `approvalNote`** (approval gate; migration `20260909190000_add_job_approval_gate`),
+  `code` (operator-authored script source — Phase 2, `null` for built-ins),
+  `lastRunAt`, `lastRunStatus`, `createdBy`, `executions[]`.
+- **`JobExecution`** — per-run record: `status` (RUNNING → SUCCEEDED / FAILED),
+  `trigger` (SCHEDULE / MANUAL), `actorId` (for manual runs), `resultJson`,
+  `error`, `startedAt` / `finishedAt`, `source` (always
+  `job-scheduler:execution`). Cascading delete from `JobDefinition`.
+
+Indexing: `[platformOrgId, name]` (unique), `[platformOrgId, enabled]`,
+`[platformOrgId, lastRunAt]`, `[platformOrgId, approved]` (approval-gate
+scanning), plus `[jobDefinitionId, startedAt]` and `[platformOrgId, status]`
+on `JobExecution`.
+
+### SSE Lifecycle
+
+Job scheduler emits through the existing `pushNotification()` model, using a
+persistent **`JOB`** priority (added to `NotificationPriority` alongside
+`CALENDAR`, wired across the same 7-file cascade: schema → `normalizePriority`
+→ `notifications/route.ts` counts + `JOB` filter → dashboard page label
+(`text-purple-600`) → `useNotifications.ts` ticker persistence). Each event
+carries a stable `source` under the `job-scheduler:*` namespace for
+client-side filtering.
+
+| Event | Priority | Scope | Source |
+|-------|----------|-------|--------|
+| Job succeeded (scheduled or manual) | `JOB` | GLOBAL | `job-scheduler:execution` |
+| Job failed | `ERROR` | GLOBAL | `job-scheduler:failure` |
+| `health-check` handler detects unhealthy platform | `ERROR` | GLOBAL | `job-scheduler:health-check` |
+| `calendar-selftest` handler fires | `CALENDAR` | GLOBAL | `job-scheduler:calendar-selftest` |
+
+Rationale: routine job lifecycle (start/success) is operational noise that would
+clutter a ticker if it used `INFO`; `ERROR` / `CRITICAL` are reserved for genuine
+failures. The `JOB` priority keeps job telemetry visually distinct from alert
+colours — the same reasoning that justified `CALENDAR`.
+
+### Admin API
+
+All `requireSuperAdmin`-guarded, all `wrapPiiRoute`-wrapped, all `checkAdminRateLimit`-guarded on writes:
+
+| Route | Methods | Purpose |
+|-------|---------|---------|
+| `/api/admin/jobs` | GET, POST | List jobs (filter: `enabled`, `approved`, `limit`) / create a job (starts disabled + unapproved) |
+| `/api/admin/jobs/[jobId]` | GET, PATCH | Read / update a job (enabling via PATCH requires prior approval) |
+| `/api/admin/jobs/[jobId]/approvals` | POST | Approve (default) or reject a job (`{ action, note? }`) — audited |
+| `/api/admin/jobs/[jobId]/trigger` | POST | Execute a job now — highest-risk, requires enabled **and** approved, audited via `job.triggered` |
+
+### Testing
+
+- **Service** — `tests/unit/job-scheduler-service.test.ts` covers CRUD, the
+  atomic claim gate (idempotency for overlapping/restart runs), the approval
+  gate (approve / reject / no-op re-approve), `listJobs` filtering
+  (`enabled` / `approved` / `limit`), and `getExecutionHistory`.
+- **Engine** — `tests/unit/job-scheduler-engine.test.ts` covers the four
+  built-in handlers (no-op, health-check alert path, calendar-health-check,
+  calendar-selftest probe) and idempotent `registerBuiltinHandlers()`.
+
+---
+
+## 11. Cache Architecture
 
 The portal implements a **multi-layered caching strategy** combining Next.js ISR, L1 in-memory LRU cache, Redis (L2), TanStack Query (client-side), and SSE for real-time updates. This section covers the server-side cache layers in detail.
 
@@ -615,7 +772,7 @@ Events are stored in the global `Notification` model (distinct from
 
 | Field | Values | Meaning |
 |-------|--------|---------|
-| `priority` | `INFO` · `WARNING` · `ERROR` · `CRITICAL` | Display weighting. `INFO`/`WARNING` auto-dismiss from the ticker after 10 s; `ERROR`/`CRITICAL` persist until manually dismissed. Health failures push `CRITICAL`. |
+| `priority` | `INFO` · `WARNING` · `ERROR` · `CRITICAL` · `CALENDAR` · `JOB` | Display weighting. `INFO`/`WARNING` auto-dismiss from the ticker after 10 s; `ERROR`/`CRITICAL`/`CALENDAR`/`JOB` persist until manually dismissed. Health failures push `CRITICAL`. `CALENDAR` (green) is for upcoming-event reminders; `JOB` (purple) is for job-scheduler telemetry. |
 | `scope` | `GLOBAL` · `ORG` (default) | **Who receives it live over SSE.** `GLOBAL` = every connected subscriber; `ORG` = that tenant's subscribers plus Super Admins only. |
 | `source` | e.g. `health-check:database`, `admin:role-management` | Machine-readable event family; powers filters, search, and page-level reactions (health card keys off these). |
 | `organizationId` | nullable | Carries the affected tenant for org-level operations so the log can attribute them; NULL for pure global broadcasts. Org deletion is `SetNull`. |
@@ -641,6 +798,8 @@ Every currently wired producer, with its success/failure priorities:
 | `admin:resource-management` | `notifyResourceOperation(…)` | resource create · update · delete | INFO / ERROR | GLOBAL (no org — global catalog) |
 | `admin:message` | `notifyAdminMessage(title, message, orgId?, priority?)` | Admin broadcast via `POST /api/admin/notifications` | caller-selected (default INFO) | GLOBAL or ORG |
 | `calendar:event-upcoming` | direct `pushNotification(...)` from `lib/calendar-event-scheduler.ts` | One alert per event instance that starts within the lead window (default 15 min), single + recurring (exdate-aware) | INFO | ORG (event's tenant)² |
+| `job-scheduler:execution` | `pushNotification(...)` via `services/job-scheduler-service.ts` → `notifyExecution` | Successful job run (SCHEDULE or MANUAL trigger); carries the job name and is JOB-priority, purposed for operational visibility | JOB | GLOBAL |
+| `job-scheduler:failure` | `pushNotification(...)` via `services/job-scheduler-service.ts` → `failExecution` | Failed job run; carries the job name + error message; ERROR-priority to alert administrators | ERROR | GLOBAL |
 
 ¹ Sent `GLOBAL` so all Super Admins see platform operations everywhere, but the
 affected `organizationId` is passed through so the log attributes the event to
@@ -874,7 +1033,7 @@ Every `/api/organizations/[orgId]/calendar*` route verifies the session (401) an
 
 ---
 
-## 11. Security
+## 12. Security
 
 ### Content Security Policy (CSP)
 
@@ -975,7 +1134,7 @@ Payload encryption does **not** replace CSRF protection. PII mutating routes mus
 
 ---
 
-## 12. Project Structure
+## 13. Project Structure
 
 ```
 nipp/
@@ -990,7 +1149,7 @@ nipp/
 │   │   ├── system-logs/page.tsx  # System log viewer
 │   │   └── users/                # User management (list, create, edit, view, delete)
 │   ├── api/                      # API endpoints (RESTful routes)
-│   │   ├── admin/                # Super admin APIs (audit-logs, cache metrics, notifications log, orgs, permissions, roles, users)
+│   │   ├── admin/                # Super admin APIs (audit-logs, cache metrics, notifications log, orgs, permissions, roles, users, jobs)
 │   │   ├── auth/                 # BetterAuth catch-all + user endpoints
 │   │   ├── cache/metrics/        # Cache metrics endpoint
 │   │   ├── csp-report/           # CSP violation reporting
@@ -1042,6 +1201,7 @@ nipp/
 │   ├── ip.ts                     # IP address utilities
 │   ├── logger.ts                 # Pino logger with PII redaction
 │   ├── middleware/auth.ts        # Auth middleware utilities
+│   ├── job-scheduler-engine.ts   # Background job scheduler: main-thread scanner, built-in handlers, globalThis singleton (Section 10); booted via app/layout.tsx
 │   ├── notification-push.ts      # In-process SSE push hub: subscriber registry, dedup, persist & broadcast (Section 8)
 │   ├── notifications/            # Email notification system (dispatcher, email, events — calendar today-events flow)
 │   ├── org-bootstrap.ts          # Organization bootstrapping logic
@@ -1088,6 +1248,7 @@ nipp/
 │   ├── calendar-event-service.ts  # Calendar event CRUD, recurrence expansion
 │   ├── calendar-notification-service.ts  # Today's-events email notifications
 │   ├── calendar-service.ts        # Calendar CRUD, default-calendar bootstrapping
+│   ├── job-scheduler-service.ts   # Job scheduler service layer: registry, approval gate, lifecycle + SSE (Section 10)
 │   ├── organization-service.ts    # Organization management & lifecycle
 │   ├── permission-service.ts      # Global permission catalog CRUD
 │   ├── resource-service.ts        # Global resource catalog CRUD (Super Admin)
@@ -1128,7 +1289,7 @@ nipp/
 
 ---
 
-## 13. Development & Testing
+## 14. Development & Testing
 
 ### Local Setup
 
@@ -1167,5 +1328,5 @@ npm run dev                      # Start development server
 
 ---
 
-*Last Updated: 02/09/26*
+*Last Updated: 10/09/26*
 *Maintained by: Property NI Development Team*

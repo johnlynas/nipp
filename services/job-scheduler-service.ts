@@ -26,6 +26,7 @@
  */
 
 import {
+  JobDefinition,
   NotificationPriority,
   NotificationScope,
   Prisma,
@@ -248,6 +249,9 @@ export const JobSchedulerService = {
           timeoutMs: input.timeoutMs ?? defaultTimeoutMs(),
           concurrencyLimit: input.concurrencyLimit ?? defaultConcurrency(),
           enabled: input.enabled ?? false,
+          // New jobs start unapproved: a platform admin must approve a job
+          // before it can be enabled or triggered (approval gate, Phase 1).
+          approved: false,
           code: input.code ?? null,
           createdBy: ctx.userId,
          },
@@ -283,6 +287,11 @@ export const JobSchedulerService = {
     const existing = await assertJobInOrg(id, platformOrgId);
 
     const data: Record<string, unknown> = {};
+    // Approval gate: enabling a job via a patch is only allowed once approved,
+    // mirroring enableJob(). Prevents bypassing the gate by flipping `enabled`.
+    if (input.enabled === true && !existing.approved) {
+      throw new ForbiddenError('Job is not approved — approve it before enabling');
+      }
     if (input.name !== undefined) {
       if (input.name.trim() === '') throw new ValidationError('name cannot be empty');
       data.name = input.name.trim();
@@ -330,11 +339,16 @@ export const JobSchedulerService = {
   async enableJob(ctx: ServiceContext, id: string) {
     requirePlatformAdmin(ctx);
     const platformOrgId = ctx.organizationId || jobSchedulerEnv.platformOrgId;
-    await assertJobInOrg(id, platformOrgId);
+    const job = await assertJobInOrg(id, platformOrgId);
+    // Approval gate: a job cannot be enabled until a platform admin has
+    // approved it.
+    if (!job.approved) {
+      throw new ForbiddenError('Job is not approved — approve it before enabling');
+      }
     const updated = await globalDb.jobDefinition.update({
       where: { id },
       data: { enabled: true },
-     });
+      });
     await recordAuditLog({
       userId: ctx.userId,
       action: 'job.enabled',
@@ -366,8 +380,88 @@ export const JobSchedulerService = {
     return updated;
    },
 
+   /**
+    * Approve a job so it may be enabled and executed. Records the approver,
+    * timestamp, and an optional note, plus a durable audit entry. Idempotent:
+    * re-approving an already-approved job refreshes the approver/timestamp.
+    */
+   async approveJob(
+   ctx: ServiceContext,
+   id: string,
+   opts: { note?: string } = {},
+   ): Promise<JobDefinition> {
+   requirePlatformAdmin(ctx);
+   const platformOrgId = ctx.organizationId || jobSchedulerEnv.platformOrgId;
+   const job = await assertJobInOrg(id, platformOrgId);
+
+   if (job.approved) {
+     // Already approved — refresh approver/timestamp but don't re-audit churn.
+     logger.info({ jobId: id, name: job.name }, 'Job already approved (no-op)');
+     return job;
+     }
+
+   const updated = await globalDb.jobDefinition.update({
+     where: { id },
+     data: {
+       approved: true,
+       approvedBy: ctx.userId,
+       approvedAt: new Date(),
+       approvalNote: opts.note ?? null,
+       },
+     });
+
+   await recordAuditLog({
+     userId: ctx.userId,
+     action: 'job.approved',
+     resourceType: 'JobDefinition',
+     resourceId: id,
+     organizationId: platformOrgId,
+     success: true,
+     metadata: { note: opts.note ?? null, name: job.name },
+     });
+   logger.info({ jobId: id, name: job.name, actor: ctx.userId }, 'Job approved');
+   return updated;
+   },
+
+   /**
+    * Reject an unapproved job: clears approval and disables it so the engine
+    * stops scheduling it. Records the actor, optional note, and an audit entry.
+    */
+   async rejectJob(
+   ctx: ServiceContext,
+   id: string,
+   opts: { note?: string } = {},
+   ): Promise<JobDefinition> {
+   requirePlatformAdmin(ctx);
+   const platformOrgId = ctx.organizationId || jobSchedulerEnv.platformOrgId;
+   const job = await assertJobInOrg(id, platformOrgId);
+
+   const updated = await globalDb.jobDefinition.update({
+     where: { id },
+     data: {
+       approved: false,
+       approvedBy: ctx.userId,
+       approvedAt: new Date(),
+       approvalNote: opts.note ?? null,
+       enabled: false,
+       },
+     });
+
+   await recordAuditLog({
+     userId: ctx.userId,
+     action: 'job.rejected',
+     resourceType: 'JobDefinition',
+     resourceId: id,
+     organizationId: platformOrgId,
+     success: true,
+     metadata: { note: opts.note ?? null, name: job.name },
+     });
+   logger.warn({ jobId: id, name: job.name, actor: ctx.userId }, 'Job rejected');
+   return updated;
+   },
+
    /** Delete a job definition (its execution history cascades). */
-  async disposeJob(ctx: ServiceContext, id: string) {
+   async disposeJob(ctx: ServiceContext, id: string) {
     requirePlatformAdmin(ctx);
     const platformOrgId = ctx.organizationId || jobSchedulerEnv.platformOrgId;
     const job = await assertJobInOrg(id, platformOrgId);
@@ -399,7 +493,10 @@ export const JobSchedulerService = {
     const job = await assertJobInOrg(id, platformOrgId);
     if (!job.enabled) {
       throw new ForbiddenError('Job is disabled — enable it before triggering');
-     }
+      }
+    if (!job.approved) {
+      throw new ForbiddenError('Job is not approved — approve it before triggering');
+      }
     await recordAuditLog({
       userId: ctx.userId,
       action: 'job.triggered',
@@ -413,13 +510,30 @@ export const JobSchedulerService = {
    },
 
    /** List jobs for the platform org (optionally filtered by enabled). */
-  async listJobs(ctx: ServiceContext, opts: { enabled?: boolean } = {}) {
+  async listJobs(
+    ctx: ServiceContext,
+    opts: { enabled?: boolean; approved?: boolean; limit?: number } = {},
+  ) {
     requirePlatformAdmin(ctx);
     const platformOrgId = ctx.organizationId || jobSchedulerEnv.platformOrgId;
+    const where: Prisma.JobDefinitionWhereInput = { platformOrgId };
+    if (opts.enabled !== undefined) where.enabled = opts.enabled;
+    if (opts.approved !== undefined) where.approved = opts.approved;
     return globalDb.jobDefinition.findMany({
-      where: { platformOrgId, ...(opts.enabled !== undefined ? { enabled: opts.enabled } : {}) },
+      where,
       orderBy: { createdAt: 'desc' },
-     });
+      take: opts.limit ? Math.min(Math.max(opts.limit, 1), 500) : undefined,
+      });
+    },
+
+   /**
+    * Read a single job by id (platform-org scoped). Throws NotFoundError if
+    * the job does not exist in the caller's platform org.
+    */
+   async getJob(ctx: ServiceContext, id: string): Promise<JobDefinition> {
+   requirePlatformAdmin(ctx);
+   const platformOrgId = ctx.organizationId || jobSchedulerEnv.platformOrgId;
+   return assertJobInOrg(id, platformOrgId);
    },
 
    /**
@@ -582,7 +696,7 @@ const jobSchedulerEnv = {
 async function assertJobInOrg(
   id: string,
   platformOrgId: string | undefined,
-): Promise<{ id: string; platformOrgId: string; name: string; enabled: boolean }> {
+): Promise<JobDefinition> {
   if (!platformOrgId) {
     throw new ForbiddenError('A platform organization context is required');
    }
