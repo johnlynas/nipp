@@ -138,7 +138,15 @@ export const envSchema = z.object({
   JOB_SCHEDULER_BOOT_REGISTRY: z.enum(['true', 'false']).default('true'),
 
    /** New jobs default to dry-run until approved (Phase 2; default false). */
-  JOB_SCHEDULER_DRYRUN_DEFAULT: z.enum(['true', 'false']).default('false'),
-});
+   JOB_SCHEDULER_DRYRUN_DEFAULT: z.enum(['true', 'false']).default('false'),
+
+   /**
+    * Execution path for due jobs: `worker` = Bree fork-per-run (Phase 2,
+    * worker isolation for untrusted-script readiness); `inline` = main-thread
+    * scanner runs runJob directly (Phase 1 fallback/rollback). Default:
+    * worker.
+    */
+   JOB_SCHEDULER_BREE_MODE: z.enum(['worker', 'inline']).default('worker'),
+   });
 
 export type Env = z.infer<typeof envSchema>;

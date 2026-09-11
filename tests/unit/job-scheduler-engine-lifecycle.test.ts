@@ -32,7 +32,25 @@ vi.mock('@/lib/logger', () => ({
 
 // Enabled boot path: the engine reads env.JOB_SCHEDULER_ENABLED at load.
 vi.mock('@/lib/env', () => ({
-  env: { JOB_SCHEDULER_ENABLED: 'true', JOB_SCHEDULER_BOOT_REGISTRY: 'true' },
+  env: {
+    JOB_SCHEDULER_ENABLED: 'true',
+    JOB_SCHEDULER_BOOT_REGISTRY: 'true',
+    // Scanner-lifecycle tests dispatch inline; the worker path is covered by
+    // tests/unit/job-scheduler-bree.test.ts and the nipp_dev integration test.
+    JOB_SCHEDULER_BREE_MODE: 'inline',
+  },
+}));
+
+// The Bree executor module: hermetic stub (no real Bree instance, no runner
+// files, no worker forks) for the scanner-lifecycle tests.
+vi.mock('@/lib/job-scheduler-bree', () => ({
+  default: {
+    executeJobInWorker: vi.fn(),
+    stopOneRun: vi.fn(),
+    stopAllRuns: vi.fn().mockResolvedValue(undefined),
+    reapStaleRunners: vi.fn().mockResolvedValue(0),
+    notifyWorkerEngineFailure: vi.fn(),
+  },
 }));
 
 // Mock registerBuiltins/runJob; keep parseSchedule real so a 1-minute cron with

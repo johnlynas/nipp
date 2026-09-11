@@ -45,6 +45,7 @@ vi.mock('@/lib/env', () => ({
   env: {
    JOB_SCHEDULER_ENABLED: 'false',
    JOB_SCHEDULER_BOOT_REGISTRY: 'true',
+   JOB_SCHEDULER_BREE_MODE: 'inline',
    },
 }));
 
@@ -61,6 +62,18 @@ vi.mock('@/services/job-scheduler-service', async (importOriginal) => {
      JobSchedulerService: { registerBuiltins: vi.fn(), runJob: vi.fn() },
    };
 });
+
+// Hermetic Bree executor stub (no instance, no forks) — these tests run in
+// `inline` mode and only need the surface the engine imports.
+vi.mock('@/lib/job-scheduler-bree', () => ({
+  default: {
+    executeJobInWorker: vi.fn(),
+    stopOneRun: vi.fn(),
+    stopAllRuns: vi.fn().mockResolvedValue(undefined),
+    reapStaleRunners: vi.fn().mockResolvedValue(0),
+    notifyWorkerEngineFailure: vi.fn(),
+  },
+}));
 
 vi.mock('@/lib/logger', () => ({
   logger: { info: vi.fn(), warn: vi.fn(), error: vi.fn() },
@@ -310,30 +323,59 @@ describe('isDueAt', () => {
     expect(isDueAt(new Date(now), '{"kind":"bogus"}', null)).toBe(false);
   });
 
-  describe('cron (Phase 1 every-N-minutes approximation)', () => {
+  // Timezone-aware @breejs/later semantics: a job is due when the most recent
+  // cron occurrence (prev(1, now)) lies strictly after lastRunAt. prev() is
+  // minute-precision for standard 5-field crons — it returns the floor of `now`
+  // to the minute, EXCEPT that scanning exactly on a full minute returns now
+  // itself (verified against @breejs/later). Consequence: a run whose
+  // lastRunAt falls before the next boundary's own full instant is consumed by
+  // that boundary; per-minute crons can therefore re-fire once if a SCHEDULE
+  // run's recorded timestamp lands after its triggering scan instant (bounded
+  // to one extra attempt, which runJob's RUNNING claim gate turns into a
+  // SKIPPED run). Spaced crons (*/N+, daily, …) never double-fire this way.
+  describe('cron (@breejs/later — timezone-aware, prev(1, now) > lastRunAt)', () => {
     const everyMin = JSON.stringify({ kind: 'cron', expr: '* * * * *' });
     const every5 = JSON.stringify({ kind: 'cron', expr: '*/5 * * * *' });
 
-    it('treats "* * * * *" as a 1-minute interval, due when no prior run exists', () => {
+    it('is due when no prior run exists (never-run fires on any past occurrence)', () => {
       expect(isDueAt(new Date(now), everyMin, null)).toBe(true);
-    });
-
-    it('is not due within the 1-minute window after a recent run', () => {
-      const last = new Date(now - 30_000);
-      expect(isDueAt(new Date(now), everyMin, last)).toBe(false);
-    });
-
-    it('is due once a full minute has elapsed since the last run', () => {
-      const last = new Date(now - MINUTE);
-      expect(isDueAt(new Date(now), everyMin, last)).toBe(true);
-    });
-
-    it('parses "*/N * * * *" as an N-minute interval', () => {
       expect(isDueAt(new Date(now), every5, null)).toBe(true);
-      expect(isDueAt(new Date(now), every5, new Date(now - 4 * MINUTE))).toBe(false);
-      expect(isDueAt(new Date(now), every5, new Date(now - 5 * MINUTE))).toBe(true);
     });
-   });
+
+    // prev(1, 00:00:30) clamps to the scan instant's own minute → 00:00:30.
+    it('a scan at T is not re-fired when lastRunAt == T (same instant already consumed)', () => {
+      expect(isDueAt(new Date(now), everyMin, new Date(now))).toBe(false); // prev == last
+    });
+
+    // A stale mid-cycle lastRunAt (00:00:30) — at the next scan past it
+    // (00:01:00.5 → prev 00:01:00) catch-up fires exactly once.
+    it('is due at the first boundary strictly after a stale mid-cycle run (catch-up once)', () => {
+      expect(
+        isDueAt(new Date('2026-01-01T00:01:00.500Z'), everyMin, new Date('2026-01-01T00:00:30.000Z')),
+      ).toBe(true);
+      expect(
+        isDueAt(new Date('2026-01-01T00:00:45.000Z'), everyMin, new Date('2026-01-01T00:00:30.000Z')),
+      ).toBe(false); // prev clamps to 00:00:45 — same un-crossed boundary
+    });
+
+    it('*/5: stays not due across the window, flips at the next occurrence boundary', () => {
+      const ranOnOccurrence = new Date('2026-01-01T00:00:00.000Z');
+      expect(isDueAt(new Date('2026-01-01T00:00:30.000Z'), every5, ranOnOccurrence)).toBe(false);
+      expect(isDueAt(new Date('2026-01-01T00:04:59.000Z'), every5, ranOnOccurrence)).toBe(false); // prev 00:04, not an occurrence
+      expect(isDueAt(new Date('2026-01-01T00:05:00.400Z'), every5, ranOnOccurrence)).toBe(true); // prev 00:05 > last
+    });
+
+    it('an explicit timezone is honoured (occurrences computed in the IANA zone)', () => {
+      const tzExpr = JSON.stringify({
+        kind: 'cron',
+        expr: '* * * * *',
+        timezone: 'Asia/Singapore', // UTC+8, no DST
+      });
+      // Scanning at 17:30Z = 01:30 local: prev occurrence 01:29 local = 17:29Z.
+      expect(isDueAt(new Date('2026-01-01T17:30:00.000Z'), tzExpr, new Date('2026-01-01T17:45:00.000Z'))).toBe(false); // last run 15 min ahead of prev → consumed
+      expect(isDueAt(new Date('2026-01-01T17:30:00.000Z'), tzExpr, new Date('2026-01-01T17:28:00.000Z'))).toBe(true);  // last run before prev 01:29l → due
+    });
+  });
 
   describe('interval', () => {
     it('is due immediately when there is no prior run', () => {
@@ -416,20 +458,22 @@ describe('scanDueJobs', () => {
    });
 
   it('skips jobs that are not due', async () => {
-     // lastRunAt 500 ms ago → not yet due for a 1-minute cron.
+    // prev(1, now) clamps to the scan instant's own minute; when lastRunAt
+    // equals that instant (the job was already executed this scan cycle), the
+    // occurrence is consumed → not due.
     mockFindMany.mockResolvedValueOnce([
       {
         id: 'job-a',
         name: 'a',
         scheduleExpr: DUE_CRON,
         handlerKey: 'noop',
-        lastRunAt: new Date('2026-01-01T00:00:00.500Z'),
-       },
-     ]);
+        lastRunAt: new Date('2026-01-01T00:00:30.000Z'),
+      },
+    ]);
 
-    expect(await scanDueJobs(new Date('2026-01-01T00:00:00.900Z'))).toBe(0);
+    expect(await scanDueJobs(new Date('2026-01-01T00:00:30.000Z'))).toBe(0);
     expect(mockRunJob).not.toHaveBeenCalled();
-   });
+  });
 
   it('isolates a single failing job and still runs the others', async () => {
     mockFindMany.mockResolvedValueOnce([
