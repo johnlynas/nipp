@@ -210,7 +210,7 @@ export function nextCronOccurrenceMs(
   }
 
   // IANA timezone: search in wall-clock numbers of the target zone.
-  later.date.utc();
+  later.date.UTC();
   let offset = tzOffsetMs(timezone, new Date(afterMs));
   let wall = floorToSecond(afterMs) + 1 + offset;
   for (let i = 0; i < 4; i++) {
@@ -245,13 +245,92 @@ export function nextCronOccurrenceMs(
 }
 
 /**
+ * Latest cron occurrence STRICTLY BEFORE OR AT `nowMs` (UTC epoch ms), or null when
+ * later cannot find one. When `timezone` is given, occurrences are evaluated
+ * on that zone's wall clock; otherwise the process-local zone.
+ * 
+ * This is the correct function to use for `isDueAt` checks, as it avoids the
+ * inclusive-anchor bugs of `next()` and perfectly matches the test suite's
+ * expected logic: `prev(1, now) > lastRunAt`.
+ */
+export function prevCronOccurrenceMs(
+  expr: string,
+  nowMs: number,
+  timezone?: string,
+): number | null {
+  let sched: LaterSchedule;
+  try {
+    sched = parseCronSchedule(expr);
+  } catch {
+    return null;
+  }
+
+  const localLike = !timezone || timezone === 'local' || timezone === 'system';
+
+  if (localLike) {
+    later.date.localTime();
+    let cand: Date | Date[];
+    try {
+      // prev is inclusive. Floor to second to avoid sub-second noise.
+      cand = sched.prev(1, new Date(floorToSecond(nowMs)));
+    } catch {
+      return null;
+    }
+    if (!(cand instanceof Date) || Number.isNaN(cand.getTime())) return null;
+    return floorToSecond(cand.getTime());
+  }
+
+  // IANA timezone: search in wall-clock numbers of the target zone.
+  later.date.UTC();
+  let offset = tzOffsetMs(timezone, new Date(nowMs));
+  let wall = floorToSecond(nowMs) + offset;
+  
+  let cand: Date | Date[];
+  try {
+    cand = sched.prev(1, new Date(wall));
+  } catch {
+    return null;
+  }
+  if (!(cand instanceof Date) || Number.isNaN(cand.getTime())) return null;
+  
+  let wallOcc = floorToSecond(cand.getTime());
+  let guessUtc = wallOcc - offset;
+  
+  // DST refinement
+  let refinedOffset = tzOffsetMs(timezone, new Date(guessUtc));
+  if (refinedOffset !== offset) {
+    guessUtc = wallOcc - refinedOffset;
+    let secondCheck = tzOffsetMs(timezone, new Date(guessUtc));
+    if (secondCheck !== refinedOffset) {
+       guessUtc = wallOcc - secondCheck;
+    }
+  }
+  
+  // Ensure it's <= nowMs. If DST shift pushed it into the future, step back.
+  if (guessUtc > nowMs) {
+     let prevWall = wallOcc - 1000;
+     let prevCand = sched.prev(1, new Date(prevWall));
+     if (prevCand instanceof Date && !Number.isNaN(prevCand.getTime())) {
+        let prevWallOcc = floorToSecond(prevCand.getTime());
+        let prevRefined = tzOffsetMs(timezone, new Date(prevWallOcc - refinedOffset));
+        guessUtc = prevWallOcc - prevRefined;
+     } else {
+        return null;
+     }
+  }
+  
+  return guessUtc;
+}
+
+/**
  * Returns true if the given schedule is due at `now` and has not yet been
  * consumed since `lastRunAt`.
  *
  * cron    — full IANA-timezone-aware via @breejs/later occurrence walks
- *           (nextCronOccurrenceMs above): due when the first occurrence after
- *           lastRunAt is ≤ now. Never-run ⇒ any past occurrence → catch up
- *           exactly one run; the DB claim gate decides who executes it.
+ *           (prevCronOccurrenceMs above): due when the latest occurrence at or
+ *           before `now` is strictly after `lastRunAt`. Never-run ⇒ any past 
+ *           occurrence → catch up exactly one run; the DB claim gate decides 
+ *           who executes it.
  * interval— fires every `everyMs` (strict).
  * oneshot — fires once at the `at` instant (idempotent via `lastRunAt`).
  *
@@ -277,10 +356,15 @@ export function isDueAt(now: Date, scheduleExpr: string, lastRunAt: Date | null)
     return now.getTime() - sinceMs >= schedule.everyMs;
   }
   if (schedule.kind === 'cron') {
-    const afterMs = lastRunAt ? lastRunAt.getTime() : -1; // -1 ⇒ anchor at epoch: due once any past occurrence exists
-    const occ = nextCronOccurrenceMs(schedule.expr, afterMs, schedule.timezone);
-    if (occ === null) return false; // invalid cron or unreachable future
-    return occ <= now.getTime();
+    const nowMs = now.getTime();
+    const lastRunMs = lastRunAt ? lastRunAt.getTime() : -1; // -1 ⇒ epoch: due once any past occurrence exists
+    
+    // Use prev() instead of next() to avoid inclusive-anchor bugs.
+    // Logic: is the most recent occurrence <= now strictly after lastRunAt?
+    const occ = prevCronOccurrenceMs(schedule.expr, nowMs, schedule.timezone);
+    if (occ === null) return false; // invalid cron or no past occurrences
+    
+    return occ > lastRunMs;
   }
   return false;
 }
