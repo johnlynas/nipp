@@ -107,4 +107,19 @@ export default tseslint.config(
       },
     },
   },
+
+  // CommonJS files (.spike/, builtins/, scripts/*.cjs) — allow require + node globals
+  {
+    files: ['**/*.cjs'],
+    languageOptions: {
+      globals: {
+        ...globals.node,
+      },
+    },
+    rules: {
+      '@typescript-eslint/no-require-imports': 'off',
+      // Throwaway/experimental scripts — suppress unused-var noise
+      '@typescript-eslint/no-unused-vars': 'off',
+    },
+  },
 );

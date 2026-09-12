@@ -5,8 +5,8 @@ services:
       dockerfile: Dockerfile.test
     container_name: nipp-0713-postgres-pgbouncer
     ports:
-      - "5433:5432"   # PostgreSQL direct access (for setup, seeding, migrations)
-      - "6433:6432"   # PgBouncer pooler (for app connections)
+      - "5432:5432"   # PostgreSQL direct access (for setup, seeding, migrations)
+      - "6432:6432"   # PgBouncer pooler (for app connections)
     environment:
       POSTGRES_DB: nipp_test
       POSTGRES_USER: postgres

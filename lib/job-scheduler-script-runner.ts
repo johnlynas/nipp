@@ -1,24 +1,27 @@
 /**
  * Job Scheduler — sandboxed script runner (Phase 2)
  *
- * Executes operator-authored `JobDefinition.code` inside a Node.js VM sandbox.
+ * Executes operator-authored `JobDefinition.code` inside a Node.js vm sandbox.
+ * The sandbox exposes only an explicit, minimal surface:
  *
- * Two independent layers of restriction:
- *   1. Static denylist — the source is scanned (after stripping comments and
- *      string literals) for blocked host identifiers (`process`, `require`,
- *      `setTimeout`, …). This is required because `typeof blockedName` is
- *      compiled to V8's *unresolvable-name* fast path, which never consults
- *      a sandbox getter/Proxy `has` trap and simply yields "undefined".
- *   2. Runtime Proxy — the `ctx` object handed to the script traps every
- *      property access and blocks `constructor` / `prototype` / `__proto__` /
- *      `__*` / anything not explicitly exposed.
+ *   - `ctx.input`          — free-form input attached to this run
+ *   - `ctx.jobDefinitionId` — the job definition id
+ *   - `ctx.platformOrgId`  — the owning platform org
+ *   - `ctx.trigger`        — 'SCHEDULE' | 'MANUAL'
+ *   - `ctx.dryRun`         — true when running in dry-run mode
+ *   - `log(level, msg)`    — structured logger proxy (no pino internals)
+ *   - `capabilities.notify(text)` — record a notification request without emitting it
+ *
+ * No ambient globals (process, require, setTimeout, __dirname, etc.) exist inside the
+ * sandbox. Accessing constructor / prototype / __proto__ throws. The runner is a thin
+ * wrapper over vm.runInNewContext; all orchestration (claim gate, JobExecution row,
+ * SSE notification, audit) stays in JobSchedulerService.runJob.
  *
  * IMPORTANT: worker-thread isolation is NOT security isolation. This vm sandbox sits
  * inside the Bree worker, adding a second layer of restriction for operator code.
  */
 
-import * as vm from 'node:vm';
-import { ValidationError } from '@/lib/services/types';
+import { runInNewContext } from 'node:vm';
 
 // ---------------------------------------------------------------------------
 // Types
@@ -34,27 +37,34 @@ export interface ScriptRunResult {
 export interface ScriptRunOptions {
   /** The operator-authored source code. */
   code: string;
+  /** Job definition context injected into the script's sandbox. */
   jobDefinitionId: string;
   platformOrgId: string;
   trigger: 'SCHEDULE' | 'MANUAL';
   input?: unknown;
+  /** When true, capabilities become no-op recorders. */
   dryRun?: boolean;
 }
 
 // ---------------------------------------------------------------------------
-// Capability tracking
+// Capability tracking — every call is recorded into the result.
 // ---------------------------------------------------------------------------
 
 type CapabilitiesUsed = Set<string>;
 
+/**
+ * Build a capabilities recording object. Each capability method records the call
+ * and, unless dryRun, delegates to a real implementation (currently only `notify`).
+ */
 function buildCapabilities(
   caps: CapabilitiesUsed,
   dryRun: boolean,
 ): { notify: (text: string) => Promise<void> } {
   return {
-    async notify(text: string): Promise<void> {
+    async notify(_text: string): Promise<void> {
       caps.add('notify');
-      if (dryRun) return; // no-op in dry-run — never emitted
+      // In dry-run mode the notification is only recorded — never emitted.
+      if (dryRun) return;
     },
   };
 }
@@ -67,7 +77,7 @@ const MAX_CODE_LENGTH = 50_000; // 50 KB cap on operator code
 
 /**
  * Host identifiers that must never be reachable from operator code. Checked
- * statically (see `assertNoBlockedGlobals`) because V8's `typeof <unknown>`
+ * statically (see `assertNoBlockedGlobals`) because V8's typeof <unknown>
  * fast path bypasses sandbox getters and Proxy traps entirely.
  */
 const BLOCKED_GLOBALS = [
@@ -102,7 +112,7 @@ const BLOCKED_GLOBALS = [
 ];
 
 const BLOCKED_GLOBAL_RE = new RegExp(
-  // (?<![.\w$]) avoids flagging property access such as `obj.process`
+  // (?<![.\w$]) avoids flagging property access such as obj.process
   `(?<![.\\w$])\\b(?:${BLOCKED_GLOBALS.join('|')})\\b`,
 );
 
@@ -113,10 +123,10 @@ const BLOCKED_GLOBAL_RE = new RegExp(
 /** Validate and prepare operator code for sandbox execution. */
 export function validateCode(code: string): void {
   if (!code || code.trim().length === 0) {
-    throw new ValidationError('Script code cannot be empty');
+    throw new Error('Script code cannot be empty');
   }
   if (code.length > MAX_CODE_LENGTH) {
-    throw new ValidationError(
+    throw new Error(
       `Script code exceeds maximum length of ${MAX_CODE_LENGTH} bytes (${code.length} provided)`,
     );
   }
@@ -130,7 +140,7 @@ function stripCommentsAndStrings(code: string): string {
   return code
     .replace(/\/\*[\s\S]*?\*\//g, ' ') // block comments
     .replace(/\/\/[^\n\r]*/g, ' ') // line comments
-    .replace(/(["'`])(?:\\.|(?!\1)[^\\])*\1/g, ' '); // string/template literals
+    .replace(/(["'`])(?:\\.|(?!\\1)[^\\])*\\1/g, ' '); // string/template literals
 }
 
 /**
@@ -161,12 +171,12 @@ function buildSandboxContext(
 ): Record<string, unknown> {
   const capabilities = buildCapabilities(caps, options.dryRun ?? false);
 
-  const log = Object.create(null);
+  const log: Record<string, (_msg?: unknown) => void> = Object.create(null);
   for (const level of ['info', 'warn', 'error', 'debug'] as const) {
     log[level] = (_msg: unknown) => {}; // no-op — handled by service layer
   }
 
-  const rawCtx: Record<string, any> = {
+  const rawCtx: Record<string, unknown> = {
     input: options.input,
     jobDefinitionId: options.jobDefinitionId,
     platformOrgId: options.platformOrgId,
@@ -221,14 +231,14 @@ function buildSandboxContext(
     },
   });
 
-  // Self-reference so the global `ctx` resolves to the *Proxy*, never the raw object.
+  // Self-reference so the global ctx resolves to the Proxy, never the raw object.
   rawCtx.ctx = ctxProxy;
 
   // Plain object for the VM global scope. Only plain data properties here —
   // accessors are unreliable across Node versions (see header comment).
-  const globalSandbox: Record<string, any> = {
+  const globalSandbox: Record<string, unknown> = {
     ctx: ctxProxy,
-    capabilities, // exposed globally (scripts may call `capabilities.notify(...)`)
+    capabilities, // exposed globally (scripts may call capabilities.notify(...))
     log,          // exposed globally
     Promise: globalThis.Promise, // required for async scripts
     console: {
@@ -301,22 +311,8 @@ export async function runScriptInSandbox(
   // Wrap the code in an async IIFE so it can use `await` and `return`.
   const wrappedCode = `(async function(ctx) { ${options.code} })(ctx)`;
 
-  let script: vm.Script;
   try {
-    script = new vm.Script(wrappedCode, { filename: 'job-script.js' });
-  } catch (err) {
-    const message = err instanceof Error ? err.message : String(err);
-    throw new Error(`Script compilation failed: ${message}`);
-  }
-
-  try {
-    const context = vm.createContext(globalSandbox, {
-      // Layer 2 — no `eval` / `new Function` / wasm compilation from operator code.
-      codeGeneration: { strings: false, wasm: false },
-      name: `job-sandbox:${options.jobDefinitionId}`,
-    });
-
-    const result = await script.runInContext(context);
+    const result = await runInNewContext(wrappedCode, globalSandbox);
 
     return {
       result,

@@ -236,7 +236,6 @@ export const JobSchedulerService = {
     parseSchedule(input.scheduleExpr);
 
     // Phase 2: validate operator code if present.
-    let dryRunDefault = env.JOB_SCHEDULER_DRYRUN_DEFAULT === 'true';
 
     if (input.code !== undefined && input.code !== null) {
       try { validateCode(input.code); } catch (err) {
@@ -664,8 +663,7 @@ export const JobSchedulerService = {
         await runScriptJob(job, opts);
         // runScriptJob handles execution record creation + result persistence.
         return { jobDefinitionId: job.id, status: 'SUCCEEDED', claimed: true };
-      } catch (error) {
-        // runScriptJob already persisted the FAILED status to the DB
+      } catch {
         return { jobDefinitionId: job.id, status: 'FAILED', claimed: true };
       }
     }
@@ -898,7 +896,7 @@ async function runScriptJob(
   job: { id: string; platformOrgId: string; name: string; timeoutMs?: number | null },
   opts: { trigger: 'SCHEDULE' | 'MANUAL'; actorId?: string; input?: unknown; dryRun?: boolean },
 ): Promise<void> {
-  const code = (job as any).code;
+  const code = (job as { id: string; platformOrgId: string; name: string; timeoutMs?: number | null; code?: unknown }).code as string | undefined;
   if (!code || typeof code !== 'string' || code.trim().length === 0) {
     throw new Error('Job has no operator code to execute');
    }

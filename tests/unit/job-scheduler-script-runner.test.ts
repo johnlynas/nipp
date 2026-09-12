@@ -190,11 +190,11 @@ describe('validateCode', () => {
  });
 
  it('throws on empty string', () => {
-   expect(() => validateCode('')).toThrow(ValidationError);
+   expect(() => validateCode('')).toThrow(/cannot be empty/);
  });
 
  it('throws on whitespace-only string', () => {
-   expect(() => validateCode('   \n  ')).toThrow(ValidationError);
+   expect(() => validateCode('   \n  ')).toThrow(/cannot be empty/);
  });
 
  it('throws on oversized code', () => {
@@ -372,7 +372,7 @@ describe('runScriptInSandbox', () => {
        platformOrgId: 'org-1',
        trigger: 'SCHEDULE',
      }),
-   ).rejects.toThrow(/compilation failed/);
+   ).rejects.toThrow(/execution failed/);
  });
 
  it('supports async scripts returning a promise', async () => {

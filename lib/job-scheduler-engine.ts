@@ -210,7 +210,7 @@ export function nextCronOccurrenceMs(
   }
 
   // IANA timezone: search in wall-clock numbers of the target zone.
-  later.date.UTC();
+  (later.date.UTC as () => void)();
   let offset = tzOffsetMs(timezone, new Date(afterMs));
   let wall = floorToSecond(afterMs) + 1 + offset;
   for (let i = 0; i < 4; i++) {
@@ -281,9 +281,9 @@ export function prevCronOccurrenceMs(
   }
 
   // IANA timezone: search in wall-clock numbers of the target zone.
-  later.date.UTC();
-  let offset = tzOffsetMs(timezone, new Date(nowMs));
-  let wall = floorToSecond(nowMs) + offset;
+  (later.date.UTC as () => void)();
+  const offset = tzOffsetMs(timezone, new Date(nowMs));
+  const wall = floorToSecond(nowMs) + offset;
   
   let cand: Date | Date[];
   try {
@@ -293,14 +293,14 @@ export function prevCronOccurrenceMs(
   }
   if (!(cand instanceof Date) || Number.isNaN(cand.getTime())) return null;
   
-  let wallOcc = floorToSecond(cand.getTime());
+  const wallOcc = floorToSecond(cand.getTime());
   let guessUtc = wallOcc - offset;
   
   // DST refinement
-  let refinedOffset = tzOffsetMs(timezone, new Date(guessUtc));
+  const refinedOffset = tzOffsetMs(timezone, new Date(guessUtc));
   if (refinedOffset !== offset) {
     guessUtc = wallOcc - refinedOffset;
-    let secondCheck = tzOffsetMs(timezone, new Date(guessUtc));
+    const secondCheck = tzOffsetMs(timezone, new Date(guessUtc));
     if (secondCheck !== refinedOffset) {
        guessUtc = wallOcc - secondCheck;
     }
@@ -308,11 +308,11 @@ export function prevCronOccurrenceMs(
   
   // Ensure it's <= nowMs. If DST shift pushed it into the future, step back.
   if (guessUtc > nowMs) {
-     let prevWall = wallOcc - 1000;
-     let prevCand = sched.prev(1, new Date(prevWall));
+     const prevWall = wallOcc - 1000;
+     const prevCand = sched.prev(1, new Date(prevWall));
      if (prevCand instanceof Date && !Number.isNaN(prevCand.getTime())) {
-        let prevWallOcc = floorToSecond(prevCand.getTime());
-        let prevRefined = tzOffsetMs(timezone, new Date(prevWallOcc - refinedOffset));
+        const prevWallOcc = floorToSecond(prevCand.getTime());
+        const prevRefined = tzOffsetMs(timezone, new Date(prevWallOcc - refinedOffset));
         guessUtc = prevWallOcc - prevRefined;
      } else {
         return null;
