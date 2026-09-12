@@ -45,6 +45,9 @@ import { requirePlatformAdmin, logFailedAuth } from '@/lib/services/base-service
 import { recordAuditLog } from '@/lib/audit-log';
 import { pushNotification } from '@/lib/notification-push';
 
+// Phase 2: sandboxed script runner for operator-authored code.
+import { runScriptInSandbox, validateCode } from '@/lib/job-scheduler-script-runner';
+
 // ---------------------------------------------------------------------------
 // Schedule model
 // ---------------------------------------------------------------------------
@@ -232,6 +235,15 @@ export const JobSchedulerService = {
      // Validate schedule up front — fail loud before writing a row.
     parseSchedule(input.scheduleExpr);
 
+    // Phase 2: validate operator code if present.
+    let dryRunDefault = env.JOB_SCHEDULER_DRYRUN_DEFAULT === 'true';
+
+    if (input.code !== undefined && input.code !== null) {
+      try { validateCode(input.code); } catch (err) {
+        throw new ValidationError(err instanceof Error ? err.message : String(err));
+      }
+    }
+
     const platformOrgId = ctx.organizationId || jobSchedulerEnv.platformOrgId;
     if (!platformOrgId) {
       logFailedAuth(ctx, 'createJob');
@@ -316,7 +328,15 @@ export const JobSchedulerService = {
      }
     if (input.enabled !== undefined) data.enabled = input.enabled;
     if (input.code !== undefined) {
-      data.code = input.code || null;
+      if (input.code !== null && input.code.trim().length === 0) {
+        throw new ValidationError('code cannot be empty');
+      }
+      if (input.code !== null) {
+        try { validateCode(input.code); } catch (err) {
+          throw new ValidationError(err instanceof Error ? err.message : String(err));
+        }
+      }
+      data.code = input.code;
      }
 
     const updated = await globalDb.jobDefinition.update({
@@ -509,6 +529,39 @@ export const JobSchedulerService = {
     return this.runJob(job.id, { trigger: 'MANUAL', actorId: ctx.userId, input });
    },
 
+   /**
+    * Dry-run a job: execute operator-authored code in the sandbox with dryRun=true.
+    * Capabilities are recorded as no-ops; nothing is committed or emitted for real.
+    * Super-admin only, rate-limited by the route layer.
+    */
+  async dryRunJob(
+    ctx: ServiceContext,
+    id: string,
+    input?: unknown,
+  ): Promise<RunResult> {
+    requirePlatformAdmin(ctx);
+    const platformOrgId = ctx.organizationId || jobSchedulerEnv.platformOrgId;
+    const job = await assertJobInOrg(id, platformOrgId);
+
+    // Only jobs with operator code can be dry-run.
+    const hasCode = typeof job.code === 'string' && job.code.trim().length > 0;
+    if (!hasCode) {
+      throw new ValidationError('dry-run only applies to jobs with operator-authored code');
+     }
+
+    await recordAuditLog({
+      userId: ctx.userId,
+      action: 'job.dry-run',
+      resourceType: 'JobDefinition',
+      resourceId: job.id,
+      organizationId: platformOrgId,
+      success: true,
+      metadata: { dryRun: true },
+     });
+
+    return this.runJob(job.id, { trigger: 'MANUAL', actorId: ctx.userId, input, dryRun: true });
+   },
+
    /** List jobs for the platform org (optionally filtered by enabled). */
   async listJobs(
     ctx: ServiceContext,
@@ -570,7 +623,7 @@ export const JobSchedulerService = {
     */
   async runJob(
     jobDefinitionId: string,
-    opts: { trigger: 'SCHEDULE' | 'MANUAL'; actorId?: string; input?: unknown } = {
+    opts: { trigger: 'SCHEDULE' | 'MANUAL'; actorId?: string; input?: unknown; dryRun?: boolean } = {
       trigger: 'SCHEDULE',
      },
   ): Promise<RunResult> {
@@ -599,6 +652,23 @@ export const JobSchedulerService = {
         return { jobDefinitionId, status: 'SKIPPED', claimed: false };
        }
      }
+
+    // Phase 2: if the job carries operator-authored code, run it through the
+    // sandboxed script runner instead of a built-in handler. The dryRun flag
+    // makes capabilities no-op recorders and the result is persisted with a
+    // dryRun marker so nothing is committed/emitted for real.
+    const hasCode = typeof job.code === 'string' && job.code.trim().length > 0;
+
+    if (hasCode) {
+      try {
+        await runScriptJob(job, opts);
+        // runScriptJob handles execution record creation + result persistence.
+        return { jobDefinitionId: job.id, status: 'SUCCEEDED', claimed: true };
+      } catch (error) {
+        // runScriptJob already persisted the FAILED status to the DB
+        return { jobDefinitionId: job.id, status: 'FAILED', claimed: true };
+      }
+    }
 
     // Resolve the handler. Phase 1 built-ins live in the registry; a missing
      // handler is a real failure (the job was created pointing at nothing).
@@ -811,6 +881,109 @@ function toJsonValue(
     return JSON.parse(JSON.stringify(value)) as Record<string, unknown>;
    } catch {
     return { toString: String(value) };
+   }
+}
+
+// ---------------------------------------------------------------------------
+// Phase 2 — sandboxed script execution helper
+// ---------------------------------------------------------------------------
+
+/**
+ * Run a job whose `code` field carries operator-authored source. Executes the
+ * code in a vm sandbox, records capabilities used, and persists the outcome —
+ * including a `dryRun` marker when applicable. Nothing is committed/emitted for
+ * real in dry-run mode (no pushNotification, no lastRunStatus update).
+ */
+async function runScriptJob(
+  job: { id: string; platformOrgId: string; name: string; timeoutMs?: number | null },
+  opts: { trigger: 'SCHEDULE' | 'MANUAL'; actorId?: string; input?: unknown; dryRun?: boolean },
+): Promise<void> {
+  const code = (job as any).code;
+  if (!code || typeof code !== 'string' || code.trim().length === 0) {
+    throw new Error('Job has no operator code to execute');
+   }
+
+  const dryRun = opts.dryRun ?? false;
+  const timeoutMs = job.timeoutMs ?? defaultTimeoutMs();
+
+  // Open the execution record.
+  const execution = await globalDb.jobExecution.create({
+    data: {
+      jobDefinitionId: job.id,
+      platformOrgId: job.platformOrgId,
+      status: 'RUNNING',
+      trigger: opts.trigger,
+      actorId: opts.actorId ?? null,
+      source: 'job-scheduler:execution',
+     },
+   });
+
+  try {
+    const result = await withTimeout(
+      runScriptInSandbox({
+        code,
+        jobDefinitionId: job.id,
+        platformOrgId: job.platformOrgId,
+        trigger: opts.trigger,
+        input: opts.input,
+        dryRun,
+      }),
+      timeoutMs,
+    );
+
+    // Build the persisted result — include capabilitiesUsed and dryRun marker.
+    const resultJson: Record<string, unknown> = {
+      ...(result.result as Record<string, unknown> ?? {}),
+      capabilitiesUsed: result.capabilitiesUsed,
+    };
+    if (dryRun) {
+      resultJson.dryRun = true;
+     }
+
+    await globalDb.jobExecution.update({
+      where: { id: execution.id },
+      data: {
+        status: 'SUCCEEDED',
+        finishedAt: new Date(),
+        resultJson: toJsonValue(resultJson) as Prisma.InputJsonValue,
+       },
+     });
+
+    // In dry-run mode: do NOT update lastRunStatus, do NOT emit SSE.
+    if (!dryRun) {
+      await globalDb.jobDefinition.update({
+        where: { id: job.id },
+        data: { lastRunStatus: 'SUCCEEDED' },
+       });
+      await notifyExecution(job.name, job.platformOrgId, 'SUCCEEDED');
+     }
+
+    logger.info(
+      { jobId: job.id, executionId: execution.id, dryRun },
+      'Script job succeeded',
+    );
+   } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    await globalDb.jobExecution.update({
+      where: { id: execution.id },
+      data: { status: 'FAILED', finishedAt: new Date(), error: message.slice(0, 4000) },
+     });
+
+    if (!dryRun) {
+      await globalDb.jobDefinition.update({
+        where: { id: job.id },
+         data: { lastRunStatus: 'FAILED' },
+        });
+      void notifyExecution(job.name, job.platformOrgId, 'FAILED', message);
+     }
+
+    logger.error(
+      { jobId: job.id, executionId: execution.id, error: message },
+      'Script job failed',
+    );
+    
+    // Re-throw so runJob can return FAILED status
+    throw error;
    }
 }
 
