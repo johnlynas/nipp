@@ -40,7 +40,8 @@ import {
   type RunResult,
   type Schedule,
 } from '@/services/job-scheduler-service';
-import JobSchedulerBree from '@/lib/job-scheduler-bree';
+import JobSchedulerBree, { HARD_CAP_MS } from '@/lib/job-scheduler-bree';
+import { withConcurrency } from '@/lib/job-scheduler-concurrency';
 
 // Trusted built-in handlers live in a side-effect-free module so the same set
 // can be required inside Bree worker threads (the runner re-registers them on
@@ -390,9 +391,9 @@ async function runJobInWorker(jobId: string): Promise<RunResult> {
     // have been taken (lastRunAt stuck RUNNING) — leave it; the next period's
     // occurrence re-arms due-detection and the alert below is visible now.
     const detail =
-      outcome.kind === 'timeout'
-        ? `worker exceeded its ${HARD_CAP_DISPLAY}ms wall cap`
-        : outcome.error;
+       outcome.kind === 'timeout'
+         ? `worker exceeded its ${HARD_CAP_MS}ms wall cap`
+         : outcome.error;
     await JobSchedulerBree.notifyWorkerEngineFailure(
       `Job "${definition?.name ?? jobId}" failed to execute in a worker: ${detail}`,
     );
@@ -406,13 +407,27 @@ async function runJobInWorker(jobId: string): Promise<RunResult> {
   }
 }
 
-/** Display-only hard cap (the enforced value lives in lib/job-scheduler-bree). */
-const HARD_CAP_DISPLAY = 1_800_000;
-
-/** Dispatch one job down the configured execution path. */
+/**
+ * Dispatch one job down the configured execution path.
+ *
+ * Each run holds a single slot in the global concurrency gate (see
+ * `lib/job-scheduler-concurrency.ts`) for the full duration of the fork, so a
+ * burst of due jobs at one tick is throttled to `MAX_CONCURRENT` simultaneous
+ * runs — this is the runtime circuit breaker that bounds forked workers and, in
+ * tandem with `DB_CONCURRENCY`, the in-process DB connections the scanner can
+ * open. The gate is applied here (not per-tick) so a tick with N due jobs
+ * enqueues N runs and releases one slot per completed run.
+ */
 async function dispatchJob(jobId: string): Promise<RunResult> {
-  if (BREE_MODE === 'worker') return runJobInWorker(jobId);
-  return JobSchedulerService.runJob(jobId, { trigger: 'SCHEDULE' });
+  return withConcurrency(
+     async (): Promise<RunResult> => {
+      if (BREE_MODE === 'worker') return runJobInWorker(jobId);
+      return JobSchedulerService.runJob(jobId, { trigger: 'SCHEDULE' });
+     },
+     // Warn (operator-visible SSE) if a run had to queue more than a second for
+     // a slot; the gate is debounced so only one alert fires per minute.
+     { queueWarnMs: 1_000 },
+   );
 }
 
 // ---------------------------------------------------------------------------

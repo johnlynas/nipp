@@ -118,15 +118,23 @@ export const envSchema = z.object({
    /** Default IANA timezone for schedules (default 'Europe/London'). */
   JOB_SCHEDULER_TIMEZONE: z.string().default('Europe/London'),
 
-   /** Global cap on simultaneous job runs — circuit breaker (default 5). */
-  JOB_SCHEDULER_MAX_CONCURRENT: z.string().regex(/^\d+$/).default('5'),
+   /**
+    * Runtime circuit-breaker cap on simultaneous job runs (default 5). Consumed by
+    * `lib/job-scheduler-concurrency.ts`: the global semaphore is sized at
+    * `max(MAX_CONCURRENT, DB_CONCURRENCY, 1)`, so this bounds live runs / forked
+    * workers. A tick with N due jobs enqueues N runs and releases one slot per
+    * completed run.
+    */
+   JOB_SCHEDULER_MAX_CONCURRENT: z.string().regex(/^\d+$/).default('5'),
 
    /**
-    * Connection-pool ceiling per forked worker, sized BELOW PgBouncer
-    * max_client_conn so the scheduler and other app connections coexist
-    * (default 100).
-   */
-  JOB_SCHEDULER_DB_CONCURRENCY: z.string().regex(/^\d+$/).default('100'),
+    * Connection-pool ceiling — sized BELOW PgBouncer `max_client_conn` so the
+    * scheduler coexists with other app connections (default 100). The breaker uses
+    * it as a floor the runtime cap may not undercut: with DEFAULT (100) >
+    * MAX_CONCURRENT (5) the pool ceiling is the binding bound in the usual case,
+    * keeping concurrent in-process Prisma clients well under capacity.
+    */
+   JOB_SCHEDULER_DB_CONCURRENCY: z.string().regex(/^\d+$/).default('100'),
 
    /** Per-job default concurrency limit (default 1). */
   JOB_SCHEDULER_DEFAULT_CONCURRENCY: z.string().regex(/^\d+$/).default('1'),

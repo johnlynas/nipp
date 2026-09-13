@@ -39,6 +39,7 @@ in yet** (see [Implementation Status (Phase 1)](#implementation-status-phase-1))
     - [Integration Strategy Decision](#integration-strategy-decision)
 - [Phase 0 Spike Evidence](#phase-0-spike-evidence)
 - [Implementation Status (Phase 1)](#implementation-status-phase-1)
+- [Implementation Status (current)](#implementation-status-current)
 - [Boot Integration Alongside the Calendar Scheduler](#boot-integration-alongside-the-calendar-scheduler)
 - [The Job Scheduler Service Interface](#the-job-scheduler-service-interface)
 - [Data Model Proposal](#data-model-proposal)
@@ -452,6 +453,17 @@ pooled connection from `workerData` instead of spawning its own `globalThis` cli
 is pinned by the R3 in-repo spike.
 
 ## Implementation Status (Phase 1)
+
+> **⚠ This section is historical — written when this branch was "Phase 1 / main-thread
+> scanner only."** The branch has since moved into Phase 2: Bree is wired in
+> (`lib/job-scheduler-bree.ts` + `job-scheduler-runtime/` materialization), the
+> scanner is `worker`-mode by default (`JOB_SCHEDULER_BREE_MODE`, default
+> `'worker'`), and a **global concurrency circuit breaker** is now wired in
+> (`lib/job-scheduler-concurrency.ts`). The "Divergences from the original Bree-worker
+> design (deferred to the next phase)" list below is no longer accurate; see
+> **[Implementation Status (current)](#implementation-status-current)** at the
+> bottom of this document for the up-to-date picture. The table above is kept as a
+> historical record of what shipped at the "Phase 1" boundary.
 
 **What shipped on this branch** (uncommitted working-tree changes — the design below
 is the reference; this section records reality):
@@ -1014,3 +1026,71 @@ not a design branch. The spike findings are durable in
   guards (`requirePlatformAdmin`, `verifySuperAdmin`, `ServiceContext`).
 - `lib/audit-log.ts` — `recordAuditLog` for the durable trail.
 - `lib/env-schema.ts` / `.env.example` — configuration conventions.
+
+---
+
+## Implementation Status (current)
+
+> **As of the branch tip on this feature (`backgroud-job-scheduler`) the branch
+> has moved past Phase 1 and is actively building Phase 2.** The "Phase 1"
+> section above still describes what shipped *at that point in history*. This
+> section records the up-to-date picture and specifically flags what is now
+> done relative to the Phase 2 items the earlier "deferred-to-next-phase" list
+> called out.
+
+**Done since the Phase 1 boundary:**
+
+- **Bree wired in.** `lib/job-scheduler-bree.ts` owns the Bree instance
+ (per-tick worker fork, file-based runner materialized in the
+  gitignored `job-scheduler-runtime/` directory), a pino adapter, and the
+  `graceful` shutdown path. The engine selects the execution path via
+  `JOB_SCHEDULER_BREE_MODE` (`worker` default; `inline` fallback).
+- **Global circuit breaker + DB-concurrency gate — DONE (this increment).**
+  `lib/job-scheduler-concurrency.ts` provides a FIFO semaphore sized at
+  `max(MAX_CONCURRENT, DB_CONCURRENCY, 1)` (defaults: 5, 100, floor 1) as a
+  `globalThis` singleton. `dispatchJob()` in `lib/job-scheduler-engine.ts` wraps
+  every run in `withConcurrency(...)` so a tick that finds N due jobs enqueues
+  N runs rather than forking N workers simultaneously. A run that queues for
+  `> queueWarnMs` (default 1s) emits a single, debounced
+  `job-scheduler:throttled` WARNING SSE alert (60s throttle window) so a
+  saturated circuit is operator-visible without a notification storm.
+- **Full IANA-timezone cron.** `prevCronOccurrenceMs` in
+  `lib/job-scheduler-engine.ts` computes occurrences in wall-clock numbers of
+  the target IANA zone (with a DST refinement loop), closing the previous
+  "every-N-minute approximation" limitation.
+- **Graceful shutdown.** `SIGTERM` / `SIGINT` handlers call
+  `JobSchedulerBree.stopAllRuns()` then `stopJobScheduler()`, closing the
+  "No cancelRunningJob / graceful shutdown yet" gap.
+- **Sandboxed script runner (Phase 2 mechanics).**
+  `lib/job-scheduler-script-runner.ts` executes `JobDefinition.code` in a
+  `node:vm` sandbox with a static denylist of host globals
+  (`process`, `require`, `setInterval`, `eval`, `fetch`, …) and a Proxy-wrapped
+  context that blocks `constructor`/`prototype`/`__proto__` access.
+  `JobSchedulerService.dryRunJob` reuses the same runner with `dryRun=true`
+  (capabilities record no-ops, no SSE, no `lastRunStatus` update).
+- **`/api/admin/jobs/[jobId]/dry-run`** — Super-Admin-only dry-run endpoint.
+- **Unit tests for the breaker.** `tests/unit/job-scheduler-concurrency.test.ts`
+  covers capacity resolution (`max` + floor), FIFO cap enforcement, release on
+  error, per-process singleton reset, and the throttle-alert behaviour.
+
+**Still open (remaining Phase 2 work):**
+
+- **True security isolation for the vm sandbox.** Worker-thread isolation
+ (runtime, not a security boundary — see [Access and Security](#access-and-security)
+ caveat) is the only boundary today. OS-level sandboxing
+ (seccomp/landlock / capability-dropped container) and an allowlisted
+ `require` shim for operator code are the remaining items.
+- **User-facing authoring / management UI.** None exists yet
+  (only admin-API routes).
+- **Per-worker connection pool.** `global-db.ts` still creates a fresh
+  `new PrismaClient()` per process. In worker mode each forked Bree worker
+  today spins up its own Prisma client, which the breaker's `DB_CONCURRENCY`
+  bound (semaphore size) keeps bounded *in-process*, but a cross-worker pool
+  is a follow-up.
+- **Docker writable mount.** `job-scheduler-runtime/` is
+  `.gitignore`d but not yet mounted in the production image.
+- **`cancelRunningJob` at the API / engine surface.** Bree-level
+  `stop()` exists, but is not yet exposed per-job via the admin API.
+- **Integration test for the worker path.** `lib/job-scheduler-bree.ts`
+  references `tests/integration/job-scheduler.test.ts`, which does not yet
+  exist (only a unit stub is present).
