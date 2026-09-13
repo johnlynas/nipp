@@ -3,15 +3,15 @@ import tenantDb from './tenant-db';
 /**
  * Sets PostgreSQL session variables for Row Level Security (RLS).
  * MUST be called at the start of every API route before any Prisma query.
- * 
- * Implements a fallback for PLATFORM_ORG_ID to ensure RLS policies 
+ *
+ * Implements a fallback for PLATFORM_ORGANIZATION_ID to ensure RLS policies
  * (specifically the Super Admin bypass EXISTS clause) continue to function
  * even if the environment variable is not explicitly set.
  */
 export async function setRLSContext(userId: string, orgId: string) {
   // 1. Try to get it from the environment (Production standard)
-  let platformOrgId = process.env.PLATFORM_ORG_ID?.trim();
-  
+  let platformOrgId = process.env.PLATFORM_ORGANIZATION_ID?.trim();
+
   // 2. Fallback: If not in env, fetch it directly from the database
   if (!platformOrgId) {
     const platformOrg = await tenantDb.organization.findFirst({
@@ -21,10 +21,10 @@ export async function setRLSContext(userId: string, orgId: string) {
 
     if (!platformOrg) {
       throw new Error(
-        'PLATFORM_ORG_ID is not set in environment variables, and no Platform organization (slug: "platform") exists in the database. Run the seed script first.'
+        'PLATFORM_ORGANIZATION_ID is not set in environment variables, and no Platform organization (slug: "platform") exists in the database. Run the seed script first.'
       );
     }
-    
+
     platformOrgId = platformOrg.id;
   }
 

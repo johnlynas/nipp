@@ -41,7 +41,7 @@ import {
   ConflictError,
   ValidationError,
 } from '@/lib/services/types';
-import { requirePlatformAdmin, logFailedAuth } from '@/lib/services/base-service';
+import { requirePlatformAdmin } from '@/lib/services/base-service';
 import { recordAuditLog } from '@/lib/audit-log';
 import { pushNotification } from '@/lib/notification-push';
 
@@ -243,11 +243,7 @@ export const JobSchedulerService = {
       }
     }
 
-    const platformOrgId = ctx.organizationId || jobSchedulerEnv.platformOrgId;
-    if (!platformOrgId) {
-      logFailedAuth(ctx, 'createJob');
-      throw new ForbiddenError('A platform organization context is required');
-     }
+    const platformOrgId = await resolvePlatformOrgId(ctx);
 
     try {
       const job = await globalDb.jobDefinition.create({
@@ -294,7 +290,7 @@ export const JobSchedulerService = {
    /** Update an existing job definition (by id, platform-org scoped). */
   async updateJob(ctx: ServiceContext, id: string, input: UpdateJobInput) {
     requirePlatformAdmin(ctx);
-    const platformOrgId = ctx.organizationId || jobSchedulerEnv.platformOrgId;
+    const platformOrgId = await resolvePlatformOrgId(ctx);
     const existing = await assertJobInOrg(id, platformOrgId);
 
     const data: Record<string, unknown> = {};
@@ -357,7 +353,7 @@ export const JobSchedulerService = {
    /** Enable a job so the engine will schedule it. */
   async enableJob(ctx: ServiceContext, id: string) {
     requirePlatformAdmin(ctx);
-    const platformOrgId = ctx.organizationId || jobSchedulerEnv.platformOrgId;
+    const platformOrgId = await resolvePlatformOrgId(ctx);
     const job = await assertJobInOrg(id, platformOrgId);
     // Approval gate: a job cannot be enabled until a platform admin has
     // approved it.
@@ -382,7 +378,7 @@ export const JobSchedulerService = {
    /** Disable a job (the engine stops scheduling it; in-flight ticks finish). */
   async disableJob(ctx: ServiceContext, id: string) {
     requirePlatformAdmin(ctx);
-    const platformOrgId = ctx.organizationId || jobSchedulerEnv.platformOrgId;
+    const platformOrgId = await resolvePlatformOrgId(ctx);
     await assertJobInOrg(id, platformOrgId);
     const updated = await globalDb.jobDefinition.update({
       where: { id },
@@ -410,7 +406,7 @@ export const JobSchedulerService = {
    opts: { note?: string } = {},
    ): Promise<JobDefinition> {
    requirePlatformAdmin(ctx);
-   const platformOrgId = ctx.organizationId || jobSchedulerEnv.platformOrgId;
+   const platformOrgId = await resolvePlatformOrgId(ctx);
    const job = await assertJobInOrg(id, platformOrgId);
 
    if (job.approved) {
@@ -452,7 +448,7 @@ export const JobSchedulerService = {
    opts: { note?: string } = {},
    ): Promise<JobDefinition> {
    requirePlatformAdmin(ctx);
-   const platformOrgId = ctx.organizationId || jobSchedulerEnv.platformOrgId;
+   const platformOrgId = await resolvePlatformOrgId(ctx);
    const job = await assertJobInOrg(id, platformOrgId);
 
    const updated = await globalDb.jobDefinition.update({
@@ -482,7 +478,7 @@ export const JobSchedulerService = {
    /** Delete a job definition (its execution history cascades). */
    async disposeJob(ctx: ServiceContext, id: string) {
     requirePlatformAdmin(ctx);
-    const platformOrgId = ctx.organizationId || jobSchedulerEnv.platformOrgId;
+    const platformOrgId = await resolvePlatformOrgId(ctx);
     const job = await assertJobInOrg(id, platformOrgId);
     await globalDb.jobDefinition.delete({ where: { id: job.id } });
     await recordAuditLog({
@@ -508,7 +504,7 @@ export const JobSchedulerService = {
     input?: unknown,
   ): Promise<RunResult> {
     requirePlatformAdmin(ctx);
-    const platformOrgId = ctx.organizationId || jobSchedulerEnv.platformOrgId;
+    const platformOrgId = await resolvePlatformOrgId(ctx);
     const job = await assertJobInOrg(id, platformOrgId);
     if (!job.enabled) {
       throw new ForbiddenError('Job is disabled — enable it before triggering');
@@ -539,7 +535,7 @@ export const JobSchedulerService = {
     input?: unknown,
   ): Promise<RunResult> {
     requirePlatformAdmin(ctx);
-    const platformOrgId = ctx.organizationId || jobSchedulerEnv.platformOrgId;
+    const platformOrgId = await resolvePlatformOrgId(ctx);
     const job = await assertJobInOrg(id, platformOrgId);
 
     // Only jobs with operator code can be dry-run.
@@ -567,7 +563,7 @@ export const JobSchedulerService = {
     opts: { enabled?: boolean; approved?: boolean; limit?: number } = {},
   ) {
     requirePlatformAdmin(ctx);
-    const platformOrgId = ctx.organizationId || jobSchedulerEnv.platformOrgId;
+    const platformOrgId = await resolvePlatformOrgId(ctx);
     const where: Prisma.JobDefinitionWhereInput = { platformOrgId };
     if (opts.enabled !== undefined) where.enabled = opts.enabled;
     if (opts.approved !== undefined) where.approved = opts.approved;
@@ -584,7 +580,7 @@ export const JobSchedulerService = {
     */
    async getJob(ctx: ServiceContext, id: string): Promise<JobDefinition> {
    requirePlatformAdmin(ctx);
-   const platformOrgId = ctx.organizationId || jobSchedulerEnv.platformOrgId;
+   const platformOrgId = await resolvePlatformOrgId(ctx);
    return assertJobInOrg(id, platformOrgId);
    },
 
@@ -597,7 +593,7 @@ export const JobSchedulerService = {
     opts: { jobId?: string; limit?: number; status?: string } = {},
   ) {
     requirePlatformAdmin(ctx);
-    const platformOrgId = ctx.organizationId || jobSchedulerEnv.platformOrgId;
+    const platformOrgId = await resolvePlatformOrgId(ctx);
     const where: Prisma.JobExecutionWhereInput = { platformOrgId };
     if (opts.jobId) where.jobDefinitionId = opts.jobId;
     if (opts.status) where.status = opts.status;
@@ -757,9 +753,38 @@ const jobSchedulerEnv = {
      }
     return jobSchedulerEnv.platformOrgId;
    },
-} as {
-  platformOrgId: string | undefined;
 };
+
+/**
+ * Resolve the platform organization ID with fallback chain:
+ * 1. Context-provided organizationId (for API routes that pass it)
+ * 2. Environment variable PLATFORM_ORGANIZATION_ID
+ * 3. Database lookup for platform organization
+ */
+async function resolvePlatformOrgId(ctx: ServiceContext): Promise<string> {
+  // 1. Check context-provided organizationId
+  if (ctx.organizationId) {
+    return ctx.organizationId;
+  }
+
+  // 2. Check environment variable (cached)
+  const fromEnv = jobSchedulerEnv.get();
+  if (fromEnv) {
+    return fromEnv;
+  }
+
+  // 3. Fallback to database lookup
+  const org = await globalDb.organization.findFirst({
+    where: { slug: 'platform' },
+    select: { id: true },
+  });
+
+  if (!org) {
+    throw new ForbiddenError('Platform organization not found. Run the seed script.');
+  }
+
+  return org.id;
+}
 
 async function assertJobInOrg(
   id: string,

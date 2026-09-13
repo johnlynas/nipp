@@ -107,6 +107,9 @@ vi.mock('@/lib/global-db', () => {
     updateMany: vi.fn().mockResolvedValue({ count: 1 }),
     findMany: vi.fn().mockResolvedValue([]),
     count: vi.fn().mockResolvedValue(0),
+    organization: {
+      findFirst: vi.fn().mockResolvedValue({ id: 'platform-org-123' }),
+    },
     };
 
   const jobExecution = {

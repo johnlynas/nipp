@@ -218,7 +218,9 @@ describe('concurrency gate — throttle alert', () => {
 
      // Second run must wait for the single slot.
     const second = m.withConcurrency(async () => 'done', { queueWarnMs: 1 });
-    await hold(5);
+    await tick();
+    // Give the second run time to queue up
+    await hold(2);
     expect(m.getConcurrencySnapshot()).toMatchObject({ waiting: 1 });
     expect(push).not.toHaveBeenCalled(); // not yet — it is still queued, not "done waiting"
 
