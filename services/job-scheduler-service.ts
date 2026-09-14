@@ -179,6 +179,7 @@ function defaultTimezone(): string {
 
 export interface CreateJobInput {
   name: string;
+  description?: string | null;
   handlerKey: string;
   scheduleExpr: string; // JSON string, parsed via parseSchedule
   timezone?: string;
@@ -191,6 +192,7 @@ export interface CreateJobInput {
 
 export interface UpdateJobInput {
   name?: string;
+  description?: string | null;
   handlerKey?: string;
   scheduleExpr?: string;
   timezone?: string;
@@ -250,6 +252,7 @@ export const JobSchedulerService = {
         data: {
           platformOrgId,
           name: input.name.trim(),
+          description: input.description?.trim() || null,
           handlerKey: input.handlerKey,
           scheduleExpr: input.scheduleExpr,
           timezone: input.timezone ?? defaultTimezone(),
@@ -302,6 +305,9 @@ export const JobSchedulerService = {
     if (input.name !== undefined) {
       if (input.name.trim() === '') throw new ValidationError('name cannot be empty');
       data.name = input.name.trim();
+     }
+    if (input.description !== undefined) {
+      data.description = input.description?.trim() || null;
      }
     if (input.handlerKey !== undefined) data.handlerKey = input.handlerKey;
     if (input.scheduleExpr !== undefined) {
@@ -573,6 +579,60 @@ export const JobSchedulerService = {
       take: opts.limit ? Math.min(Math.max(opts.limit, 1), 500) : undefined,
       });
     },
+
+   /**
+    * List jobs for the platform org with pagination. Returns the page of jobs
+    * plus a `pagination` summary ({ page, pageSize, total }) so the client can
+    * compute the total page count.
+    */
+  async listJobsPaginated(
+    ctx: ServiceContext,
+    opts: { enabled?: boolean; approved?: boolean; lastRunStatus?: string; search?: string; page?: number; pageSize?: number } = {},
+  ) {
+    requirePlatformAdmin(ctx);
+    const platformOrgId = await resolvePlatformOrgId(ctx);
+    const page = Math.max(opts.page ?? 1, 1);
+    const pageSize = Math.min(Math.max(opts.pageSize ?? 20, 1), 100);
+
+    const where: Prisma.JobDefinitionWhereInput = { platformOrgId };
+    if (opts.enabled !== undefined) where.enabled = opts.enabled;
+    if (opts.approved !== undefined) where.approved = opts.approved;
+    if (opts.lastRunStatus) where.lastRunStatus = opts.lastRunStatus;
+    if (opts.search && opts.search.trim()) {
+      where.OR = [
+        { name: { contains: opts.search, mode: 'insensitive' } },
+        { description: { contains: opts.search, mode: 'insensitive' } },
+      ];
+    }
+
+    // `total` (filtered) drives pagination. The stat-card counts are always
+    // from the full platform-org dataset, independent of filters — same
+    // pattern as the notifications log.
+    const [items, total, totalCount, approvedCount, enabledCount] = await Promise.all([
+      globalDb.jobDefinition.findMany({
+        where,
+        orderBy: { createdAt: 'desc' },
+        skip: (page - 1) * pageSize,
+        take: pageSize,
+      }),
+      globalDb.jobDefinition.count({ where }),
+      globalDb.jobDefinition.count({ where: { platformOrgId } }),
+      globalDb.jobDefinition.count({ where: { platformOrgId, approved: true } }),
+      globalDb.jobDefinition.count({ where: { platformOrgId, enabled: true } }),
+    ]);
+
+    return {
+      items,
+      pagination: { page, pageSize, total },
+      counts: {
+        totalCount,
+        approvedCount,
+        unapprovedCount: totalCount - approvedCount,
+        enabledCount,
+        disabledCount: totalCount - enabledCount,
+      },
+    };
+   },
 
    /**
     * Read a single job by id (platform-org scoped). Throws NotFoundError if

@@ -64,6 +64,7 @@ export async function PATCH(
 
   let body: {
     name?: string;
+    description?: string | null;
     handlerKey?: string;
     scheduleExpr?: string;
     timezone?: string;
@@ -86,6 +87,7 @@ export async function PATCH(
       id,
       {
         name: body.name,
+        description: body.description,
         handlerKey: body.handlerKey,
         scheduleExpr: body.scheduleExpr,
         timezone: body.timezone,

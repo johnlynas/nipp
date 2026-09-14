@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useEffect, useCallback, useRef } from 'react';
-import { Eye, Pencil, Trash2, Play, Pause, Zap, FileCode, Clock, Calendar } from 'lucide-react';
+import { Eye, Pencil, Trash2, Play, Pause, Zap, FileCode, Clock, Calendar, CheckCircle, XCircle } from 'lucide-react';
 import { useIsSuperAdmin } from '@/hooks/usePermission';
 import { logClientError } from '@/lib/client-error-logger';
 import { SearchBar } from '@/components/dashboard/SearchBar';
@@ -11,10 +11,12 @@ import { PageHeader } from '@/components/dashboard/PageHeader';
 import { Modal } from '@/components/dashboard/Modal';
 import { ConfirmDialog } from '@/components/dashboard/ConfirmDialog';
 import { PaginationControls } from '@/components/admin/PaginationControls';
+import { StatCard } from '@/components/dashboard/StatCard';
 
 interface JobDefinition {
   id: string;
   name: string;
+  description: string | null;
   handlerKey: string;
   code: string | null;
   scheduleExpr: string;
@@ -48,9 +50,11 @@ interface PaginationState {
 
 export default function ScriptsPage() {
   const [jobs, setJobs] = useState<JobDefinition[]>([]);
-  const [pagination, setPagination] = useState<PaginationState>({ page: 1, pageSize: 10, total: 0, totalPages: 0 });
+  const [pagination, setPagination] = useState<PaginationState>({ page: 1, pageSize: 8, total: 0, totalPages: 1 });
   const [search, setSearch] = useState('');
   const [enabledFilter, setEnabledFilter] = useState<'all' | 'enabled' | 'disabled'>('all');
+  const [approvedFilter, setApprovedFilter] = useState<'all' | 'approved' | 'unapproved'>('all');
+  const [runStatusFilter, setRunStatusFilter] = useState<'all' | 'RUNNING' | 'SUCCEEDED' | 'FAILED'>('all');
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
@@ -64,6 +68,7 @@ export default function ScriptsPage() {
   const [createModalOpen, setCreateModalOpen] = useState(false);
   const [createForm, setCreateForm] = useState({
     name: '',
+    description: '',
     handlerKey: 'script-handler',
     scheduleType: 'interval' as 'interval' | 'cron' | 'oneshot',
     intervalMs: '60000',
@@ -79,6 +84,7 @@ export default function ScriptsPage() {
   const [editModalOpen, setEditModalOpen] = useState(false);
   const [editForm, setEditForm] = useState({
     name: '',
+    description: '',
     handlerKey: 'script-handler',
     scheduleExpr: '',
     timezone: 'Europe/London',
@@ -92,6 +98,11 @@ export default function ScriptsPage() {
   const [triggerModalOpen, setTriggerModalOpen] = useState(false);
   const [triggerInput, setTriggerInput] = useState('');
 
+  // Approval confirmation
+  const [approvalModalOpen, setApprovalModalOpen] = useState(false);
+  const [approvalAction, setApprovalAction] = useState<'approve' | 'reject'>('approve');
+  const [approvalNote, setApprovalNote] = useState('');
+
   // Delete confirmation
   const [deleteModalOpen, setDeleteModalOpen] = useState(false);
 
@@ -101,25 +112,23 @@ export default function ScriptsPage() {
   // Abort controller to cancel stale fetch requests
   const abortControllerRef = useRef<AbortController | null>(null);
 
-  // Reset to page 1 when filters change
-  useEffect(() => {
-    setPagination(p => ({ ...p, page: 1 }));
-  }, [search, enabledFilter]);
-
   // Fetch jobs
-  const fetchData = useCallback(async () => {
+  const fetchData = useCallback(async (page?: number) => {
     abortControllerRef.current?.abort();
     abortControllerRef.current = new AbortController();
 
     setLoading(true);
     setError(null);
     try {
+      const pageToUse = page ?? pagination.page;
       const params = new URLSearchParams({
-        page: String(pagination.page),
+        page: String(pageToUse),
         pageSize: String(pagination.pageSize),
       });
       if (search) params.set('search', search);
       if (enabledFilter !== 'all') params.set('enabled', enabledFilter === 'enabled' ? 'true' : 'false');
+      if (approvedFilter !== 'all') params.set('approved', approvedFilter === 'approved' ? 'true' : 'false');
+      if (runStatusFilter !== 'all') params.set('lastRunStatus', runStatusFilter);
 
       const res = await fetch(`/api/dashboard/admin/scripts?${params}`, {
         signal: abortControllerRef.current.signal,
@@ -131,7 +140,15 @@ export default function ScriptsPage() {
 
       const data = await res.json();
       setJobs(data.items || []);
-      setPagination(data.pagination || pagination);
+
+      const total = data.pagination?.total ?? 0;
+      const totalPages = Math.max(1, Math.ceil(total / pagination.pageSize));
+      setPagination({
+        page: pageToUse,
+        pageSize: pagination.pageSize,
+        total,
+        totalPages,
+      });
     } catch (err) {
       if (err instanceof DOMException && err.name === 'AbortError') return;
       const message = err instanceof Error ? err.message : 'Failed to fetch scripts';
@@ -141,11 +158,19 @@ export default function ScriptsPage() {
     } finally {
       setLoading(false);
     }
-  }, [pagination.page, pagination.pageSize, search, enabledFilter]);
+  }, [pagination.pageSize, search, enabledFilter, approvedFilter, runStatusFilter]);
 
+  // Fetch when filters change (reset to page 1)
   useEffect(() => {
-    fetchData();
-  }, [fetchData]);
+    fetchData(1);
+  }, [search, enabledFilter, approvedFilter, runStatusFilter]);
+
+  // Handle page change
+  const handlePageChange = (newPage: number) => {
+    if (newPage >= 1 && newPage <= pagination.totalPages) {
+      fetchData(newPage);
+    }
+  };
 
   // Auto-dismiss error banners after 6 seconds
   useEffect(() => {
@@ -180,6 +205,7 @@ export default function ScriptsPage() {
     setSelectedJob(job);
     setEditForm({
       name: job.name,
+      description: job.description ?? '',
       handlerKey: job.handlerKey,
       scheduleExpr: job.scheduleExpr,
       timezone: job.timezone || 'Europe/London',
@@ -231,7 +257,14 @@ export default function ScriptsPage() {
 
       if (!res.ok) {
         const data = await res.json().catch(() => ({}));
-        throw new Error(data.error || 'Failed to update script');
+        const errorMessage = data.error || 'Failed to update script';
+        // Handle the approval edge case more gracefully
+        if (errorMessage.includes('Job is not approved')) {
+          setError('This job needs to be approved before it can be enabled. Use the Approve button.');
+        } else {
+          throw new Error(errorMessage);
+        }
+        return;
       }
 
       setEditModalOpen(false);
@@ -240,6 +273,36 @@ export default function ScriptsPage() {
       const message = err instanceof Error ? err.message : 'Failed to update script';
       console.error('Failed to update script:', err);
       logClientError(message, 'scripts', 'update');
+      setError(message);
+    }
+  };
+
+  // Handle approve/reject job
+  const handleApproval = async () => {
+    if (!selectedJob) return;
+
+    try {
+      const res = await fetch(`/api/admin/jobs/${selectedJob.id}/approvals`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          action: approvalAction,
+          note: approvalNote.trim() || undefined,
+        }),
+      });
+
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}));
+        throw new Error(data.error || 'Failed to update approval status');
+      }
+
+      setApprovalModalOpen(false);
+      setApprovalNote('');
+      fetchData();
+    } catch (err) {
+      const message = err instanceof Error ? err.message : 'Failed to update approval status';
+      console.error('Failed to update approval:', err);
+      logClientError(message, 'scripts', 'approval');
       setError(message);
     }
   };
@@ -266,6 +329,7 @@ export default function ScriptsPage() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           name: createForm.name,
+          description: createForm.description || null,
           handlerKey: createForm.handlerKey,
           scheduleExpr,
           timezone: createForm.timezone,
@@ -284,6 +348,7 @@ export default function ScriptsPage() {
       setCreateModalOpen(false);
       setCreateForm({
         name: '',
+        description: '',
         handlerKey: 'script-handler',
         scheduleType: 'interval',
         intervalMs: '60000',
@@ -331,6 +396,15 @@ export default function ScriptsPage() {
 
   // Handle enable/disable job
   const handleToggleEnable = async (job: JobDefinition) => {
+    // Prevent enabling an unapproved job - show approval modal instead
+    if (job.enabled === false && !job.approved) {
+      setApprovalModalOpen(true);
+      setApprovalAction('approve');
+      setApprovalNote('');
+      setSelectedJob(job);
+      return;
+    }
+
     try {
       const res = await fetch(`/api/dashboard/admin/scripts/${job.id}`, {
         method: 'PATCH',
@@ -340,7 +414,14 @@ export default function ScriptsPage() {
 
       if (!res.ok) {
         const data = await res.json().catch(() => ({}));
-        throw new Error(data.error || 'Failed to update script');
+        const errorMessage = data.error || 'Failed to update script';
+        // Handle the approval edge case more gracefully
+        if (errorMessage.includes('Job is not approved')) {
+          setError('This job needs to be approved before it can be enabled. Use the Approve button.');
+        } else {
+          setError(errorMessage);
+        }
+        return;
       }
 
       fetchData();
@@ -357,6 +438,11 @@ export default function ScriptsPage() {
         <span className="font-medium" style={{ color: '#1B2A4A' }}>{j.name}</span>
         <span className="text-xs text-gray-500">{j.handlerKey}</span>
       </div>
+    )},
+    { key: 'description', label: 'Description', render: (j: JobDefinition) => (
+      <span className="block max-w-[280px] truncate text-sm text-gray-600" title={j.description || undefined}>
+        {j.description || '—'}
+      </span>
     )},
     { key: 'enabled', label: 'Status', render: (j: JobDefinition) => (
       <StatusBadge status={j.enabled ? (j.approved ? 'Active' : 'Pending Approval') : 'Disabled'} />
@@ -393,19 +479,41 @@ export default function ScriptsPage() {
         >
           <FileCode className="h-4 w-4" />
         </button>
+        {/* Approve/Reject button for unapproved jobs */}
+        {!j.approved && (
+          <button
+            onClick={() => { setSelectedJob(j); setApprovalAction('approve'); setApprovalModalOpen(true); }}
+            title="Approve"
+            className="rounded p-1.5 text-blue-600 hover:bg-blue-50 hover:text-blue-700 transition-colors"
+            aria-label="Approve"
+          >
+            <CheckCircle className="h-4 w-4" />
+          </button>
+        )}
+        {/* Enable/Disable button */}
         <button
           onClick={() => handleToggleEnable(j)}
-          title={j.enabled ? 'Disable' : 'Enable'}
-          className="rounded p-1.5 text-gray-400 hover:bg-gray-100 hover:text-[#1B2A4A] transition-colors"
+          title={j.enabled ? 'Disable' : (j.approved ? 'Enable' : 'Approve to Enable')}
+          className="rounded p-1.5 transition-colors"
+          style={{
+            color: j.enabled || j.approved ? '#6c757d' : '#9ca3af',
+            cursor: j.approved ? 'pointer' : 'not-allowed',
+          }}
           aria-label={j.enabled ? 'Disable' : 'Enable'}
+          disabled={!j.approved}
         >
           {j.enabled ? <Pause className="h-4 w-4" /> : <Play className="h-4 w-4" />}
         </button>
         <button
           onClick={() => { setSelectedJob(j); setTriggerModalOpen(true); }}
           title="Trigger"
-          className="rounded p-1.5 text-gray-400 hover:bg-gray-100 hover:text-[#1B2A4A] transition-colors"
+          className={`rounded p-1.5 transition-colors ${
+            !j.enabled || !j.approved
+              ? 'text-gray-300 cursor-not-allowed'
+              : 'text-gray-400 hover:bg-gray-100 hover:text-[#1B2A4A]'
+          }`}
           aria-label="Trigger"
+          disabled={!j.enabled || !j.approved}
         >
           <Zap className="h-4 w-4" />
         </button>
@@ -422,7 +530,7 @@ export default function ScriptsPage() {
   ];
 
   return (
-    <div>
+    <div className="space-y-6">
       {/* Error Banner */}
       {error && (
         <div className="mb-4 rounded border bg-red-50 p-3 text-sm text-red-700" role="alert">
@@ -430,8 +538,17 @@ export default function ScriptsPage() {
         </div>
       )}
 
+      {/* Stat Cards */}
+      <div className="grid grid-cols-2 gap-4 md:grid-cols-5">
+        <StatCard label="Total Scripts" value={jobs.length} />
+        <StatCard label="Approved" value={jobs.filter(j => j.approved).length} color="success" />
+        <StatCard label="Unapproved" value={jobs.filter(j => !j.approved).length} color="warning" />
+        <StatCard label="Enabled" value={jobs.filter(j => j.enabled).length} color="success" />
+        <StatCard label="Disabled" value={jobs.filter(j => !j.enabled).length} color="danger" />
+      </div>
+
       {/* Page Header */}
-      <PageHeader title="Custom Scripts" description="Background job scheduler for custom scripts">
+      <PageHeader description="Background job scheduler for custom scripts">
         <button
           onClick={() => setCreateModalOpen(true)}
           className="rounded px-4 py-2 text-sm font-medium text-white transition-colors hover:opacity-90"
@@ -455,6 +572,31 @@ export default function ScriptsPage() {
           <option value="enabled">Enabled</option>
           <option value="disabled">Disabled</option>
         </select>
+
+        <select
+          value={approvedFilter}
+          onChange={(e) => setApprovedFilter(e.target.value as 'all' | 'approved' | 'unapproved')}
+          className="rounded border px-3 py-2 text-sm bg-white hover:bg-gray-50 transition-colors focus:outline-none"
+          style={{ borderColor: '#dee2e6', color: '#1B2A4A' }}
+          aria-label="Filter by approval status"
+        >
+          <option value="all">All Approval Status</option>
+          <option value="approved">Approved</option>
+          <option value="unapproved">Unapproved</option>
+        </select>
+
+        <select
+          value={runStatusFilter}
+          onChange={(e) => setRunStatusFilter(e.target.value as 'all' | 'RUNNING' | 'SUCCEEDED' | 'FAILED')}
+          className="rounded border px-3 py-2 text-sm bg-white hover:bg-gray-50 transition-colors focus:outline-none"
+          style={{ borderColor: '#dee2e6', color: '#1B2A4A' }}
+          aria-label="Filter by run status"
+        >
+          <option value="all">All Run Status</option>
+          <option value="RUNNING">Running</option>
+          <option value="SUCCEEDED">Succeeded</option>
+          <option value="FAILED">Failed</option>
+        </select>
       </div>
 
       {/* Table */}
@@ -466,7 +608,7 @@ export default function ScriptsPage() {
         totalPages={pagination.totalPages}
         totalItems={pagination.total}
         pageSize={pagination.pageSize}
-        onPageChange={(page) => setPagination(p => ({ ...p, page }))}
+        onPageChange={handlePageChange}
       />
 
       {/* Detail Modal */}
@@ -501,7 +643,12 @@ export default function ScriptsPage() {
                 </p>
               </div>
             </div>
-            
+
+            <div>
+              <label className="text-sm font-medium" style={{ color: '#6c757d' }}>Description</label>
+              <p className="mt-1 text-sm whitespace-pre-wrap" style={{ color: '#1B2A4A' }}>{selectedJob.description || '—'}</p>
+            </div>
+
             <div>
               <label className="text-sm font-medium" style={{ color: '#6c757d' }}>Code</label>
               <div className="mt-1">
@@ -586,6 +733,19 @@ export default function ScriptsPage() {
               className="w-full rounded border px-3 py-2 text-sm focus:outline-none"
               style={{ borderColor: '#dee2e6', color: '#1B2A4A' }}
               placeholder="My Background Script"
+            />
+          </div>
+
+          <div>
+            <label htmlFor="script-description" className="mb-1 block text-sm font-medium" style={{ color: '#6c757d' }}>Description</label>
+            <textarea
+              id="script-description"
+              value={createForm.description}
+              onChange={(e) => setCreateForm(f => ({ ...f, description: e.target.value }))}
+              className="w-full rounded border px-3 py-2 text-sm focus:outline-none"
+              style={{ borderColor: '#dee2e6', color: '#1B2A4A' }}
+              rows={2}
+              placeholder="What does this script do?"
             />
           </div>
 
@@ -745,6 +905,19 @@ export default function ScriptsPage() {
             />
           </div>
 
+          <div>
+            <label htmlFor="edit-script-description" className="mb-1 block text-sm font-medium" style={{ color: '#6c757d' }}>Description</label>
+            <textarea
+              id="edit-script-description"
+              value={editForm.description}
+              onChange={(e) => setEditForm(f => ({ ...f, description: e.target.value }))}
+              className="w-full rounded border px-3 py-2 text-sm focus:outline-none"
+              style={{ borderColor: '#dee2e6', color: '#1B2A4A' }}
+              rows={2}
+              placeholder="What does this script do?"
+            />
+          </div>
+
           <div className="grid grid-cols-2 gap-4">
             <div>
               <label htmlFor="edit-script-handler" className="mb-1 block text-sm font-medium" style={{ color: '#6c757d' }}>Handler Key</label>
@@ -867,6 +1040,48 @@ export default function ScriptsPage() {
               style={{ backgroundColor: '#F5A623' }}
             >
               Trigger
+            </button>
+          </div>
+        </div>
+      </Modal>
+
+      {/* Approval Confirmation Modal */}
+      <Modal isOpen={approvalModalOpen} onClose={() => setApprovalModalOpen(false)} title={approvalAction === 'approve' ? 'Approve Script' : 'Reject Script'} size="md">
+        <div className="space-y-4">
+          <p className="text-sm" style={{ color: '#6c757d' }}>
+            {approvalAction === 'approve'
+              ? `Approve "${selectedJob?.name}"? Approved jobs can be enabled and triggered.`
+              : `Reject "${selectedJob?.name}"? This will disable and clear approval.`
+            }
+          </p>
+          <div>
+            <label htmlFor="approval-note" className="mb-1 block text-sm font-medium" style={{ color: '#6c757d' }}>Note (optional)</label>
+            <textarea
+              id="approval-note"
+              value={approvalNote}
+              onChange={(e) => setApprovalNote(e.target.value)}
+              className="w-full rounded border px-3 py-2 text-sm focus:outline-none font-mono"
+              style={{ borderColor: '#dee2e6', color: '#1B2A4A' }}
+              rows={3}
+              placeholder={`Add a note about this ${approvalAction === 'approve' ? 'approval' : 'rejection'}...`}
+            />
+          </div>
+          <div className="flex justify-end gap-3">
+            <button
+              onClick={() => setApprovalModalOpen(false)}
+              className="rounded border px-4 py-2 text-sm font-medium transition-colors hover:bg-gray-50"
+              style={{ borderColor: '#dee2e6', color: '#1B2A4A' }}
+            >
+              Cancel
+            </button>
+            <button
+              onClick={handleApproval}
+              className="rounded px-4 py-2 text-sm font-medium text-white transition-colors hover:opacity-90"
+              style={{
+                backgroundColor: approvalAction === 'approve' ? '#28a745' : '#dc3545',
+              }}
+            >
+              {approvalAction === 'approve' ? 'Approve' : 'Reject'}
             </button>
           </div>
         </div>

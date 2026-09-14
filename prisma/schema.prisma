@@ -596,6 +596,8 @@ model JobDefinition {
 
   /** Unique within a platformOrgId. */
   name           String
+  /** Free-text description of what the script does. */
+  description    String?
   /** Handler registry key → built-in handler or (Phase 2) stored script. */
   handlerKey     String
   /**

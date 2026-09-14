@@ -20,14 +20,26 @@ export async function GET(request: NextRequest) {
 
   try {
     const url = new URL(request.url);
+    const page = parseInt(url.searchParams.get('page') || '1', 10);
+    const pageSize = parseInt(url.searchParams.get('pageSize') || '8', 10);
     const enabled = url.searchParams.get('enabled');
+    const approved = url.searchParams.get('approved');
+    const lastRunStatus = url.searchParams.get('lastRunStatus');
+    const search = url.searchParams.get('search');
 
-    const jobs = await JobSchedulerService.listJobs(
+    const result = await JobSchedulerService.listJobsPaginated(
       { userId: auth.session!.user.id, role: 'PLATFORM_ADMIN' },
-      { enabled: enabled ? enabled === 'true' : undefined }
+      {
+        page: Number.isNaN(page) ? 1 : page,
+        pageSize: Number.isNaN(pageSize) ? 8 : pageSize,
+        enabled: enabled ? enabled === 'true' : undefined,
+        approved: approved ? approved === 'true' : undefined,
+        lastRunStatus: lastRunStatus || undefined,
+        search: search || undefined,
+      }
     );
 
-    return NextResponse.json({ items: jobs });
+    return NextResponse.json(result);
   } catch (error) {
     console.error('Failed to list scripts:', error);
     return NextResponse.json({ error: 'Failed to fetch scripts' }, { status: 500 });
@@ -51,6 +63,7 @@ export async function POST(request: NextRequest) {
 
   let body: {
     name?: string;
+    description?: string | null;
     handlerKey?: string;
     scheduleExpr?: string;
     timezone?: string;
@@ -73,6 +86,7 @@ export async function POST(request: NextRequest) {
       { userId: auth.session!.user.id, role: 'PLATFORM_ADMIN' },
       {
         name: body.name ?? '',
+        description: body.description,
         handlerKey: body.handlerKey ?? 'script-handler',
         scheduleExpr: body.scheduleExpr ?? JSON.stringify({ kind: 'interval', everyMs: 60000 }),
         timezone: body.timezone,
