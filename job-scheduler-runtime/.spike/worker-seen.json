@@ -1,0 +1,28 @@
+{
+  "discovery": {
+    "threadId": 1,
+    "isMainThread": false,
+    "hasParentPort": true,
+    "workerViaModuleDestructure": {
+      "job": {
+        "name": "spike",
+        "type": "timeout",
+        "time": 600,
+        "path": "/Users/johnlynas/dev/nipp-0807/job-scheduler-runtime/.spike/spike-job.cjs",
+        "worker": {
+          "workerData": {
+            "hello": "from-parent-marker",
+            "orgId": "org_spike"
+          }
+        },
+        "timeout": 0,
+        "timezone": "local"
+      },
+      "hello": "from-parent-marker",
+      "orgId": "org_spike"
+    },
+    "envMarker": "env-passed-marker"
+  },
+  "prismaRequire": "ok",
+  "jobCount": 0
+}
