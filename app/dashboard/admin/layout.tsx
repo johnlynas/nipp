@@ -3,7 +3,11 @@
 import { useState, useMemo } from 'react';
 import { useRouter, usePathname } from 'next/navigation';
 import Link from 'next/link';
+<<<<<<< HEAD
 import { Menu, X, UserRound, Building2, UsersRound, Shield, Key, Layers, LogOut, CalendarDays, Bell, XCircle, HeartPulse, ChartNoAxesCombined, ScrollText } from 'lucide-react';
+=======
+import { Menu, X, UserRound, Building2, UsersRound, Shield, Key, Layers, LogOut, CalendarDays, Bell, XCircle, HeartPulse, ChartNoAxesCombined, Network } from 'lucide-react';
+>>>>>>> 0a8bff0 (feat(org-chart): add interactive organization chart)
 import { authClient } from '@/lib/auth-client';
 import { RequireSuperAdmin } from '@/components/auth/RequireSuperAdmin';
 import { useNotifications, PRIORITY_COLORS, getPriorityIcon } from '@/hooks/useNotifications';
@@ -17,6 +21,7 @@ const navItems = [
   { href: '/dashboard/admin/resources', label: 'Resources', icon: Layers },
   { href: '/dashboard/admin/notifications', label: 'Notifications', icon: Bell },
   { href: '/dashboard/admin/calendar', label: 'Calendar', icon: CalendarDays },
+  { href: '/dashboard/admin/org-chart', label: 'Org Chart', icon: Network },
   { href: '/dashboard/admin/system-health', label: 'System Health', icon: HeartPulse },
   { href: '/dashboard/admin/cache-metrics', label: 'Cache Metrics', icon: ChartNoAxesCombined },
   { href: '/dashboard/admin/custom-scripts', label: 'Custom Scripts', icon: ScrollText },
@@ -27,6 +32,8 @@ export default function AdminDashboardLayout({ children }: { children: React.Rea
   const router = useRouter();
   const pathname = usePathname();
   const isCalendarPage = useMemo(() => pathname === '/dashboard/admin/calendar', [pathname]);
+  // Org chart is full-bleed like the calendar (no top header, no content padding).
+  const isFullScreenPage = isCalendarPage || pathname === '/dashboard/admin/org-chart';
   const { notifications, isConnected, dismissNotification, clearNotifications } = useNotifications();
 
   const handleLogout = async () => {
@@ -114,7 +121,7 @@ export default function AdminDashboardLayout({ children }: { children: React.Rea
         {/* Main Content */}
         <div className="flex-1 flex flex-col min-w-0">
           {/* Top Bar */}
-          {!isCalendarPage && (
+          {!isFullScreenPage && (
             <header className="bg-white border-b px-6 py-3 flex items-center justify-between shadow-sm" style={{ borderColor: '#dee2e6' }}>
               <h1 className="text-lg font-semibold" style={{ color: '#1B2A4A' }}>
                 {navItems.find((item) => item.href === pathname)?.label || 'Dashboard'}
@@ -123,7 +130,7 @@ export default function AdminDashboardLayout({ children }: { children: React.Rea
           )}
 
           {/* Page Content */}
-          <main className={`flex-1 min-h-0 min-w-0 ${isCalendarPage ? 'flex flex-col overflow-hidden' : 'p-6 overflow-y-auto'}`}>
+          <main className={`flex-1 min-h-0 min-w-0 ${isFullScreenPage ? 'flex flex-col overflow-hidden' : 'p-6 overflow-y-auto'}`}>
             {children}
           </main>
 

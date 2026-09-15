@@ -68,6 +68,8 @@ const PERMISSION_CATALOG = [
   { key: 'calendar:create', resource: 'calendars', action: 'create', description: 'Create calendar events', isDefault: true },
   { key: 'calendar:update', resource: 'calendars', action: 'update', description: 'Update calendar events', isDefault: true },
   { key: 'calendar:delete', resource: 'calendars', action: 'delete', description: 'Delete calendar events', isDefault: true },
+  { key: 'org-chart:read', resource: 'org-chart', action: 'read', description: 'View the organization chart', isDefault: true },
+  { key: 'org-chart:update', resource: 'org-chart', action: 'update', description: 'Edit organization chart membership', isDefault: true },
 ];
 
 // =========================================================================
