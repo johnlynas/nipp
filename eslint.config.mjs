@@ -5,8 +5,9 @@ import reactHooks from 'eslint-plugin-react-hooks';
 import tseslint from 'typescript-eslint';
 
 export default tseslint.config(
-  // Ignore generated and node_modules directories
-  { ignores: ['node_modules/', '.next/', 'dist/', 'next-env.d.ts'] },
+  // Ignore generated and node_modules directories (job-scheduler-runtime/ holds
+  // the worker bootstrap materialized at runtime by lib/job-scheduler-bree.ts)
+  { ignores: ['node_modules/', '.next/', 'dist/', 'next-env.d.ts', 'job-scheduler-runtime/'] },
 
   // Base JavaScript rules
   js.configs.recommended,

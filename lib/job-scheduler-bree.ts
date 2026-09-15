@@ -163,8 +163,12 @@ function report(outcome) {
  *
  *   - `node:module.registerHooks` (Node >= 22.15, CJS-aware) — so a `.cjs`
  *     entry point can `require()` `.ts` files;
- *   - the `resolve` hook redirects `@/<p>` → `<APP_ROOT>/<p>`, trying the
- *     TypeScript extensions Node's CJS resolver does not know about;
+ *   - the `resolve` hook redirects BOTH project-relative specifiers
+ *     (`./env-schema`, `../foo`) and `@/<p>` aliases to candidates that try
+ *     the TypeScript extensions Node's CJS resolver does not know about —
+ *     transpiled CJS emits plain `require('./x')`, which vanilla Node resolves
+ *     as `.js`/`.json`/`.node` only, so any extensionless relative import from
+ *     a project file throws MODULE_NOT_FOUND without this;
  *   - the `load` hook transpiles project `.ts` sources (single-file, no type
  *     check — `typescript.transpileModule`) to CommonJS before require runs.
  *
@@ -185,6 +189,12 @@ const fsSync = require('node:fs');
 
 const APP_ROOT = ${JSON.stringify(APP_ROOT)};
 
+// Mark this thread as a job-scheduler worker (read via isJobSchedulerWorker()
+// in services/job-scheduler-service.ts): the scheduler's SSE subscribers only
+// live in the parent thread, so in-worker lifecycle-notification emission is
+// skipped and the parent re-emits once it receives the run result.
+globalThis.jobSchedulerWorker = true;
+
 function exists(p) { try { fsSync.accessSync(p); return true; } catch { return false; } }
 function resolveTsCandidate(base) {
   const candidates = [base, base + '.ts', base + '.tsx', path.join(base, 'index.ts'), path.join(base, 'index.tsx')];
@@ -200,9 +210,22 @@ const typescript = require(require.resolve('typescript', { paths: [APP_ROOT] }))
 
 nodeModule.registerHooks({
   resolve(source, context, nextResolve) {
+    // '@/…' alias → project root (TS extensions).
     if (typeof source === 'string' && source.startsWith('@/')) {
       const candidate = resolveTsCandidate(path.join(APP_ROOT, source.slice(2)));
       if (candidate) return nextResolve(candidate, context);
+    }
+    // Extensionless RELATIVE imports from project files: transpiled CJS emits
+    // require('./env-schema') etc., which vanilla Node's CJS resolver cannot
+    // map to .ts/.tsx. Redirect when the importing file is inside APP_ROOT
+    // (node_modules packages keep vanilla semantics).
+    if (typeof source === 'string' && (source.startsWith('./') || source.startsWith('../'))) {
+      let parentPath = '';
+      try { parentPath = require('node:url').fileURLToPath(context.parentURL); } catch {}
+      if (parentPath.startsWith(APP_ROOT + path.sep) && !parentPath.includes('node_modules')) {
+        const candidate = resolveTsCandidate(path.resolve(path.dirname(parentPath), source));
+        if (candidate) return nextResolve(candidate, context);
+      }
     }
     return nextResolve(source, context);
   },
@@ -230,19 +253,19 @@ nodeModule.registerHooks({
 
 /**
  * Write (idempotently) the worker bootstrap into RUNTIME_DIR. Returns its path.
+ * Idempotent by CONTENT: a previously written bootstrap is kept only when it
+ * byte-matches the current template, so loader fixes in this file take effect
+ * on the next run without waiting out the 24 h freshness window (which used to
+ * silently ship stale loaders; see the relative-import resolve hook below).
  */
 async function materializeWorkerBootstrap(): Promise<string> {
   await fs.mkdir(RUNTIME_DIR, { recursive: true });
   const finalPath = path.join(RUNTIME_DIR, 'job-scheduler-worker-bootstrap.cjs');
+  const source = buildWorkerBootstrapSource();
+  const existing = await fs.readFile(finalPath, 'utf8').catch(() => null);
+  if (existing === source) return finalPath; // byte-identical — nothing to do
   const tmpPath = `${finalPath}.tmp-${process.pid}-${Date.now()}`;
-  await fs.writeFile(tmpPath, buildWorkerBootstrapSource(), 'utf8');
-  const existing = await fs.stat(finalPath).then((s) => s.mtimeMs, () => 0);
-  if (existing !== 0 && existing > Date.now() - 24 * 3600 * 1000) {
-    // Fresh-enough bootstrap already in place — keep it (avoids rewriting on
-    // every engine boot/reap cycle).
-    await fs.unlink(tmpPath).catch(() => {});
-    return finalPath;
-  }
+  await fs.writeFile(tmpPath, source, 'utf8');
   try {
     await fs.rename(tmpPath, finalPath);
   } catch (err) {

@@ -27,6 +27,7 @@
  */
 
 import { NotificationPriority, NotificationScope } from '@prisma/client';
+import { isMainThread } from 'node:worker_threads';
 import globalDb from '@/lib/global-db';
 import { logger } from '@/lib/logger';
 import { pushNotification } from '@/lib/notification-push';
@@ -325,4 +326,10 @@ export function resetCalendarEventSchedulerState(): void {
 
 // Start on module load — runs once when the Next.js server boots the root
 // layout (same boot path as the background health check in app/layout.tsx).
-startCalendarEventScheduler();
+// Guarded to the main thread: Bree job-scheduler workers import this module
+// transitively (job-scheduler-builtins → findDueToStartEvents) and would
+// otherwise each start a duplicate 30 s scan interval — visible in logs as a
+// "[calendar-event-scheduler] Started" line on every worker fork.
+if (isMainThread) {
+  startCalendarEventScheduler();
+}

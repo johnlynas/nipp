@@ -32,8 +32,10 @@ import globalDb from '@/lib/global-db';
 // Bree ships its own CJS + types; it stays webpack-external (next.config.ts
 // serverExternalPackages) so this import is a plain Node require at runtime.
 import later, { type Schedule as LaterSchedule } from '@breejs/later';
+import { NotificationPriority, NotificationScope } from '@prisma/client';
 import { env } from '@/lib/env';
 import { logger } from '@/lib/logger';
+import { pushNotification } from '@/lib/notification-push';
 import {
   JobSchedulerService,
   parseSchedule,
@@ -382,11 +384,51 @@ export function isDueAt(now: Date, scheduleExpr: string, lastRunAt: Date | null)
 async function runJobInWorker(jobId: string): Promise<RunResult> {
   const definition = await globalDb.jobDefinition.findUnique({
     where: { id: jobId },
-    select: { timeoutMs: true, name: true },
+    select: { timeoutMs: true, name: true, platformOrgId: true },
   });
   try {
     const outcome = await JobSchedulerBree.executeJobInWorker(jobId, definition?.timeoutMs ?? undefined);
-    if (outcome.kind === 'ok') return outcome.result as RunResult;
+    if (outcome.kind === 'ok') {
+      // Re-emit the lifecycle notification HERE, on the parent thread where the
+      // live SSE subscribers actually are. The worker's own pushNotification
+      // cannot broadcast (its subscriber map is an empty thread-local copy) and
+      // now skips it entirely for SUCCEEDED/FAILED runs (isMainThread guards in
+      // JobSchedulerService); its DB persistence already happened, and this
+      // parent push reuses the identical {title,message,priority,scope,source,org}
+      // shape so pushNotification's 10 s DB dedup treats it as one event.
+      const result = outcome.result as RunResult;
+      // Only notify for runs the worker actually executed (claimed). SKIPPED
+      // (claim lost to a concurrent tick) announces nothing — matching
+      // runJob, which never calls notifyExecution on the skip paths.
+      if (result?.claimed && definition) {
+        try {
+          await pushNotification(
+            result.status === 'FAILED'
+              ? {
+                  title: `Job failed: ${definition.name}`,
+                  message: result.error
+                    ? `Job "${definition.name}" failed: ${result.error}`
+                    : `Job "${definition.name}" failed.`,
+                  priority: NotificationPriority.ERROR,
+                  scope: NotificationScope.GLOBAL,
+                  source: 'job-scheduler:failure',
+                  organizationId: definition.platformOrgId,
+                }
+              : {
+                  title: `Job completed: ${definition.name}`,
+                  message: `Job "${definition.name}" completed successfully.`,
+                  priority: NotificationPriority.JOB,
+                  scope: NotificationScope.GLOBAL,
+                  source: 'job-scheduler:execution',
+                  organizationId: definition.platformOrgId,
+                },
+          );
+        } catch {
+          // A broken notification channel must not mask the run result.
+        }
+      }
+      return result;
+    }
     // Worker crashed / timed out at the engine level. The in-worker claim may
     // have been taken (lastRunAt stuck RUNNING) — leave it; the next period's
     // occurrence re-arms due-detection and the alert below is visible now.

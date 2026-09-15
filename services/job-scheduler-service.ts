@@ -48,6 +48,20 @@ import { pushNotification } from '@/lib/notification-push';
 // Phase 2: sandboxed script runner for operator-authored code.
 import { runScriptInSandbox, validateCode } from '@/lib/job-scheduler-script-runner';
 
+/**
+ * True when this module copy is running inside a Bree job-scheduler worker
+ * thread (the per-fork bootstrap sets the marker before requiring this file).
+ * Used to skip SSE emission in workers: live subscribers only exist in the
+ * parent thread, so a worker push would persist + log but deliver nothing.
+ * The engine re-emits lifecycle notifications on the parent on receipt. Not an
+ * isMainThread check on purpose: vitest test workers are also non-main threads
+ * and must keep the full notification behavior for assertions.
+ */
+export function isJobSchedulerWorker(): boolean {
+  const g = globalThis as unknown as Record<string, boolean | undefined>;
+  return g.jobSchedulerWorker === true;
+}
+
 // ---------------------------------------------------------------------------
 // Schedule model
 // ---------------------------------------------------------------------------
@@ -210,6 +224,10 @@ export interface RunResult {
   executionId?: string;
   status: JobStatus | 'SKIPPED';
   claimed: boolean; // false → another tick already claimed this instant
+  /** Human-readable failure reason (present when status === 'FAILED'). Used
+   * by the engine's parent thread to emit the failure notification in worker
+   * mode, where the run itself cannot broadcast SSE. */
+  error?: string;
 }
 
 // ---------------------------------------------------------------------------
@@ -719,8 +737,9 @@ export const JobSchedulerService = {
         await runScriptJob(job, opts);
         // runScriptJob handles execution record creation + result persistence.
         return { jobDefinitionId: job.id, status: 'SUCCEEDED', claimed: true };
-      } catch {
-        return { jobDefinitionId: job.id, status: 'FAILED', claimed: true };
+      } catch (err) {
+        const message = err instanceof Error ? err.message : String(err);
+        return { jobDefinitionId: job.id, status: 'FAILED', claimed: true, error: message };
       }
     }
 
@@ -730,7 +749,8 @@ export const JobSchedulerService = {
     if (!handler) {
       await failExecution(job, claimInstant, { trigger: opts.trigger, actorId: opts.actorId },
          `No handler registered for key "${job.handlerKey}"`);
-      return { jobDefinitionId, status: 'FAILED', claimed: true };
+      return { jobDefinitionId, status: 'FAILED', claimed: true,
+        error: `No handler registered for key "${job.handlerKey}"` };
      }
 
      // Open the execution record.
@@ -770,7 +790,14 @@ export const JobSchedulerService = {
           data: { lastRunStatus: 'SUCCEEDED' },
          });
        }
-      await notifyExecution(job.name, job.platformOrgId, 'SUCCEEDED');
+      // Worker guard: live SSE subscribers only exist in the parent thread; a
+      // worker's copy of the subscriber map is empty, so its push would persist
+      // and log but deliver nothing. The engine (parent) re-emits on receipt —
+      // DB dedup collapses the double. Inline/trigger runs are never marked as
+      // scheduler workers, so they deliver directly.
+      if (!isJobSchedulerWorker()) {
+        await notifyExecution(job.name, job.platformOrgId, 'SUCCEEDED');
+      }
       logger.info({ jobId: job.id, executionId: execution.id }, 'Job succeeded');
       return { jobDefinitionId: job.id, executionId: execution.id, status: 'SUCCEEDED', claimed: true };
      } catch (error) {
@@ -895,8 +922,13 @@ async function failExecution(
        // Swallow secondary DB failures but keep them visible.
       logger.error({ error: dbError }, 'jobScheduler: failed to persist failure state');
       }
-      // A failed job run is a platform-visible event.
-      void notifyExecution(job.name, job.platformOrgId, 'FAILED', message);
+      // A failed job run is a platform-visible event. Worker guard: only the
+      // parent thread reaches live SSE subscribers (see SUCCEEDED path above);
+      // in worker mode the engine re-emits on receipt. Inline/trigger runs
+      // deliver directly here.
+      if (!isJobSchedulerWorker()) {
+        void notifyExecution(job.name, job.platformOrgId, 'FAILED', message);
+      }
     }
 
 async function notifyExecution(
@@ -1038,7 +1070,12 @@ async function runScriptJob(
         where: { id: job.id },
         data: { lastRunStatus: 'SUCCEEDED' },
        });
-      await notifyExecution(job.name, job.platformOrgId, 'SUCCEEDED');
+      // Worker guard: only the parent thread can reach live SSE subscribers;
+      // in worker mode the engine (parent) re-emits on receipt and DB dedup
+      // collapses the double. See the identical guard in runJob's handler path.
+      if (!isJobSchedulerWorker()) {
+        await notifyExecution(job.name, job.platformOrgId, 'SUCCEEDED');
+      }
      }
 
     logger.info(
@@ -1047,6 +1084,8 @@ async function runScriptJob(
     );
    } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
+    // Persistence runs in every thread; the failure notification is parent-only
+    // (worker mode re-emits on receipt — see above). Inline mode delivers here.
     await globalDb.jobExecution.update({
       where: { id: execution.id },
       data: { status: 'FAILED', finishedAt: new Date(), error: message.slice(0, 4000) },
@@ -1055,9 +1094,11 @@ async function runScriptJob(
     if (!dryRun) {
       await globalDb.jobDefinition.update({
         where: { id: job.id },
-         data: { lastRunStatus: 'FAILED' },
-        });
-      void notifyExecution(job.name, job.platformOrgId, 'FAILED', message);
+        data: { lastRunStatus: 'FAILED' },
+       });
+      if (!isJobSchedulerWorker()) {
+        void notifyExecution(job.name, job.platformOrgId, 'FAILED', message);
+      }
      }
 
     logger.error(
