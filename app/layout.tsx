@@ -9,6 +9,8 @@ import { env } from '@/lib/env';
 import '@/lib/background-health-check';
 // Start the calendar "due to start" SSE scanner (same Node.js boot path).
 import '@/lib/calendar-event-scheduler';
+// Start the background job scheduler (same Node.js boot path; platform-org jobs only).
+import '@/lib/job-scheduler-engine';
 
 const inter = Inter({
   subsets: ['latin'],

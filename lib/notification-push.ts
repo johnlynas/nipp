@@ -114,7 +114,8 @@ function normalizePriority(priority: string | NotificationPriority): Notificatio
     key === NotificationPriority.WARNING ||
     key === NotificationPriority.ERROR ||
     key === NotificationPriority.CRITICAL ||
-    key === NotificationPriority.CALENDAR
+    key === NotificationPriority.CALENDAR ||
+    key === NotificationPriority.JOB
   ) {
     return key as NotificationPriority;
   }
@@ -359,12 +360,15 @@ export async function sendHeartbeat(): Promise<void> {
  * (see connection-tracking note above) never run two heartbeats.
  */
 export function startHeartbeat(): void {
+  const g = globalThis as unknown as Record<string, ReturnType<typeof setInterval> | null>;
+  if (g.__nipp_sseHeartbeatTimer) return; // already running (cross-copy safety)
   if (sseState.heartbeatTimer) return; // Already running
 
   const timer = setInterval(() => {
     sendHeartbeat().catch(console.error);
   }, HEARTBEAT_INTERVAL_MS);
 
+  g.__nipp_sseHeartbeatTimer = timer;
   sseState.heartbeatTimer = timer;
 
   if (typeof timer.unref === 'function') {

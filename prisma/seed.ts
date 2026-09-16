@@ -327,9 +327,10 @@ async function main() {
     process.exit(1);
   }
 
-  const envPlatformOrgId = process.env.PLATFORM_ORG_ID?.trim();
+  // Accept both PLATFORM_ORGANIZATION_ID (env-schema) and PLATFORM_ORG_ID (legacy) for flexibility
+  const envPlatformOrgId = process.env.PLATFORM_ORGANIZATION_ID?.trim() ?? process.env.PLATFORM_ORG_ID?.trim();
   if (!envPlatformOrgId) {
-    console.warn('\n⚠️ WARNING: PLATFORM_ORG_ID environment variable is not set.');
+    console.warn('\n⚠️ WARNING: PLATFORM_ORGANIZATION_ID environment variable is not set.');
     console.warn('The script will attempt to find or create the Platform Organization automatically.\n');
   }
 
@@ -1047,7 +1048,7 @@ async function main() {
   console.log('\n✅ Seed completed successfully! Database overwritten with latest script values.');
   console.log('\n📝 NEXT STEPS:');
   console.log('1. (Optional) Add the following to your .env for stability:');
-  console.log(`   PLATFORM_ORG_ID=${platformOrgId}`);
+  console.log(`   PLATFORM_ORGANIZATION_ID=${platformOrgId}`);
   console.log('\n2. Restart your dev server: npm run dev');
   console.log('3. Log out completely and log back in using the credentials from your .env file.');
   console.log('4. You should now see the Super Admin dashboard!\n');

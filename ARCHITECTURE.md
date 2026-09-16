@@ -56,7 +56,18 @@ This document is organized by **functional area**. Use the table of contents bel
   - [Models & Services](#models--services)
   - [Due-to-Start SSE Notifications](#due-to-start-sse-notifications)
   - [Authorization](#authorization)
-- [10. Cache Architecture](#10-cache-architecture)
+- [10. Job Scheduler](#10-job-scheduler)
+  - [Components](#components)
+  - [Execution modes](#execution-modes)
+  - [Concurrency and circuit breaking](#concurrency-and-circuit-breaking)
+  - [Built-in handlers](#built-in-handlers)
+  - [Operator scripts and dry run](#operator-scripts-and-dry-run)
+  - [Approval Gate](#approval-gate)
+  - [Data Model](#data-model)
+  - [Lifecycle notifications via SSE](#lifecycle-notifications-via-sse)
+  - [Admin API](#admin-api)
+  - [Testing](#testing-1)
+- [11. Cache Architecture](#11-cache-architecture)
   - [Overview](#overview)
   - [Layer 1: In-Memory LRU Cache](#layer-1-in-memory-lru-cache)
   - [Layer 2: Redis (Distributed Cache)](#layer-2-redis-distributed-cache)
@@ -65,14 +76,14 @@ This document is organized by **functional area**. Use the table of contents bel
   - [Cross-Instance Invalidation](#cross-instance-invalidation)
   - [Stampede Protection](#stampede-protection)
   - [Cache Monitoring & Metrics](#cache-monitoring--metrics)
-- [11. Security](#11-security)
+  - [12. Security](#12-security)
   - [Content Security Policy (CSP)](#content-security-policy-csp)
   - [Data-in-Transit Payload Encryption](#data-in-transit-payload-encryption)
   - [CSRF Protection](#csrf-protection)
   - [Secrets Management](#secrets-management)
   - [PII Logging Policy](#pii-logging-policy)
-- [12. Project Structure](#12-project-structure)
-- [13. Development & Testing](#13-development--testing)
+  - [13. Project Structure](#13-project-structure)
+  - [14. Development & Testing](#14-development--testing)
   - [Local Setup](#local-setup)
   - [Running Tests](#running-tests)
   - [Database Migrations](#database-migrations)
@@ -106,6 +117,7 @@ This document is organized by **functional area**. Use the table of contents bel
 | Connection Pooler | PgBouncer (port 6432) |
 | Cache / Session Store | Redis (`ioredis`) |
 | In-Memory Cache | `lru-cache` v11 (L1 cache) |
+| Job Engine | Bree v9.2.9 + `@breejs/later` v4.2 — worker-per-run execution (default) with an inline main-thread fallback (`JOB_SCHEDULER_BREE_MODE`) |
 | Email | Nodemailer v9.0.3 |
 | Logging | Pino (`pino`, `pino-pretty`) |
 | Database Driver | `pg` v8.22.0 |
@@ -126,6 +138,8 @@ This document is organized by **functional area**. Use the table of contents bel
 ## 2. High-Level Architecture
 
 The following diagram illustrates the core components, data flow, and security boundaries of the portal.
+
+### Component Diagram
 
 ```mermaid
 flowchart TB
@@ -175,6 +189,7 @@ flowchart TB
 | **Data Layer** (`prisma/schema.prisma`) | Schema definition, relations, RLS policies. | PostgreSQL |
 | **Cache Layer** (`lib/cache/`, `lib/redis.ts`) | L1 in-memory + L2 Redis caching with stampede protection and cross-instance invalidation. | Node / Redis |
 | **Real-Time Push** (`lib/notification-push.ts`, `app/api/notifications/stream/route.ts`) | SSE notification hub: subscriber registry, two-layer dedup, DB persistence, scope-filtered fan-out to admin & tenant browsers (Section 8). | Node |
+| **Domain Services** (`services/`) | Domain business logic: `job-scheduler-service` (platform job engine), `calendar-event-service`, `team-service`, `organization-service`, … | Node |
 
 ---
 
@@ -338,6 +353,7 @@ A dedicated `services/` layer sits between the API routes and the database (Pris
 | Calendar | `services/calendar-service.ts` | Calendar container CRUD, default-calendar bootstrapping (org-scoped) |
 | Calendar Event | `services/calendar-event-service.ts` | Event CRUD, recurrence expansion, upcoming events |
 | Calendar Notification | `services/calendar-notification-service.ts` | Today's-events email notifications, delivery history |
+| Job Scheduler | `services/job-scheduler-service.ts` + `lib/job-scheduler-engine.ts` / `lib/job-scheduler-bree.ts` | Platform-org job engine: main-thread due-scanner, Bree worker-per-run execution (or inline), sandboxed operator scripts, approval gate, concurrency circuit breaker, execution history, lifecycle SSE. |
 
 ---
 
@@ -364,6 +380,8 @@ A dedicated `services/` layer sits between the API routes and the database (Pris
 | `Notification` | Global | In-app events pushed over SSE: title, message, priority (`INFO`/`WARNING`/`ERROR`/`CRITICAL`), scope (`GLOBAL`/`ORG`), source tag, optional `organizationId`, and an `acknowledged` admin flag |
 | `Calendar` | Org-scoped | Container/namespace for calendar events (one default per org) |
 | `CalendarEvent` | Org-scoped | Individual events within a calendar (local datetimes, optional `propertyId`; recurrence stored as RFC 5545 `rrule` JSON + `exdates` Json columns, not a separate model) |
+| `JobDefinition` | Platform-org | Job specification. Fields: `name` (unique per org), `description`, `handlerKey`, `code` (operator script source — sandboxed, not eval'd), `scheduleExpr` (JSON), `timezone`, `timeoutMs`, `concurrencyLimit`, `enabled`, the approval gate (`approved` / `approvedBy` / `approvedAt` / `approvalNote`), `lastRunAt` (claim marker), `lastRunStatus`, `createdBy`. |
+| `JobExecution` | Platform-org | Per-run record: status (PENDING→RUNNING→SUCCEEDED/FAILED/CANCELLED), trigger (SCHEDULE/MANUAL), actorId, resultJson, error, dryRun flag on the result. Cascading delete from `JobDefinition`. |
 
 ### Relationships
 
@@ -392,123 +410,6 @@ The system uses **PgBouncer** as a connection pooler between the Node.js applica
 - **Health Monitoring:** The `/api/health` endpoint includes a dedicated PgBouncer health check via `lib/pgbouncer-monitor.ts`. It queries the admin interface for connection counts and pool utilization.
 - **System Health Card:** The admin dashboard displays PgBouncer status, latency, and active connections alongside Database and Cache health.
 - **Pool Modes:** Configured for `transaction` or `session` pooling depending on requirements.
-
----
-
-## 10. Cache Architecture
-
-The portal implements a **multi-layered caching strategy** combining Next.js ISR, L1 in-memory LRU cache, Redis (L2), TanStack Query (client-side), and SSE for real-time updates. This section covers the server-side cache layers in detail.
-
-For client-side caching, see [CACHING_ARCHITECTURE.md](./CACHING_ARCHITECTURE.md); for the SSE real-time notification system, see [Section 8](#8-real-time-notification-system-sse).
-
-### Overview
-
-```
-Request → API Route / Resolver
-    │
-    ▼
-L1 Cache Check (in-memory, <0.1ms)
-    ├── HIT → Return cached value
-    │
-    └── MISS
-        │
-        ▼
-L2 Cache Check (Redis, ~5ms)
-    ├── HIT → Populate L1, return value
-    │
-    └── MISS
-        │
-        ▼
-Database Query (Prisma, ~15–40ms)
-    │
-    ▼
-Write-Through: L2 (Redis, configurable TTL) + L1 (60s TTL)
-    │
-    ▼
-Pub/Sub Publish → Other instances evict L1 key
-```
-
-### Layer 1: In-Memory LRU Cache
-
-A high-performance, instance-local cache for frequently accessed data. Eliminates network round-trips for hot keys.
-
-| Parameter | Default | Description |
-|-----------|---------|-------------|
-| `L1_CACHE_MAX_ENTRIES` | 1000 | Maximum cache entries per instance |
-| `L1_CACHE_TTL_MS` | 60,000 (60s) | Max TTL for cache entries |
-| `ENABLE_L1_CACHE` | `true` | Feature flag to disable L1 entirely |
-
-- **Library:** `lru-cache` v11 with byte-level size calculation
-- **Runtime Guard:** Disabled on Edge runtime (`process.env.NEXT_RUNTIME === 'edge'`)
-- **Max Entry Size:** 10KB (rejects oversized entries to prevent memory issues)
-- **Singleton Pattern:** Stored on `globalThis` for a single instance across all Next.js route bundles
-- **TTL Strategy:** 60-second max TTL (shorter than Redis to limit stale data window)
-
-### Layer 2: Redis (Distributed Cache)
-
-Distributed server-side cache for cross-instance consistency and persistence across restarts.
-
-- **Client:** `ioredis` with retry strategy (max 10 retries, exponential backoff)
-- **Connection Pooling:** Handled internally by ioredis
-- **Invalidation:** Explicit via `cacheDel()` + Pub/Sub for cross-instance sync
-
-### Hybrid Cache Orchestration
-
-The hybrid cache layer (`lib/cache/hybrid.ts`) provides a unified interface: `cacheGet(key, resolver, options)` checks L1 first, falls back to Redis (L2), then calls the resolver function on a miss. Results are written through to both layers.
-
-- **Read Path:** L1 → L2 (Redis) → Resolver (DB). Write-through stores to both layers on miss.
-- **Write Path:** L2 first (source of truth) → L1 → Pub/Sub publish for cross-instance invalidation.
-- **Delete Path:** Remove from both layers + Pub/Sub publish.
-
-### Adaptive TTL Strategy
-
-| Type | TTL | Used For |
-|------|-----|----------|
-| `permanent` | No TTL (evicted only on explicit delete) | Static reference data |
-| `stable` | 1 hour (3600s) | Orgs, users, roles |
-| `volatile` | 5 minutes (300s) | Permissions (can change with role updates) |
-| `search` | 30 seconds | Search results (relatively stable) |
-
-### Cross-Instance Invalidation
-
-When data changes, a Pub/Sub message is published to Redis channel `cache:invalidations`. All instances subscribe to this channel and evict the affected key from their L1 cache:
-
-```
-Instance A:  Mutation → redis.publish('cache:invalidations', { key })
-Instance B:  subscriber.on('message') → lruCache.delete(key)
-Instance C:  subscriber.on('message') → lruCache.delete(key)
-```
-
-### Stampede Protection
-
-When the L1 cache is cold (e.g., after restart), concurrent requests for the same key could all miss and trigger simultaneous DB queries. Stampede protection uses a `Map<string, Promise>` (`lib/cache/stampede.ts`) to deduplicate concurrent misses — only one resolver is executed per unique key.
-
-### Cache Monitoring & Metrics
-
-Cache metrics are exposed via `lib/cache/health.ts` and the health endpoint (`GET /api/health`):
-
-```json
-{
-  "l1Hits": 1500,
-  "l1Misses": 500,
-  "l2Hits": 450,
-  "l2Misses": 50,
-  "l1Size": 850,
-  "l1MemoryBytes": 4250000,
-  "l1HitRate": 75.0,
-  "redisConnected": true
-}
-```
-
-| Metric | Source | Target |
-|--------|--------|--------|
-| L1 Hit Rate | `lib/cache/health.ts` | >70% (varies by traffic) |
-| L1 Entry Count | `lib/cache/health.ts` | <1000 (configurable) |
-| L1 Memory Usage | `lib/cache/health.ts` | <20MB per instance |
-| Redis Latency | `lib/redis.ts` | <5ms p99 |
-| Redis Connection State | `lib/redis.ts` | Connected |
-
-The admin dashboard includes a cache metrics page at `/admin/cache-metrics`. A profiling script (`scripts/cache-benchmark.ts`) measures real-world cache performance across all scenarios.
 
 ---
 
@@ -615,7 +516,7 @@ Events are stored in the global `Notification` model (distinct from
 
 | Field | Values | Meaning |
 |-------|--------|---------|
-| `priority` | `INFO` · `WARNING` · `ERROR` · `CRITICAL` | Display weighting. `INFO`/`WARNING` auto-dismiss from the ticker after 10 s; `ERROR`/`CRITICAL` persist until manually dismissed. Health failures push `CRITICAL`. |
+| `priority` | `INFO` · `WARNING` · `ERROR` · `CRITICAL` · `CALENDAR` · `JOB` | Display weighting. `INFO`/`WARNING` auto-dismiss from the ticker after 10 s; `ERROR`/`CRITICAL`/`CALENDAR`/`JOB` persist until manually dismissed. Health failures push `CRITICAL`. `CALENDAR` (green) is for upcoming-event reminders; `JOB` (purple) is for job-scheduler telemetry. |
 | `scope` | `GLOBAL` · `ORG` (default) | **Who receives it live over SSE.** `GLOBAL` = every connected subscriber; `ORG` = that tenant's subscribers plus Super Admins only. |
 | `source` | e.g. `health-check:database`, `admin:role-management` | Machine-readable event family; powers filters, search, and page-level reactions (health card keys off these). |
 | `organizationId` | nullable | Carries the affected tenant for org-level operations so the log can attribute them; NULL for pure global broadcasts. Org deletion is `SetNull`. |
@@ -641,6 +542,10 @@ Every currently wired producer, with its success/failure priorities:
 | `admin:resource-management` | `notifyResourceOperation(…)` | resource create · update · delete | INFO / ERROR | GLOBAL (no org — global catalog) |
 | `admin:message` | `notifyAdminMessage(title, message, orgId?, priority?)` | Admin broadcast via `POST /api/admin/notifications` | caller-selected (default INFO) | GLOBAL or ORG |
 | `calendar:event-upcoming` | direct `pushNotification(...)` from `lib/calendar-event-scheduler.ts` | One alert per event instance that starts within the lead window (default 15 min), single + recurring (exdate-aware) | INFO | ORG (event's tenant)² |
+| `job-scheduler:execution` | `pushNotification(...)` — worker path via the engine (parent thread re-emits on receipt of the run result; inline/trigger runs emit in place) | Successful job run (SCHEDULE or MANUAL); JOB priority for operational visibility; the worker's own emission is skipped (its SSE subscriber registry is an empty thread-local copy) and DB dedup collapses any double | JOB | GLOBAL |
+| `job-scheduler:failure` | same wiring, with the failure reason carried through `RunResult.error` | Failed job run (handler throws or times out); ERROR priority to alert administrators | ERROR | GLOBAL |
+| `job-scheduler:worker-error` | `pushNotification(...)` in `lib/job-scheduler-bree.ts` | The worker engine itself failed (fork crashed, dispatch error) — the run reports SKIPPED; surfaced so a stuck lastRunAt doesn't hide | ERROR | GLOBAL |
+| `job-scheduler:throttled` | `pushNotification(...)` in `lib/job-scheduler-concurrency.ts` (debounced to ≤ 1/min) | A run queued > 1 s for a concurrency slot — the circuit breaker is saturated | WARNING | GLOBAL |
 
 ¹ Sent `GLOBAL` so all Super Admins see platform operations everywhere, but the
 affected `organizationId` is passed through so the log attributes the event to
@@ -863,6 +768,11 @@ Full design rationale, trade-offs (restart duplicates, lost-not-resent, per-scan
 cap, cross-process dedup) and limitations:
 [documents/feature-planning-and-development/calendar-event-sse-notifications.md](./documents/feature-planning-and-development/calendar-event-sse-notifications.md).
 
+The other two module-load schedulers (health checks, this scanner) are
+`isMainThread`-guarded for the same reason as the SSE hub: Bree job-scheduler
+worker threads import these modules transitively via their runner bootstraps,
+and an unguarded per-fork interval would double every 30 s scan.
+
 The other calendar-owned notification flow is **email** dispatch for today's
 events, handled by `lib/notifications/dispatcher.ts`, with delivery via
 `lib/notifications/email.ts` (nodemailer) and event definitions in
@@ -874,7 +784,350 @@ Every `/api/organizations/[orgId]/calendar*` route verifies the session (401) an
 
 ---
 
-## 11. Security
+## 10. Job Scheduler
+
+The platform runs a **background job scheduler** — a general-purpose execution
+layer for platform automation (and the substrate for operator-authored scripts).
+It is **platform-organization only**: tenant users cannot define, view, trigger,
+or inspect jobs.
+
+```mermaid
+flowchart LR
+    subgraph Boot[Server boot]
+        L["app/layout.tsx<br/>import '@/lib/job-scheduler-engine'"] --> S["startJobScheduler()<br/>globalThis singleton · unref'd timer<br/>immediate first scan on boot"]
+        S --> B["registerBuiltinHandlers()"]
+        S --> R["reapStaleRunners()"]
+        S --> SH["SIGTERM / SIGINT handlers<br/>(graceful worker shutdown)"]
+    end
+
+    subgraph Scan[Main thread — decision only]
+        T["tick every 10 s"] --> Q["findMany(<br/>enabled AND approved)"]
+        Q --> D{"isDueAt(now, scheduleExpr,<br/>lastRunAt)?<br/>full IANA-timezone cron via @breejs/later<br/>+ interval + oneshot"}
+    end
+
+    S --> T
+    D -- due --> C["concurrency gate<br/>sem max(MAX_CONCURRENT, DB_CONCURRENCY, 1)"]
+
+    subgraph Paths[Execution — JOB_SCHEDULER_BREE_MODE]
+        C --> W["worker (default)<br/>Bree fork-per-run"]
+        C --> I["inline (fallback)<br/>runJob in main thread"]
+    end
+
+    subgraph Worker[Bree worker thread]
+        W --> M["materialize runner .cjs<br/>(job-scheduler-runtime/, atomic rename)"]
+        M --> WB["worker bootstrap:<br/>TS loader + '@/…' alias hooks<br/>sets jobSchedulerWorker flag"]
+        WB --> RJW["JobSchedulerService.runJob(jobId)"]
+    end
+
+    I --> RJM["JobSchedulerService.runJob(jobId)<br/>(same service, same code path)"]
+
+    subgraph Run[runJob — one place for all state]
+        RJW --> CL["claim gate<br/>(atomic lastRunAt update)"]
+        CL --> H["handlerKey built-in<br/>OR JobDefinition.code → sandboxed script"]
+        H --> EX["JobExecution row · timeout<br/>· audit entry"]
+    end
+    RJM --> CL
+
+    RJW -->|postMessage run result| PARENT["engine (parent thread)"]
+    PARENT --> SSE["re-emit lifecycle notification<br/>JOB / ERROR → SSE push hub (Section 8)"]
+
+    linkStyle default interpolate spline;
+```
+
+The split is deliberate: **the main-thread scanner decides *when* a job is due;**
+**`runJob` alone owns all run state** — the DB claim gate, `JobExecution` row,
+timeout, audit trail, and notification. Because the worker path calls the same
+`runJob`, a forked run and an inline run produce identical execution history.
+
+### Components
+
+| Component | File | Responsibility |
+|-----------|------|---------------|
+| Engine (scanner) | `lib/job-scheduler-engine.ts` | 10 s poll of `JobDefinition`; due-detection (`isDueAt`, full IANA-timezone-aware cron via `@breejs/later` occurrence walks + interval + oneshot); dispatch through the concurrency gate; graceful shutdown handlers. State on `globalThis`, timer `unref`'d — survives Next.js dev double-evaluation, never blocks process exit. |
+| Bree executor | `lib/job-scheduler-bree.ts` | Worker-per-run execution: materializes file-based CJS runners, forks via Bree (`node:worker_threads`), marshals results back with `postMessage`, enforces the per-run wall cap (`HARD_CAP_MS = 30 min` backstop over the job's own `timeoutMs`). |
+| Concurrency gate | `lib/job-scheduler-concurrency.ts` | Global circuit breaker + DB-connection ceiling (see below). Emits a debounced WARNING SSE alert when runs queue past 1 s. |
+| Built-in handlers | `lib/job-scheduler-builtins.ts` | The trusted, audited handler set (`noop`, `health-check`, `calendar-health-check`, `calendar-selftest`). Side-effect-free module so it can re-register inside every fork. |
+| Sandbox script runner | `lib/job-scheduler-script-runner.ts` | Executes operator-authored `JobDefinition.code` in a Node `vm` sandbox (see below). |
+| Service | `services/job-scheduler-service.ts` | The single platform-only interface: job CRUD, the approval gate, the DB-backed claim gate, handler dispatch, execution lifecycle + SSE, dry-run, execution history. Every public method runs `requirePlatformAdmin(ctx)`. |
+
+### Execution modes
+
+- **`worker` (default)** — each due run forks a fresh Bree worker thread
+  (Phase 0 spike invariants: at most one live worker per run key; runners are
+  file-based, never eval'd). The fork buys real isolation for operator scripts
+  and is safe for built-ins.
+- **`inline`** — the main thread runs `runJob` directly. Phase 1 fallback /
+  rollback path (and used by tests); no fork cost per run.
+
+The worker side cannot rely on anything the main process set up, so the
+bootstrap (`job-scheduler-worker-bootstrap.cjs`, materialized by
+`lib/job-scheduler-bree.ts`) registers a per-worker `node:module.registerHooks`
+loader (Node ≥ 22.15) that transpiles project `.ts` files to CJS and resolves
+both `@/…` aliases and extensionless relative imports to TypeScript candidates.
+It is rewritten **only when the template content changed** (byte-identical
+files are kept), so loader fixes in `job-scheduler-bree.ts` take effect on the
+next run instead of outliving a freshness window. Bree and its deps stay
+webpack-external (`serverExternalPackages` in `next.config.ts`) so the workers
+see real filesystem paths.
+
+**Worker-thread threading rules** (why some things happen in the parent):
+
+- A worker is its own thread: module state, the Prisma client, and especially
+  the SSE subscriber registry are **thread-local copies**. The bootstrap sets a
+  `globalThis.jobSchedulerWorker` flag; `runJob` skips its own
+  SUCCEEDED/FAILED notification when the flag is set, and the **engine parent
+  re-emits it** on receipt (identical payload shape → the push hub's 10 s dedup
+  collapses any double). SKIPPED runs announce nothing, matching inline mode.
+- The health-check and calendar-event scanners that boot off module load are
+  `isMainThread`-guarded for the same reason — a per-fork copy of their 30 s
+  interval would double every scan (each worker sees its own "fresh"
+  singleton).
+
+### Concurrency and circuit breaking
+
+Every run holds one slot in the process-wide semaphore for its full duration,
+sized `max(JOB_SCHEDULER_MAX_CONCURRENT, JOB_SCHEDULER_DB_CONCURRENCY, 1)`
+(`lib/job-scheduler-concurrency.ts`):
+
+- `JOB_SCHEDULER_MAX_CONCURRENT` (default **5**) — the *runtime* circuit
+  breaker: caps simultaneous runs / forked workers against a burst of due jobs.
+- `JOB_SCHEDULER_DB_CONCURRENCY` (default **100**) — the *connection-pool
+  ceiling*, sized below PgBouncer `max_client_conn`, so concurrent in-process
+  Prisma clients can never exceed it even if the runtime cap is raised.
+- A run waiting > 1 s for a slot emits at most one (debounced, per minute) WARNING-level SSE
+ alert (`job-scheduler:throttled`) so a saturated circuit is operator-visible
+ without a notification storm.
+
+### Built-in handlers
+
+Operators reference a handler by `handlerKey`; they cannot define new ones
+(operator code takes the sandboxed-script path). Registered idempotently as
+plain standalone functions (no closures over module state), so they survive the
+worker boundary unchanged:
+
+| handlerKey | Purpose | Emission |
+|------------|---------|----------|
+| `noop` | End-to-end smoke test; proves create → approve → enable → trigger → execute → SSE. | (result only) |
+| `health-check` | Platform health probe; alert on any unhealthy check, silent when healthy. | `ERROR` / `job-scheduler:health-check` on unhealthy |
+| `calendar-health-check` | Probes the calendar "due to start" pipeline; a thrown discovery **fails** the run. | (result only) |
+| `calendar-selftest` | Emits one `CALENDAR`-priority probe to prove the notification path is reachable (optional `{ title, message }` input). | `CALENDAR` / `job-scheduler:calendar-selftest` |
+
+### Operator scripts and dry run
+
+A job may carry `handlerKey` *or* `JobDefinition.code` — operator-authored
+JavaScript executed in a sandboxed VM **inside** the worker (defense in depth;
+worker isolation alone is not security isolation):
+
+- **Explicit surface only** — the script sees `ctx.{input, jobDefinitionId,
+  platformOrgId, trigger, dryRun}`, `log`, and `capabilities.notify(text)`. No
+  ambient globals: `process`, `require`, timers, `fetch`, `__dirname`, and ~25
+  other host identifiers are blocked by a **static denylist scan** (comments /
+  string-literal aware; needed because V8's `typeof` fast path bypasses Proxy
+  traps) *and* by runtime Proxy traps that throw on `constructor` / `prototype`
+  / `__proto__` / `__*` access. Code is capped at 50 KB.
+- **Dry-run** — `dryRunJob` runs the script with `dryRun: true`: capabilities
+  become no-op recorders, nothing is committed or emitted for real; the
+  execution row records `dryRun: true` + `capabilitiesUsed`. New jobs default to
+  dry-run only when `JOB_SCHEDULER_DRYRUN_DEFAULT=true`.
+
+### Approval gate
+
+Every newly created `JobDefinition` starts `enabled: false, approved: false`.
+
+The **approval gate** is the control that moves a job from "defined" to "may
+execute": a platform admin must approve the job before it can be enabled,
+manually triggered, dry-run, or run on its schedule.
+
+- `enableJob` throws if not approved; `updateJob` with `enabled: true` throws;
+  `triggerJob` / `dryRunJob` require **both** `enabled: true` and
+  `approved: true`.
+- The scanner's `findMany` additionally requires `approved: true` (defense in
+  depth: no job ever runs unreviewed, even against a corrupted row).
+- `approveJob` / `rejectJob` record `approvedBy`, `approvedAt`, and an optional
+  `approvalNote`, plus a durable `job.approved` / `job.rejected` audit entry.
+  Re-approval is idempotent (refreshes approver/timestamp, no duplicate audit);
+  rejection clears approval and disables the job.
+
+### Data model
+
+Two platform-org-scoped models in `prisma/schema.prisma`:
+
+- **`JobDefinition`** — the job specification: `platformOrgId` (owner), `name`
+  (unique per org), `description`, `handlerKey`, `code` (operator script,
+  `null` for built-ins), `scheduleExpr` (JSON), `timezone`, `timeoutMs`,
+  `concurrencyLimit`, `enabled`, the **approval gate** fields (`approved` /
+  `approvedBy` / `approvedAt` / `approvalNote`), `lastRunAt` (claim marker),
+  `lastRunStatus`, `createdBy`.
+- **`JobExecution`** — per-run record: `status` (PENDING → RUNNING → SUCCEEDED /
+  FAILED / CANCELLED), `trigger` (SCHEDULE / MANUAL), `actorId`, `resultJson`,
+  `error`, `startedAt` / `finishedAt`. Cascading delete from `JobDefinition`.
+
+### Lifecycle notifications via SSE
+
+| Event | Priority | Scope | Source |
+|-------|----------|-------|--------|
+| Job succeeded (scheduled, manual, or dry-run's parent re-emit) | `JOB` | GLOBAL | `job-scheduler:execution` |
+| Job failed (handler throws / times out; carries the failure reason) | `ERROR` | GLOBAL | `job-scheduler:failure` |
+| Worker engine itself fails (fork crash, dispatch error) | `ERROR` | GLOBAL | `job-scheduler:worker-error` |
+| Concurrency circuit saturated (run queued > 1 s) | `WARNING` | GLOBAL | `job-scheduler:throttled` |
+| `health-check` handler detects unhealthy platform | `ERROR` | GLOBAL | `job-scheduler:health-check` |
+| `calendar-selftest` handler fires | `CALENDAR` | GLOBAL | `job-scheduler:calendar-selftest` |
+
+Routine job lifecycle uses the dedicated `JOB` priority so it stays visually
+distinct from alert colours in the ticker (the same reasoning that justified
+`CALENDAR`).
+
+### Admin API
+
+All `requireSuperAdmin`-guarded, all `wrapPiiRoute`-wrapped, writes are
+`checkAdminRateLimit`-guarded:
+
+| Route | Methods | Purpose |
+|-------|---------|---------|
+| `/api/admin/jobs` | GET, POST | List jobs (filters: `enabled`, `approved`, `limit`) / create a job (starts disabled + unapproved; optional `description`, `code`, dry-run default) |
+| `/api/admin/jobs/[jobId]` | GET, PATCH, DELETE | Read / update (enabling via PATCH requires prior approval) / delete (cascades execution history) |
+| `/api/admin/jobs/[jobId]/approvals` | POST | Approve (default) or reject (`{ action, note? }`) — audited |
+| `/api/admin/jobs/[jobId]/trigger` | POST | Execute now — highest-risk; requires enabled **and** approved; audited via `job.triggered`; optional run `input` |
+| `/api/admin/jobs/[jobId]/dry-run` | POST | Sandboxed execution with `dryRun: true` — no committed side effects, capability recording |
+| `/api/admin/jobs/[jobId]/history` | GET | Execution history (filters: `status`, `trigger`, `limit`) |
+
+### Testing
+
+- **Service** — `tests/unit/job-scheduler-service.test.ts`: CRUD, the atomic
+  claim gate (overlap / restart idempotency), approval gate semantics, schedule
+  validation, dry-run plumbing.
+- **Engine** — `tests/unit/job-scheduler-engine.test.ts` +
+  `tests/unit/job-scheduler-engine-lifecycle.test.ts`: built-in handlers,
+  `isDueAt` (incl. timezone-aware cron occurrence math) and boot/shutdown
+  lifecycle.
+- **Concurrency** — `tests/unit/job-scheduler-concurrency.test.ts`: gate sizing,
+  FIFO release, throttle debouncing.
+- **Sandbox** — `tests/unit/job-scheduler-script-runner.test.ts`: capability
+  surface, static denylist, Proxy traps, dry-run recording.
+
+Design rationale, spike evidence, and the phase plan live in
+[documents/feature-planning-and-development/job-scheduler-service-plan.md](./documents/feature-planning-and-development/job-scheduler-service-plan.md).
+
+---
+
+## 11. Cache Architecture
+
+The portal implements a **multi-layered caching strategy** combining Next.js ISR, L1 in-memory LRU cache, Redis (L2), TanStack Query (client-side), and SSE for real-time updates. This section covers the server-side cache layers in detail.
+
+For client-side caching, see [CACHING_ARCHITECTURE.md](./CACHING_ARCHITECTURE.md); for the SSE real-time notification system, see [Section 8](#8-real-time-notification-system-sse).
+
+### Overview
+
+```
+Request → API Route / Resolver
+    │
+    ▼
+L1 Cache Check (in-memory, <0.1ms)
+    ├── HIT → Return cached value
+    │
+    └── MISS
+        │
+        ▼
+L2 Cache Check (Redis, ~5ms)
+    ├── HIT → Populate L1, return value
+    │
+    └── MISS
+        │
+        ▼
+Database Query (Prisma, ~15–40ms)
+    │
+    ▼
+Write-Through: L2 (Redis, configurable TTL) + L1 (60s TTL)
+    │
+    ▼
+Pub/Sub Publish → Other instances evict L1 key
+```
+
+### Layer 1: In-Memory LRU Cache
+
+A high-performance, instance-local cache for frequently accessed data. Eliminates network round-trips for hot keys.
+
+| Parameter | Default | Description |
+|-----------|---------|-------------|
+| `L1_CACHE_MAX_ENTRIES` | 1000 | Maximum cache entries per instance |
+| `L1_CACHE_TTL_MS` | 60,000 (60s) | Max TTL for cache entries |
+| `ENABLE_L1_CACHE` | `true` | Feature flag to disable L1 entirely |
+
+- **Library:** `lru-cache` v11 with byte-level size calculation
+- **Runtime Guard:** Disabled on Edge runtime (`process.env.NEXT_RUNTIME === 'edge'`)
+- **Max Entry Size:** 10KB (rejects oversized entries to prevent memory issues)
+- **Singleton Pattern:** Stored on `globalThis` for a single instance across all Next.js route bundles
+- **TTL Strategy:** 60-second max TTL (shorter than Redis to limit stale data window)
+
+### Layer 2: Redis (Distributed Cache)
+
+Distributed server-side cache for cross-instance consistency and persistence across restarts.
+
+- **Client:** `ioredis` with retry strategy (max 10 retries, exponential backoff)
+- **Connection Pooling:** Handled internally by ioredis
+- **Invalidation:** Explicit via `cacheDel()` + Pub/Sub for cross-instance sync
+
+### Hybrid Cache Orchestration
+
+The hybrid cache layer (`lib/cache/hybrid.ts`) provides a unified interface: `cacheGet(key, resolver, options)` checks L1 first, falls back to Redis (L2), then calls the resolver function on a miss. Results are written through to both layers.
+
+- **Read Path:** L1 → L2 (Redis) → Resolver (DB). Write-through stores to both layers on miss.
+- **Write Path:** L2 first (source of truth) → L1 → Pub/Sub publish for cross-instance invalidation.
+- **Delete Path:** Remove from both layers + Pub/Sub publish.
+
+### Adaptive TTL Strategy
+
+| Type | TTL | Used For |
+|------|-----|----------|
+| `permanent` | No TTL (evicted only on explicit delete) | Static reference data |
+| `stable` | 1 hour (3600s) | Orgs, users, roles |
+| `volatile` | 5 minutes (300s) | Permissions (can change with role updates) |
+| `search` | 30 seconds | Search results (relatively stable) |
+
+### Cross-Instance Invalidation
+
+When data changes, a Pub/Sub message is published to Redis channel `cache:invalidations`. All instances subscribe to this channel and evict the affected key from their L1 cache:
+
+```
+Instance A:  Mutation → redis.publish('cache:invalidations', { key })
+Instance B:  subscriber.on('message') → lruCache.delete(key)
+Instance C:  subscriber.on('message') → lruCache.delete(key)
+```
+
+### Stampede Protection
+
+When the L1 cache is cold (e.g., after restart), concurrent requests for the same key could all miss and trigger simultaneous DB queries. Stampede protection uses a `Map<string, Promise>` (`lib/cache/stampede.ts`) to deduplicate concurrent misses — only one resolver is executed per unique key.
+
+### Cache Monitoring & Metrics
+
+Cache metrics are exposed via `lib/cache/health.ts` and the health endpoint (`GET /api/health`):
+
+```json
+{
+  "l1Hits": 1500,
+  "l1Misses": 500,
+  "l2Hits": 450,
+  "l2Misses": 50,
+  "l1Size": 850,
+  "l1MemoryBytes": 4250000,
+  "l1HitRate": 75.0,
+  "redisConnected": true
+}
+```
+
+| Metric | Source | Target |
+|--------|--------|--------|
+| L1 Hit Rate | `lib/cache/health.ts` | >70% (varies by traffic) |
+| L1 Entry Count | `lib/cache/health.ts` | <1000 (configurable) |
+| L1 Memory Usage | `lib/cache/health.ts` | <20MB per instance |
+| Redis Latency | `lib/redis.ts` | <5ms p99 |
+| Redis Connection State | `lib/redis.ts` | Connected |
+
+The admin dashboard includes a cache metrics page at `/admin/cache-metrics`. A profiling script (`scripts/cache-benchmark.ts`) measures real-world cache performance across all scenarios.
+
+---
+
+## 12. Security
 
 ### Content Security Policy (CSP)
 
@@ -975,7 +1228,7 @@ Payload encryption does **not** replace CSRF protection. PII mutating routes mus
 
 ---
 
-## 12. Project Structure
+## 13. Project Structure
 
 ```
 nipp/
@@ -990,7 +1243,7 @@ nipp/
 │   │   ├── system-logs/page.tsx  # System log viewer
 │   │   └── users/                # User management (list, create, edit, view, delete)
 │   ├── api/                      # API endpoints (RESTful routes)
-│   │   ├── admin/                # Super admin APIs (audit-logs, cache metrics, notifications log, orgs, permissions, roles, users)
+│   │   ├── admin/                # Super admin APIs (audit-logs, cache metrics, notifications log, orgs, permissions, roles, users, jobs)
 │   │   ├── auth/                 # BetterAuth catch-all + user endpoints
 │   │   ├── cache/metrics/        # Cache metrics endpoint
 │   │   ├── csp-report/           # CSP violation reporting
@@ -1042,6 +1295,11 @@ nipp/
 │   ├── ip.ts                     # IP address utilities
 │   ├── logger.ts                 # Pino logger with PII redaction
 │   ├── middleware/auth.ts        # Auth middleware utilities
+│   ├── job-scheduler-builtins.ts    # Trusted handler set (noop, health-check, calendar-*); side-effect-free, shared by main thread + workers
+│   ├── job-scheduler-bree.ts        # Bree worker-per-run executor: materialized runners, TS loader bootstrap, timeouts (Section 10)
+│   ├── job-scheduler-concurrency.ts # Global concurrency gate / circuit breaker + DB pool ceiling (Section 10)
+│   ├── job-scheduler-engine.ts      # Main-thread due-scanner, IANA-cron due-detection, dispatch, graceful shutdown; booted via app/layout.tsx (Section 10)
+│   ├── job-scheduler-script-runner.ts # Sandboxed vm runner for operator code (Section 10)
 │   ├── notification-push.ts      # In-process SSE push hub: subscriber registry, dedup, persist & broadcast (Section 8)
 │   ├── notifications/            # Email notification system (dispatcher, email, events — calendar today-events flow)
 │   ├── org-bootstrap.ts          # Organization bootstrapping logic
@@ -1088,6 +1346,7 @@ nipp/
 │   ├── calendar-event-service.ts  # Calendar event CRUD, recurrence expansion
 │   ├── calendar-notification-service.ts  # Today's-events email notifications
 │   ├── calendar-service.ts        # Calendar CRUD, default-calendar bootstrapping
+│   ├── job-scheduler-service.ts   # Job engine interface: CRUD, approval gate, claim gate, handler dispatch, sandboxed scripts, dry-run, history (Section 10)
 │   ├── organization-service.ts    # Organization management & lifecycle
 │   ├── permission-service.ts      # Global permission catalog CRUD
 │   ├── resource-service.ts        # Global resource catalog CRUD (Super Admin)
@@ -1123,12 +1382,13 @@ nipp/
 ├── docker-compose.test.yml       # Docker Compose for test infrastructure (PostgreSQL + Redis)
 ├── Dockerfile.test               # Test environment Dockerfile
 ├── docker-entrypoint.sh          # Container entrypoint script
+├── job-scheduler-runtime/        # (gitignored) materialized worker runners + TS-loader bootstrap; rewritten only when content changes (Section 10)
 └── vitest.config.ts              # Vitest configuration (jsdom for React, Node for backend)
 ```
 
 ---
 
-## 13. Development & Testing
+## 14. Development & Testing
 
 ### Local Setup
 
@@ -1167,5 +1427,5 @@ npm run dev                      # Start development server
 
 ---
 
-*Last Updated: 02/09/26*
+*Last Updated: 15/09/26*
 *Maintained by: Property NI Development Team*

@@ -107,6 +107,54 @@ export const envSchema = z.object({
 
   /** Calendar POST/PATCH/DELETE: window duration in seconds (default 60). */
   RATE_LIMIT_CALENDAR_WINDOW: z.string().regex(/^\d+$/).optional(),
-});
+
+   // ---------------------------------------------------------------------------
+   // Background Job Scheduler (job-scheduler-service / Bree — platform-org only)
+   // ---------------------------------------------------------------------------
+
+   /** Master on/off for the job scheduler engine. */
+  JOB_SCHEDULER_ENABLED: z.enum(['true', 'false']).default('true'),
+
+   /** Default IANA timezone for schedules (default 'Europe/London'). */
+  JOB_SCHEDULER_TIMEZONE: z.string().default('Europe/London'),
+
+   /**
+    * Runtime circuit-breaker cap on simultaneous job runs (default 5). Consumed by
+    * `lib/job-scheduler-concurrency.ts`: the global semaphore is sized at
+    * `max(MAX_CONCURRENT, DB_CONCURRENCY, 1)`, so this bounds live runs / forked
+    * workers. A tick with N due jobs enqueues N runs and releases one slot per
+    * completed run.
+    */
+   JOB_SCHEDULER_MAX_CONCURRENT: z.string().regex(/^\d+$/).default('5'),
+
+   /**
+    * Connection-pool ceiling — sized BELOW PgBouncer `max_client_conn` so the
+    * scheduler coexists with other app connections (default 100). The breaker uses
+    * it as a floor the runtime cap may not undercut: with DEFAULT (100) >
+    * MAX_CONCURRENT (5) the pool ceiling is the binding bound in the usual case,
+    * keeping concurrent in-process Prisma clients well under capacity.
+    */
+   JOB_SCHEDULER_DB_CONCURRENCY: z.string().regex(/^\d+$/).default('100'),
+
+   /** Per-job default concurrency limit (default 1). */
+  JOB_SCHEDULER_DEFAULT_CONCURRENCY: z.string().regex(/^\d+$/).default('1'),
+
+   /** Per-job default wall-clock cap in ms (default 300000 = 5 min). */
+  JOB_SCHEDULER_DEFAULT_TIMEOUT_MS: z.string().regex(/^\d+$/).default('300000'),
+
+   /** Load enabled jobs from the DB at boot (default true). */
+  JOB_SCHEDULER_BOOT_REGISTRY: z.enum(['true', 'false']).default('true'),
+
+   /** New jobs default to dry-run until approved (Phase 2; default false). */
+   JOB_SCHEDULER_DRYRUN_DEFAULT: z.enum(['true', 'false']).default('false'),
+
+   /**
+    * Execution path for due jobs: `worker` = Bree fork-per-run (Phase 2,
+    * worker isolation for untrusted-script readiness); `inline` = main-thread
+    * scanner runs runJob directly (Phase 1 fallback/rollback). Default:
+    * worker.
+    */
+   JOB_SCHEDULER_BREE_MODE: z.enum(['worker', 'inline']).default('worker'),
+   });
 
 export type Env = z.infer<typeof envSchema>;

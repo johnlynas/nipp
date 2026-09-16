@@ -56,8 +56,8 @@ export async function POST(request: NextRequest) {
     }
 
     // Validate priority (optional, defaults to INFO). CALENDAR is the
-    // "event due to start" reminder priority emitted by the calendar scheduler.
-    const validPriorities = ['info', 'warning', 'error', 'critical', 'calendar'] as const;
+    // "event due to start" reminder priority; JOB is emitted by the job scheduler.
+    const validPriorities = ['info', 'warning', 'error', 'critical', 'calendar', 'job'] as const;
     const resolvedPriority = validPriorities.includes(priority) ? priority : 'info';
 
     // Validate orgId — required for both scopes
@@ -86,7 +86,7 @@ export async function POST(request: NextRequest) {
       title,
       message,
       organizationId,
-      resolvedPriority as 'INFO' | 'WARNING' | 'ERROR' | 'CRITICAL' | 'CALENDAR'
+      resolvedPriority as 'INFO' | 'WARNING' | 'ERROR' | 'CRITICAL' | 'CALENDAR' | 'JOB'
     );
 
     return NextResponse.json({ success: true });
@@ -179,7 +179,8 @@ export async function GET(request: NextRequest) {
       globalDb.notification.count({ where: { priority: 'ERROR' } }),
       globalDb.notification.count({ where: { priority: 'CRITICAL' } }),
       globalDb.notification.count({ where: { priority: 'CALENDAR' } }),
-    ]);
+      globalDb.notification.count({ where: { priority: 'JOB' } }),
+     ]);
 
     return NextResponse.json({
       notifications: notifications.map((n) => ({
@@ -204,7 +205,8 @@ export async function GET(request: NextRequest) {
         errorCount: priorityCounts[2],
         criticalCount: priorityCounts[3],
         calendarCount: priorityCounts[4],
-       },
+        jobCount: priorityCounts[5],
+        },
      });
   } catch (error) {
     logger.error({ err: error, page, pageSize, scope, priority }, 'Failed to fetch notifications');

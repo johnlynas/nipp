@@ -4,7 +4,7 @@
  * Connects to /api/notifications/stream, maintains a queue of notifications
  * displayed as a footer ticker in the admin dashboard. Auto-dismisses after
  * 10 seconds for INFO/WARNING, or stays persistent (until manually dismissed)
- * for ERROR/CRITICAL/CALENDAR priority.
+ * for ERROR/CRITICAL/CALENDAR/JOB priority.
  *
  * Uses a singleton connection pattern to prevent multiple SSE connections
  * from the same browser tab (fixes 429 errors from React StrictMode and
@@ -22,7 +22,7 @@ export interface NotificationItem {
   id: string;
   title: string;
   message: string;
-  priority: 'INFO' | 'WARNING' | 'ERROR' | 'CRITICAL' | 'CALENDAR';
+  priority: 'INFO' | 'WARNING' | 'ERROR' | 'CRITICAL' | 'CALENDAR' | 'JOB';
   source?: string | null;
   organizationId?: string | null;
   organizationName?: string | null;
@@ -41,6 +41,7 @@ export const PRIORITY_COLORS: Record<string, string> = {
   ERROR: 'text-red-400 bg-red-500/10 border-red-500/30',
   CRITICAL: 'text-red-400 bg-red-500/20 border-red-500/50',
   CALENDAR: 'text-green-300 bg-green-500/20 border-green-400/60',
+  JOB: 'text-purple-300 bg-purple-500/20 border-purple-400/60',
 };
 
 export function getPriorityIcon(priority: string): string {
@@ -49,6 +50,7 @@ export function getPriorityIcon(priority: string): string {
     case 'ERROR': return '⚠️';
     case 'WARNING': return '🟡';
     case 'CALENDAR': return '🟢';
+    case 'JOB': return '🟣';
     default: return 'ℹ️';
    }
 }

@@ -8,6 +8,7 @@ import { getPreviousHealthState, addSystemLog } from '@/lib/system-logs';
 import { notifyHealthCheck } from '@/lib/notification-push';
 import globalDb from '@/lib/global-db';
 import { env } from '@/lib/env';
+import { isMainThread } from 'node:worker_threads';
 
 const HEALTH_CHECK_INTERVAL_MS = 30_000; // 30 seconds
 
@@ -123,5 +124,10 @@ export function stopBackgroundHealthCheck(): void {
   }
 }
 
-// Start on module load — this runs once when Next.js server starts
-startBackgroundHealthCheck();
+// Start on module load — this runs once when Next.js server starts. Guarded
+// to the main thread: Bree job-scheduler workers import this transitively via
+// the built-in handler set, and a per-fork health interval would double every
+// 30 s check (each worker sees a "fresh" globalThis singleton).
+if (isMainThread) {
+  startBackgroundHealthCheck();
+}
