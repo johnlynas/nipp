@@ -42,6 +42,8 @@ const MAX_ZOOM = 2;
  */
 export default function OrgChart({ tree, canEdit, organizationId, focusTeamId, onFocusTeamHandled }: OrgChartProps) {
   const [openTeamIds, setOpenTeamIds] = useState<Set<string>>(() => new Set());
+  // Org node collapse state — defaults to teams visible.
+  const [orgOpen, setOrgOpen] = useState(true);
   const [zoom, setZoom] = useState(1);
   const [pan, setPan] = useState({ x: 0, y: 0 });
   const [selectedMember, setSelectedMember] = useState<ChartMember | null>(null);
@@ -58,9 +60,10 @@ export default function OrgChart({ tree, canEdit, organizationId, focusTeamId, o
     return () => mq.removeEventListener('change', update);
   }, []);
 
-  // Sidebar → expand a team in the tree.
+  // Sidebar → expand a team in the tree (revealing the team row if needed).
   useEffect(() => {
     if (focusTeamId) {
+      setOrgOpen(true);
       setOpenTeamIds((prev) => new Set(prev).add(focusTeamId));
       onFocusTeamHandled();
     }
@@ -94,6 +97,7 @@ export default function OrgChart({ tree, canEdit, organizationId, focusTeamId, o
 
   const canvasW = columns.length * TEAM_COL_W + PADDING * 2;
   const canvasH = useMemo(() => {
+    if (!orgOpen) return ORG_Y + ORG_H + PADDING;
     let maxBottom = TEAM_Y + TEAM_H;
     for (const col of columns) {
       if (!openTeamIds.has(col.id) && col.id !== unassignedId) continue;
@@ -101,7 +105,7 @@ export default function OrgChart({ tree, canEdit, organizationId, focusTeamId, o
       if (bottom > maxBottom) maxBottom = bottom;
     }
     return maxBottom + PADDING + TEAM_H;
-  }, [columns, openTeamIds]);
+  }, [columns, openTeamIds, orgOpen]);
 
   // Pan handlers (background only).
   const onPointerDown = (e: React.PointerEvent) => {
@@ -151,9 +155,11 @@ export default function OrgChart({ tree, canEdit, organizationId, focusTeamId, o
     setPan(centerPan(1));
   }, [centerPan]);
 
-  // Default start position: each displayed org opens centred in the viewport.
+  // Default start position: each displayed org opens centred in the viewport,
+  // with the team row visible.
   useEffect(() => {
     if (isMobile) return;
+    setOrgOpen(true);
     setZoom(1);
     setPan(centerPan(1));
   }, [tree.organization.id, isMobile, centerPan]);
@@ -305,31 +311,7 @@ export default function OrgChart({ tree, canEdit, organizationId, focusTeamId, o
             transform: `translate(${pan.x}px, ${pan.y}px) scale(${zoom})`,
           }}
         >
-          {/* Connector line org → team row */}
-          <div
-            className="absolute"
-            style={{
-              left: orgNodeLeft + NODE_W / 2,
-              top: ORG_Y + ORG_H,
-              height: TEAM_Y - (ORG_Y + ORG_H),
-              width: 2,
-              backgroundColor: '#b6c2d9',
-            }}
-          />
-          {columns.length > 1 && (
-            <div
-              className="absolute"
-              style={{
-                left: PADDING + NODE_W / 2,
-                top: TEAM_Y - 10,
-                height: 2,
-                width: (columns.length - 1) * TEAM_COL_W,
-                backgroundColor: '#b6c2d9',
-              }}
-            />
-          )}
-
-          {/* Organization root */}
+          {/* Organization root — click toggles the team row */}
           <OrgChartNode
             kind="org"
             label={tree.organization.name}
@@ -338,41 +320,71 @@ export default function OrgChart({ tree, canEdit, organizationId, focusTeamId, o
             y={ORG_Y}
             w={NODE_W}
             h={ORG_H}
+            expanded={orgOpen}
+            onToggle={() => setOrgOpen((open) => !open)}
           />
 
-          {/* Team columns */}
-          {columns.map((col, i) => {
-            const open = col.id === unassignedId || openTeamIds.has(col.id);
-            return (
-              <div key={col.id}>
-                <OrgChartNode
-                  kind="team"
-                  label={col.name}
-                  x={PADDING + i * TEAM_COL_W + (TEAM_COL_W - NODE_W) / 2}
-                  y={TEAM_Y}
-                  w={NODE_W}
-                  h={TEAM_H}
-                  expanded={open}
-                  memberCount={col.members.length}
-                  onToggle={() => col.id === unassignedId ? undefined : toggleTeam(col.id)}
+          {orgOpen && (
+            <>
+              {/* Connector line org → team row */}
+              <div
+                className="absolute"
+                style={{
+                  left: orgNodeLeft + NODE_W / 2,
+                  top: ORG_Y + ORG_H,
+                  height: TEAM_Y - (ORG_Y + ORG_H),
+                  width: 2,
+                  backgroundColor: '#b6c2d9',
+                }}
+              />
+              {columns.length > 1 && (
+                <div
+                  className="absolute"
+                  style={{
+                    left: PADDING + NODE_W / 2,
+                    top: TEAM_Y - 10,
+                    height: 2,
+                    width: (columns.length - 1) * TEAM_COL_W,
+                    backgroundColor: '#b6c2d9',
+                  }}
                 />
-                {open &&
-                  col.members.map((m, j) => (
+              )}
+
+              {/* Team columns */}
+              {columns.map((col, i) => {
+                const open = col.id === unassignedId || openTeamIds.has(col.id);
+                return (
+                  <div key={col.id}>
                     <OrgChartNode
-                      key={`${col.id}-${m.userId}`}
-                      kind="member"
-                      label={m.name}
-                      sublabel={`${m.memberRole}${m.assignedRoles.length > 0 ? ' · ' + m.assignedRoles.map((r) => r.name).join(', ') : ''}`}
+                      kind="team"
+                      label={col.name}
                       x={PADDING + i * TEAM_COL_W + (TEAM_COL_W - NODE_W) / 2}
-                      y={MEMBER_Y_START + j * MEMBER_STEP}
+                      y={TEAM_Y}
                       w={NODE_W}
-                      h={MEMBER_H}
-                      onDetails={() => setSelectedMember(m)}
+                      h={TEAM_H}
+                      expanded={open}
+                      memberCount={col.members.length}
+                      onToggle={() => col.id === unassignedId ? undefined : toggleTeam(col.id)}
                     />
-                  ))}
-              </div>
-            );
-          })}
+                    {open &&
+                      col.members.map((m, j) => (
+                        <OrgChartNode
+                          key={`${col.id}-${m.userId}`}
+                          kind="member"
+                          label={m.name}
+                          sublabel={`${m.memberRole}${m.assignedRoles.length > 0 ? ' · ' + m.assignedRoles.map((r) => r.name).join(', ') : ''}`}
+                          x={PADDING + i * TEAM_COL_W + (TEAM_COL_W - NODE_W) / 2}
+                          y={MEMBER_Y_START + j * MEMBER_STEP}
+                          w={NODE_W}
+                          h={MEMBER_H}
+                          onDetails={() => setSelectedMember(m)}
+                        />
+                      ))}
+                  </div>
+                );
+              })}
+            </>
+          )}
         </div>
       </div>
 

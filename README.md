@@ -353,11 +353,12 @@ flowchart LR
 
 **What you get:**
 
-- **Interactive canvas** — the diagram opens centred in the viewport; click
-  a team to expand/collapse its members (collapsed by default); zoom from 50%
-  to 200% with the buttons or the mouse wheel (roll forward = in, roll back
-  = out, anchored at the cursor), drag-to-pan, and re-centre with the reset
-  button or a middle-click.
+- **Interactive canvas** — the diagram opens centred in the viewport with
+  the team row visible; click the organization node to show/hide the whole
+  team row, or a team to expand/collapse its members (collapsed by default);
+  zoom from 50% to 200% with the buttons or the mouse wheel (roll forward =
+  in, roll back = out, anchored at the cursor), drag-to-pan, and re-centre
+  with the reset button or a middle-click.
 - **Member detail modal** — name, email, membership role, the assigned roles
   with their permission keys, and every team the member belongs to (reuses the
   shared dashboard `Modal`).

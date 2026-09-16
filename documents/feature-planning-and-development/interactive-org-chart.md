@@ -322,7 +322,8 @@ section above, this one wins.
 
 **Shipped (per plan):** data endpoint + authz matrix, full-bleed page with
 `?org=` super-admin switcher, slide-in sidebar (combobox / Manage links / team
-list / unassigned), interactive canvas (expand/collapse, zoom 50–200%,
+list / unassigned), interactive canvas (org node toggles the team row —
+visible by default — plus per-team expand/collapse, zoom 50–200%,
 drag-to-pan; diagram opens centred in the viewport; mouse-wheel zoom toward
 the cursor — roll forward in, roll back out — and middle-click recentres),
 detail modal reusing the

@@ -18,8 +18,9 @@ interface OrgChartNodeProps {
 
 /**
  * A single org-chart node (organization / team / member), absolutely
- * positioned by the parent canvas. Team nodes are expand/collapse buttons;
- * member nodes open the detail modal.
+ * positioned by the parent canvas. Org and team nodes are expand/collapse
+ * buttons (org toggles the whole team row, team its member list); member
+ * nodes open the detail modal.
  */
 export default function OrgChartNode({
   kind,
@@ -65,18 +66,18 @@ export default function OrgChartNode({
       type="button"
       role="treeitem"
       aria-level={kind === 'org' ? 1 : kind === 'team' ? 2 : 3}
-      aria-expanded={isTeam ? expanded : undefined}
+      aria-expanded={kind === 'member' ? undefined : expanded}
       aria-label={
         isTeam
           ? `Team ${label}, ${memberCount} member${memberCount === 1 ? '' : 's'}${expanded ? ', expanded' : ', collapsed'}`
           : kind === 'org'
-            ? `Organization ${label}`
+            ? `Organization ${label}${expanded ? ', teams visible' : ', teams hidden'}`
             : `Member ${label}`
       }
       title={sublabel || label}
       className={`${base} ${surface}`}
       style={styles}
-      onClick={() => (isTeam ? onToggle?.() : onDetails?.())}
+      onClick={() => (kind === 'member' ? onDetails?.() : onToggle?.())}
     >
       {kind === 'org' && (
         <span className="text-sm font-semibold leading-tight px-2">{label}</span>
