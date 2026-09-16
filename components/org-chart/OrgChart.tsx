@@ -34,7 +34,9 @@ const MAX_ZOOM = 2;
  * Interactive org chart canvas.
  *
  * Desktop: absolute-positioned tree (org root → teams → members), zoom via
- * transform scale, drag-to-pan on the background.
+ * transform scale, drag-to-pan on the background, mouse wheel zoom
+ * (roll forward = in, roll back = out), middle-click recentres the diagram.
+ * The diagram opens centred in the viewport.
  * Mobile (<768px): vertical accordion layout (org header, team sections,
  * member lists) instead of a tiny zoomable canvas.
  */
@@ -75,10 +77,6 @@ export default function OrgChart({ tree, canEdit, organizationId, focusTeamId, o
 
   const zoomIn = useCallback(() => setZoom((z) => Math.min(MAX_ZOOM, Math.round((z + 0.1) * 10) / 10)), []);
   const zoomOut = useCallback(() => setZoom((z) => Math.max(MIN_ZOOM, Math.round((z - 0.1) * 10) / 10)), []);
-  const resetView = useCallback(() => {
-    setZoom(1);
-    setPan({ x: 0, y: 0 });
-  }, []);
 
   // -----------------------------------------------------------------------
   // Canvas geometry (memoized on tree + open state)
@@ -119,6 +117,80 @@ export default function OrgChart({ tree, canEdit, organizationId, focusTeamId, o
   const onPointerUp = () => {
     dragRef.current = null;
   };
+
+  // Mouse wheel zoom (native, non-passive so preventDefault works) +
+  // middle-click (wheel centre) recentres the diagram. Refs mirror zoom/pan
+  // and canvas size so the native listener and centering math always see
+  // current values without re-subscribing.
+  const canvasRef = useRef<HTMLDivElement | null>(null);
+  const zoomRef = useRef(zoom);
+  const panRef = useRef(pan);
+  useEffect(() => {
+    zoomRef.current = zoom;
+  }, [zoom]);
+  useEffect(() => {
+    panRef.current = pan;
+  }, [pan]);
+  const canvasSizeRef = useRef({ w: canvasW, h: canvasH });
+  useEffect(() => {
+    canvasSizeRef.current = { w: canvasW, h: canvasH };
+  }, [canvasW, canvasH]);
+
+  /** Pan offset that centres the canvas content in the viewport at zoom z. */
+  const centerPan = useCallback((z: number) => {
+    const el = canvasRef.current;
+    if (!el) return { x: 0, y: 0 };
+    const rect = el.getBoundingClientRect();
+    const { w, h } = canvasSizeRef.current;
+    return { x: (rect.width - w * z) / 2, y: (rect.height - h * z) / 2 };
+  }, []);
+
+  // Reset = 100% zoom with the diagram centred in the viewport.
+  const resetView = useCallback(() => {
+    setZoom(1);
+    setPan(centerPan(1));
+  }, [centerPan]);
+
+  // Default start position: each displayed org opens centred in the viewport.
+  useEffect(() => {
+    if (isMobile) return;
+    setZoom(1);
+    setPan(centerPan(1));
+  }, [tree.organization.id, isMobile, centerPan]);
+
+  useEffect(() => {
+    const el = canvasRef.current;
+    if (!el) return;
+    const handleWheel = (e: WheelEvent) => {
+      e.preventDefault();
+      const z = zoomRef.current;
+      const factor = e.deltaY < 0 ? 1.1 : 1 / 1.1;
+      const next = Math.min(MAX_ZOOM, Math.max(MIN_ZOOM, Math.round(z * factor * 10) / 10));
+      if (next === z) return;
+      // Keep the point under the cursor fixed while scaling.
+      const rect = el.getBoundingClientRect();
+      const mx = e.clientX - rect.left;
+      const my = e.clientY - rect.top;
+      const p = panRef.current;
+      const newPan = { x: mx - ((mx - p.x) * next) / z, y: my - ((my - p.y) * next) / z };
+      zoomRef.current = next;
+      panRef.current = newPan;
+      setZoom(next);
+      setPan(newPan);
+    };
+    const handleMouseDown = (e: MouseEvent) => {
+      if (e.button === 1) {
+        e.preventDefault();
+        resetView();
+      }
+    };
+    el.addEventListener('wheel', handleWheel, { passive: false });
+    el.addEventListener('mousedown', handleMouseDown);
+    return () => {
+      el.removeEventListener('wheel', handleWheel);
+      el.removeEventListener('mousedown', handleMouseDown);
+    };
+  }, [resetView, isMobile]); // isMobile: canvas element only exists on desktop
 
   const orgNodeLeft = canvasW / 2 - NODE_W / 2;
 
@@ -216,6 +288,7 @@ export default function OrgChart({ tree, canEdit, organizationId, focusTeamId, o
 
       {/* Pannable/zoomable canvas */}
       <div
+        ref={canvasRef}
         className="h-full w-full cursor-grab active:cursor-grabbing"
         onPointerDown={onPointerDown}
         onPointerMove={onPointerMove}

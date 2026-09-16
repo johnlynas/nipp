@@ -44,17 +44,20 @@ export default function OrgChartNode({
   };
 
   const base =
-    'absolute flex flex-col items-center justify-center rounded-md border text-center transition-colors focus:outline-none focus:ring-2 focus:ring-[#F5A623]';
+    'absolute flex flex-col items-center justify-center rounded-md border text-center transition-colors focus:outline-none focus:ring-2 focus:ring-[#1B2A4A]';
 
+  // Complementary fill scheme: navy (org) and amber (team) are colour-wheel
+  // opposites; teal (member) bridges the two. Warm/cool fills carry dark ink
+  // text for contrast; only the navy org node uses white text.
   let surface: string;
   if (kind === 'org') {
     surface = 'bg-[#1B2A4A] text-white border-[#2A9D8F] border-2';
   } else if (isTeam) {
     surface = expanded
-      ? 'bg-[#24355c] text-white border-[#F5A623] border-2'
-      : 'bg-[#1B2A4A] text-white border-[#3a4f7a]';
+      ? 'bg-[#F5A623] text-[#16233A] border-[#1B2A4A] border-2'
+      : 'bg-[#F5A623] text-[#16233A] border-[#C9861B]';
   } else {
-    surface = 'bg-white text-[#1B2A4A] border-[#dee2e6] hover:border-[#1B2A4A]';
+    surface = 'bg-[#2A9D8F] text-[#16233A] border-[#1F7A70] hover:border-[#1B2A4A]';
   }
 
   return (
@@ -76,23 +79,15 @@ export default function OrgChartNode({
       onClick={() => (isTeam ? onToggle?.() : onDetails?.())}
     >
       {kind === 'org' && (
-        <>
-          <span className="text-sm font-semibold leading-tight px-2">{label}</span>
-          {sublabel && <span className="text-xs text-gray-300 mt-0.5 px-2">{sublabel}</span>}
-        </>
+        <span className="text-sm font-semibold leading-tight px-2">{label}</span>
       )}
       {isTeam && (
-        <>
-          <span className="text-sm font-semibold leading-tight px-2">{label}</span>
-          <span className="text-xs text-gray-300 mt-0.5">
-            {memberCount} member{memberCount === 1 ? '' : 's'} {expanded ? '▾' : '▸'}
-          </span>
-        </>
+        <span className="text-sm font-semibold leading-tight px-2">{label}</span>
       )}
       {kind === 'member' && (
         <>
           <span className="text-sm font-medium leading-tight px-2">{label}</span>
-          {sublabel && <span className="text-xs text-gray-500 mt-0.5 px-2 truncate w-full">{sublabel}</span>}
+          {sublabel && <span className="text-xs text-[#16233A] mt-0.5 px-2 truncate w-full">{sublabel}</span>}
         </>
       )}
     </button>
