@@ -56,7 +56,14 @@ This document is organized by **functional area**. Use the table of contents bel
   - [Models & Services](#models--services)
   - [Due-to-Start SSE Notifications](#due-to-start-sse-notifications)
   - [Authorization](#authorization)
-- [10. Job Scheduler](#10-job-scheduler)
+- [10. Organization Chart](#10-organization-chart)
+  - [Architecture](#architecture)
+  - [Files & Responsibilities](#files--responsibilities)
+  - [Data Flow & API](#data-flow--api)
+  - [Tree Shaping Rules](#tree-shaping-rules)
+  - [Authorization](#authorization-1)
+  - [Test Suites](#test-suites)
+- [11. Job Scheduler](#11-job-scheduler)
   - [Components](#components)
   - [Execution modes](#execution-modes)
   - [Concurrency and circuit breaking](#concurrency-and-circuit-breaking)
@@ -67,7 +74,7 @@ This document is organized by **functional area**. Use the table of contents bel
   - [Lifecycle notifications via SSE](#lifecycle-notifications-via-sse)
   - [Admin API](#admin-api)
   - [Testing](#testing-1)
-- [11. Cache Architecture](#11-cache-architecture)
+- [12. Cache Architecture](#12-cache-architecture)
   - [Overview](#overview)
   - [Layer 1: In-Memory LRU Cache](#layer-1-in-memory-lru-cache)
   - [Layer 2: Redis (Distributed Cache)](#layer-2-redis-distributed-cache)
@@ -76,14 +83,14 @@ This document is organized by **functional area**. Use the table of contents bel
   - [Cross-Instance Invalidation](#cross-instance-invalidation)
   - [Stampede Protection](#stampede-protection)
   - [Cache Monitoring & Metrics](#cache-monitoring--metrics)
-  - [12. Security](#12-security)
+  - [13. Security](#13-security)
   - [Content Security Policy (CSP)](#content-security-policy-csp)
   - [Data-in-Transit Payload Encryption](#data-in-transit-payload-encryption)
   - [CSRF Protection](#csrf-protection)
   - [Secrets Management](#secrets-management)
   - [PII Logging Policy](#pii-logging-policy)
-  - [13. Project Structure](#13-project-structure)
-  - [14. Development & Testing](#14-development--testing)
+  - [14. Project Structure](#14-project-structure)
+  - [15. Development & Testing](#15-development--testing)
   - [Local Setup](#local-setup)
   - [Running Tests](#running-tests)
   - [Database Migrations](#database-migrations)
@@ -784,7 +791,131 @@ Every `/api/organizations/[orgId]/calendar*` route verifies the session (401) an
 
 ---
 
-## 10. Job Scheduler
+## 10. Organization Chart
+
+The org chart is a **read-only, live view of an organization's people** — an
+interactive tree of **organization → teams → members**, each member carrying
+their BetterAuth membership role, assigned roles, and permission keys. It is a
+pure projection of existing tenant data (`Organization`, `Team`, `TeamMember`,
+`Member`, `MemberRole`, `RolePermission`, `Permission`): **no new tables, no
+migration**. The page lives at `/dashboard/admin/org-chart` inside the
+admin dashboard, full-bleed like the calendar (the layout's
+`isFullScreenPage` condition covers both paths), with a matching left-nav
+entry ("Org Chart", `Network` icon).
+
+### Architecture
+
+```mermaid
+flowchart TB
+    subgraph CLIENT["Browser — /dashboard/admin/org-chart"]
+        PAGE["org-chart/page.tsx (client component)<br/>init: session org → localStorage → ?org= super-admin override<br/>(calendar-page pattern)"]
+        CANVAS["components/org-chart/OrgChart.tsx<br/>absolute-positioned canvas · zoom 0.5–2x · drag-to-pan<br/>mobile <768px: vertical accordion"]
+        SIDE["OrgChartSidebar.tsx — slide-in panel (w-16 / w-80)<br/>typeable org combobox (super admin) · Manage links<br/>team list → expands team in canvas · unassigned list"]
+        MODAL["OrgChartDetailModal.tsx — member detail popup<br/>(shared dashboard Modal)"]
+    end
+
+    subgraph SERVER["Node runtime"]
+        RT["GET /api/organizations/[orgId]/org-chart<br/>resolveTenantAccess: 401 / 403 / 503 · viewerCanEdit flag"]
+        Q["one org-scoped read on globalDb<br/>wrapped in superAdminStorage (no ALS leakage)"]
+        SHAPER["lib/org-chart.ts — buildOrgChart()<br/>pure function, no DB imports"]
+    end
+
+    PAGE -->|fetch per displayed org| RT
+    RT --> Q --> SHAPER
+    SHAPER -- "ChartTree JSON" --> CANVAS
+    CANVAS <--> MODAL
+    SIDE <--> CANVAS
+
+    linkStyle default interpolate spline;
+```
+
+### Files & Responsibilities
+
+| Component | File | Responsibility |
+|-----------|------|----------------|
+| Page | `app/dashboard/admin/org-chart/page.tsx` | Client component: active-org init (session → localStorage → `?org=` super-admin override against `/api/admin/organizations/list`), tree fetch per org, loading / no-org / error+retry states. |
+| API route | `app/api/organizations/[orgId]/org-chart/route.ts` | Single GET endpoint: authorization gate, one Prisma read, member-role and team-membership assembly, delegates shaping to `lib/org-chart.ts`. |
+| Tree shaper | `lib/org-chart.ts` | Pure functions (`buildOrgChart`, `resolvePrimaryTeamSlug`, `pickPrimaryTeamSlug`) — unit-testable without a database; also the single source of the `ChartTree` / `ChartMember` types. |
+| Canvas | `components/org-chart/OrgChart.tsx` | Desktop tree canvas (expand/collapse teams, zoom 50–200%, drag-to-pan, reset), responsive accordion below 768 px, owns the detail-modal state. |
+| Node | `components/org-chart/OrgChartNode.tsx` | One org / team / member node: `role="treeitem"`, `aria-level` (1/2/3), `aria-expanded`, keyboard-operable `<button>`. |
+| Sidebar | `components/org-chart/OrgChartSidebar.tsx` | Slide-in panel mirroring `CalendarSidebar`: collapsed/expanded, typeable org combobox for Super Admins, Manage links (organization settings / members / roles) shown when `viewerCanEdit`, team list that expands the matching tree node, unassigned member list. |
+| Detail modal | `components/org-chart/OrgChartDetailModal.tsx` | Member popup: email, membership role, assigned roles with expandable permission keys, all team memberships. |
+| Types | `components/org-chart/types.ts` | Re-exports the shaper's types so page and components share one type source with the API route. |
+
+### Data Flow & API
+
+One endpoint serves the whole chart:
+
+| Route | Methods | Purpose |
+|-------|---------|---------|
+| `/api/organizations/[orgId]/org-chart` | GET | Full org tree — `organization`, `teams[]` (each with `members[]`), `unassigned[]`, and `viewerCanEdit`. Each member carries `name`, `email`, `memberRole` (BetterAuth role), `assignedRoles[]` (`name` + `permissionCount` + permission `resource:action` keys), and `teams` (all team slugs). |
+
+Server-side, the route performs **one** org-scoped `globalDb.organization.findUnique`
+(teams → members → user; members → memberRoles → role → permissions) wrapped in
+`superAdminStorage.run(true, …)` so the unscoped client's `AsyncLocalStorage`
+context cannot leak — the same guard pattern as the calendar routes. The route
+then flattens rows into `BuildOrgChartInput`: one entry per `Member` row
+(those are the authoritative membership list), with `teamSlugs` ordered by
+primary-membership rule (earliest `TeamMember.createdAt`, ties broken by team
+name — `pickPrimaryTeamSlug`), and hands it to the pure shaper.
+
+**Response shape:**
+
+| Field | Meaning |
+|-------|---------|
+| `organization` | `{ id, name, description }` |
+| `teams[]` | Alphabetical by name; each team `{ id, slug, name, description, members[] }` |
+| `unassigned[]` | Org members with no usable team membership (alphabetical) |
+| `viewerCanEdit` | `true` for platform admins / tenant admins of the viewed org; clients use it to render edit affordances (v1 is read-only) |
+
+### Tree Shaping Rules
+
+`buildOrgChart()` in `lib/org-chart.ts` enforces:
+
+- **Teams alphabetical** by name; **members alphabetical** within each bucket.
+- **1:1 team display (v1):** each member renders under exactly one team — the
+  first slug that matches a real org team (primary membership). All memberships
+  remain visible in `ChartMember.teams` and the detail modal. Schema/index-level
+  1:1 enforcement is deferred; no data is mutated.
+- **Unassigned bucket:** members with no team slugs, or only slugs foreign to
+  the org, land in `unassigned` — never silently dropped.
+
+### Authorization
+
+The route uses the shared `resolveTenantAccess` gate (`lib/tenant-access.ts`)
+— the same authorization as the calendar and teams routes:
+
+| Caller | Result |
+|--------|--------|
+| Unauthenticated | 401 |
+| Member of `orgId` | 200, own org's chart only; `viewerCanEdit = (membership.role === 'admin')` |
+| Member of a *different* org, not super admin | 403 |
+| Super Admin (Platform Organization member) | 200 for **any** `orgId`, `viewerCanEdit: true` (PLATFORM_ADMIN) |
+| DB failure during access check | 503 — fails closed |
+
+The read is org-scoped at the query root, so the shaper cannot cross tenant
+boundaries; the RLS layer remains as a second net. The seeded permissions
+`org-chart:read` / `org-chart:update` (`prisma/seed.ts`) are in the global
+catalog for future role-level tightening; v1 gating is membership/admin-status
+only, matching calendar access.
+
+### Test Suites
+
+- **Unit** — `tests/unit/org-chart-tree.test.ts`: shaper contracts (team/member
+  ordering, 1:1 placement, unassigned fallback, primary-membership selection,
+  empty-org) with no database needed.
+- **Integration** — `tests/integration/org-chart.test.ts`: the authorization
+  matrix (401 anonymous, 403 non-member/other tenant, 200 member +
+  `viewerCanEdit` for tenant admin / super admin), 1:1 rendering, roles and
+  permission keys on member nodes, 404 for a missing org.
+
+Full design spec, decisions, risks, and deferred work (drag-and-drop edits,
+reporting lines, v2 tenant page):
+[documents/feature-planning-and-development/interactive-org-chart.md](./documents/feature-planning-and-development/interactive-org-chart.md).
+
+---
+
+## 11. Job Scheduler
 
 The platform runs a **background job scheduler** — a general-purpose execution
 layer for platform automation (and the substrate for operator-authored scripts).
@@ -1010,7 +1141,7 @@ Design rationale, spike evidence, and the phase plan live in
 
 ---
 
-## 11. Cache Architecture
+## 12. Cache Architecture
 
 The portal implements a **multi-layered caching strategy** combining Next.js ISR, L1 in-memory LRU cache, Redis (L2), TanStack Query (client-side), and SSE for real-time updates. This section covers the server-side cache layers in detail.
 
@@ -1127,7 +1258,7 @@ The admin dashboard includes a cache metrics page at `/admin/cache-metrics`. A p
 
 ---
 
-## 12. Security
+## 13. Security
 
 ### Content Security Policy (CSP)
 
@@ -1228,7 +1359,7 @@ Payload encryption does **not** replace CSRF protection. PII mutating routes mus
 
 ---
 
-## 13. Project Structure
+## 14. Project Structure
 
 ```
 nipp/
@@ -1250,7 +1381,7 @@ nipp/
 │   │   ├── dashboard/admin/      # Dashboard admin APIs (orgs, permissions, resources, roles, teams, users)
 │   │   ├── health/               # Health check endpoint (transition events pushed via SSE)
 │   │   ├── notifications/stream/# Live SSE notification stream (auth, caps, heartbeat)
-│   │   ├── organizations/[orgId]/# Org-scoped APIs (calendar, teams)
+│   │   ├── organizations/[orgId]/# Org-scoped APIs (calendar, teams, org-chart)
 │   │   ├── roles/                # Role-related APIs
 │   │   └── security/payload-key/# Payload encryption key management
 │   ├── dashboard/                # Tenant dashboard layouts & pages (layouts carry the SSE footer ticker)
@@ -1267,6 +1398,7 @@ nipp/
 │   ├── auth/                     # Auth components (LogoutButton, RequirePermission, RequireSuperAdmin)
 │   ├── calendar/                 # Interactive calendar (month/week/day/year views, DnD, recurrence)
 │   ├── dashboard/                # Dashboard UI (ConfirmDialog, DataTable)
+│   ├── org-chart/                # Interactive org chart (canvas tree, sidebar, member detail modal) — Section 7
 │   └── ui/                       # Shared UI primitives
 ├── features/                     # Client feature modules (auth, notifications inbox, org, permissions, user)
 ├── hooks/                        # Custom React hooks
@@ -1296,13 +1428,14 @@ nipp/
 │   ├── logger.ts                 # Pino logger with PII redaction
 │   ├── middleware/auth.ts        # Auth middleware utilities
 │   ├── job-scheduler-builtins.ts    # Trusted handler set (noop, health-check, calendar-*); side-effect-free, shared by main thread + workers
-│   ├── job-scheduler-bree.ts        # Bree worker-per-run executor: materialized runners, TS loader bootstrap, timeouts (Section 10)
-│   ├── job-scheduler-concurrency.ts # Global concurrency gate / circuit breaker + DB pool ceiling (Section 10)
-│   ├── job-scheduler-engine.ts      # Main-thread due-scanner, IANA-cron due-detection, dispatch, graceful shutdown; booted via app/layout.tsx (Section 10)
-│   ├── job-scheduler-script-runner.ts # Sandboxed vm runner for operator code (Section 10)
+│   ├── job-scheduler-bree.ts        # Bree worker-per-run executor: materialized runners, TS loader bootstrap, timeouts (Section 11)
+│   ├── job-scheduler-concurrency.ts # Global concurrency gate / circuit breaker + DB pool ceiling (Section 11)
+│   ├── job-scheduler-engine.ts      # Main-thread due-scanner, IANA-cron due-detection, dispatch, graceful shutdown; booted via app/layout.tsx (Section 11)
+│   ├── job-scheduler-script-runner.ts # Sandboxed vm runner for operator code (Section 11)
 │   ├── notification-push.ts      # In-process SSE push hub: subscriber registry, dedup, persist & broadcast (Section 8)
 │   ├── notifications/            # Email notification system (dispatcher, email, events — calendar today-events flow)
 │   ├── org-bootstrap.ts          # Organization bootstrapping logic
+│   ├── org-chart.ts              # Org chart tree shaper: Prisma rows → ChartTree, primary-team placement — Section 7
 │   ├── organization-context.tsx  # React context for organization state
 │   ├── organization.ts           # Organization utilities
 │   ├── payload-format.ts         # Payload encryption wire format
@@ -1346,7 +1479,7 @@ nipp/
 │   ├── calendar-event-service.ts  # Calendar event CRUD, recurrence expansion
 │   ├── calendar-notification-service.ts  # Today's-events email notifications
 │   ├── calendar-service.ts        # Calendar CRUD, default-calendar bootstrapping
-│   ├── job-scheduler-service.ts   # Job engine interface: CRUD, approval gate, claim gate, handler dispatch, sandboxed scripts, dry-run, history (Section 10)
+│   ├── job-scheduler-service.ts   # Job engine interface: CRUD, approval gate, claim gate, handler dispatch, sandboxed scripts, dry-run, history (Section 11)
 │   ├── organization-service.ts    # Organization management & lifecycle
 │   ├── permission-service.ts      # Global permission catalog CRUD
 │   ├── resource-service.ts        # Global resource catalog CRUD (Super Admin)
@@ -1360,6 +1493,7 @@ nipp/
 │   │   ├── calendar-events-*.test.ts  # Calendar event CRUD & query tests
 │   │   ├── logout-flow.test.ts   # Cross-tab session invalidation tests
 │   │   ├── notification-reliability.test.ts  # SSE/notification reliability
+│   │   ├── org-chart.test.ts                 # Org chart API authz matrix: membership / super-admin / 1:1 rule — Section 7
 │   │   ├── org-lifecycle.test.ts # Organization lifecycle tests
 │   │   ├── organization-*.test.ts  # Organization API & bootstrap tests
 │   │   ├── payload-encryption.test.ts  # Payload encryption integration tests
@@ -1382,13 +1516,13 @@ nipp/
 ├── docker-compose.test.yml       # Docker Compose for test infrastructure (PostgreSQL + Redis)
 ├── Dockerfile.test               # Test environment Dockerfile
 ├── docker-entrypoint.sh          # Container entrypoint script
-├── job-scheduler-runtime/        # (gitignored) materialized worker runners + TS-loader bootstrap; rewritten only when content changes (Section 10)
+├── job-scheduler-runtime/        # (gitignored) materialized worker runners + TS-loader bootstrap; rewritten only when content changes (Section 11)
 └── vitest.config.ts              # Vitest configuration (jsdom for React, Node for backend)
 ```
 
 ---
 
-## 14. Development & Testing
+## 15. Development & Testing
 
 ### Local Setup
 

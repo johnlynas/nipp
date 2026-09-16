@@ -3,11 +3,7 @@
 import { useState, useMemo } from 'react';
 import { useRouter, usePathname } from 'next/navigation';
 import Link from 'next/link';
-<<<<<<< HEAD
-import { Menu, X, UserRound, Building2, UsersRound, Shield, Key, Layers, LogOut, CalendarDays, Bell, XCircle, HeartPulse, ChartNoAxesCombined, ScrollText } from 'lucide-react';
-=======
-import { Menu, X, UserRound, Building2, UsersRound, Shield, Key, Layers, LogOut, CalendarDays, Bell, XCircle, HeartPulse, ChartNoAxesCombined, Network } from 'lucide-react';
->>>>>>> 0a8bff0 (feat(org-chart): add interactive organization chart)
+import { Menu, X, UserRound, Building2, UsersRound, Shield, Key, Layers, LogOut, CalendarDays, Bell, XCircle, HeartPulse, ChartNoAxesCombined, ScrollText, Network } from 'lucide-react';
 import { authClient } from '@/lib/auth-client';
 import { RequireSuperAdmin } from '@/components/auth/RequireSuperAdmin';
 import { useNotifications, PRIORITY_COLORS, getPriorityIcon } from '@/hooks/useNotifications';

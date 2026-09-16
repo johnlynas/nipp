@@ -18,7 +18,7 @@ All required data already exists in the Prisma schema — no new business tables
 
 **Source plan:** `.hermes/plans/2026-09-14_120000-org-chart.md`
 
-**Status:** Proposed
+**Status:** Implemented (v1, commit `cd2874f`) — see [Implementation Status](#implementation-status) for shipped scope and divergences.
 
 ---
 
@@ -310,3 +310,41 @@ Grants follow the existing `calendar:read` grant pattern for tenant admin / supe
 - Organization members can view the chart; non-members are rejected (403) per the API + isolation tests.
 - Super admins see edit affordances for every organization (tenant-admin self-service view is v2).
 - `npm run test`, `npm run lint`, `npm run type-check`, and `npm run build` all pass.
+
+---
+
+## Implementation Status
+
+The feature shipped in commit `cd2874f` (`feat(org-chart): add interactive
+organization chart`) and matches this plan with the following divergences —
+this section is the as-built record; where it conflicts with an earlier
+section above, this one wins.
+
+**Shipped (per plan):** data endpoint + authz matrix, full-bleed page with
+`?org=` super-admin switcher, slide-in sidebar (combobox / Manage links / team
+list / unassigned), interactive canvas (expand/collapse, zoom 50–200%,
+drag-to-pan, reset), detail modal reusing the shared `Modal`, mobile vertical
+accordion below 768 px, `role="tree"`/`treeitem` + keyboard accessibility,
+1:1 primary-membership display with unassigned bucketing, the two seeded
+permissions (`org-chart:read`, `org-chart:update`), unit tests for the shaper
+and integration tests for the authz matrix, and a matching left-nav entry in
+the admin layout.
+
+**Divergences:**
+
+- **Authz helper** — the route uses the shared `resolveTenantAccess` gate
+  (`lib/tenant-access.ts`, same as the calendar/teams routes) rather than a
+  standalone `requireSuperAdmin` + manual membership check; outcome is
+  identical (401 / 403 / 503-fail-closed, super admin sees any org).
+- **Manage links** — the sidebar's Manage section exposes *Organization
+  settings*, *Members*, and *Roles*. There is no separate "Teams" link; teams
+  are managed through the members page in this codebase.
+- **Sidebar member clicks** — clicking a (unassigned) member *in the sidebar*
+  opens that user's admin view page (`/admin/users/[userId]/view`); the
+  detail **modal** is opened from inside the tree canvas, as planned.
+- **Test coverage** — unit (shaper) and integration (authz matrix) suites
+  shipped. The planned jsdom component-render tests
+  (`tests/unit/OrgChart*.test.tsx`) and the isolation spec
+  (`tests/isolation/application/org-chart-isolation.test.ts`) were **not**
+  included in v1; cross-tenant rejection is asserted inside the integration
+  matrix (403 cases) until a dedicated isolation spec lands.
