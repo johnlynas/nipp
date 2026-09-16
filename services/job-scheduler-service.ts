@@ -716,8 +716,12 @@ export const JobSchedulerService = {
       const claim = await globalDb.jobDefinition.updateMany({
         where: {
           id: jobDefinitionId,
-          lastRunAt: { lt: claimInstant },
-         },
+          // A job that has NEVER run has lastRunAt = NULL; in Postgres
+          // `NULL < $x` is never true, so `{ lt }` alone would silently
+          // match zero rows and every scheduled run of a never-run job
+          // would be SKIPPED forever (no execution, no SSE). Include null.
+          OR: [{ lastRunAt: null }, { lastRunAt: { lt: claimInstant } }],
+        },
         data: { lastRunAt: claimInstant, lastRunStatus: 'RUNNING' },
        });
       executed = claim.count > 0;

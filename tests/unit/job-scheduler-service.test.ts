@@ -393,6 +393,28 @@ describe('JobSchedulerService.runJob', () => {
     expect(mockPush).not.toHaveBeenCalled();
   });
 
+  it('claim gate also matches jobs that have NEVER run (lastRunAt = NULL)', async () => {
+    // Regression: in Postgres, `WHERE "lastRunAt" < $x` matches ZERO rows when
+    // lastRunAt is NULL (NULL comparisons are never true). A freshly created +
+    // approved + enabled job therefore lost its claim on every tick and was
+    // silently SKIPPED forever — no execution row, no SSE notification.
+    registerHandler('noop', noopHandler);
+    (globalDb.jobDefinition.updateMany as any).mockResolvedValue({ count: 1 });
+    (globalDb.jobExecution.create as any).mockResolvedValue({ id: 'exec-null-claim' });
+    (globalDb.jobExecution.update as any).mockResolvedValue({ id: 'exec-null-claim' });
+    (globalDb.jobDefinition.update as any).mockResolvedValue({ id: 'job-1' });
+
+    const result = await JobSchedulerService.runJob('job-1', { trigger: 'SCHEDULE' });
+    expect(result).toMatchObject({ status: 'SUCCEEDED', claimed: true });
+
+    const claimCall = (globalDb.jobDefinition.updateMany as any).mock.calls.at(-1)![0];
+    // The WHERE must cover BOTH null and past lastRunAt, not just `{ lt }`.
+    expect(claimCall.where.OR).toEqual([
+      { lastRunAt: null },
+      { lastRunAt: { lt: expect.any(Date) } },
+    ]);
+  });
+
   it('returns FAILED when handler is not registered', async () => {
     // The claim gate succeeds but no handler is registered
     (globalDb.jobDefinition.updateMany as any).mockResolvedValue({ count: 1 });
