@@ -38,11 +38,12 @@ Self-service registration is not available (`/register` redirects to
   - [Roles, Permissions & Teams (RBAC)](#5-roles-permissions-teams-rbac)
   - [Interactive Calendar](#6-interactive-calendar)
     - [Live "due to start" SSE alerts](#live-due-to-start-sse-alerts)
-  - [Calendar Notifications](#7-calendar-notifications)
-  - [Real-Time Notifications](#8-real-time-notifications)
-  - [Caching](#9-caching)
-  - [Background Job Scheduler](#10-background-job-scheduler)
-  - [Data Protection & Security Hardening](#11-data-protection-security-hardening)
+  - [Interactive Organization Chart](#7-interactive-organization-chart)
+  - [Calendar Notifications](#8-calendar-notifications)
+  - [Real-Time Notifications](#9-real-time-notifications)
+  - [Caching](#10-caching)
+  - [Background Job Scheduler](#11-background-job-scheduler)
+  - [Data Protection & Security Hardening](#12-data-protection-security-hardening)
 - [Getting Started](#getting-started)
   - [Prerequisites](#prerequisites)
   - [Setup (step by step)](#setup-step-by-step)
@@ -76,6 +77,7 @@ Self-service registration is not available (`/register` redirects to
 | **Super Admin console** | Manage organizations, users, roles, permissions, audit logs, cache metrics, system health/logs |
 | **Tenant dashboard** | Integrated dashboard for users, organizations, roles, permissions, resources, teams, and the calendar |
 | **Interactive Calendar** | Month/week/day/year views, drag-and-drop rescheduling, RFC 5545 (rrule) recurrence, event modals, quick-add, live "due to start" SSE alerts |
+| **Org Chart** | Live interactive tree of org → teams → members: zoom/pan canvas, member detail modal with roles & permissions, tenant-switcher sidebar, unassigned bucket, mobile accordion (`/dashboard/admin/org-chart`) |
 | **Calendar Notifications** | Rate-limited email alerts for today's events, delivery logged to `NotificationLog` |
 | **Hybrid caching** | L1 in-memory + L2 Redis cache with stampede protection, warming, and live metrics |
 | **Real-time notifications** | Live server-side SSE broadcast (health checks, all admin management events, and upcoming calendar events) with org/global scoping, deduplication, and a persisted notification log |
@@ -90,7 +92,7 @@ app/                  Next.js App Router: pages and API route handlers
   dashboard/          Integrated role-based dashboards (+ /api/dashboard/admin/*)
   organizations/      Organization-scoped tenant pages
   api/                Other route handlers (auth, calendar, teams, health, …)
-components/           React UI (admin, calendar, dashboard, auth, providers)
+components/           React UI (admin, calendar, org-chart, dashboard, auth, providers)
 features/             Client-side feature modules (notifications, org, permissions, user)
 hooks/                Shared client hooks (useInactivityTimeout, usePermission)
 lib/                  Core infrastructure: auth, tenant-db, cache, crypto, notifications
@@ -206,6 +208,7 @@ from reusable components (`components/dashboard/`):
 | `/dashboard/admin/resources` | Feature resources and role-to-resource bindings |
 | `/dashboard/admin/teams` | Teams, members, and team-level roles |
 | `/dashboard/admin/calendar` | The interactive calendar (see below) |
+| `/dashboard/admin/org-chart` | Interactive organization chart: org → teams → members tree, detail modal, tenant switcher (see §7) |
 | `/dashboard/admin/notifications` | Live notification log: stat cards, filters, search, acknowledge/delete actions |
 
 These pages talk to REST endpoints under `/api/dashboard/admin/*`. Role-based
@@ -291,7 +294,7 @@ calendar:event-upcoming`) for every event — single *or* recurring, including
 exdate handling — that starts within its lead window (default the next **15
 minutes**). Recurring series are expanded with the same rrule engine used by the
 calendar UI, so alerts always match rendered instances. It rides the platform SSE
-pipeline from [section 8](#8-real-time-notifications), so the dashboard's footer
+pipeline from [section 9](#9-real-time-notifications), so the dashboard's footer
 ticker surfaces "Calendar event due to start: …" messages live — no client-side
 polling.
 
@@ -323,7 +326,75 @@ Event types: `VIEWING`, `INSPECTION`, `MAINTENANCE`, `LEASE_SIGNING`,
 `LEASE_RENEWAL`, `KEY_EXCHANGE`, `OTHER`. Events carry an optional
 `propertyId` for future property-scheduling work.
 
-## 7. Calendar Notifications
+## 7. Interactive Organization Chart
+
+The org chart is a **live, read-only view of an organization's people** — an
+interactive tree of **organization → teams → members** built from data that is
+already in the database (no new tables, no migration). It opens at
+`/dashboard/admin/org-chart`, full-bleed like the calendar page, with the same
+dark slide-in panel on the right.
+
+```mermaid
+flowchart LR
+    P["Org chart page<br/>calendar-page init order:<br/>session org → localStorage → ?org= super-admin override"]
+    subgraph API["GET /api/organizations/[orgId]/org-chart"]
+        G["resolveTenantAccess gate<br/>member of the org OR super admin<br/>(401 / 403 / 503)"]
+        R["one org-scoped Prisma read on globalDb<br/>(wrapped in superAdminStorage)"]
+    end
+    S["buildOrgChart() — lib/org-chart.ts<br/>pure function: teams alphabetical ·<br/>1:1 primary-team placement · unassigned bucket ·<br/>members by name"]
+    T["ChartTree JSON<br/>org + teams[members[roles, permission keys]]<br/>+ unassigned + viewerCanEdit"]
+
+    P -->|fetch per displayed org| G
+    G -- ok --> R --> S --> T
+    T --> UI["components/org-chart/<br/>canvas · slide-in sidebar · detail modal"]
+
+    linkStyle default interpolate spline;
+```
+
+**What you get:**
+
+- **Interactive canvas** — click a team to expand/collapse its members
+  (collapsed by default); zoom from 50% to 200%, drag-to-pan, and reset view.
+- **Member detail modal** — name, email, membership role, the assigned roles
+  with their permission keys, and every team the member belongs to (reuses the
+  shared dashboard `Modal`).
+- **Right slide-in panel** — collapsed (`w-16`) / expanded (`w-80`) like the
+  calendar sidebar; a typeable organization combobox for Super Admins (view any
+  tenant's chart, `?org=` survives refresh), **Manage** links into the existing
+  settings / members / roles pages, and a team list that expands and scrolls to
+  that team in the canvas.
+- **Unassigned bucket** — members with no team membership are listed separately
+  (in the tree and in the sidebar).
+- **1:1 team display (v1)** — each member renders under exactly one team; if
+  they belong to several, their primary membership (earliest join date, ties
+  broken by team name) wins, and all memberships stay visible in the detail
+  modal.
+- **Responsive & accessible** — below 768 px the canvas becomes a vertical
+  accordion (org → teams → members); the tree uses `role="tree"` /
+  `role="treeitem"` and every node is a keyboard-operable button carrying
+  `aria-expanded` / `aria-level`.
+
+One endpoint serves everything:
+
+| Route | Methods | Purpose |
+|-------|---------|---------|
+| `/api/organizations/[orgId]/org-chart` | GET | Full org tree in one call — organization, teams with members, unassigned members, and the `viewerCanEdit` flag; each member carries their BetterAuth role, assigned roles, and permission keys |
+
+Authorization is the shared org-scoped gate used by the calendar and teams
+routes (`resolveTenantAccess`): a member sees **their own** organization's
+chart (other tenants → 403), Super Admins can view any tenant's chart, and
+unauthenticated requests get 401. `viewerCanEdit` is true for platform / tenant
+admins; v1 is read-only either way — the Manage links navigate to existing
+admin pages (inline editing lands in v2). The seeded permissions
+`org-chart:read` / `org-chart:update` reserve role-level gating for future use.
+
+The tree shaper is a pure function, unit-tested without a database
+(`tests/unit/org-chart-tree.test.ts`); the endpoint's authorization matrix is
+covered by `tests/integration/org-chart.test.ts`. Full design spec, trade-offs,
+and deferred work:
+[documents/feature-planning-and-development/interactive-org-chart.md](./documents/feature-planning-and-development/interactive-org-chart.md).
+
+## 8. Calendar Notifications
 
 The notification service emails users — or entire organizations — about events
 happening **today**, reusing the shared email infrastructure
@@ -341,7 +412,7 @@ via nodemailer — configure `SMTP_*` variables) → dispatch through the shared
 rate-limited dispatcher (max 5 per event type per 24h; fails open without
 Redis) → log each delivery.
 
-## 8. Real-Time Notifications
+## 9. Real-Time Notifications
 
 In-app real-time updates are pushed over Server-Sent Events (SSE) from a
 single production-ready endpoint, `GET /api/notifications/stream`. Any event
@@ -370,7 +441,7 @@ Every notable platform event is emitted as an SSE notification:
 Org-level operations carry the affected organization id, so the history log
 can show which tenant was impacted; pure global catalog entries (permissions,
 resources) are sent without one. A full per-family API reference lives in
-[ARCHITECTURE.md §8](./ARCHITECTURE.md#8-real-time-notificationssystem-sse).
+[ARCHITECTURE.md §9](./ARCHITECTURE.md#9-real-time-notificationssystem-sse).
 
 ### Delivery model
 
@@ -420,9 +491,9 @@ The persisted history is browsable at `/dashboard/admin/notifications`:
   `DELETE`, and `POST` for sending admin broadcasts).
 
 **Email calendar notifications** (today's events) remain a separate,
-rate-limited flow described in section 7.
+rate-limited flow described in section 8.
 
-## 9. Caching
+## 10. Caching
 
 Permission resolution and search use a **hybrid cache**: an L1 in-memory LRU
 (`lib/cache/lru.ts`, with stampede protection and background warming) in front
@@ -438,7 +509,7 @@ npx tsx scripts/cache-benchmark.ts   # 8 scenarios: direct DB, L2 hit, L1 hit, e
 See [CACHING_ARCHITECTURE.md](./CACHING_ARCHITECTURE.md) and
 [scripts/README.md](./scripts/README.md).
 
-## 10. Background Job Scheduler
+## 11. Background Job Scheduler
 
 The platform runs a general-purpose **background job scheduler**, booted by a
 side-effect import in `app/layout.tsx` (`import '@/lib/job-scheduler-engine'`).
@@ -465,7 +536,7 @@ flowchart TB
 
     RUN -- "RunResult via postMessage" --> PARENT["engine re-emits the lifecycle SSE notification here (workers can't broadcast — their subscriber registry is thread-local)"]
     INLINE --> PARENT
-    PARENT --> HUB["SSE push hub (section 8)<br/>JOB / ERROR / WARNING telemetry<br/>+ persisted Notification history"]
+    PARENT --> HUB["SSE push hub (section 9)<br/>JOB / ERROR / WARNING telemetry<br/>+ persisted Notification history"]
 
     linkStyle default interpolate spline;
 ```
@@ -545,9 +616,9 @@ announce nothing, matching inline behaviour.
 Configuration is via `JOB_SCHEDULER_*` env vars (see
 [Appendix A](#appendix-a-environment-variables)). Full design rationale, worker
 lifecycle details, and the concurrency sizing live in
-[ARCHITECTURE.md §10](./ARCHITECTURE.md#10-job-scheduler); the phase plan is at
+[ARCHITECTURE.md §11](./ARCHITECTURE.md#11-job-scheduler); the phase plan is at
 [documents/feature-planning-and-development/job-scheduler-service-plan.md](./documents/feature-planning-and-development/job-scheduler-service-plan.md).
-## 11. Data Protection & Security Hardening
+## 12. Data Protection & Security Hardening
 
 - **PII at rest:** AES-256-GCM encryption for sensitive columns, keyed by
   `PII_ENCRYPTION_KEY` (`lib/pii-crypto.ts`, `lib/pii-routes.ts`).
@@ -768,7 +839,7 @@ Start from `.env.example` (committed, placeholders only).
 | `CALENDAR_LEAD_TIME_MINUTES` | no | 15 | Lead window: notify when an event starts within this many minutes |
 | `CALENDAR_MAX_EVENTS_PER_SCAN` | no | 20 | Per-scan cap on upcoming-event notifications (burst protection) |
 
-**Job scheduler** (see [§10](#10-background-job-scheduler))
+**Job scheduler** (see [§11](#11-background-job-scheduler))
 
 | Variable | Required | Default | Purpose |
 |----------|----------|---------|---------|
@@ -869,7 +940,7 @@ Prisma models (`prisma/schema.prisma`), grouped by domain:
 |-------|--------|
 | Identity & auth | `User`, `Session`, `Account` |
 | Organizations & membership | `Organization`, `Member`, `Invitation`, `SentInvitation` |
-| Teams | `Team`, `TeamMember`, `TeamRole` |
+| Teams | `Team`, `TeamMember`, `TeamRole` (also the source of the [org chart](#7-interactive-organization-chart)) |
 | RBAC | `Permission`, `Role`, `RolePermission`, `MemberRole`, `Resource`, `ResourceRole` |
 | Calendar | `Calendar`, `CalendarEvent` (rrule JSON + exdates, optional `propertyId`) |
 | Audit & notifications | `AuditLog`, `Notification` (SSE in-app events, org/global scope, acknowledged flag), `NotificationLog` (email deliveries) |
