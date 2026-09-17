@@ -55,11 +55,11 @@ export default function TeamsPage() {
   const [editModalOpen, setEditModalOpen] = useState(false);
   const [editForm, setEditForm] = useState({ name: '', description: '' });
 
-  // Fetch organizations for dropdown
+  // Fetch all organizations for the filter / create-team dropdowns
   useEffect(() => {
     async function fetchOrganizations() {
       try {
-        const res = await fetch('/api/dashboard/admin/organizations?page=1&pageSize=8');
+        const res = await fetch('/api/admin/organizations/list');
         if (res.ok) {
           const data = await res.json();
           setOrganizations(data.organizations || []);

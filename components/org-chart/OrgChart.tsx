@@ -247,8 +247,7 @@ export default function OrgChart({ tree, canEdit, organizationId, focusTeamId, o
                         >
                           <p className="text-sm font-medium" style={{ color: '#1B2A4A' }}>{m.name}</p>
                           <p className="text-xs text-gray-500">
-                            {m.memberRole}
-                            {m.assignedRoles.length > 0 && ` · ${m.assignedRoles.map((r) => r.name).join(', ')}`}
+                            {m.email}
                           </p>
                         </button>
                       </li>
@@ -278,18 +277,35 @@ export default function OrgChart({ tree, canEdit, organizationId, focusTeamId, o
   // -----------------------------------------------------------------------
   return (
     <div className="relative h-full flex-1 overflow-hidden bg-[#f8f9fa]">
-      {/* Zoom controls */}
-      <div className="absolute right-4 top-4 z-10 flex items-center gap-1 rounded-md border bg-white p-1 shadow-sm" style={{ borderColor: '#dee2e6' }}>
-        <button type="button" onClick={zoomIn} aria-label="Zoom in" className="rounded p-1.5 text-gray-600 hover:bg-gray-100">
-          <ZoomIn className="h-4 w-4" />
-        </button>
-        <button type="button" onClick={zoomOut} aria-label="Zoom out" className="rounded p-1.5 text-gray-600 hover:bg-gray-100">
-          <ZoomOut className="h-4 w-4" />
-        </button>
-        <button type="button" onClick={resetView} aria-label="Reset view" className="rounded p-1.5 text-gray-600 hover:bg-gray-100">
-          <Maximize2 className="h-4 w-4" />
-        </button>
-        <span className="px-1 text-xs text-gray-500 tabular-nums">{Math.round(zoom * 100)}%</span>
+      {/* Zoom controls + color key (fixed overlay, right/top) */}
+      <div className="absolute right-4 top-4 z-10 flex flex-col items-stretch gap-2">
+        {/* Zoom controls */}
+        <div className="flex items-center gap-1 rounded-md border bg-white p-1 shadow-sm" style={{ borderColor: '#dee2e6' }}>
+          <button type="button" onClick={zoomIn} aria-label="Zoom in" className="rounded p-1.5 text-gray-600 hover:bg-gray-100">
+            <ZoomIn className="h-4 w-4" />
+          </button>
+          <button type="button" onClick={zoomOut} aria-label="Zoom out" className="rounded p-1.5 text-gray-600 hover:bg-gray-100">
+            <ZoomOut className="h-4 w-4" />
+          </button>
+          <button type="button" onClick={resetView} aria-label="Reset view" className="rounded p-1.5 text-gray-600 hover:bg-gray-100">
+            <Maximize2 className="h-4 w-4" />
+          </button>
+          <span className="px-1 text-xs text-gray-500 tabular-nums">{Math.round(zoom * 100)}%</span>
+        </div>
+
+        {/* Color key */}
+        <div className="flex flex-col gap-1.5 rounded-md border bg-white p-2 shadow-sm" style={{ borderColor: '#dee2e6' }} aria-label="Color key">
+          {[
+            { color: '#1B2A4A', label: 'Organization' },
+            { color: '#F5A623', label: 'Team' },
+            { color: '#2A9D8F', label: 'Members' },
+          ].map(({ color, label }) => (
+            <div key={label} className="flex items-center gap-2">
+              <span aria-hidden="true" className="inline-block h-3 w-3 rounded-sm" style={{ backgroundColor: color }} />
+              <span className="text-xs leading-none" style={{ color: '#1B2A4A' }}>{label}</span>
+            </div>
+          ))}
+        </div>
       </div>
 
       {/* Pannable/zoomable canvas */}
@@ -326,13 +342,14 @@ export default function OrgChart({ tree, canEdit, organizationId, focusTeamId, o
 
           {orgOpen && (
             <>
-              {/* Connector line org → team row */}
+              {/* Connector line org → bus (stops at the horizontal bus so
+                  every team gets the same short drop-line) */}
               <div
                 className="absolute"
                 style={{
-                  left: orgNodeLeft + NODE_W / 2,
+                  left: orgNodeLeft + NODE_W / 2 - 1,
                   top: ORG_Y + ORG_H,
-                  height: TEAM_Y - (ORG_Y + ORG_H),
+                  height: TEAM_Y - 10 - (ORG_Y + ORG_H),
                   width: 2,
                   backgroundColor: '#b6c2d9',
                 }}
@@ -341,7 +358,7 @@ export default function OrgChart({ tree, canEdit, organizationId, focusTeamId, o
                 <div
                   className="absolute"
                   style={{
-                    left: PADDING + NODE_W / 2,
+                    left: PADDING + TEAM_COL_W / 2,
                     top: TEAM_Y - 10,
                     height: 2,
                     width: (columns.length - 1) * TEAM_COL_W,
@@ -350,9 +367,25 @@ export default function OrgChart({ tree, canEdit, organizationId, focusTeamId, o
                 />
               )}
 
+              {/* Drop lines bus → each team */}
+              {columns.map((col, i) => (
+                <div
+                  key={`drop-${col.id}`}
+                  className="absolute"
+                  style={{
+                    left: PADDING + i * TEAM_COL_W + TEAM_COL_W / 2 - 1,
+                    top: TEAM_Y - 10,
+                    height: 10,
+                    width: 2,
+                    backgroundColor: '#b6c2d9',
+                  }}
+                />
+              ))}
+
               {/* Team columns */}
               {columns.map((col, i) => {
                 const open = col.id === unassignedId || openTeamIds.has(col.id);
+                const cx = PADDING + i * TEAM_COL_W + TEAM_COL_W / 2;
                 return (
                   <div key={col.id}>
                     <OrgChartNode
@@ -366,20 +399,35 @@ export default function OrgChart({ tree, canEdit, organizationId, focusTeamId, o
                       memberCount={col.members.length}
                       onToggle={() => col.id === unassignedId ? undefined : toggleTeam(col.id)}
                     />
-                    {open &&
-                      col.members.map((m, j) => (
-                        <OrgChartNode
-                          key={`${col.id}-${m.userId}`}
-                          kind="member"
-                          label={m.name}
-                          sublabel={`${m.memberRole}${m.assignedRoles.length > 0 ? ' · ' + m.assignedRoles.map((r) => r.name).join(', ') : ''}`}
-                          x={PADDING + i * TEAM_COL_W + (TEAM_COL_W - NODE_W) / 2}
-                          y={MEMBER_Y_START + j * MEMBER_STEP}
-                          w={NODE_W}
-                          h={MEMBER_H}
-                          onDetails={() => setSelectedMember(m)}
+                    {open && col.members.length > 0 && (
+                      <>
+                        {/* Vertical spine team → members (visible in the gaps
+                            between member cards; nodes render above it) */}
+                        <div
+                          className="absolute"
+                          style={{
+                            left: cx - 1,
+                            top: TEAM_Y + TEAM_H,
+                            height: MEMBER_Y_START + col.members.length * MEMBER_STEP - MEMBER_H + (MEMBER_H - 12) - (TEAM_Y + TEAM_H),
+                            width: 2,
+                            backgroundColor: '#b6c2d9',
+                          }}
                         />
-                      ))}
+                        {col.members.map((m, j) => (
+                          <OrgChartNode
+                            key={`${col.id}-${m.userId}`}
+                            kind="member"
+                            label={m.name}
+                            sublabel={m.email}
+                            x={PADDING + i * TEAM_COL_W + (TEAM_COL_W - NODE_W) / 2}
+                            y={MEMBER_Y_START + j * MEMBER_STEP}
+                            w={NODE_W}
+                            h={MEMBER_H}
+                            onDetails={() => setSelectedMember(m)}
+                          />
+                        ))}
+                      </>
+                    )}
                   </div>
                 );
               })}
