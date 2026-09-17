@@ -326,7 +326,8 @@ list / unassigned), interactive canvas (org node toggles the team row —
 visible by default — plus per-team expand/collapse, zoom 50–200%,
 drag-to-pan; diagram opens centred in the viewport; mouse-wheel zoom toward
 the cursor — roll forward in, roll back out — and middle-click recentres),
-detail modal reusing the
+grey tree connectors (org → bus → drop line per team, plus a vertical spine
+per open team running through its member column), detail modal reusing the
 shared `Modal`, mobile vertical accordion below 768 px, `role="tree"`/`treeitem`
 + keyboard accessibility, 1:1 primary-membership display with unassigned
 bucketing, the two seeded permissions (`org-chart:read`, `org-chart:update`),

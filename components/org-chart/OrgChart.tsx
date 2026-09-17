@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useEffect, useMemo, useCallback, useRef } from 'react';
-import { ZoomIn, ZoomOut, Maximize2 } from 'lucide-react';
+import { ZoomIn, ZoomOut, Maximize2, Search, X } from 'lucide-react';
 import type { ChartTree, ChartMember } from './types';
 import OrgChartNode from './OrgChartNode';
 import OrgChartDetailModal from './OrgChartDetailModal';
@@ -48,6 +48,7 @@ export default function OrgChart({ tree, canEdit, organizationId, focusTeamId, o
   const [pan, setPan] = useState({ x: 0, y: 0 });
   const [selectedMember, setSelectedMember] = useState<ChartMember | null>(null);
   const [isMobile, setIsMobile] = useState(false);
+  const [search, setSearch] = useState('');
 
   const dragRef = useRef<{ startX: number; startY: number; panX: number; panY: number } | null>(null);
 
@@ -96,16 +97,83 @@ export default function OrgChart({ tree, canEdit, organizationId, focusTeamId, o
   );
 
   const canvasW = columns.length * TEAM_COL_W + PADDING * 2;
+
+  // -----------------------------------------------------------------------
+  // Search — case-insensitive text match across the whole chart
+  // (org name, team name/description, member name/email). Matches are
+  // highlighted in place as the user types; non-matching members are hidden.
+  // -----------------------------------------------------------------------
+  const searchQuery = search.trim().toLowerCase();
+  const searching = searchQuery.length > 0;
+
+  const { matchedMemberIds, matchedTeamIds, orgMatches } = useMemo(() => {
+    const memberIds = new Set<string>();
+    const teamIds = new Set<string>();
+    let org = false;
+    if (searching) {
+      if (tree.organization.name.toLowerCase().includes(searchQuery)) org = true;
+      for (const t of tree.teams) {
+        if (
+          t.name.toLowerCase().includes(searchQuery) ||
+          (t.description ?? '').toLowerCase().includes(searchQuery)
+        ) {
+          teamIds.add(t.id);
+        }
+      }
+      for (const m of [...tree.teams.flatMap((t) => t.members), ...tree.unassigned]) {
+        if (
+          m.name.toLowerCase().includes(searchQuery) ||
+          m.email.toLowerCase().includes(searchQuery)
+        ) {
+          memberIds.add(m.userId);
+        }
+      }
+    }
+    return { matchedMemberIds: memberIds, matchedTeamIds: teamIds, orgMatches: org };
+  }, [searching, searchQuery, tree]);
+
+  /** Teams whose name matches or that contain at least one matching member. */
+  const teamsWithMatches = useMemo(() => {
+    const s = new Set<string>();
+    if (searching) {
+      for (const t of tree.teams) {
+        if (matchedTeamIds.has(t.id) || t.members.some((m) => matchedMemberIds.has(m.userId))) {
+          s.add(t.id);
+        }
+      }
+    }
+    return s;
+  }, [searching, tree, matchedTeamIds, matchedMemberIds]);
+
+  const unassignedMatches = searching && tree.unassigned.some((m) => matchedMemberIds.has(m.userId));
+
+  const isVisibleMember = useCallback(
+    (m: ChartMember) => !searching || matchedMemberIds.has(m.userId),
+    [searching, matchedMemberIds],
+  );
+
+  /** Teams with matches are revealed automatically while searching. */
+  const isColumnOpen = useCallback(
+    (col: { id: string; members: ChartMember[] }) =>
+      col.id === unassignedId ||
+      openTeamIds.has(col.id) ||
+      (searching && teamsWithMatches.has(col.id)),
+    [openTeamIds, searching, teamsWithMatches],
+  );
+
+  const matchCount = (orgMatches ? 1 : 0) + matchedTeamIds.size + matchedMemberIds.size;
+
   const canvasH = useMemo(() => {
     if (!orgOpen) return ORG_Y + ORG_H + PADDING;
     let maxBottom = TEAM_Y + TEAM_H;
     for (const col of columns) {
-      if (!openTeamIds.has(col.id) && col.id !== unassignedId) continue;
-      const bottom = MEMBER_Y_START + col.members.length * MEMBER_STEP;
+      if (!isColumnOpen(col)) continue;
+      const count = searching ? col.members.filter(isVisibleMember).length : col.members.length;
+      const bottom = MEMBER_Y_START + count * MEMBER_STEP;
       if (bottom > maxBottom) maxBottom = bottom;
     }
     return maxBottom + PADDING + TEAM_H;
-  }, [columns, openTeamIds, orgOpen]);
+  }, [columns, isColumnOpen, searching, isVisibleMember, orgOpen]);
 
   // Pan handlers (background only).
   const onPointerDown = (e: React.PointerEvent) => {
@@ -208,7 +276,7 @@ export default function OrgChart({ tree, canEdit, organizationId, focusTeamId, o
       <div className="h-full overflow-y-auto bg-[#f8f9fa] p-4" role="tree" aria-label={`Organization chart: ${tree.organization.name}`}>
         <div
           className="rounded-md p-4 text-white text-center"
-          style={{ backgroundColor: '#1B2A4A', border: '2px solid #2A9D8F' }}
+          style={{ backgroundColor: '#1B2A4A', border: `2px solid ${searching && orgMatches ? '#F5A623' : '#2A9D8F'}` }}
         >
           <p className="text-base font-semibold">{tree.organization.name}</p>
           {tree.organization.description && (
@@ -216,9 +284,54 @@ export default function OrgChart({ tree, canEdit, organizationId, focusTeamId, o
           )}
         </div>
 
+        <div className="mx-auto mt-4 max-w-md">
+          <label htmlFor="org-chart-search" className="sr-only">
+            Search organization chart
+          </label>
+          <div className="flex items-center gap-2 rounded-md border bg-white p-1.5 shadow-sm" style={{ borderColor: '#dee2e6' }}>
+            <Search aria-hidden="true" className="ml-1 h-4 w-4 shrink-0 text-gray-500" />
+            <input
+              id="org-chart-search"
+              type="search"
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+              placeholder="Search teams & members"
+              className="w-full bg-transparent text-sm outline-none"
+              style={{ color: '#1B2A4A' }}
+            />
+            {search && (
+              <button
+                type="button"
+                onClick={() => setSearch('')}
+                aria-label="Clear search"
+                className="rounded p-0.5 text-gray-400 hover:bg-gray-100 hover:text-gray-600"
+              >
+                <X className="h-3.5 w-3.5" />
+              </button>
+            )}
+          </div>
+          {searching && (
+            <p className="mt-1 px-1 text-xs tabular-nums" style={{ color: '#1B2A4A' }}>
+              {matchCount === 0
+                ? 'No matches found'
+                : `${matchCount} match${matchCount === 1 ? '' : 'es'}`}
+            </p>
+          )}
+        </div>
+
         <ul className="mt-4 space-y-3">
+          {searching && matchCount === 0 && (
+            <li className="rounded border bg-white p-4 text-center text-sm" style={{ borderColor: '#dee2e6', color: '#1B2A4A' }}>
+              No matches found for &ldquo;{search.trim()}&rdquo;
+            </li>
+          )}
           {columns.map((col) => {
-            const open = col.id === unassignedId || openTeamIds.has(col.id);
+            const open = isColumnOpen(col);
+            const visibleMembers = searching ? col.members.filter(isVisibleMember) : col.members;
+            const isUnassignedCol = col.id === unassignedId;
+            // While searching, hide columns with no matching org / team / member.
+            if (searching && !isUnassignedCol && !teamsWithMatches.has(col.id)) return null;
+            if (searching && isUnassignedCol && !unassignedMatches) return null;
             return (
               <li key={col.id} className="rounded border bg-white" style={{ borderColor: '#dee2e6' }}>
                 <button
@@ -227,36 +340,39 @@ export default function OrgChart({ tree, canEdit, organizationId, focusTeamId, o
                   aria-expanded={open}
                   onClick={() => col.id === unassignedId ? undefined : toggleTeam(col.id)}
                   className="w-full flex items-center justify-between px-4 py-3 text-sm font-semibold"
-                  style={{ color: '#1B2A4A' }}
+                  style={{
+                    color: '#1B2A4A',
+                    ...(searching && matchedTeamIds.has(col.id) ? { boxShadow: 'inset 0 0 0 2px #F5A623' } : {}),
+                  }}
                 >
                   <span>{col.name}</span>
                   <span className="text-xs text-gray-500">
-                    {col.members.length} member{col.members.length === 1 ? '' : 's'} {open ? '▾' : '▸'}
+                    {visibleMembers.length} member{visibleMembers.length === 1 ? '' : 's'} {open ? '▾' : '▸'}
                   </span>
                 </button>
-                {open && col.members.length > 0 && (
+                {open && visibleMembers.length > 0 && (
                   <ul className="border-t px-2 py-2 space-y-1" style={{ borderColor: '#dee2e6' }}>
-                    {col.members.map((m) => (
+                    {visibleMembers.map((m) => (
                       <li key={m.userId}>
                         <button
                           type="button"
                           role="treeitem"
-                          aria-label={`Member ${m.name}`}
+                          aria-label={`Member ${m.name}${searching && matchedMemberIds.has(m.userId) ? ', matches search' : ''}`}
                           onClick={() => setSelectedMember(m)}
                           className="w-full text-left rounded px-2 py-2 hover:bg-gray-50"
+                          style={searching && matchedMemberIds.has(m.userId) ? { boxShadow: 'inset 0 0 0 2px #F5A623' } : undefined}
                         >
                           <p className="text-sm font-medium" style={{ color: '#1B2A4A' }}>{m.name}</p>
                           <p className="text-xs text-gray-500">
-                            {m.memberRole}
-                            {m.assignedRoles.length > 0 && ` · ${m.assignedRoles.map((r) => r.name).join(', ')}`}
+                            {m.email}
                           </p>
                         </button>
                       </li>
                     ))}
                   </ul>
                 )}
-                {open && col.members.length === 0 && (
-                  <p className="px-4 pb-3 text-xs text-gray-500">No members</p>
+                {open && visibleMembers.length === 0 && (
+                  <p className="px-4 pb-3 text-xs text-gray-500">No members{searching ? ' match' : ''}</p>
                 )}
               </li>
             );
@@ -278,18 +394,73 @@ export default function OrgChart({ tree, canEdit, organizationId, focusTeamId, o
   // -----------------------------------------------------------------------
   return (
     <div className="relative h-full flex-1 overflow-hidden bg-[#f8f9fa]">
-      {/* Zoom controls */}
-      <div className="absolute right-4 top-4 z-10 flex items-center gap-1 rounded-md border bg-white p-1 shadow-sm" style={{ borderColor: '#dee2e6' }}>
-        <button type="button" onClick={zoomIn} aria-label="Zoom in" className="rounded p-1.5 text-gray-600 hover:bg-gray-100">
-          <ZoomIn className="h-4 w-4" />
-        </button>
-        <button type="button" onClick={zoomOut} aria-label="Zoom out" className="rounded p-1.5 text-gray-600 hover:bg-gray-100">
-          <ZoomOut className="h-4 w-4" />
-        </button>
-        <button type="button" onClick={resetView} aria-label="Reset view" className="rounded p-1.5 text-gray-600 hover:bg-gray-100">
-          <Maximize2 className="h-4 w-4" />
-        </button>
-        <span className="px-1 text-xs text-gray-500 tabular-nums">{Math.round(zoom * 100)}%</span>
+      {/* Zoom controls + color key (fixed overlay, right/top) */}
+      <div className="absolute right-4 top-4 z-10 flex flex-col items-stretch gap-2">
+        {/* Zoom controls */}
+        <div className="flex items-center gap-1 rounded-md border bg-white p-1 shadow-sm" style={{ borderColor: '#dee2e6' }}>
+          <button type="button" onClick={zoomIn} aria-label="Zoom in" className="rounded p-1.5 text-gray-600 hover:bg-gray-100">
+            <ZoomIn className="h-4 w-4" />
+          </button>
+          <button type="button" onClick={zoomOut} aria-label="Zoom out" className="rounded p-1.5 text-gray-600 hover:bg-gray-100">
+            <ZoomOut className="h-4 w-4" />
+          </button>
+          <button type="button" onClick={resetView} aria-label="Reset view" className="rounded p-1.5 text-gray-600 hover:bg-gray-100">
+            <Maximize2 className="h-4 w-4" />
+          </button>
+          <span className="px-1 text-xs text-gray-500 tabular-nums">{Math.round(zoom * 100)}%</span>
+        </div>
+
+        {/* Color key */}
+        <div className="flex flex-col gap-1.5 rounded-md border bg-white p-2 shadow-sm" style={{ borderColor: '#dee2e6' }} aria-label="Color key">
+          {[
+            { color: '#1B2A4A', label: 'Organization' },
+            { color: '#F5A623', label: 'Team' },
+            { color: '#2A9D8F', label: 'Members' },
+          ].map(({ color, label }) => (
+            <div key={label} className="flex items-center gap-2">
+              <span aria-hidden="true" className="inline-block h-3 w-3 rounded-sm" style={{ backgroundColor: color }} />
+              <span className="text-xs leading-none" style={{ color: '#1B2A4A' }}>{label}</span>
+            </div>
+          ))}
+        </div>
+
+        {/* Search (same styling as the key; matches update live in the chart) */}
+        <div className="w-52 rounded-md border bg-white shadow-sm" style={{ borderColor: '#dee2e6' }}>
+          <label htmlFor="org-chart-search" className="sr-only">
+            Search organization chart
+          </label>
+          <div className="flex items-center gap-1.5 p-1.5">
+            <Search aria-hidden="true" className="h-4 w-4 shrink-0 text-gray-500" />
+            <input
+              id="org-chart-search"
+              type="search"
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+              placeholder="Search chart…"
+              className="w-full bg-transparent text-xs outline-none"
+              style={{ color: '#1B2A4A' }}
+            />
+            {search && (
+              <button
+                type="button"
+                onClick={() => setSearch('')}
+                aria-label="Clear search"
+                className="rounded p-0.5 text-gray-400 hover:bg-gray-100 hover:text-gray-600"
+              >
+                <X className="h-3.5 w-3.5" />
+              </button>
+            )}
+          </div>
+          <p
+            role="status"
+            className={`px-2.5 text-xs leading-none tabular-nums ${searching ? '' : 'invisible'}`}
+            style={{ color: '#1B2A4A', paddingBottom: searching ? 8 : 0 }}
+          >
+            {matchCount === 0
+              ? 'No matches found'
+              : `${matchCount} match${matchCount === 1 ? '' : 'es'}`}
+          </p>
+        </div>
       </div>
 
       {/* Pannable/zoomable canvas */}
@@ -321,27 +492,29 @@ export default function OrgChart({ tree, canEdit, organizationId, focusTeamId, o
             w={NODE_W}
             h={ORG_H}
             expanded={orgOpen}
+            highlighted={orgMatches}
             onToggle={() => setOrgOpen((open) => !open)}
           />
 
           {orgOpen && (
             <>
-              {/* Connector line org → team row */}
+              {/* Connector line org → bus (stops at the horizontal bus so
+                  every team gets the same short drop-line) */}
               <div
                 className="absolute"
                 style={{
-                  left: orgNodeLeft + NODE_W / 2,
+                  left: orgNodeLeft + NODE_W / 2 - 1,
                   top: ORG_Y + ORG_H,
-                  height: TEAM_Y - (ORG_Y + ORG_H),
+                  height: TEAM_Y - 10 - (ORG_Y + ORG_H),
                   width: 2,
                   backgroundColor: '#b6c2d9',
                 }}
               />
-              {columns.length > 1 && (
+              {!searching && columns.length > 1 && (
                 <div
                   className="absolute"
                   style={{
-                    left: PADDING + NODE_W / 2,
+                    left: PADDING + TEAM_COL_W / 2,
                     top: TEAM_Y - 10,
                     height: 2,
                     width: (columns.length - 1) * TEAM_COL_W,
@@ -350,9 +523,27 @@ export default function OrgChart({ tree, canEdit, organizationId, focusTeamId, o
                 />
               )}
 
-              {/* Team columns */}
+              {/* Drop lines bus → each team (matched columns only while searching) */}
+              {columns.map((col, i) => (searching && !isColumnOpen(col) ? null : (
+                <div
+                  key={`drop-${col.id}`}
+                  className="absolute"
+                  style={{
+                    left: PADDING + i * TEAM_COL_W + TEAM_COL_W / 2 - 1,
+                    top: TEAM_Y - 10,
+                    height: 10,
+                    width: 2,
+                    backgroundColor: '#b6c2d9',
+                  }}
+                />
+              )))}
+
+              {/* Team columns — while searching, only columns with matches show */}
               {columns.map((col, i) => {
-                const open = col.id === unassignedId || openTeamIds.has(col.id);
+                const open = isColumnOpen(col);
+                const members = searching ? col.members.filter(isVisibleMember) : col.members;
+                if (searching && !open) return null;
+                const cx = PADDING + i * TEAM_COL_W + TEAM_COL_W / 2;
                 return (
                   <div key={col.id}>
                     <OrgChartNode
@@ -363,26 +554,52 @@ export default function OrgChart({ tree, canEdit, organizationId, focusTeamId, o
                       w={NODE_W}
                       h={TEAM_H}
                       expanded={open}
-                      memberCount={col.members.length}
+                      memberCount={members.length}
+                      highlighted={searching && matchedTeamIds.has(col.id)}
                       onToggle={() => col.id === unassignedId ? undefined : toggleTeam(col.id)}
                     />
-                    {open &&
-                      col.members.map((m, j) => (
-                        <OrgChartNode
-                          key={`${col.id}-${m.userId}`}
-                          kind="member"
-                          label={m.name}
-                          sublabel={`${m.memberRole}${m.assignedRoles.length > 0 ? ' · ' + m.assignedRoles.map((r) => r.name).join(', ') : ''}`}
-                          x={PADDING + i * TEAM_COL_W + (TEAM_COL_W - NODE_W) / 2}
-                          y={MEMBER_Y_START + j * MEMBER_STEP}
-                          w={NODE_W}
-                          h={MEMBER_H}
-                          onDetails={() => setSelectedMember(m)}
+                    {open && members.length > 0 && (
+                      <>
+                        {/* Vertical spine team → members (visible in the gaps
+                            between member cards; nodes render above it) */}
+                        <div
+                          className="absolute"
+                          style={{
+                            left: cx - 1,
+                            top: TEAM_Y + TEAM_H,
+                            height: MEMBER_Y_START + members.length * MEMBER_STEP - MEMBER_H + (MEMBER_H - 12) - (TEAM_Y + TEAM_H),
+                            width: 2,
+                            backgroundColor: '#b6c2d9',
+                          }}
                         />
-                      ))}
+                        {members.map((m, j) => (
+                          <OrgChartNode
+                            key={`${col.id}-${m.userId}`}
+                            kind="member"
+                            label={m.name}
+                            sublabel={m.email}
+                            x={PADDING + i * TEAM_COL_W + (TEAM_COL_W - NODE_W) / 2}
+                            y={MEMBER_Y_START + j * MEMBER_STEP}
+                            w={NODE_W}
+                            h={MEMBER_H}
+                            highlighted={searching && matchedMemberIds.has(m.userId)}
+                            onDetails={() => setSelectedMember(m)}
+                          />
+                        ))}
+                      </>
+                    )}
                   </div>
                 );
               })}
+
+              {searching && matchCount === 0 && (
+                <div
+                  className="absolute rounded-md border bg-white px-4 py-2 text-sm shadow-sm"
+                  style={{ left: orgNodeLeft - 20, top: TEAM_Y + TEAM_H / 2 - 12, color: '#1B2A4A', borderColor: '#dee2e6' }}
+                >
+                  No matches found for &ldquo;{search.trim()}&rdquo;
+                </div>
+              )}
             </>
           )}
         </div>
