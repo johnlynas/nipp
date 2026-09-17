@@ -34,12 +34,16 @@ const MAX_ZOOM = 2;
  * Interactive org chart canvas.
  *
  * Desktop: absolute-positioned tree (org root → teams → members), zoom via
- * transform scale, drag-to-pan on the background.
+ * transform scale, drag-to-pan on the background, mouse wheel zoom
+ * (roll forward = in, roll back = out), middle-click recentres the diagram.
+ * The diagram opens centred in the viewport.
  * Mobile (<768px): vertical accordion layout (org header, team sections,
  * member lists) instead of a tiny zoomable canvas.
  */
 export default function OrgChart({ tree, canEdit, organizationId, focusTeamId, onFocusTeamHandled }: OrgChartProps) {
   const [openTeamIds, setOpenTeamIds] = useState<Set<string>>(() => new Set());
+  // Org node collapse state — defaults to teams visible.
+  const [orgOpen, setOrgOpen] = useState(true);
   const [zoom, setZoom] = useState(1);
   const [pan, setPan] = useState({ x: 0, y: 0 });
   const [selectedMember, setSelectedMember] = useState<ChartMember | null>(null);
@@ -56,9 +60,10 @@ export default function OrgChart({ tree, canEdit, organizationId, focusTeamId, o
     return () => mq.removeEventListener('change', update);
   }, []);
 
-  // Sidebar → expand a team in the tree.
+  // Sidebar → expand a team in the tree (revealing the team row if needed).
   useEffect(() => {
     if (focusTeamId) {
+      setOrgOpen(true);
       setOpenTeamIds((prev) => new Set(prev).add(focusTeamId));
       onFocusTeamHandled();
     }
@@ -75,10 +80,6 @@ export default function OrgChart({ tree, canEdit, organizationId, focusTeamId, o
 
   const zoomIn = useCallback(() => setZoom((z) => Math.min(MAX_ZOOM, Math.round((z + 0.1) * 10) / 10)), []);
   const zoomOut = useCallback(() => setZoom((z) => Math.max(MIN_ZOOM, Math.round((z - 0.1) * 10) / 10)), []);
-  const resetView = useCallback(() => {
-    setZoom(1);
-    setPan({ x: 0, y: 0 });
-  }, []);
 
   // -----------------------------------------------------------------------
   // Canvas geometry (memoized on tree + open state)
@@ -96,6 +97,7 @@ export default function OrgChart({ tree, canEdit, organizationId, focusTeamId, o
 
   const canvasW = columns.length * TEAM_COL_W + PADDING * 2;
   const canvasH = useMemo(() => {
+    if (!orgOpen) return ORG_Y + ORG_H + PADDING;
     let maxBottom = TEAM_Y + TEAM_H;
     for (const col of columns) {
       if (!openTeamIds.has(col.id) && col.id !== unassignedId) continue;
@@ -103,7 +105,7 @@ export default function OrgChart({ tree, canEdit, organizationId, focusTeamId, o
       if (bottom > maxBottom) maxBottom = bottom;
     }
     return maxBottom + PADDING + TEAM_H;
-  }, [columns, openTeamIds]);
+  }, [columns, openTeamIds, orgOpen]);
 
   // Pan handlers (background only).
   const onPointerDown = (e: React.PointerEvent) => {
@@ -119,6 +121,82 @@ export default function OrgChart({ tree, canEdit, organizationId, focusTeamId, o
   const onPointerUp = () => {
     dragRef.current = null;
   };
+
+  // Mouse wheel zoom (native, non-passive so preventDefault works) +
+  // middle-click (wheel centre) recentres the diagram. Refs mirror zoom/pan
+  // and canvas size so the native listener and centering math always see
+  // current values without re-subscribing.
+  const canvasRef = useRef<HTMLDivElement | null>(null);
+  const zoomRef = useRef(zoom);
+  const panRef = useRef(pan);
+  useEffect(() => {
+    zoomRef.current = zoom;
+  }, [zoom]);
+  useEffect(() => {
+    panRef.current = pan;
+  }, [pan]);
+  const canvasSizeRef = useRef({ w: canvasW, h: canvasH });
+  useEffect(() => {
+    canvasSizeRef.current = { w: canvasW, h: canvasH };
+  }, [canvasW, canvasH]);
+
+  /** Pan offset that centres the canvas content in the viewport at zoom z. */
+  const centerPan = useCallback((z: number) => {
+    const el = canvasRef.current;
+    if (!el) return { x: 0, y: 0 };
+    const rect = el.getBoundingClientRect();
+    const { w, h } = canvasSizeRef.current;
+    return { x: (rect.width - w * z) / 2, y: (rect.height - h * z) / 2 };
+  }, []);
+
+  // Reset = 100% zoom with the diagram centred in the viewport.
+  const resetView = useCallback(() => {
+    setZoom(1);
+    setPan(centerPan(1));
+  }, [centerPan]);
+
+  // Default start position: each displayed org opens centred in the viewport,
+  // with the team row visible.
+  useEffect(() => {
+    if (isMobile) return;
+    setOrgOpen(true);
+    setZoom(1);
+    setPan(centerPan(1));
+  }, [tree.organization.id, isMobile, centerPan]);
+
+  useEffect(() => {
+    const el = canvasRef.current;
+    if (!el) return;
+    const handleWheel = (e: WheelEvent) => {
+      e.preventDefault();
+      const z = zoomRef.current;
+      const factor = e.deltaY < 0 ? 1.1 : 1 / 1.1;
+      const next = Math.min(MAX_ZOOM, Math.max(MIN_ZOOM, Math.round(z * factor * 10) / 10));
+      if (next === z) return;
+      // Keep the point under the cursor fixed while scaling.
+      const rect = el.getBoundingClientRect();
+      const mx = e.clientX - rect.left;
+      const my = e.clientY - rect.top;
+      const p = panRef.current;
+      const newPan = { x: mx - ((mx - p.x) * next) / z, y: my - ((my - p.y) * next) / z };
+      zoomRef.current = next;
+      panRef.current = newPan;
+      setZoom(next);
+      setPan(newPan);
+    };
+    const handleMouseDown = (e: MouseEvent) => {
+      if (e.button === 1) {
+        e.preventDefault();
+        resetView();
+      }
+    };
+    el.addEventListener('wheel', handleWheel, { passive: false });
+    el.addEventListener('mousedown', handleMouseDown);
+    return () => {
+      el.removeEventListener('wheel', handleWheel);
+      el.removeEventListener('mousedown', handleMouseDown);
+    };
+  }, [resetView, isMobile]); // isMobile: canvas element only exists on desktop
 
   const orgNodeLeft = canvasW / 2 - NODE_W / 2;
 
@@ -216,6 +294,7 @@ export default function OrgChart({ tree, canEdit, organizationId, focusTeamId, o
 
       {/* Pannable/zoomable canvas */}
       <div
+        ref={canvasRef}
         className="h-full w-full cursor-grab active:cursor-grabbing"
         onPointerDown={onPointerDown}
         onPointerMove={onPointerMove}
@@ -232,31 +311,7 @@ export default function OrgChart({ tree, canEdit, organizationId, focusTeamId, o
             transform: `translate(${pan.x}px, ${pan.y}px) scale(${zoom})`,
           }}
         >
-          {/* Connector line org → team row */}
-          <div
-            className="absolute"
-            style={{
-              left: orgNodeLeft + NODE_W / 2,
-              top: ORG_Y + ORG_H,
-              height: TEAM_Y - (ORG_Y + ORG_H),
-              width: 2,
-              backgroundColor: '#b6c2d9',
-            }}
-          />
-          {columns.length > 1 && (
-            <div
-              className="absolute"
-              style={{
-                left: PADDING + NODE_W / 2,
-                top: TEAM_Y - 10,
-                height: 2,
-                width: (columns.length - 1) * TEAM_COL_W,
-                backgroundColor: '#b6c2d9',
-              }}
-            />
-          )}
-
-          {/* Organization root */}
+          {/* Organization root — click toggles the team row */}
           <OrgChartNode
             kind="org"
             label={tree.organization.name}
@@ -265,41 +320,71 @@ export default function OrgChart({ tree, canEdit, organizationId, focusTeamId, o
             y={ORG_Y}
             w={NODE_W}
             h={ORG_H}
+            expanded={orgOpen}
+            onToggle={() => setOrgOpen((open) => !open)}
           />
 
-          {/* Team columns */}
-          {columns.map((col, i) => {
-            const open = col.id === unassignedId || openTeamIds.has(col.id);
-            return (
-              <div key={col.id}>
-                <OrgChartNode
-                  kind="team"
-                  label={col.name}
-                  x={PADDING + i * TEAM_COL_W + (TEAM_COL_W - NODE_W) / 2}
-                  y={TEAM_Y}
-                  w={NODE_W}
-                  h={TEAM_H}
-                  expanded={open}
-                  memberCount={col.members.length}
-                  onToggle={() => col.id === unassignedId ? undefined : toggleTeam(col.id)}
+          {orgOpen && (
+            <>
+              {/* Connector line org → team row */}
+              <div
+                className="absolute"
+                style={{
+                  left: orgNodeLeft + NODE_W / 2,
+                  top: ORG_Y + ORG_H,
+                  height: TEAM_Y - (ORG_Y + ORG_H),
+                  width: 2,
+                  backgroundColor: '#b6c2d9',
+                }}
+              />
+              {columns.length > 1 && (
+                <div
+                  className="absolute"
+                  style={{
+                    left: PADDING + NODE_W / 2,
+                    top: TEAM_Y - 10,
+                    height: 2,
+                    width: (columns.length - 1) * TEAM_COL_W,
+                    backgroundColor: '#b6c2d9',
+                  }}
                 />
-                {open &&
-                  col.members.map((m, j) => (
+              )}
+
+              {/* Team columns */}
+              {columns.map((col, i) => {
+                const open = col.id === unassignedId || openTeamIds.has(col.id);
+                return (
+                  <div key={col.id}>
                     <OrgChartNode
-                      key={`${col.id}-${m.userId}`}
-                      kind="member"
-                      label={m.name}
-                      sublabel={`${m.memberRole}${m.assignedRoles.length > 0 ? ' · ' + m.assignedRoles.map((r) => r.name).join(', ') : ''}`}
+                      kind="team"
+                      label={col.name}
                       x={PADDING + i * TEAM_COL_W + (TEAM_COL_W - NODE_W) / 2}
-                      y={MEMBER_Y_START + j * MEMBER_STEP}
+                      y={TEAM_Y}
                       w={NODE_W}
-                      h={MEMBER_H}
-                      onDetails={() => setSelectedMember(m)}
+                      h={TEAM_H}
+                      expanded={open}
+                      memberCount={col.members.length}
+                      onToggle={() => col.id === unassignedId ? undefined : toggleTeam(col.id)}
                     />
-                  ))}
-              </div>
-            );
-          })}
+                    {open &&
+                      col.members.map((m, j) => (
+                        <OrgChartNode
+                          key={`${col.id}-${m.userId}`}
+                          kind="member"
+                          label={m.name}
+                          sublabel={`${m.memberRole}${m.assignedRoles.length > 0 ? ' · ' + m.assignedRoles.map((r) => r.name).join(', ') : ''}`}
+                          x={PADDING + i * TEAM_COL_W + (TEAM_COL_W - NODE_W) / 2}
+                          y={MEMBER_Y_START + j * MEMBER_STEP}
+                          w={NODE_W}
+                          h={MEMBER_H}
+                          onDetails={() => setSelectedMember(m)}
+                        />
+                      ))}
+                  </div>
+                );
+              })}
+            </>
+          )}
         </div>
       </div>
 

@@ -809,7 +809,7 @@ entry ("Org Chart", `Network` icon).
 flowchart TB
     subgraph CLIENT["Browser — /dashboard/admin/org-chart"]
         PAGE["org-chart/page.tsx (client component)<br/>init: session org → localStorage → ?org= super-admin override<br/>(calendar-page pattern)"]
-        CANVAS["components/org-chart/OrgChart.tsx<br/>absolute-positioned canvas · zoom 0.5–2x · drag-to-pan<br/>mobile <768px: vertical accordion"]
+        CANVAS["components/org-chart/OrgChart.tsx<br/>absolute-positioned canvas · opens centred · zoom 0.5–2x (buttons + mouse wheel)<br/>drag-to-pan · middle-click recentres · mobile <768px: vertical accordion"]
         SIDE["OrgChartSidebar.tsx — slide-in panel (w-16 / w-80)<br/>typeable org combobox (super admin) · Manage links<br/>team list → expands team in canvas · unassigned list"]
         MODAL["OrgChartDetailModal.tsx — member detail popup<br/>(shared dashboard Modal)"]
     end
@@ -836,11 +836,19 @@ flowchart TB
 | Page | `app/dashboard/admin/org-chart/page.tsx` | Client component: active-org init (session → localStorage → `?org=` super-admin override against `/api/admin/organizations/list`), tree fetch per org, loading / no-org / error+retry states. |
 | API route | `app/api/organizations/[orgId]/org-chart/route.ts` | Single GET endpoint: authorization gate, one Prisma read, member-role and team-membership assembly, delegates shaping to `lib/org-chart.ts`. |
 | Tree shaper | `lib/org-chart.ts` | Pure functions (`buildOrgChart`, `resolvePrimaryTeamSlug`, `pickPrimaryTeamSlug`) — unit-testable without a database; also the single source of the `ChartTree` / `ChartMember` types. |
-| Canvas | `components/org-chart/OrgChart.tsx` | Desktop tree canvas (expand/collapse teams, zoom 50–200%, drag-to-pan, reset), responsive accordion below 768 px, owns the detail-modal state. |
+| Canvas | `components/org-chart/OrgChart.tsx` | Desktop tree canvas (org node toggles the team row — visible by default — per-team member expand/collapse, zoom 50–200% via buttons or mouse wheel anchored at the cursor, drag-to-pan, opens centred in the viewport, re-centres via button or middle-click), responsive accordion below 768 px, owns the detail-modal state. |
 | Node | `components/org-chart/OrgChartNode.tsx` | One org / team / member node: `role="treeitem"`, `aria-level` (1/2/3), `aria-expanded`, keyboard-operable `<button>`. |
 | Sidebar | `components/org-chart/OrgChartSidebar.tsx` | Slide-in panel mirroring `CalendarSidebar`: collapsed/expanded, typeable org combobox for Super Admins, Manage links (organization settings / members / roles) shown when `viewerCanEdit`, team list that expands the matching tree node, unassigned member list. |
 | Detail modal | `components/org-chart/OrgChartDetailModal.tsx` | Member popup: email, membership role, assigned roles with expandable permission keys, all team memberships. |
 | Types | `components/org-chart/types.ts` | Re-exports the shaper's types so page and components share one type source with the API route. |
+
+The canvas attaches its `wheel` listener natively with `{ passive: false }`
+(React's synthetic `onWheel` is registered passive and cannot
+`preventDefault()`, which would let the page scroll behind the canvas) and
+mirrors zoom/pan into refs so rapid wheel ticks always compute against current
+values; middle-click (`button === 1`) recentres the diagram (100% zoom,
+content centred in the viewport — also the default start position for each
+displayed org) and suppresses the browser's autoscroll gesture.
 
 ### Data Flow & API
 

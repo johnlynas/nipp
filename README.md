@@ -77,7 +77,7 @@ Self-service registration is not available (`/register` redirects to
 | **Super Admin console** | Manage organizations, users, roles, permissions, audit logs, cache metrics, system health/logs |
 | **Tenant dashboard** | Integrated dashboard for users, organizations, roles, permissions, resources, teams, and the calendar |
 | **Interactive Calendar** | Month/week/day/year views, drag-and-drop rescheduling, RFC 5545 (rrule) recurrence, event modals, quick-add, live "due to start" SSE alerts |
-| **Org Chart** | Live interactive tree of org → teams → members: zoom/pan canvas, member detail modal with roles & permissions, tenant-switcher sidebar, unassigned bucket, mobile accordion (`/dashboard/admin/org-chart`) |
+| **Org Chart** | Live interactive tree of org → teams → members: zoom/pan canvas (opens centred in the viewport, mouse-wheel zoom toward the cursor, middle-click recentres), member detail modal with roles & permissions, tenant-switcher sidebar, unassigned bucket, mobile accordion (`/dashboard/admin/org-chart`) |
 | **Calendar Notifications** | Rate-limited email alerts for today's events, delivery logged to `NotificationLog` |
 | **Hybrid caching** | L1 in-memory + L2 Redis cache with stampede protection, warming, and live metrics |
 | **Real-time notifications** | Live server-side SSE broadcast (health checks, all admin management events, and upcoming calendar events) with org/global scoping, deduplication, and a persisted notification log |
@@ -353,8 +353,12 @@ flowchart LR
 
 **What you get:**
 
-- **Interactive canvas** — click a team to expand/collapse its members
-  (collapsed by default); zoom from 50% to 200%, drag-to-pan, and reset view.
+- **Interactive canvas** — the diagram opens centred in the viewport with
+  the team row visible; click the organization node to show/hide the whole
+  team row, or a team to expand/collapse its members (collapsed by default);
+  zoom from 50% to 200% with the buttons or the mouse wheel (roll forward =
+  in, roll back = out, anchored at the cursor), drag-to-pan, and re-centre
+  with the reset button or a middle-click.
 - **Member detail modal** — name, email, membership role, the assigned roles
   with their permission keys, and every team the member belongs to (reuses the
   shared dashboard `Modal`).

@@ -322,13 +322,16 @@ section above, this one wins.
 
 **Shipped (per plan):** data endpoint + authz matrix, full-bleed page with
 `?org=` super-admin switcher, slide-in sidebar (combobox / Manage links / team
-list / unassigned), interactive canvas (expand/collapse, zoom 50–200%,
-drag-to-pan, reset), detail modal reusing the shared `Modal`, mobile vertical
-accordion below 768 px, `role="tree"`/`treeitem` + keyboard accessibility,
-1:1 primary-membership display with unassigned bucketing, the two seeded
-permissions (`org-chart:read`, `org-chart:update`), unit tests for the shaper
-and integration tests for the authz matrix, and a matching left-nav entry in
-the admin layout.
+list / unassigned), interactive canvas (org node toggles the team row —
+visible by default — plus per-team expand/collapse, zoom 50–200%,
+drag-to-pan; diagram opens centred in the viewport; mouse-wheel zoom toward
+the cursor — roll forward in, roll back out — and middle-click recentres),
+detail modal reusing the
+shared `Modal`, mobile vertical accordion below 768 px, `role="tree"`/`treeitem`
++ keyboard accessibility, 1:1 primary-membership display with unassigned
+bucketing, the two seeded permissions (`org-chart:read`, `org-chart:update`),
+unit tests for the shaper and integration tests for the authz matrix, and a
+matching left-nav entry in the admin layout.
 
 **Divergences:**
 
