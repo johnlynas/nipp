@@ -12,6 +12,8 @@ interface OrgChartNodeProps {
   expanded?: boolean;
   /** Only meaningful for team nodes. */
   memberCount?: number;
+  /** True when the node matches the active search query (highlighted). */
+  highlighted?: boolean;
   onToggle?: () => void;
   onDetails?: () => void;
 }
@@ -32,6 +34,7 @@ export default function OrgChartNode({
   h,
   expanded,
   memberCount = 0,
+  highlighted = false,
   onToggle,
   onDetails,
 }: OrgChartNodeProps) {
@@ -50,16 +53,23 @@ export default function OrgChartNode({
   // Complementary fill scheme: navy (org) and amber (team) are colour-wheel
   // opposites; teal (member) bridges the two. Warm/cool fills carry dark ink
   // text for contrast; only the navy org node uses white text.
-  let surface: string;
-  if (kind === 'org') {
-    surface = 'bg-[#1B2A4A] text-white border-[#2A9D8F] border-2';
-  } else if (isTeam) {
-    surface = expanded
+  const surface = kind === 'org' ? (
+    highlighted
+      ? 'bg-[#1B2A4A] text-white border-[#F5A623] border-2'
+      : 'bg-[#1B2A4A] text-white border-[#2A9D8F] border-2'
+  ) : isTeam ? (
+    expanded
       ? 'bg-[#F5A623] text-[#16233A] border-[#1B2A4A] border-2'
-      : 'bg-[#F5A623] text-[#16233A] border-[#C9861B]';
-  } else {
-    surface = 'bg-[#2A9D8F] text-[#16233A] border-[#1F7A70] hover:border-[#1B2A4A]';
-  }
+      : 'bg-[#F5A623] text-[#16233A] border-[#C9861B]'
+  ) : (
+    'bg-[#2A9D8F] text-[#16233A] border-[#1F7A70] hover:border-[#1B2A4A]'
+  );
+
+  // Search highlight: bold outline + slight lift so matches pop without
+  // changing the node's shape or position.
+  const highlightStyle: React.CSSProperties = highlighted
+    ? { boxShadow: '0 0 0 3px #F5A623, 0 2px 8px rgba(27, 42, 74, 0.35)' }
+    : {};
 
   return (
     <button
@@ -69,14 +79,14 @@ export default function OrgChartNode({
       aria-expanded={kind === 'member' ? undefined : expanded}
       aria-label={
         isTeam
-          ? `Team ${label}, ${memberCount} member${memberCount === 1 ? '' : 's'}${expanded ? ', expanded' : ', collapsed'}`
+          ? `Team ${label}, ${memberCount} member${memberCount === 1 ? '' : 's'}${expanded ? ', expanded' : ', collapsed'}${highlighted ? ', matches search' : ''}`
           : kind === 'org'
-            ? `Organization ${label}${expanded ? ', teams visible' : ', teams hidden'}`
-            : `Member ${label}`
+            ? `Organization ${label}${expanded ? ', teams visible' : ', teams hidden'}${highlighted ? ', matches search' : ''}`
+            : `Member ${label}${highlighted ? ', matches search' : ''}`
       }
       title={sublabel || label}
       className={`${base} ${surface}`}
-      style={styles}
+      style={{ ...styles, ...highlightStyle }}
       onClick={() => (kind === 'member' ? onDetails?.() : onToggle?.())}
     >
       {kind === 'org' && (
