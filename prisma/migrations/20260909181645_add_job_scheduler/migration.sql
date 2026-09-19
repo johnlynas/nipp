@@ -7,7 +7,20 @@
 -- (with indexes + a cascade FK). No existing data is altered.
 
 -- AlterEnum: JOB is emitted by the job scheduler (success/failure signals).
-ALTER TYPE "NotificationPriority" ADD VALUE 'JOB';
+-- Idempotent guard required: on a fresh instance the later catch-up migration
+-- (20260712000000) creates NotificationPriority already containing 'JOB', so
+-- an unguarded ADD VALUE there fails with `enum label "JOB" already exists`.
+DO $ddl$ BEGIN
+  IF NOT EXISTS (SELECT 1 FROM pg_type t
+                 JOIN pg_namespace ns ON ns.oid = t.typnamespace
+                 WHERE ns.nspname = 'public' AND lower(t.typname) = 'notificationpriority') THEN
+    CREATE TYPE "NotificationPriority" AS ENUM ('INFO','WARNING','ERROR','CRITICAL','CALENDAR');
+  ELSIF NOT EXISTS (SELECT 1 FROM pg_enum e
+                    JOIN pg_type t ON t.oid = e.enumtypid
+                    WHERE t.typname::text = 'NotificationPriority' AND e.enumlabel = 'JOB') THEN
+    EXECUTE 'ALTER TYPE "NotificationPriority" ADD VALUE ''JOB''';
+  END IF;
+END $ddl$;
 
 -- CreateTable: job definitions (one row per scheduled job, platform-org scoped)
 CREATE TABLE "JobDefinition" (

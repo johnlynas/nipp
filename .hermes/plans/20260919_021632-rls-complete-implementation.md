@@ -303,3 +303,22 @@ Key empirical facts recorded for later phases:
 - Postgres **16.15**, direct TCP SCRAM; owner DSN needs a password (DIRECT_* local-trust variant fails over TCP) — applier prefers a credentialed DSN.
 - `runWithRLS` connection-pinning confirmed on this exact engine version — Phase 2 can rely on the interactive-transaction pattern for binding GUCs.
 
+---
+
+## Phase 2 execution log (2026-09-19) — AS-BUILT
+
+Status: **DONE, verified.** Full 12-migration chain applies clean (`ON_ERROR_STOP`) to a fresh throwaway DB; the complete catalog is live on dev `nipp_dev` (18 RLS tables, 25 policies). Live probe suite as `nipp_app`: 17/17 PASS. No commits (user convention).
+
+| Item | As-built detail |
+|---|---|
+| **2A** policy catalog | `prisma/migrations/20260919093000_rls_complete_policies/migration.sql` — 18 tables, 25 policies (per-command Organization/AuditLog/Notification; FOR ALL default shape for org-scoped; platform-only JobDefinition+JobExecution gated on flag AND `app.platform_org_id`). Applied live to dev: 18 RLS-enabled tables. |
+| **2A'** enum-guard fix | `20260909181645_add_job_scheduler` — bare `ALTER TYPE … ADD VALUE 'JOB'` collided with the catch-up migration on fresh instances (enum already had JOB). Rewrote with idempotent DO-block guard (create type if absent, else add label if absent). |
+| **2B** superseded drafts | `20260711000000_rls_policies` + `20260715000000_permission_rls_fix` bodies replaced with no-op comments (verified never applied anywhere before edit). Fresh chain order now produces exactly the intended policy set. |
+| **New** catch-up migration | `2026071200000_catchup_missing_push_objects` — idempotent DDL reflecting objects that existed only via `db push` (4 enums + Team/Calendar/TeamMember/TeamRole/CalendarEvent/Notification). Regenerable via `scripts/rls-gen-missing-tables.mjs`. Without it a fresh `migrate deploy` failed. |
+| **GUC empty-string pitfall** | Custom GUCs return `''` (not NULL) when unset, so `current_setting(…,'app.is_platform_admin',true)::int` THREW `22P02` on every query from an unwrapped connection — fail-closed via error, not zero rows. Fix: `NULLIF(current_setting('app.is_platform_admin', true), '')::int = 1` in all 27 flag sites (org-matching text comparisons were already safe since '' matches no row id). |
+| **Verification driver** | `scripts/rls-phase2-verify.mjs` (env wrapper `run-rls-verify.mjs`): fresh DB, full chain via psql, two-tenant+platform fixture as owner, 17 probes as non-owner `nipp_app`. Key semantics locked in: transaction-local GUCs must bracket each probe/operation in ONE txn; denied UPDATE/DELETE touch 0 rows (no throw); AuditLog NULL-org rows are intentionally visible even with empty context (cross-tenant audit posture per design §3.3). |
+
+Empirical notes for later phases:
+- Prisma migrations store camelCase columns as literal identifiers (`"orgId"` in the catalog) — bare SQL outside Prisma must quote them; unquoted folds to lowercase and mismatches.
+- `Member.updatedAt` has no DB default (Prisma app-side) — manual fixtures need it explicit. Dev DB RLS is already live, so any not-yet-wrapped dev-server query now runs under the owner role (app still connects as postgres) — Phase 3 cutover can flip identity safely once all call sites are context-wrapped.
+
