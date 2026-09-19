@@ -90,6 +90,15 @@ body {
   border-radius: var(--radius-pill);
 }
 
+/* Hide the native search-input clear affordance — the org chart provides
+   its own lighter custom clear button (type="button" inside the field). */
+#org-chart-search::-webkit-search-cancel-button,
+#org-chart-search::-webkit-search-decoration {
+  -webkit-appearance: none;
+  appearance: none;
+  display: none;
+}
+
 /* ============================================================
    Split-Screen Login Layout Structure (Scaffolded for Future Implementation)
    ============================================================ */
