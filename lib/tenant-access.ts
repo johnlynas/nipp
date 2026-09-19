@@ -18,6 +18,7 @@ import { superAdminStorage } from '@/lib/global-db-guard';
 import { verifySuperAdmin } from '@/lib/authz';
 import { logger } from '@/lib/logger';
 import type { ServiceContext } from '@/lib/services/types';
+import type { TenantContextObject } from '@/lib/tenant-context';
 
 export type TenantAccess =
   | { ok: true; ctx: ServiceContext }
@@ -63,4 +64,23 @@ export async function resolveTenantAccess(
 
   logger.info({ userId, orgId }, 'Super Admin accessing tenant organization');
   return { ok: true, ctx: { userId, role: 'PLATFORM_ADMIN', organizationId: orgId } };
+}
+
+/**
+ * Build the verified RLS context object (RLS plan Phase 1D) from a resolved
+ * TenantAccess + session user id. No extra lookups: isPlatformAdmin mirrors
+ * the authoritative decision already made by resolveTenantAccess.
+ */
+export function toTenantContext(
+  access: Extract<TenantAccess, { ok: true }>,
+  sessionUserId: string
+): TenantContextObject {
+  if (!sessionUserId) throw new Error('toTenantContext: sessionUserId required (fail-closed)');
+  const orgId = access.ctx.organizationId;
+  if (!orgId) throw new Error('toTenantContext: organizationId missing (fail-closed)');
+  return {
+    userId: sessionUserId,
+    orgId,
+    isPlatformAdmin: access.ctx.role === 'PLATFORM_ADMIN',
+  };
 }
