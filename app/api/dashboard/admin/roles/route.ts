@@ -1,8 +1,10 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { requireSuperAdmin } from '@/lib/require-super-admin';
 import { checkAdminRateLimit } from '@/lib/rate-limiter';
+// RLS Phase 3: dashboard role listing/creation run under verified contexts.
+import tenantDb from '@/lib/tenant-db';
+import { withPlatformContext, withTenantAdminContext } from '@/lib/platform-db';
 
-import globalDb from '@/lib/global-db';
 import { RoleService } from '@/services/role-service';
 import { notifyRoleOperation } from '@/lib/notification-push';
 import type { Prisma } from '@prisma/client';
@@ -27,86 +29,85 @@ export async function GET(request: NextRequest) {
     const search = url.searchParams.get('search') || undefined;
     const isDefault = url.searchParams.get('isDefault');
 
-    // If no organizationId, fetch roles across all organizations
     if (!organizationId) {
-      const allOrgs = await globalDb.organization.findMany({
-        select: { id: true },
+      // Cross-org listing: one verified platform context for the whole body.
+      return await withPlatformContext(auth.session!.user.id, async () => {
+        const allOrgs = await tenantDb.organization.findMany({
+          select: { id: true },
+        });
+
+        // Fetch ALL roles from each org (no per-org pagination), then paginate the merged result
+        const allRoles = [];
+        for (const org of allOrgs) {
+          allRoles.push(
+            await RoleService.list(org.id, { search } as import('@/lib/services/types').RoleFilters, { page: 1, pageSize: 10000 }, {
+              userId: auth.session!.user.id,
+              role: 'PLATFORM_ADMIN',
+            }),
+          );
+        }
+
+        // Merge results from all orgs
+        const items = allRoles.flatMap((r) => r.items);
+
+        // Apply isDefault filter client-side if specified
+        let filteredItems = items;
+        if (isDefault !== null && isDefault !== undefined) {
+          const filterVal = isDefault === 'true';
+          filteredItems = items.filter((r) => r.isDefault === filterVal);
+        }
+
+        const totalPages = Math.max(1, Math.ceil(filteredItems.length / pageSize));
+        const start = (page - 1) * pageSize;
+
+        // Dashboard counts: always from the full dataset, independent of filters
+        const allRolesFlat = await tenantDb.role.findMany({
+          include: {
+            _count: { select: { memberRoles: true, teamRoles: true } },
+          },
+        });
+        const defaultCount = allRolesFlat.filter((r) => r.isDefault).length;
+        const customCount = allRolesFlat.filter((r) => !r.isDefault).length;
+        const rolesInUseCount = allRolesFlat.filter(
+          (r) => (r._count.memberRoles ?? 0) > 0 || (r._count.teamRoles ?? 0) > 0
+        ).length;
+
+        return NextResponse.json({
+          items: filteredItems.slice(start, start + pageSize),
+          pagination: { page, pageSize, total: filteredItems.length, totalPages },
+          counts: { defaultCount, customCount, rolesInUseCount },
+        });
       });
+    }
 
-      // Fetch ALL roles from each org (no per-org pagination), then paginate the merged result
-      const allRoles = await Promise.all(
-        allOrgs.map((org) =>
-          RoleService.list(org.id, { search } as import('@/lib/services/types').RoleFilters, { page: 1, pageSize: 10000 }, {
-            userId: auth.session!.user.id,
-            role: 'PLATFORM_ADMIN',
-          })
-        )
-      );
-
-      // Merge results from all orgs
-      const items = allRoles.flatMap((r) => r.items);
-      const total = items.length;
-
-      // Apply isDefault filter client-side if specified
-      let filteredItems = items;
+    // Org-scoped listing: one verified target-org context.
+    return await withTenantAdminContext(auth.session!.user.id, organizationId, async () => {
+      const filters: Record<string, unknown> = {};
+      if (search) filters.search = search;
       if (isDefault !== null && isDefault !== undefined) {
-        const filterVal = isDefault === 'true';
-        filteredItems = items.filter((r) => r.isDefault === filterVal);
+        filters.isDefault = isDefault === 'true';
       }
 
-      const totalPages = Math.max(1, Math.ceil(filteredItems.length / pageSize));
-      const start = (page - 1) * pageSize;
+      const result = await RoleService.list(organizationId, filters as import('@/lib/services/types').RoleFilters, { page, pageSize }, {
+        userId: auth.session!.user.id,
+        role: 'PLATFORM_ADMIN',
+      });
 
-      // Dashboard counts: always from the full dataset, independent of filters
-      const allRolesAcrossOrgs = await Promise.all(
-        allOrgs.map((org) =>
-          globalDb.role.findMany({
-            where: { organizationId: org.id },
-            include: {
-              _count: { select: { memberRoles: true, teamRoles: true } },
-            },
-          })
-        )
-      );
-      const allRolesFlat = allRolesAcrossOrgs.flat();
-      const defaultCount = allRolesFlat.filter((r) => r.isDefault).length;
-      const customCount = allRolesFlat.filter((r) => !r.isDefault).length;
-      const rolesInUseCount = allRolesFlat.filter(
+      // Dashboard counts: always from the full dataset (org-scoped), independent of filters
+      const allRoles = await tenantDb.role.findMany({
+        where: { organizationId },
+        include: {
+          _count: { select: { memberRoles: true, teamRoles: true } },
+        },
+      });
+      const defaultCount = allRoles.filter((r) => r.isDefault).length;
+      const customCount = allRoles.filter((r) => !r.isDefault).length;
+      const rolesInUseCount = allRoles.filter(
         (r) => (r._count.memberRoles ?? 0) > 0 || (r._count.teamRoles ?? 0) > 0
       ).length;
 
-      return NextResponse.json({
-        items: filteredItems.slice(start, start + pageSize),
-        pagination: { page, pageSize, total: filteredItems.length, totalPages },
-        counts: { defaultCount, customCount, rolesInUseCount },
-      });
-    }
-
-    const filters: Record<string, unknown> = {};
-    if (search) filters.search = search;
-    if (isDefault !== null && isDefault !== undefined) {
-      filters.isDefault = isDefault === 'true';
-    }
-
-    const result = await RoleService.list(organizationId, filters as import('@/lib/services/types').RoleFilters, { page, pageSize }, {
-      userId: auth.session!.user.id,
-      role: 'PLATFORM_ADMIN',
+      return NextResponse.json({ ...result, counts: { defaultCount, customCount, rolesInUseCount } });
     });
-
-    // Dashboard counts: always from the full dataset, independent of filters
-    const allRoles = await globalDb.role.findMany({
-      where: { organizationId },
-      include: {
-        _count: { select: { memberRoles: true, teamRoles: true } },
-      },
-    });
-    const defaultCount = allRoles.filter((r) => r.isDefault).length;
-    const customCount = allRoles.filter((r) => !r.isDefault).length;
-    const rolesInUseCount = allRoles.filter(
-      (r) => (r._count.memberRoles ?? 0) > 0 || (r._count.teamRoles ?? 0) > 0
-    ).length;
-
-    return NextResponse.json({ ...result, counts: { defaultCount, customCount, rolesInUseCount } });
   } catch (error) {
     console.error('Failed to list roles:', error);
     return NextResponse.json({ error: 'Failed to fetch roles' }, { status: 500 });
@@ -139,10 +140,13 @@ export async function POST(request: NextRequest) {
     const targetLabel = body.name ? `Role "${body.name}"` : 'role';
 
     try {
-      const result = await RoleService.create(
-        { name: body.name, description: body.description, isDefault: body.isDefault ?? false },
-        organizationId,
-        { userId: auth.session!.user.id, role: 'PLATFORM_ADMIN' }
+      // RLS: verified target-org context — RoleService.create's WITH CHECK writes bind to it.
+      const result = await withTenantAdminContext(auth.session!.user.id, organizationId, () =>
+        RoleService.create(
+          { name: body.name, description: body.description, isDefault: body.isDefault ?? false },
+          organizationId,
+          { userId: auth.session!.user.id, role: 'PLATFORM_ADMIN' }
+        ),
       );
 
       await notifyRoleOperation('create', targetLabel, true, undefined, result.organizationId);

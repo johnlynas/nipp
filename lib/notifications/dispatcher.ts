@@ -4,7 +4,8 @@
  * Checks rate limits, sends email, and logs to NotificationLog.
  */
 
-import globalDb from '@/lib/global-db';
+import tenantDb from '@/lib/tenant-db';
+import { runWithTenant } from '@/lib/tenant-context';
 import { getRedis } from '@/lib/redis';
 import { sendEmail } from './email';
 import { NOTIFICATION_RATE_LIMIT, type ExtremeEventType } from './events';
@@ -67,8 +68,8 @@ export async function dispatchNotification(
   const subject = `Property NI — ${eventType} Alert`;
   const emailResult = await sendEmail(recipientEmail, subject, message);
 
-  // Log to NotificationLog
-  await globalDb.notificationLog.create({
+  // Log to NotificationLog (not in tenantDb's scoped-model list — pass-through).
+  await tenantDb.notificationLog.create({
     data: {
       recipientEmail,
       eventType,
@@ -85,10 +86,15 @@ export async function dispatchNotification(
  * Get all Super Admin emails from the database.
  */
 export async function getSuperAdminEmails(): Promise<string[]> {
-  const members = await globalDb.member.findMany({
-    where: { orgId: env.PLATFORM_ORGANIZATION_ID || '' },
-    select: { user: { select: { email: true } } },
-  });
+  const platformOrgId = env.PLATFORM_ORGANIZATION_ID;
+  if (!platformOrgId) return []; // fail-closed: no verified platform org → nobody is a super admin
+  // Member IS tenant-scoped in tenantDb — the platform-org id becomes the context.
+  const members = await runWithTenant(platformOrgId, () =>
+    tenantDb.member.findMany({
+      where: { orgId: platformOrgId },
+      select: { user: { select: { email: true } } },
+    })
+  );
 
   return members.map((m) => m.user.email).filter(Boolean);
 }

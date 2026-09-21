@@ -28,7 +28,7 @@
 
 import { NotificationPriority, NotificationScope } from '@prisma/client';
 import { isMainThread } from 'node:worker_threads';
-import globalDb from '@/lib/global-db';
+import tenantDb from '@/lib/tenant-db';
 import { logger } from '@/lib/logger';
 import { pushNotification } from '@/lib/notification-push';
 import { expandRecurrenceWithRrule, RruleJson } from '@/lib/recurrence-rrule';
@@ -149,7 +149,7 @@ export async function findDueToStartEvents(now: Date): Promise<DueToStartInstanc
   // 1. Non-recurring events — single query, then code-level window filter
   //    (the DB filter is the primary gate; the code check guards mocks and
   //    rounding edges, and keeps behavior identical for recurring below).
-  const singleEvents = (await globalDb.calendarEvent.findMany({
+  const singleEvents = (await tenantDb.calendarEvent.findMany({
     where: { startDate: { gte: now, lte: windowEnd } },
     orderBy: { startDate: 'asc' },
   })) as unknown as DbEventShape[];
@@ -172,7 +172,7 @@ export async function findDueToStartEvents(now: Date): Promise<DueToStartInstanc
 
   // 2. Recurring series — fetch candidates whose series began on or before
   //    the window end, then expand instances into (now, windowEnd].
-  const recurringSeries = (await globalDb.calendarEvent.findMany({
+  const recurringSeries = (await tenantDb.calendarEvent.findMany({
     where: { startDate: { lte: windowEnd } },
     orderBy: { startDate: 'asc' },
   })) as unknown as DbEventShape[];

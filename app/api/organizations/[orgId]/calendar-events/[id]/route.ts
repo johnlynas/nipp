@@ -8,9 +8,10 @@
 
 import { NextRequest, NextResponse } from 'next/server';
 import { auth } from '@/lib/auth';
-import globalDb from '@/lib/global-db';
-import { superAdminStorage } from '@/lib/global-db-guard';
-import { resolveTenantAccess } from '@/lib/tenant-access';
+import { resolveTenantAccess, toTenantContext } from '@/lib/tenant-access';
+// RLS Phase 3: verified-context tenantDb (unscoped globalDb deleted).
+import tenantDb from '@/lib/tenant-db';
+import { withRLSContext } from '@/lib/rls-transaction';
 import { CalendarEventService } from '@/services/calendar-event-service';
 import { isSameSiteRequest } from '@/lib/csrf';
 import { checkCalendarRateLimit } from '@/lib/rate-limiter';
@@ -44,13 +45,11 @@ export async function GET(
   if (!access.ok) {
     return NextResponse.json({ error: access.error }, { status: access.status });
   }
+return withRLSContext(toTenantContext(access, session.user.id), async () => {
   const ctx = access.ctx;
 
   try {
-    // Scoping globalDb access (S7): see note in PATCH below.
-    const event = await superAdminStorage.run(true, () =>
-      CalendarEventService.getEventById(ctx, eventId)
-    );
+    const event = await CalendarEventService.getEventById(ctx, eventId);
     return NextResponse.json(event);
   } catch (error: unknown) {
     if (error instanceof Error) {
@@ -59,6 +58,7 @@ export async function GET(
     }
     return NextResponse.json({ error: 'Internal server error' }, { status: 500 });
   }
+  });
 }
 
 // ---------------------------------------------------------------------------
@@ -91,6 +91,7 @@ export async function PATCH(
   if (!access.ok) {
     return NextResponse.json({ error: access.error }, { status: access.status });
   }
+return withRLSContext(toTenantContext(access, session.user.id), async () => {
 
   // Only admins (tenant admin or platform super admin) can update events
   if (access.ctx.role === 'MEMBER') {
@@ -127,12 +128,9 @@ export async function PATCH(
   };
 
   try {
-    // Scoping globalDb access (S7): every DB-touching call below (service,
-    // recurrence scopes, and direct queries) runs inside this context so it
-    // works for super admins operating on tenant orgs without leaking.
-    return await superAdminStorage.run(true, async () => {
+    return await (async () => {
     // Check if this is a recurring event with an edit scope
-    const existingEvent = await globalDb.calendarEvent.findFirst({
+    const existingEvent = await tenantDb.calendarEvent.findFirst({
       where: { id: eventId, organizationId: ctx.organizationId! },
     });
 
@@ -159,7 +157,7 @@ export async function PATCH(
         const instanceDate = clickedDate ? new Date(clickedDate + 'T00:00:00') : (updates.startDate ?? new Date());
         const result = await applyEditScopeThis(ctx, eventId, instanceDate, updates);
         // Fetch the override event to return
-        const overrideEvent = await globalDb.calendarEvent.findFirst({
+        const overrideEvent = await tenantDb.calendarEvent.findFirst({
           where: { id: result.overrideId, organizationId: ctx.organizationId! },
         });
         return NextResponse.json({ event: overrideEvent, editScope: 'this' });
@@ -167,13 +165,13 @@ export async function PATCH(
         const instanceDate = clickedDate ? new Date(clickedDate + 'T00:00:00') : (updates.startDate ?? new Date());
         const result = await applyEditScopeFollowing(ctx, eventId, instanceDate, updates);
         // Fetch the new series event to return
-        const newSeriesEvent = await globalDb.calendarEvent.findFirst({
+        const newSeriesEvent = await tenantDb.calendarEvent.findFirst({
           where: { id: result.newSeriesId, organizationId: ctx.organizationId! },
         });
         return NextResponse.json({ event: newSeriesEvent, editScope: 'following' });
       } else if (scope === 'all') {
         await applyEditScopeAll(ctx, eventId, updates);
-        const updatedEvent = await globalDb.calendarEvent.findFirst({
+        const updatedEvent = await tenantDb.calendarEvent.findFirst({
           where: { id: eventId, organizationId: ctx.organizationId! },
         });
         return NextResponse.json({ event: updatedEvent, editScope: 'all' });
@@ -200,7 +198,7 @@ export async function PATCH(
       } : undefined),
     });
     return NextResponse.json({ event });
-    });  // superAdminStorage.run
+    })();
   } catch (error: unknown) {
     if (error instanceof Error) {
       const status = error.message.includes('not found') ? 404 : 400;
@@ -208,6 +206,7 @@ export async function PATCH(
     }
     return NextResponse.json({ error: 'Internal server error' }, { status: 500 });
   }
+  });
 }
 
 // ---------------------------------------------------------------------------
@@ -240,6 +239,7 @@ export async function DELETE(
   if (!access.ok) {
     return NextResponse.json({ error: access.error }, { status: access.status });
   }
+return withRLSContext(toTenantContext(access, session.user.id), async () => {
 
   // Only admins (tenant admin or platform super admin) can delete events
   if (access.ctx.role === 'MEMBER') {
@@ -254,8 +254,7 @@ export async function DELETE(
   const ctx = access.ctx;
 
   try {
-    // Scoping globalDb access (S7) — see note in PATCH above.
-    await superAdminStorage.run(true, () => CalendarEventService.deleteEvent(ctx, eventId));
+    await CalendarEventService.deleteEvent(ctx, eventId);
     return NextResponse.json({ success: true });
   } catch (error: unknown) {
     if (error instanceof Error) {
@@ -264,4 +263,5 @@ export async function DELETE(
     }
     return NextResponse.json({ error: 'Internal server error' }, { status: 500 });
   }
+  });
 }

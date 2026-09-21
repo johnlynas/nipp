@@ -3,7 +3,7 @@
  */
 
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import globalDb from '@/lib/global-db';
+import globalDb from '@/lib/tenant-db';
 import { ResourceService } from '@/services/resource-service';
 import { ServiceContext, ForbiddenError, NotFoundError, ConflictError, ValidationError } from '@/lib/services/types';
 
@@ -26,7 +26,7 @@ const Mocks = vi.hoisted(() => {
   };
 });
 
-vi.mock('@/lib/global-db', () => ({
+vi.mock('@/lib/tenant-db', () => ({
   default: {
     resource: {
       findUnique: Mocks.resourceFindUnique,

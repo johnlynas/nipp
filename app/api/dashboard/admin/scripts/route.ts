@@ -2,8 +2,8 @@ import { NextRequest, NextResponse } from 'next/server';
 import { requireSuperAdmin } from '@/lib/require-super-admin';
 import { checkAdminRateLimit } from '@/lib/rate-limiter';
 
-import globalDb from '@/lib/global-db';
 import { JobSchedulerService, type Schedule } from '@/services/job-scheduler-service';
+import { withPlatformContext } from '@/lib/platform-db';
 import { NotificationPriority, NotificationScope } from '@prisma/client';
 
 export const runtime = 'nodejs';
@@ -27,16 +27,19 @@ export async function GET(request: NextRequest) {
     const lastRunStatus = url.searchParams.get('lastRunStatus');
     const search = url.searchParams.get('search');
 
-    const result = await JobSchedulerService.listJobsPaginated(
-      { userId: auth.session!.user.id, role: 'PLATFORM_ADMIN' },
-      {
-        page: Number.isNaN(page) ? 1 : page,
-        pageSize: Number.isNaN(pageSize) ? 8 : pageSize,
-        enabled: enabled ? enabled === 'true' : undefined,
-        approved: approved ? approved === 'true' : undefined,
-        lastRunStatus: lastRunStatus || undefined,
-        search: search || undefined,
-      }
+    // One verified platform context for the job catalog (platform_org_id bound).
+    const result = await withPlatformContext(auth.session!.user.id, () =>
+      JobSchedulerService.listJobsPaginated(
+        { userId: auth.session!.user.id, role: 'PLATFORM_ADMIN' },
+        {
+          page: Number.isNaN(page) ? 1 : page,
+          pageSize: Number.isNaN(pageSize) ? 8 : pageSize,
+          enabled: enabled ? enabled === 'true' : undefined,
+          approved: approved ? approved === 'true' : undefined,
+          lastRunStatus: lastRunStatus || undefined,
+          search: search || undefined,
+        }
+      )
     );
 
     return NextResponse.json(result);
@@ -82,8 +85,10 @@ export async function POST(request: NextRequest) {
   const targetLabel = body.name || 'unnamed script';
 
   try {
-    const result = await JobSchedulerService.createJob(
-      { userId: auth.session!.user.id, role: 'PLATFORM_ADMIN' },
+    // Verified platform context for the job-definition insert.
+    const result = await withPlatformContext(auth.session!.user.id, () =>
+      JobSchedulerService.createJob(
+        { userId: auth.session!.user.id, role: 'PLATFORM_ADMIN' },
       {
         name: body.name ?? '',
         description: body.description,
@@ -93,8 +98,9 @@ export async function POST(request: NextRequest) {
         timeoutMs: body.timeoutMs,
         concurrencyLimit: body.concurrencyLimit,
         enabled: body.enabled ?? false,
-        code: body.code,
-      }
+          code: body.code,
+        }
+      )
     );
 
     return NextResponse.json(result, { status: 201 });

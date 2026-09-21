@@ -8,6 +8,8 @@
 
 import { NextRequest, NextResponse } from 'next/server';
 import tenantDb from '@/lib/tenant-db';
+// RLS Phase 3: super-admin ops run under a verified platform context.
+import { withPlatformContext } from '@/lib/platform-db';
 import { requireSuperAdmin } from '@/lib/require-super-admin';
 import { checkAdminRateLimit } from '@/lib/rate-limiter';
 import { logger } from '@/lib/logger';
@@ -78,21 +80,24 @@ export const GET = wrapPiiRoute(async (request) => {
     // Execute search directly — no plaintext caching for PII results.
     // The wrapPiiRoute encrypts the response, so cached plaintext is unnecessary
     // and would expose PII in server-side cache stores.
-    const [results, total] = await Promise.all([
-      tenantDb.organization.findMany({
-        where: {
-          name: { startsWith: q, mode: 'insensitive' },
-        },
-        select: { id: true, name: true, slug: true },
-        orderBy: { name: 'asc' },
-        take: limit,
-      }),
-      tenantDb.organization.count({
-        where: {
-          name: { startsWith: q, mode: 'insensitive' },
-        },
-      }),
-    ]);
+    // Verified platform context for the org prefix search.
+    const [results, total] = await withPlatformContext(session.user.id, () =>
+      Promise.all([
+        tenantDb.organization.findMany({
+          where: {
+            name: { startsWith: q, mode: 'insensitive' },
+          },
+          select: { id: true, name: true, slug: true },
+          orderBy: { name: 'asc' },
+          take: limit,
+        }),
+        tenantDb.organization.count({
+          where: {
+            name: { startsWith: q, mode: 'insensitive' },
+          },
+        }),
+      ])
+    );
 
     return NextResponse.json({ results, total });
 

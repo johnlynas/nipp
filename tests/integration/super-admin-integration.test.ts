@@ -25,7 +25,7 @@ vi.mock('@/lib/authz', () => ({
   verifySuperAdmin: vi.fn(),
 }));
 
-vi.mock('@/lib/global-db', () => ({
+vi.mock('@/lib/tenant-db', () => ({
   default: {
     organization: {
       findMany: vi.fn().mockResolvedValue([

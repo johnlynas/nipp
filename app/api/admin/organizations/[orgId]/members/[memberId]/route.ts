@@ -8,9 +8,9 @@
 
 import { NextRequest, NextResponse } from 'next/server';
 import { requireSuperAdmin } from '@/lib/require-super-admin';
-import globalDb from '@/lib/global-db';
+// RLS Phase 3: cross-org admin member ops run under a verified target-org context.
 import tenantDb from '@/lib/tenant-db';
-import { runWithTenant } from '@/lib/tenant-context';
+import { withTenantAdminContext } from '@/lib/platform-db';
 import { recordAuditLog } from '@/lib/audit-log';
 import { logger } from '@/lib/logger';
 import { wrapPiiRoute, PiiRouteParams } from '@/lib/payload-middleware';
@@ -66,44 +66,45 @@ export const PATCH = wrapPiiRoute(async (request, decryptedBody, params) => {
   }
 
   try {
-    // Verify target org exists (globalDb)
-    const org = await globalDb.organization.findUnique({ where: { id: urlOrgId } });
-    if (!org) {
-      return NextResponse.json({ error: 'Organization not found' }, { status: 404 });
-    }
+    // RLS: verified target-org context for cross-org member role update
+    return await withTenantAdminContext(session.user.id, urlOrgId, async () => {
+      // Verify target org exists (flag admits any org row)
+      const org = await tenantDb.organization.findUnique({ where: { id: urlOrgId } });
+      if (!org) {
+        return NextResponse.json({ error: 'Organization not found' }, { status: 404 });
+      }
 
-    // Verify member exists and belongs to this org (globalDb)
-    const existingMember = await globalDb.member.findFirst({
-      where: { id: urlMemberId, orgId: urlOrgId },
-      include: { user: { select: { name: true, email: true } } },
-    });
-    if (!existingMember) {
-      return NextResponse.json({ error: 'Member not found in this organization' }, { status: 404 });
-    }
+      // Verify member exists and belongs to this org (platform pass-through; RLS scopes)
+      const existingMember = await tenantDb.member.findFirst({
+        where: { id: urlMemberId, orgId: urlOrgId },
+        include: { user: { select: { name: true, email: true } } },
+      });
+      if (!existingMember) {
+        return NextResponse.json({ error: 'Member not found in this organization' }, { status: 404 });
+      }
 
-    // Update member role within tenant context (tenantDb)
-    const updatedMember = await runWithTenant(urlOrgId, async () => {
-      return tenantDb.member.update({
+      // Update member role (extension passes through for platform ctx; orgId in where matches RLS)
+      const updatedMember = await tenantDb.member.update({
         where: { id: urlMemberId },
         data: { role },
         include: { user: { select: { name: true, email: true } } },
       });
-    });
 
-    // Audit log (globalDb)
-    await recordAuditLog({
-      userId: session.user.id,
-      userName: session.user.name || undefined,
-      action: 'member.role_updated',
-      success: true,
-      resourceType: 'Organization.Member',
-      resourceId: urlMemberId,
-      organizationId: urlOrgId,
-      metadata: { newRole: role },
-    });
+      // Audit log
+      await recordAuditLog({
+        userId: session.user.id,
+        userName: session.user.name || undefined,
+        action: 'member.role_updated',
+        success: true,
+        resourceType: 'Organization.Member',
+        resourceId: urlMemberId,
+        organizationId: urlOrgId,
+        metadata: { newRole: role },
+      });
 
-    logger.info({ userId: session.user.id, orgId: urlOrgId, memberId: urlMemberId, role }, 'Updated member role in tenant organization');
-    return NextResponse.json({ message: 'Member role updated', member: updatedMember });
+      logger.info({ userId: session.user.id, orgId: urlOrgId, memberId: urlMemberId, role }, 'Updated member role in tenant organization');
+      return NextResponse.json({ message: 'Member role updated', member: updatedMember });
+    });
   } catch (error) {
     const isDbError = error instanceof Error && error.message.includes("Can't reach database server");
     logger.error({ err: error, orgId: urlOrgId, memberId: urlMemberId }, isDbError ? 'Database unavailable updating member' : 'Unexpected error updating member');
@@ -142,39 +143,40 @@ export const DELETE = wrapPiiRoute(async (request, _decryptedBody, params) => {
   }
 
   try {
-    // Verify target org exists (globalDb)
-    const org = await globalDb.organization.findUnique({ where: { id: urlOrgId } });
-    if (!org) {
-      return NextResponse.json({ error: 'Organization not found' }, { status: 404 });
-    }
+    // RLS: verified target-org context for cross-org member removal
+    return await withTenantAdminContext(session.user.id, urlOrgId, async () => {
+      // Verify target org exists (flag admits any org row)
+      const org = await tenantDb.organization.findUnique({ where: { id: urlOrgId } });
+      if (!org) {
+        return NextResponse.json({ error: 'Organization not found' }, { status: 404 });
+      }
 
-    // Verify member exists and belongs to this org (globalDb)
-    const existingMember = await globalDb.member.findFirst({
-      where: { id: urlMemberId, orgId: urlOrgId },
-      include: { user: { select: { name: true, email: true } } },
+      // Verify member exists and belongs to this org (platform pass-through; RLS scopes)
+      const existingMember = await tenantDb.member.findFirst({
+        where: { id: urlMemberId, orgId: urlOrgId },
+        include: { user: { select: { name: true, email: true } } },
+      });
+      if (!existingMember) {
+        return NextResponse.json({ error: 'Member not found in this organization' }, { status: 404 });
+      }
+
+      // Remove member (platform ctx pass-through; orgId in where matches RLS)
+      await tenantDb.member.delete({ where: { id: urlMemberId } });
+
+      // Audit log
+      await recordAuditLog({
+        userId: session.user.id,
+        userName: session.user.name || undefined,
+        action: 'member.deleted',
+        success: true,
+        resourceType: 'Organization.Member',
+        resourceId: urlMemberId,
+        organizationId: urlOrgId,
+      });
+
+      logger.info({ userId: session.user.id, orgId: urlOrgId, memberId: urlMemberId }, 'Removed member from tenant organization');
+      return NextResponse.json({ message: 'Member removed successfully' });
     });
-    if (!existingMember) {
-      return NextResponse.json({ error: 'Member not found in this organization' }, { status: 404 });
-    }
-
-    // Remove member within tenant context (tenantDb)
-    await runWithTenant(urlOrgId, async () => {
-      return tenantDb.member.delete({ where: { id: urlMemberId } });
-    });
-
-    // Audit log (globalDb)
-    await recordAuditLog({
-      userId: session.user.id,
-      userName: session.user.name || undefined,
-      action: 'member.deleted',
-      success: true,
-      resourceType: 'Organization.Member',
-      resourceId: urlMemberId,
-      organizationId: urlOrgId,
-    });
-
-    logger.info({ userId: session.user.id, orgId: urlOrgId, memberId: urlMemberId }, 'Removed member from tenant organization');
-    return NextResponse.json({ message: 'Member removed successfully' });
   } catch (error) {
     const isDbError = error instanceof Error && error.message.includes("Can't reach database server");
     logger.error({ err: error, orgId: urlOrgId, memberId: urlMemberId }, isDbError ? 'Database unavailable removing member' : 'Unexpected error removing member');

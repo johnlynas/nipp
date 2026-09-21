@@ -8,7 +8,9 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { revalidateTag } from 'next/cache';
 import { requireSuperAdmin } from '@/lib/require-super-admin';
-import globalDb from '@/lib/global-db';
+// RLS Phase 3: tenant-role management runs under a verified target-org context.
+import tenantDb from '@/lib/tenant-db';
+import { withTenantAdminContext } from '@/lib/platform-db';
 import { RoleService } from '@/services/role-service';
 import { handleServiceError } from '@/lib/services/error-handler';
 import type { ServiceContext } from '@/lib/services/types';
@@ -35,22 +37,25 @@ export async function GET(
   const { orgId } = await params;
 
   try {
-    // Verify target org exists (globalDb)
-    const org = await globalDb.organization.findUnique({ where: { id: orgId } });
-    if (!org) {
-      return NextResponse.json({ error: 'Organization not found' }, { status: 404 });
-    }
+    // RLS: verified target-org context for both org check and role listing
+    return await withTenantAdminContext(session.user.id, orgId, async () => {
+      // Verify target org exists (flag admits any org row)
+      const org = await tenantDb.organization.findUnique({ where: { id: orgId } });
+      if (!org) {
+        return NextResponse.json({ error: 'Organization not found' }, { status: 404 });
+      }
 
-    // Construct service context — Platform Admin acting on target org
-    const ctx: ServiceContext = {
-      userId: session.user.id,
-      role: 'PLATFORM_ADMIN',
-    };
+      // Construct service context — Platform Admin acting on target org
+      const ctx: ServiceContext = {
+        userId: session.user.id,
+        role: 'PLATFORM_ADMIN',
+      };
 
-    const result = await RoleService.list(orgId, {}, { page: 1, pageSize: 100 }, ctx);
+      const result = await RoleService.list(orgId, {}, { page: 1, pageSize: 100 }, ctx);
 
-    logger.info({ userId: session.user.id, orgId, count: result.items.length }, 'Fetched tenant roles');
-    return NextResponse.json({ roles: result.items });
+      logger.info({ userId: session.user.id, orgId, count: result.items.length }, 'Fetched tenant roles');
+      return NextResponse.json({ roles: result.items });
+    });
   } catch (error) {
     return handleDbOrServiceError(error);
   }
@@ -90,37 +95,43 @@ export async function POST(
     return NextResponse.json({ error: 'Role name is required' }, { status: 400 });
   }
 
+  // Capture narrowed values (const) so the async closure below keeps their types.
+  const roleData = { name: body.name, description: body.description };
+
   try {
-    // Verify target org exists (globalDb)
-    const org = await globalDb.organization.findUnique({ where: { id: orgId } });
-    if (!org) {
-      return NextResponse.json({ error: 'Organization not found' }, { status: 404 });
-    }
+    // RLS: verified target-org context for org check + role create (RLS WITH CHECK binds write to ctx org)
+    return await withTenantAdminContext(session.user.id, orgId, async () => {
+      // Verify target org exists
+      const org = await tenantDb.organization.findUnique({ where: { id: orgId } });
+      if (!org) {
+        return NextResponse.json({ error: 'Organization not found' }, { status: 404 });
+      }
 
-    // Construct service context — Platform Admin acting on target org
-    const ctx: ServiceContext = {
-      userId: session.user.id,
-      role: 'PLATFORM_ADMIN',
-    };
+      // Construct service context — Platform Admin acting on target org
+      const ctx: ServiceContext = {
+        userId: session.user.id,
+        role: 'PLATFORM_ADMIN',
+      };
 
-    const role = await RoleService.create({ name: body.name, description: body.description }, orgId, ctx);
+      const role = await RoleService.create(roleData, orgId, ctx);
 
-    // Audit log (globalDb)
-    await recordAuditLog({
-      userId: session.user.id,
-      userName: session.user.name ?? null,
-      action: 'role.created',
-      success: true,
-      resourceType: 'Organization.Role' as string,
-      resourceId: role.id ?? null,
-      organizationId: orgId,
-    } as never);
+      // Audit log
+      await recordAuditLog({
+        userId: session.user.id,
+        userName: session.user.name ?? null,
+        action: 'role.created',
+        success: true,
+        resourceType: 'Organization.Role' as string,
+        resourceId: role.id ?? null,
+        organizationId: orgId,
+      } as never);
 
-    // Invalidate cache
-    revalidateTag('org');
+      // Invalidate cache
+      revalidateTag('org');
 
-    logger.info({ userId: session.user.id, orgId, roleId: role.id }, 'Created role in tenant organization');
-    return NextResponse.json({ message: 'Role created successfully', role }, { status: 201 });
+      logger.info({ userId: session.user.id, orgId, roleId: role.id }, 'Created role in tenant organization');
+      return NextResponse.json({ message: 'Role created successfully', role }, { status: 201 });
+    });
   } catch (error) {
     return handleDbOrServiceError(error);
   }

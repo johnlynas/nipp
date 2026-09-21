@@ -34,7 +34,7 @@ vi.mock('@/lib/calendar-event-scheduler', () => ({
 // `findMany` mock is created inline in the factory (vitest hoists vi.mock above
 // every top-level const, so a module-level handle would trip the TDZ) and
 // derived as `mockFindMany` after import below.
-vi.mock('@/lib/global-db', () => ({
+vi.mock('@/lib/tenant-db', () => ({
   default: { jobDefinition: { findMany: vi.fn().mockResolvedValue([]) } },
 }));
 
@@ -97,7 +97,7 @@ import { checkHealthStatus } from '@/lib/health-check';
 import { findDueToStartEvents } from '@/lib/calendar-event-scheduler';
 import { pushNotification } from '@/lib/notification-push';
 import type { JobRunContext } from '@/services/job-scheduler-service';
-import globalDb from '@/lib/global-db';
+import globalDb from '@/lib/tenant-db';
 
 // --- Typed mock handles ---------------------------------------------------
 

@@ -1,7 +1,7 @@
 import tenantDb from '@/lib/tenant-db';
 import { env } from '@/lib/env';
 import { logger } from '@/lib/logger';
-import { runWithTenant } from './tenant-context';
+import { withPlatformContext } from './platform-db';
 
 /**
  * Check if a user has a specific permission in an organization.
@@ -40,12 +40,15 @@ export async function verifySuperAdmin(
       return { authorized: false, error: 'Not the platform organization' };
     }
 
-    // Use tenantDb with explicit context for the platform org to satisfy tenant isolation rules
-    const member = await runWithTenant(platformOrgId, async () => {
+    // Access-resolution read: must run with a bound RLS context on one pinned
+    // connection. The app connects as nipp_app (non-owner), so an unscoped or
+    // GUC-less Member query is invisible to Postgres (fail-closed) — only the
+    // verified platform flag exposes the platform-org membership row.
+    const member = await withPlatformContext(userId, async () => {
       return tenantDb.member.findFirst({
         where: {
           userId,
-          organization: { id: platformOrgId },
+          orgId: platformOrgId,
         },
       });
     });
@@ -82,14 +85,17 @@ export async function isSuperAdmin(userId: string, orgId?: string): Promise<bool
 }
 
 /**
- * Get the Platform Organization ID from environment or database.
+ * Get the Platform Organization ID from environment (primary) or database.
+ * NOTE: the DB fallback runs unscoped by design — under the non-owner nipp_app
+ * connection an RLS-scoped Organization query with no context is invisible
+ * (fail-closed), so this returns null → callers map it to a 503, not a silent
+ * auth decision. PLATFORM_ORGANIZATION_ID in env is therefore REQUIRED.
  */
 export async function getPlatformOrgId(): Promise<string | null> {
   if (env.PLATFORM_ORGANIZATION_ID) {
     return env.PLATFORM_ORGANIZATION_ID;
   }
   try {
-    // Organization is not tenant-scoped, so we can query it directly with tenantDb
     const org = await tenantDb.organization.findFirst({
       where: { name: 'Platform' },
       select: { id: true },

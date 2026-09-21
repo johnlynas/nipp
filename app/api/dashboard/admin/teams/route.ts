@@ -2,7 +2,9 @@ import { NextRequest, NextResponse } from 'next/server';
 import { requireSuperAdmin } from '@/lib/require-super-admin';
 import { checkAdminRateLimit } from '@/lib/rate-limiter';
 
-import globalDb from '@/lib/global-db';
+// RLS Phase 3: team listing/creation run under verified platform contexts.
+import tenantDb from '@/lib/tenant-db';
+import { withPlatformContext } from '@/lib/platform-db';
 import { TeamService } from '@/services/team-service';
 import { notifyTeamOperation } from '@/lib/notification-push';
 
@@ -25,11 +27,11 @@ export async function GET(request: NextRequest) {
     const organizationId = url.searchParams.get('organizationId') || undefined;
     const search = url.searchParams.get('search') || undefined;
 
+    // RLS: one verified platform context for the whole cross-org listing.
+    return withPlatformContext(auth.session!.user.id, async () => {
     // If no organizationId, fetch teams across all organizations
     if (!organizationId) {
-      const allOrgs = await globalDb.organization.findMany({
-        select: { id: true },
-      });
+      const allOrgs = await tenantDb.organization.findMany({ select: { id: true } });
 
       // Fetch ALL teams from each org (no per-org pagination), then paginate the merged result
       const allTeams = await Promise.all(
@@ -63,6 +65,7 @@ export async function GET(request: NextRequest) {
       });
     }
 
+    // Single-org listing under the same platform context (Team RLS is flag-gated).
     const result = await TeamService.getTeamsByOrg(organizationId, {
       userId: auth.session!.user.id,
       role: 'PLATFORM_ADMIN',
@@ -79,6 +82,7 @@ export async function GET(request: NextRequest) {
     }
 
     return NextResponse.json(result);
+    });
   } catch (error) {
     console.error('Failed to list teams:', error);
     return NextResponse.json({ error: 'Failed to fetch teams' }, { status: 500 });
@@ -118,10 +122,16 @@ export async function POST(request: NextRequest) {
     }
 
     try {
-      const result = await TeamService.createTeam(
-        { name: body.name, slug: body.slug, description: body.description ?? undefined },
-        body.organizationId,
-        { userId: auth.session!.user.id, role: 'PLATFORM_ADMIN' }
+      // RLS: verified platform context on the create target org (WITH CHECK binds the write).
+      // Capture to consts so narrowing survives into the closure.
+      const teamName = body.name;
+      const targetOrgId = body.organizationId;
+      const result = await withPlatformContext(auth.session!.user.id, () =>
+        TeamService.createTeam(
+          { name: teamName, slug: body.slug, description: body.description ?? undefined },
+          targetOrgId,
+          { userId: auth.session!.user.id, role: 'PLATFORM_ADMIN' }
+        )
       );
 
       await notifyTeamOperation('create', targetLabel, true, undefined, result.organizationId);
@@ -130,7 +140,7 @@ export async function POST(request: NextRequest) {
     } catch (error) {
       console.error('Failed to create team:', error);
       const message = error instanceof Error && error.message ? error.message : 'Failed to create team';
-      await notifyTeamOperation('create', targetLabel, false, message, body.organizationId);
+      await notifyTeamOperation('create', targetLabel, false, message, body.organizationId!);
       return NextResponse.json({ error: 'Failed to create team' }, { status: 500 });
     }
   } catch (error) {

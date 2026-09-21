@@ -6,10 +6,18 @@
  * - Authorization guards (requirePlatformAdmin, requireAnyAdmin)
  * - Typed error classes (ValidationError, NotFoundError, ConflictError, ForbiddenError)
  * - Audit logging for all mutations
+ *
+ * RLS plan Phase 3 (kill the unscoped bypass):
+ * All queries run through tenantDb. Operations on a specific org are wrapped in
+ * runWithTenant(targetOrgId) so the Prisma extension resolves a context; per-ID
+ * lookups without an explicit target fall back to the caller's ctx org — with
+ * the env-derived platform org as the last-resort context for super-admin paths.
  */
 
 import { Prisma } from '@prisma/client';
-import globalDb from '@/lib/global-db';
+import tenantDb from '@/lib/tenant-db';
+import { runWithTenant } from '@/lib/tenant-context';
+import { env } from '@/lib/env';
 import { logger } from '@/lib/logger';
 import { recordAuditLog } from '@/lib/audit-log';
 import { ServiceContext, ValidationError, NotFoundError, ConflictError, ForbiddenError } from '@/lib/services/types';
@@ -90,6 +98,11 @@ export interface PaginatedTeamMembers {
 // ---------------------------------------------------------------------------
 // Internal helpers
 // ---------------------------------------------------------------------------
+
+/** Context org for a service call: caller's org, platform org as fallback. */
+function contextOrgId(ctx: ServiceContext): string {
+  return ctx.organizationId ?? env.PLATFORM_ORGANIZATION_ID!;
+}
 
 /**
  * Generate a URL-friendly slug from a team name.
@@ -218,27 +231,29 @@ export const TeamService = {
 
     const slug = input.slug || generateSlug(input.name);
 
-    return await globalDb.$transaction(async (tx) => {
-      const team = await createWithUniqueSlug(tx, organizationId, input.name, slug, input.description);
+    return runWithTenant(organizationId, async () =>
+      tenantDb.$transaction(async (tx) => {
+        const team = await createWithUniqueSlug(tx, organizationId, input.name, slug, input.description);
 
-      logger.info(
-        { teamId: team.id, orgId: organizationId, method: 'TeamService.createTeam' },
-        'Team created',
-      );
+        logger.info(
+          { teamId: team.id, orgId: organizationId, method: 'TeamService.createTeam' },
+          'Team created',
+        );
 
-      // Audit log
-      await recordAuditLog({
-        userId: ctx.userId,
-        action: 'team.created',
-        resourceType: 'Team',
-        resourceId: team.id,
-        organizationId,
-        success: true,
-        metadata: { name: team.name },
-      });
+        // Audit log
+        await recordAuditLog({
+          userId: ctx.userId,
+          action: 'team.created',
+          resourceType: 'Team',
+          resourceId: team.id,
+          organizationId,
+          success: true,
+          metadata: { name: team.name },
+        });
 
-      return team;
-    });
+        return team;
+      }),
+    );
   },
 
   /**
@@ -248,31 +263,35 @@ export const TeamService = {
   async getTeamById(teamId: string, ctx: ServiceContext) {
     requireAnyAdmin(ctx);
 
-    const team = await globalDb.team.findUnique({
-      where: { id: teamId },
-      include: {
-        members: {
-          select: {
-            id: true,
-            userId: true,
-            user: { select: { name: true, email: true } },
-            createdAt: true,
+    const team = await runWithTenant(contextOrgId(ctx), () =>
+      tenantDb.team.findUnique({
+        where: { id: teamId },
+        include: {
+          members: {
+            select: {
+              id: true,
+              userId: true,
+              user: { select: { name: true, email: true } },
+              createdAt: true,
+            },
           },
         },
-      },
-    });
+      }),
+    );
 
     if (!team) {
       throw new NotFoundError('Team not found');
     }
 
     // Fetch roles separately to avoid type issues with nested includes
-    const teamRoles = await globalDb.teamRole.findMany({
-      where: { teamId },
-      include: {
-        role: { select: { id: true, name: true, description: true } },
-      },
-    });
+    const teamRoles = await runWithTenant(team.organizationId, () =>
+      tenantDb.teamRole.findMany({
+        where: { teamId },
+        include: {
+          role: { select: { id: true, name: true, description: true } },
+        },
+      }),
+    );
 
     const teamWithDetails = {
       ...team,
@@ -312,31 +331,33 @@ export const TeamService = {
     const { page: normalizedPage, pageSize: normalizedPageSize } = normalizePagination({ page, pageSize });
     const skip = (normalizedPage - 1) * normalizedPageSize;
 
-    const [teams, total] = await Promise.all([
-      globalDb.team.findMany({
-        where: { organizationId },
-        skip,
-        take: normalizedPageSize,
-        orderBy: { name: 'asc' },
-        include: {
-          _count: { select: { members: true } },
-        },
-      }),
-      globalDb.team.count({ where: { organizationId } }),
-    ]);
+    return runWithTenant(organizationId, async () => {
+      const [teams, total] = await Promise.all([
+        tenantDb.team.findMany({
+          where: { organizationId },
+          skip,
+          take: normalizedPageSize,
+          orderBy: { name: 'asc' },
+          include: {
+            _count: { select: { members: true } },
+          },
+        }),
+        tenantDb.team.count({ where: { organizationId } }),
+      ]);
 
-    return {
-      teams: teams.map(({ id, name, slug, description, createdAt, updatedAt, organizationId, _count }) => ({
-        id, name, slug, description, createdAt, updatedAt, organizationId,
-        _count: { members: _count.members },
-      })),
-      pagination: {
-        page: normalizedPage,
-        pageSize: normalizedPageSize,
-        total,
-        totalPages: Math.ceil(total / normalizedPageSize),
-      },
-    };
+      return {
+        teams: teams.map(({ id, name, slug, description, createdAt, updatedAt, organizationId: orgId, _count }) => ({
+          id, name, slug, description, createdAt, updatedAt, organizationId: orgId,
+          _count: { members: _count.members },
+        })),
+        pagination: {
+          page: normalizedPage,
+          pageSize: normalizedPageSize,
+          total,
+          totalPages: Math.ceil(total / normalizedPageSize),
+        },
+      };
+    });
   },
 
   /**
@@ -347,7 +368,9 @@ export const TeamService = {
     requireAnyAdmin(ctx);
 
     // Verify team exists first and get its org
-    const existingTeam = await globalDb.team.findUnique({ where: { id: teamId } });
+    const existingTeam = await runWithTenant(contextOrgId(ctx), () =>
+      tenantDb.team.findUnique({ where: { id: teamId } }),
+    );
     if (!existingTeam) {
       throw new NotFoundError('Team not found');
     }
@@ -375,10 +398,12 @@ export const TeamService = {
       updateData.description = input.description;
     }
 
-    const updatedTeam = await globalDb.team.update({
-      where: { id: teamId },
-      data: updateData,
-    });
+    const updatedTeam = await runWithTenant(existingTeam.organizationId, () =>
+      tenantDb.team.update({
+        where: { id: teamId },
+        data: updateData,
+      }),
+    );
 
     logger.info(
       { userId: ctx.userId, teamId, method: 'TeamService.updateTeam' },
@@ -405,10 +430,12 @@ export const TeamService = {
   async deleteTeam(teamId: string, ctx: ServiceContext) {
     requireAnyAdmin(ctx);
 
-    const team = await globalDb.team.findUnique({
-      where: { id: teamId },
-      include: { _count: { select: { members: true } } },
-    });
+    const team = await runWithTenant(contextOrgId(ctx), () =>
+      tenantDb.team.findUnique({
+        where: { id: teamId },
+        include: { _count: { select: { members: true } } },
+      }),
+    );
 
     if (!team) {
       throw new NotFoundError('Team not found');
@@ -428,7 +455,7 @@ export const TeamService = {
     }
 
     // Platform Admin can delete any team (including non-empty)
-    await globalDb.team.delete({ where: { id: teamId } });
+    await runWithTenant(team.organizationId, () => tenantDb.team.delete({ where: { id: teamId } }));
 
     logger.info(
       { userId: ctx.userId, teamId, method: 'TeamService.deleteTeam' },
@@ -455,8 +482,11 @@ export const TeamService = {
   async addTeamMember(teamId: string, input: AddTeamMemberInput, ctx: ServiceContext) {
     requireAnyAdmin(ctx);
 
-    // Verify team exists and get its org
-    const team = await globalDb.team.findUnique({ where: { id: teamId } });
+    // Wrap the whole operation under one org context (the team's org once known;
+    // the per-ID lookups use the caller/platform fallback below).
+    const team = await runWithTenant(contextOrgId(ctx), () =>
+      tenantDb.team.findUnique({ where: { id: teamId } }),
+    );
     if (!team) {
       throw new NotFoundError('Team not found');
     }
@@ -469,54 +499,56 @@ export const TeamService = {
       }
     }
 
-    // Verify user is a member of the same organization
-    const member = await globalDb.member.findFirst({
-      where: { userId: input.userId, orgId: team.organizationId },
-    });
+    return runWithTenant(team.organizationId, async () => {
+      // Verify user is a member of the same organization
+      const member = await tenantDb.member.findFirst({
+        where: { userId: input.userId, orgId: team.organizationId },
+      });
 
-    if (!member) {
-      throw new ValidationError('User is not a member of this organization');
-    }
+      if (!member) {
+        throw new ValidationError('User is not a member of this organization');
+      }
 
-    // Check if already a team member (unique constraint on [userId, teamId])
-    const existing = await globalDb.teamMember.findFirst({
-      where: { userId: input.userId, teamId },
-    });
+      // Check if already a team member (unique constraint on [userId, teamId])
+      const existing = await tenantDb.teamMember.findFirst({
+        where: { userId: input.userId, teamId },
+      });
 
-    if (existing) {
-      throw new ConflictError('User is already a member of this team');
-    }
+      if (existing) {
+        throw new ConflictError('User is already a member of this team');
+      }
 
-    return await globalDb.$transaction(async (tx) => {
-      // Create team membership
-      const teamMember = await tx.teamMember.create({
-        data: {
-          userId: input.userId,
-          teamId,
+      return tenantDb.$transaction(async (tx) => {
+        // Create team membership
+        const teamMember = await tx.teamMember.create({
+          data: {
+            userId: input.userId,
+            teamId,
+            organizationId: team.organizationId,
+          },
+        });
+
+        // Assign all team roles (role inheritance)
+        await assignTeamRolesToMember(tx, member.id, teamId, team.organizationId);
+
+        logger.info(
+          { userId: input.userId, teamId, method: 'TeamService.addTeamMember' },
+          'User added to team with role inheritance',
+        );
+
+        // Audit log
+        await recordAuditLog({
+          userId: ctx.userId,
+          action: 'team.member_added',
+          resourceType: 'TeamMember',
+          resourceId: teamMember.id,
           organizationId: team.organizationId,
-        },
+          success: true,
+          metadata: { userId: input.userId, teamName: team.name },
+        });
+
+        return teamMember;
       });
-
-      // Assign all team roles (role inheritance)
-      await assignTeamRolesToMember(tx, member.id, teamId, team.organizationId);
-
-      logger.info(
-        { userId: input.userId, teamId, method: 'TeamService.addTeamMember' },
-        'User added to team with role inheritance',
-      );
-
-      // Audit log
-      await recordAuditLog({
-        userId: ctx.userId,
-        action: 'team.member_added',
-        resourceType: 'TeamMember',
-        resourceId: teamMember.id,
-        organizationId: team.organizationId,
-        success: true,
-        metadata: { userId: input.userId, teamName: team.name },
-      });
-
-      return teamMember;
     });
   },
 
@@ -527,7 +559,9 @@ export const TeamService = {
     requireAnyAdmin(ctx);
 
     // Verify team exists and get its org
-    const team = await globalDb.team.findUnique({ where: { id: teamId } });
+    const team = await runWithTenant(contextOrgId(ctx), () =>
+      tenantDb.team.findUnique({ where: { id: teamId } }),
+    );
     if (!team) {
       throw new NotFoundError('Team not found');
     }
@@ -540,46 +574,48 @@ export const TeamService = {
       }
     }
 
-    // Find the team member record
-    const teamMember = await globalDb.teamMember.findFirst({
-      where: { userId, teamId },
-    });
-
-    if (!teamMember) {
-      throw new NotFoundError('User is not a member of this team');
-    }
-
-    // Find the corresponding Member record for role revocation
-    const member = await globalDb.member.findFirst({
-      where: { userId, orgId: team.organizationId },
-    });
-
-    return await globalDb.$transaction(async (tx) => {
-      // Revoke team-inherited roles first
-      if (member) {
-        await revokeTeamRolesFromMember(tx, member.id, teamId, team.organizationId);
-      }
-
-      // Remove team membership
-      await tx.teamMember.delete({ where: { id: teamMember.id } });
-
-      logger.info(
-        { userId, teamId, method: 'TeamService.removeTeamMember' },
-        'User removed from team with role revocation',
-      );
-
-      // Audit log
-      await recordAuditLog({
-        userId: ctx.userId,
-        action: 'team.member_removed',
-        resourceType: 'TeamMember',
-        resourceId: teamMember.id,
-        organizationId: team.organizationId,
-        success: true,
-        metadata: { userId },
+    return runWithTenant(team.organizationId, async () => {
+      // Find the team member record
+      const teamMember = await tenantDb.teamMember.findFirst({
+        where: { userId, teamId },
       });
 
-      return { success: true };
+      if (!teamMember) {
+        throw new NotFoundError('User is not a member of this team');
+      }
+
+      // Find the corresponding Member record for role revocation
+      const member = await tenantDb.member.findFirst({
+        where: { userId, orgId: team.organizationId },
+      });
+
+      return tenantDb.$transaction(async (tx) => {
+        // Revoke team-inherited roles first
+        if (member) {
+          await revokeTeamRolesFromMember(tx, member.id, teamId, team.organizationId);
+        }
+
+        // Remove team membership
+        await tx.teamMember.delete({ where: { id: teamMember.id } });
+
+        logger.info(
+          { userId, teamId, method: 'TeamService.removeTeamMember' },
+          'User removed from team with role revocation',
+        );
+
+        // Audit log
+        await recordAuditLog({
+          userId: ctx.userId,
+          action: 'team.member_removed',
+          resourceType: 'TeamMember',
+          resourceId: teamMember.id,
+          organizationId: team.organizationId,
+          success: true,
+          metadata: { userId },
+        });
+
+        return { success: true };
+      });
     });
   },
 
@@ -589,7 +625,9 @@ export const TeamService = {
   async listTeamMembers(teamId: string, ctx: ServiceContext, page = 1, pageSize = 20) {
     requireAnyAdmin(ctx);
 
-    const team = await globalDb.team.findUnique({ where: { id: teamId } });
+    const team = await runWithTenant(contextOrgId(ctx), () =>
+      tenantDb.team.findUnique({ where: { id: teamId } }),
+    );
     if (!team) {
       throw new NotFoundError('Team not found');
     }
@@ -602,48 +640,50 @@ export const TeamService = {
       }
     }
 
-    const { page: normalizedPage, pageSize: normalizedPageSize } = normalizePagination({ page, pageSize });
-    const skip = (normalizedPage - 1) * normalizedPageSize;
+    return runWithTenant(team.organizationId, async () => {
+      const { page: normalizedPage, pageSize: normalizedPageSize } = normalizePagination({ page, pageSize });
+      const skip = (normalizedPage - 1) * normalizedPageSize;
 
-    // Get team members with their roles
-    const [members, total] = await Promise.all([
-      globalDb.teamMember.findMany({
-        where: { teamId },
-        skip,
-        take: normalizedPageSize,
-        include: {
-          user: { select: { name: true, email: true } },
+      // Get team members with their roles
+      const [members, total] = await Promise.all([
+        tenantDb.teamMember.findMany({
+          where: { teamId },
+          skip,
+          take: normalizedPageSize,
+          include: {
+            user: { select: { name: true, email: true } },
+          },
+        }),
+        tenantDb.teamMember.count({ where: { teamId } }),
+      ]);
+
+      // Fetch roles for each member separately to avoid type issues with nested includes
+      const membersWithRoles = await Promise.all(
+        members.map(async (tm) => {
+          const memberRoles = await tenantDb.memberRole.findMany({
+            where: { memberId: tm.id },
+            include: { role: { select: { id: true, name: true } } },
+          });
+          return {
+            id: tm.id,
+            userId: tm.userId,
+            user: tm.user,
+            createdAt: tm.createdAt,
+            roles: memberRoles.map((mr) => ({ id: mr.role.id, name: mr.role.name })),
+          };
+        }),
+      );
+
+      return {
+        members: membersWithRoles,
+        pagination: {
+          page: normalizedPage,
+          pageSize: normalizedPageSize,
+          total,
+          totalPages: Math.ceil(total / normalizedPageSize),
         },
-      }),
-      globalDb.teamMember.count({ where: { teamId } }),
-    ]);
-
-    // Fetch roles for each member separately to avoid type issues with nested includes
-    const membersWithRoles = await Promise.all(
-      members.map(async (tm) => {
-        const memberRoles = await globalDb.memberRole.findMany({
-          where: { memberId: tm.id },
-          include: { role: { select: { id: true, name: true } } },
-        });
-        return {
-          id: tm.id,
-          userId: tm.userId,
-          user: tm.user,
-          createdAt: tm.createdAt,
-          roles: memberRoles.map((mr) => ({ id: mr.role.id, name: mr.role.name })),
-        };
-      }),
-    );
-
-    return {
-      members: membersWithRoles,
-      pagination: {
-        page: normalizedPage,
-        pageSize: normalizedPageSize,
-        total,
-        totalPages: Math.ceil(total / normalizedPageSize),
-      },
-    };
+      };
+    });
   },
 
   /**
@@ -654,7 +694,9 @@ export const TeamService = {
     requireAnyAdmin(ctx);
 
     // Verify team exists and get its org
-    const team = await globalDb.team.findUnique({ where: { id: teamId } });
+    const team = await runWithTenant(contextOrgId(ctx), () =>
+      tenantDb.team.findUnique({ where: { id: teamId } }),
+    );
     if (!team) {
       throw new NotFoundError('Team not found');
     }
@@ -667,50 +709,52 @@ export const TeamService = {
       }
     }
 
-    // Verify role belongs to the same organization
-    const role = await globalDb.role.findUnique({ where: { id: input.roleId } });
-    if (!role) {
-      throw new NotFoundError('Role not found');
-    }
-    if (role.organizationId !== team.organizationId) {
-      throw new ValidationError('Role must belong to the same organization as the team');
-    }
-
-    return await globalDb.$transaction(async (tx) => {
-      // Check for duplicate assignment
-      const existing = await tx.teamRole.findFirst({
-        where: { teamId, roleId: input.roleId },
-      });
-
-      if (existing) {
-        throw new ConflictError('Role is already assigned to this team');
+    return runWithTenant(team.organizationId, async () => {
+      // Verify role belongs to the same organization
+      const role = await tenantDb.role.findUnique({ where: { id: input.roleId } });
+      if (!role) {
+        throw new NotFoundError('Role not found');
+      }
+      if (role.organizationId !== team.organizationId) {
+        throw new ValidationError('Role must belong to the same organization as the team');
       }
 
-      const teamRole = await tx.teamRole.create({
-        data: {
-          teamId,
-          roleId: input.roleId,
+      return tenantDb.$transaction(async (tx) => {
+        // Check for duplicate assignment
+        const existing = await tx.teamRole.findFirst({
+          where: { teamId, roleId: input.roleId },
+        });
+
+        if (existing) {
+          throw new ConflictError('Role is already assigned to this team');
+        }
+
+        const teamRole = await tx.teamRole.create({
+          data: {
+            teamId,
+            roleId: input.roleId,
+            organizationId: team.organizationId,
+          },
+        });
+
+        logger.info(
+          { teamId, roleId: input.roleId, method: 'TeamService.assignTeamRole' },
+          'Role assigned to team',
+        );
+
+        // Audit log
+        await recordAuditLog({
+          userId: ctx.userId,
+          action: 'team.role_assigned',
+          resourceType: 'TeamRole',
+          resourceId: teamRole.id,
           organizationId: team.organizationId,
-        },
+          success: true,
+          metadata: { roleId: input.roleId },
+        });
+
+        return teamRole;
       });
-
-      logger.info(
-        { teamId, roleId: input.roleId, method: 'TeamService.assignTeamRole' },
-        'Role assigned to team',
-      );
-
-      // Audit log
-      await recordAuditLog({
-        userId: ctx.userId,
-        action: 'team.role_assigned',
-        resourceType: 'TeamRole',
-        resourceId: teamRole.id,
-        organizationId: team.organizationId,
-        success: true,
-        metadata: { roleId: input.roleId },
-      });
-
-      return teamRole;
     });
   },
 
@@ -721,7 +765,9 @@ export const TeamService = {
     requireAnyAdmin(ctx);
 
     // Verify team exists and get its org
-    const team = await globalDb.team.findUnique({ where: { id: teamId } });
+    const team = await runWithTenant(contextOrgId(ctx), () =>
+      tenantDb.team.findUnique({ where: { id: teamId } }),
+    );
     if (!team) {
       throw new NotFoundError('Team not found');
     }
@@ -734,33 +780,35 @@ export const TeamService = {
       }
     }
 
-    // Find the TeamRole record
-    const teamRole = await globalDb.teamRole.findFirst({
-      where: { teamId, roleId },
+    return runWithTenant(team.organizationId, async () => {
+      // Find the TeamRole record
+      const teamRole = await tenantDb.teamRole.findFirst({
+        where: { teamId, roleId },
+      });
+
+      if (!teamRole) {
+        throw new NotFoundError('Role is not assigned to this team');
+      }
+
+      await tenantDb.teamRole.delete({ where: { id: teamRole.id } });
+
+      logger.info(
+        { teamId, roleId, method: 'TeamService.removeTeamRole' },
+        'Role removed from team',
+      );
+
+      // Audit log
+      await recordAuditLog({
+        userId: ctx.userId,
+        action: 'team.role_removed',
+        resourceType: 'TeamRole',
+        resourceId: teamRole.id,
+        organizationId: team.organizationId,
+        success: true,
+      });
+
+      return { success: true };
     });
-
-    if (!teamRole) {
-      throw new NotFoundError('Role is not assigned to this team');
-    }
-
-    await globalDb.teamRole.delete({ where: { id: teamRole.id } });
-
-    logger.info(
-      { teamId, roleId, method: 'TeamService.removeTeamRole' },
-      'Role removed from team',
-    );
-
-    // Audit log
-    await recordAuditLog({
-      userId: ctx.userId,
-      action: 'team.role_removed',
-      resourceType: 'TeamRole',
-      resourceId: teamRole.id,
-      organizationId: team.organizationId,
-      success: true,
-    });
-
-    return { success: true };
   },
 
   /**
@@ -769,7 +817,9 @@ export const TeamService = {
   async getTeamRoles(teamId: string, ctx: ServiceContext) {
     requireAnyAdmin(ctx);
 
-    const team = await globalDb.team.findUnique({ where: { id: teamId } });
+    const team = await runWithTenant(contextOrgId(ctx), () =>
+      tenantDb.team.findUnique({ where: { id: teamId } }),
+    );
     if (!team) {
       throw new NotFoundError('Team not found');
     }
@@ -782,13 +832,15 @@ export const TeamService = {
       }
     }
 
-    const roles = await globalDb.teamRole.findMany({
-      where: { teamId },
-      select: {
-        id: true,
-        role: { select: { id: true, name: true, description: true } },
-      },
-    });
+    const roles = await runWithTenant(team.organizationId, () =>
+      tenantDb.teamRole.findMany({
+        where: { teamId },
+        select: {
+          id: true,
+          role: { select: { id: true, name: true, description: true } },
+        },
+      }),
+    );
 
     return roles.map((tr) => ({
       id: tr.id,

@@ -10,10 +10,19 @@
  *
  * These entries are marked as "permanent" — they have no TTL and will only be
  * evicted if explicitly deleted (e.g., when an org/user/role is removed).
+ *
+ * RLS: this runs at process startup (instrumentation.ts) outside any request,
+ * where no tenant ALS context exists. The app connects as the non-owner role
+ * nipp_app, so every query needs a verified context bound via GUCs — every
+ * warmer therefore runs inside inPlatformCtx() (platform admin flag on,
+ * env-verified platform org id). Without that, RLS denies the empty-context
+ * queries with 42501 and nothing is warmed.
  */
 
 import { getLruCache } from './lru';
 import tenantDb from '@/lib/tenant-db';
+import { withPlatformContextForDB } from '@/lib/rls-transaction';
+import { env } from '@/lib/env';
 
 // ---------------------------------------------------------------------------
 // Types
@@ -22,6 +31,21 @@ import tenantDb from '@/lib/tenant-db';
 interface WarmEntry {
   key: string;
   value: unknown;
+}
+
+// ---------------------------------------------------------------------------
+// RLS context wrapper for startup (out-of-request) queries
+// ---------------------------------------------------------------------------
+
+/**
+ * Run `op` under a verified PLATFORM RLS context (flag=1, env platform org).
+ * Returns null when PLATFORM_ORGANIZATION_ID is unset — warming is optional
+ * and must never take startup down.
+ */
+async function inPlatformCtx<T>(op: () => Promise<T>): Promise<T | null> {
+  const platformOrgId = env.PLATFORM_ORGANIZATION_ID;
+  if (!platformOrgId) return null;
+  return withPlatformContextForDB(platformOrgId, op);
 }
 
 // ---------------------------------------------------------------------------
@@ -36,13 +60,16 @@ async function warmOrganizations(): Promise<WarmEntry[]> {
   const entries: WarmEntry[] = [];
 
   try {
-    const organizations = await tenantDb.organization.findMany({
-      select: {
-        id: true,
-        name: true,
-        slug: true,
-      },
-    });
+    const organizations = await inPlatformCtx(() =>
+      tenantDb.organization.findMany({
+        select: {
+          id: true,
+          name: true,
+          slug: true,
+        },
+      }),
+    );
+    if (!organizations) return entries;
 
     for (const org of organizations) {
       // Entity key — used by detail endpoints
@@ -78,13 +105,16 @@ async function warmUsers(): Promise<WarmEntry[]> {
   const entries: WarmEntry[] = [];
 
   try {
-    const users = await tenantDb.user.findMany({
-      select: {
-        id: true,
-        name: true,
-        email: true,
-      },
-    });
+    const users = await inPlatformCtx(() =>
+      tenantDb.user.findMany({
+        select: {
+          id: true,
+          name: true,
+          email: true,
+        },
+      }),
+    );
+    if (!users) return entries;
 
     for (const user of users) {
       // Entity key — used by detail endpoints
@@ -130,41 +160,44 @@ async function warmRoles(): Promise<WarmEntry[]> {
   const entries: WarmEntry[] = [];
 
   try {
-    // Get all organizations first
-    const organizations = await tenantDb.organization.findMany({
-      select: { id: true },
-    });
-
-    for (const org of organizations) {
-      const roles = await tenantDb.role.findMany({
-        where: { organizationId: org.id },
-        select: {
-          id: true,
-          name: true,
-          description: true,
-        },
+    // ONE platform context covers org list + per-org role queries.
+    await inPlatformCtx(async () => {
+      // Get all organizations first
+      const organizations = await tenantDb.organization.findMany({
+        select: { id: true },
       });
 
-      for (const role of roles) {
-        // Entity key — used by detail endpoints
-        const entityKey = `role:${org.id}:${role.id}`;
-        entries.push({ key: entityKey, value: role });
-
-        // Search result aggregation key — used by search endpoint
-        const normalizedName = role.name.toLowerCase();
-        const searchKey = `search:role:${org.id}:${normalizedName}`;
-        entries.push({
-          key: searchKey,
-          value: { results: [{ id: role.id, name: role.name, description: role.description }], total: 1 },
+      for (const org of organizations) {
+        const roles = await tenantDb.role.findMany({
+          where: { organizationId: org.id },
+          select: {
+            id: true,
+            name: true,
+            description: true,
+          },
         });
 
-        // Also cache the list entry for search
-        const listKey = `role:list:${org.id}:${normalizedName}`;
-        entries.push({ key: listKey, value: { id: role.id, name: role.name, description: role.description } });
-      }
+        for (const role of roles) {
+          // Entity key — used by detail endpoints
+          const entityKey = `role:${org.id}:${role.id}`;
+          entries.push({ key: entityKey, value: role });
 
-      console.log(`[Cache Warm] Loaded ${roles.length} roles for org ${org.id}`);
-    }
+          // Search result aggregation key — used by search endpoint
+          const normalizedName = role.name.toLowerCase();
+          const searchKey = `search:role:${org.id}:${normalizedName}`;
+          entries.push({
+            key: searchKey,
+            value: { results: [{ id: role.id, name: role.name, description: role.description }], total: 1 },
+          });
+
+          // Also cache the list entry for search
+          const listKey = `role:list:${org.id}:${normalizedName}`;
+          entries.push({ key: listKey, value: { id: role.id, name: role.name, description: role.description } });
+        }
+
+        console.log(`[Cache Warm] Loaded ${roles.length} roles for org ${org.id}`);
+      }
+    });
   } catch (error) {
     console.error('[Cache Warm] Failed to warm roles:', error);
   }
@@ -180,15 +213,18 @@ async function warmPermissions(): Promise<WarmEntry[]> {
   const entries: WarmEntry[] = [];
 
   try {
-    const permissions = await tenantDb.permission.findMany({
-      select: {
-        id: true,
-        key: true,
-        resource: true,
-        action: true,
-        description: true,
-      },
-    });
+    const permissions = await inPlatformCtx(() =>
+      tenantDb.permission.findMany({
+        select: {
+          id: true,
+          key: true,
+          resource: true,
+          action: true,
+          description: true,
+        },
+      }),
+    );
+    if (!permissions) return entries;
 
     for (const perm of permissions) {
       // Entity key — used by detail endpoints
@@ -223,6 +259,11 @@ export async function warmCache(): Promise<void> {
   const lru = getLruCache();
   if (!lru) {
     console.log('[Cache Warm] L1 cache is disabled (Edge runtime or feature flag)');
+    return;
+  }
+
+  if (!env.PLATFORM_ORGANIZATION_ID) {
+    console.warn('[Cache Warm] PLATFORM_ORGANIZATION_ID unset — warming skipped (RLS fail-closed context unavailable at startup)');
     return;
   }
 

@@ -2,9 +2,10 @@ import { NextRequest, NextResponse } from 'next/server';
 import { requireSuperAdmin } from '@/lib/require-super-admin';
 import { checkAdminRateLimit } from '@/lib/rate-limiter';
 
-import globalDb from '@/lib/global-db';
 import { ResourceService } from '@/services/resource-service';
 import { notifyResourceOperation } from '@/lib/notification-push';
+// RLS Phase 3: resource listing/creation run under verified platform contexts.
+import { withPlatformContext } from '@/lib/platform-db';
 
 export const runtime = 'nodejs';
 
@@ -27,12 +28,15 @@ export async function GET(request: NextRequest) {
     const filters: import('@/services/resource-service').ResourceFilters = {};
     if (search) filters.search = search;
 
-    const result = await ResourceService.list(filters, { page, pageSize }, {
-      userId: auth.session!.user.id,
-      role: 'PLATFORM_ADMIN',
+    // One verified platform context for the resource catalog listing.
+    const result = await withPlatformContext(auth.session!.user.id, async () => {
+      const data = await ResourceService.list(filters, { page, pageSize }, {
+        userId: auth.session!.user.id,
+        role: 'PLATFORM_ADMIN',
+      });
+      return NextResponse.json(data);
     });
-
-    return NextResponse.json(result);
+    return result;
   } catch (error) {
     console.error('Failed to list resources:', error);
     return NextResponse.json({ error: 'Failed to fetch resources' }, { status: 500 });

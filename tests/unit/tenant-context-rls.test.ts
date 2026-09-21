@@ -47,7 +47,8 @@ describe('runWithTenantContext (verified RLS context)', () => {
   });
 
   it('fail-closed on missing required fields', () => {
-    // @ts-expect-error — orgId intentionally missing
+    // orgId intentionally missing: allowed by the type only in platform mode,
+    // so runtime fail-closed still throws (no @ts-expect-error — input is typed).
     expect(() => runWithTenantContext({ userId: 'u' }, () => null)).toThrow(/orgId/);
     expect(() =>
       runWithTenantContext({ userId: '', orgId: 'o' } as { userId: string; orgId: string }, () => null)

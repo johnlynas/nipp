@@ -7,8 +7,8 @@
 
 import { NextRequest, NextResponse } from 'next/server';
 import { auth } from '@/lib/auth';
-import { superAdminStorage } from '@/lib/global-db-guard';
-import { resolveTenantAccess } from '@/lib/tenant-access';
+import { resolveTenantAccess, toTenantContext } from '@/lib/tenant-access';
+import { withRLSContext } from '@/lib/rls-transaction';
 import { CalendarService } from '@/services/calendar-service';
 import { isSameSiteRequest } from '@/lib/csrf';
 import { checkCalendarRateLimit } from '@/lib/rate-limiter';
@@ -36,13 +36,11 @@ export async function GET(
   if (!access.ok) {
     return NextResponse.json({ error: access.error }, { status: access.status });
   }
+return withRLSContext(toTenantContext(access, session.user.id), async () => {
   const ctx = access.ctx;
 
   try {
-    // Scoping globalDb access (S7): see note in POST below.
-    const calendars = await superAdminStorage.run(true, () =>
-      CalendarService.getCalendars(ctx, orgId)
-    );
+    const calendars = await CalendarService.getCalendars(ctx, orgId);
     return NextResponse.json(calendars);
   } catch (error: unknown) {
     if (error instanceof Error) {
@@ -51,6 +49,7 @@ export async function GET(
     }
     return NextResponse.json({ error: 'Internal server error' }, { status: 500 });
   }
+  });
 }
 
 // ---------------------------------------------------------------------------
@@ -82,6 +81,7 @@ export async function POST(
   if (!access.ok) {
     return NextResponse.json({ error: access.error }, { status: access.status });
   }
+return withRLSContext(toTenantContext(access, session.user.id), async () => {
 
   // Only admins (tenant admin or platform super admin) can create calendars
   if (access.ctx.role === 'MEMBER') {
@@ -102,10 +102,7 @@ export async function POST(
   }
 
   try {
-    // Scoping globalDb access (S7): see note in GET above.
-    const calendar = await superAdminStorage.run(true, () =>
-      CalendarService.createCalendar(ctx, { name, description })
-    );
+    const calendar = await CalendarService.createCalendar(ctx, { name, description });
     return NextResponse.json({ calendar }, { status: 201 });
   } catch (error: unknown) {
     if (error instanceof Error) {
@@ -114,4 +111,5 @@ export async function POST(
     }
     return NextResponse.json({ error: 'Internal server error' }, { status: 500 });
   }
+  });
 }

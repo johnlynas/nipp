@@ -3,7 +3,7 @@
  */
 
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import globalDb from '@/lib/global-db';
+import globalDb from '@/lib/tenant-db';
 import {
   applyEditScopeThis,
   applyEditScopeFollowing,
@@ -14,7 +14,7 @@ import {
 // Mocks — plain vi.fn() with no defaults (clearAllMocks preserves implementation)
 // ---------------------------------------------------------------------------
 
-vi.mock('@/lib/global-db', () => ({
+vi.mock('@/lib/tenant-db', () => ({
   default: {
     calendarEvent: {
       findFirst: vi.fn(),

@@ -11,9 +11,10 @@
 
 import { NextRequest, NextResponse } from 'next/server';
 import { auth } from '@/lib/auth';
-import globalDb from '@/lib/global-db';
-import { superAdminStorage } from '@/lib/global-db-guard';
-import { resolveTenantAccess } from '@/lib/tenant-access';
+import { resolveTenantAccess, toTenantContext } from '@/lib/tenant-access';
+// RLS Phase 3: verified-context tenantDb (unscoped globalDb deleted).
+import tenantDb from '@/lib/tenant-db';
+import { withRLSContext } from '@/lib/rls-transaction';
 import {
   buildOrgChart,
   type BuildOrgChartInput,
@@ -43,15 +44,15 @@ export async function GET(
   if (!access.ok) {
     return NextResponse.json({ error: access.error }, { status: access.status });
   }
+return withRLSContext(toTenantContext(access, session.user.id), async () => {
 
   const viewerCanEdit =
     access.ctx.role === 'PLATFORM_ADMIN' || access.ctx.role === 'TENANT_ADMIN';
 
   try {
-    // One org-scoped read (S7: wrap the unscoped client in superAdminStorage so
-    // the AsyncLocalStorage context does not leak, same as the calendar routes).
-    const org = await superAdminStorage.run(true, () =>
-      globalDb.organization.findUnique({
+    // One org-scoped read; RLS + app-layer extension scope to the target org.
+    const org = await (() =>
+      tenantDb.organization.findUnique({
         where: { id: orgId },
         include: {
           teams: {
@@ -82,8 +83,7 @@ export async function GET(
             },
           },
         },
-      })
-    );
+      }))();
 
     if (!org) {
       return NextResponse.json({ error: 'Organization not found' }, { status: 404 });
@@ -159,4 +159,5 @@ export async function GET(
     }
     return NextResponse.json({ error: 'Internal server error' }, { status: 500 });
   }
+  });
 }

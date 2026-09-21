@@ -1,7 +1,192 @@
 import { PrismaClient, type NotificationPriority, type NotificationScope } from '@prisma/client';
 import { hashPassword } from 'better-auth/crypto';
+import { readFileSync, writeFileSync, existsSync } from 'node:fs';
 
-const prisma = new PrismaClient();
+/**
+ * Write PLATFORM_ORGANIZATION_ID=<id> into .env (replace existing line, keep the
+ * rest of the file byte-for-byte; append with a comment if absent). This kills
+ * the stale-platform-org FK failures after `prisma db push` + reseed.
+ */
+function persistPlatformOrgIdToEnv(platformOrgId: string): void {
+  const envPath = new URL('../.env', import.meta.url);
+  if (!existsSync(envPath)) return;
+  const content = readFileSync(envPath, 'utf8');
+  const line = `PLATFORM_ORGANIZATION_ID="${platformOrgId}"   # verified Platform org (RLS platform ops fail-closed without it)`;
+  const re = /^PLATFORM_ORGANIZATION_ID=.*$/m;
+  const next = re.test(content) ? content.replace(re, line) : `${content.trimEnd()}\n\n${line}\n`;
+  writeFileSync(envPath, next);
+}
+
+// The seed ALWAYS connects as OWNER: it performs DDL (roles/grants/policies)
+// that the app role cannot do, and once RLS is live an empty-context data
+// write by nipp_app would be denied anyway. When the app DATABASE_URL points
+// at nipp_app (Phase 3+), provide SEED_RLS_DSN in .env for the owner DSN:
+//   SEED_RLS_DSN="postgresql://postgres:<pw>@localhost:5432/nipp_dev"
+const SEED_OWNER_DSN = process.env.SEED_RLS_DSN?.trim() || null;
+
+const prisma = new PrismaClient(SEED_OWNER_DSN ? { datasources: { db: { url: SEED_OWNER_DSN } } } : undefined);
+
+// =========================================================================
+// RLS BOOTSTRAP (idempotent) — nipp_app role + grants + row-level policies
+// =========================================================================
+// `npm run db:seed` supports the recreate workflow (`prisma db push`, which
+// leaves NO _prisma_migrations behind); without this step a fresh DB has no
+// non-owner role, no grants, and no RLS policies — the app (connecting as
+// nipp_app) is completely locked out. This block therefore applies the same
+// DDL that lives in:
+//   prisma/migrations/20260919035439_rls_roles            (role + grants)
+//   prisma/migrations/20260919093000_rls_complete_policies (18 tables, full policy catalog)
+//   prisma/migrations/20260920000000_rls_platform_write_paths
+// Kept in sync manually — when the migrations change, update this list too.
+// Every statement is idempotent (DO guards / DROP POLICY IF EXISTS), so the
+// seed stays repeatable on both recreated and long-running DBs.
+// MUST run as the owner role (postgres): nipp_app cannot create roles/grants.
+// =========================================================================
+
+const APP_ROLE = 'nipp_app';
+const FLAG_EXPR = `NULLIF(current_setting('app.is_platform_admin', true), '')::int = 1`;
+
+/** One statement per entry — Prisma $executeRawUnsafe executes a single stmt. */
+function buildRLSBootstrapStatements(appPassword: string | null): string[] {
+  const statements: string[] = [];
+  statements.push(`DO $$ BEGIN IF NOT EXISTS (SELECT FROM pg_roles WHERE rolname = '${APP_ROLE}') THEN CREATE ROLE ${APP_ROLE} LOGIN NOSUPERUSER NOCREATEDB NOREPLICATION; END IF; END $$`);
+  if (appPassword) {
+    statements.push(`ALTER ROLE ${APP_ROLE} WITH PASSWORD '${appPassword.replace(/'/g, "''")}'`);
+  }
+  statements.push(`GRANT USAGE ON SCHEMA public TO ${APP_ROLE}`);
+  // Grants on every existing public table (fresh db-push has no grants at all).
+  statements.push(
+    `DO $$ DECLARE r RECORD; BEGIN FOR r IN SELECT c.oid, n.nspname AS schema_name, c.relname AS table_name FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace WHERE n.nspname = 'public' AND c.relkind = 'r' LOOP EXECUTE format('GRANT SELECT, INSERT, UPDATE, DELETE ON TABLE %I.%I TO ${APP_ROLE}', r.schema_name, r.table_name); END LOOP; END $$`,
+  );
+  // Cover tables created later by migrations/db push (owner creates them).
+  statements.push(`ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT SELECT, INSERT, UPDATE, DELETE ON TABLES TO ${APP_ROLE}`);
+
+  const orgScoped: Array<[table: string, policy: string, orgCol: 'organizationId' | 'orgId']> = [
+    ['Team', 'rls_team_isolated', 'organizationId'],
+    ['TeamMember', 'rls_teammember_isolated', 'organizationId'],
+    ['TeamRole', 'rls_teamrole_isolated', 'organizationId'],
+    ['Calendar', 'rls_calendar_isolated', 'organizationId'],
+    ['CalendarEvent', 'rls_calendarevent_isolated', 'organizationId'],
+    ['Role', 'rls_role_isolated', 'organizationId'],
+    ['RolePermission', 'rls_rolepermission_isolated', 'organizationId'],
+    ['MemberRole', 'rls_memberrole_isolated', 'organizationId'],
+    ['Member', 'rls_member_isolated', 'orgId'],
+    ['Invitation', 'rls_invitation_isolated', 'orgId'],
+    ['SentInvitation', 'rls_sentinvitation_isolated', 'orgId'],
+  ];
+  for (const [table, policy, orgCol] of orgScoped) {
+    statements.push(`ALTER TABLE "${table}" ENABLE ROW LEVEL SECURITY`);
+    const m = `"${orgCol}"::text = current_setting('app.current_org_id', true)`;
+    statements.push(`DROP POLICY IF EXISTS ${policy} ON "${table}"`);
+    statements.push(
+      `CREATE POLICY ${policy} ON "${table}" USING (${m} OR ${FLAG_EXPR}) WITH CHECK (${m})`,
+    );
+  }
+
+  // Organization — per-command: rows only manageable by platform ops acting on
+  // the org; tenant-context UPDATE/DELETE is denied (no self-privilege edits).
+  statements.push(`ALTER TABLE "Organization" ENABLE ROW LEVEL SECURITY`);
+  const orgIdMatch = `id::text = current_setting('app.current_org_id', true)`;
+  for (const [policy, cmd] of [
+    ['rls_organization_select', 'FOR SELECT'],
+    ['rls_organization_insert', 'FOR INSERT'],
+    ['rls_organization_update', 'FOR UPDATE'],
+    ['rls_organization_delete', 'FOR DELETE'],
+  ] as const) {
+    let using: string | null = null;
+    let check: string | null = null;
+    if (cmd === 'FOR SELECT') using = `${orgIdMatch} OR ${FLAG_EXPR}`;
+    if (cmd === 'FOR INSERT') check = FLAG_EXPR;
+    if (cmd === 'FOR UPDATE' || cmd === 'FOR DELETE') {
+      using = `${orgIdMatch} AND ${FLAG_EXPR}`;
+    }
+    statements.push(`DROP POLICY IF EXISTS ${policy} ON "Organization"`);
+    statements.push(
+      `CREATE POLICY ${policy} ON "Organization" ${cmd}${using ? ` USING (${using})` : ''}${check ? ` WITH CHECK (${check})` : ''}`,
+    );
+  }
+
+  // AuditLog / NotificationLog — append-only: SELECT/INSERT own org OR global
+  // (NULL org) rows OR platform admin; no UPDATE/DELETE policy for the app role.
+  const nullSafeMatch = `"organizationId" IS NULL OR "organizationId"::text = current_setting('app.current_org_id', true)`;
+  for (const [table, selectPolicy, insertPolicy] of [
+    ['AuditLog', 'rls_auditlog_select', 'rls_auditlog_insert'],
+    ['NotificationLog', 'rls_notificationlog_select', 'rls_notificationlog_insert'],
+  ] as const) {
+    statements.push(`ALTER TABLE "${table}" ENABLE ROW LEVEL SECURITY`);
+    statements.push(`DROP POLICY IF EXISTS ${selectPolicy} ON "${table}"`);
+    statements.push(`CREATE POLICY ${selectPolicy} ON "${table}" FOR SELECT USING (${nullSafeMatch} OR ${FLAG_EXPR})`);
+    statements.push(`DROP POLICY IF EXISTS ${insertPolicy} ON "${table}"`);
+    statements.push(`CREATE POLICY ${insertPolicy} ON "${table}" FOR INSERT WITH CHECK (${nullSafeMatch} OR ${FLAG_EXPR})`);
+  }
+
+  // Notification — SSE scope semantics: platform sees all; org rows visible to
+  // the owning tenant; writes ctx-bound (or platform for global broadcasts).
+  statements.push(`ALTER TABLE "Notification" ENABLE ROW LEVEL SECURITY`);
+  const notifMatch = `"organizationId" IS NULL OR "organizationId"::text = current_setting('app.current_org_id', true)`;
+  statements.push(`DROP POLICY IF EXISTS rls_notification_select ON "Notification"`);
+  statements.push(`CREATE POLICY rls_notification_select ON "Notification" FOR SELECT USING (${FLAG_EXPR} OR ${notifMatch})`);
+  statements.push(`DROP POLICY IF EXISTS rls_notification_insert ON "Notification"`);
+  statements.push(`CREATE POLICY rls_notification_insert ON "Notification" FOR INSERT WITH CHECK (${notifMatch} OR ${FLAG_EXPR})`);
+  statements.push(`DROP POLICY IF EXISTS rls_notification_update ON "Notification"`);
+  statements.push(`CREATE POLICY rls_notification_update ON "Notification" FOR UPDATE USING (${FLAG_EXPR} OR ${notifMatch})`);
+  // Platform-admin DELETE (approval/cleanup path) — 20260920 write paths.
+  statements.push(`DROP POLICY IF EXISTS rls_notification_delete ON "Notification"`);
+  statements.push(`CREATE POLICY rls_notification_delete ON "Notification" FOR DELETE USING (${FLAG_EXPR})`);
+
+  // JobDefinition / JobExecution — platform-only executable code: visible only
+  // to verified platform admins AND when the context platform org matches.
+  for (const [table, policy] of [['JobDefinition', 'rls_jobdefinition_platform_only'], ['JobExecution', 'rls_jobexecution_platform_only']] as const) {
+    statements.push(`ALTER TABLE "${table}" ENABLE ROW LEVEL SECURITY`);
+    const jobCond = `${FLAG_EXPR} AND "platformOrgId"::text = current_setting('app.platform_org_id', true)`;
+    statements.push(`DROP POLICY IF EXISTS ${policy} ON "${table}"`);
+    statements.push(`CREATE POLICY ${policy} ON "${table}" FOR ALL USING (${jobCond}) WITH CHECK (${jobCond})`);
+  }
+
+  // Permission — global catalog, restricted read: platform sees all; tenants
+  // see only permissions assigned to a role in their org. Writes are platform
+  // admin only (20260920); tenant actors stay S12 read-only.
+  statements.push(`ALTER TABLE "Permission" ENABLE ROW LEVEL SECURITY`);
+  const permExists = `EXISTS (SELECT 1 FROM "RolePermission" rp WHERE rp."permissionId" = "Permission".id AND rp."organizationId"::text = current_setting('app.current_org_id', true))`;
+  statements.push(`DROP POLICY IF EXISTS rls_permission_select ON "Permission"`);
+  statements.push(`CREATE POLICY rls_permission_select ON "Permission" FOR SELECT USING (${FLAG_EXPR} OR ${permExists})`);
+  for (const policy of ['rls_permission_platform_update', 'rls_permission_platform_delete'] as const) {
+    statements.push(`DROP POLICY IF EXISTS ${policy} ON "Permission"`);
+    if (policy === 'rls_permission_platform_update') {
+      // WITH CHECK is legal on UPDATE; NOT allowed on SELECT/DELETE (Postgres 42601).
+      statements.push(`CREATE POLICY rls_permission_platform_update ON "Permission" FOR UPDATE USING (${FLAG_EXPR}) WITH CHECK (${FLAG_EXPR})`);
+    } else {
+      statements.push(`CREATE POLICY rls_permission_platform_delete ON "Permission" FOR DELETE USING (${FLAG_EXPR})`);
+    }
+  }
+
+  return statements;
+}
+
+async function applyRLSBootstrap(): Promise<void> {
+  // The RLS bootstrap connects as OWNER (the seed's own client, see top of
+  // file). If that DSN happens to be the non-owner app role we cannot create
+  // roles/grants — fail with a clear instruction.
+  const rows = await prisma.$queryRawUnsafe<Array<{ current_user: string }>>('SELECT current_user');
+  const who = rows[0]?.current_user;
+  if (who === APP_ROLE) {
+    console.error('\n❌ RLS bootstrap needs the OWNER connection (seed is running as nipp_app).');
+    console.error('   Set it in .env and re-run npm run db:seed:');
+    const dbname = process.env.DATABASE_URL?.match(/5432\/([^?\s&]+)/)?.[1];
+    console.error(`       SEED_RLS_DSN="postgresql://postgres:<pw>@localhost:5432/${dbname}"\n`);
+    process.exit(1);
+  }
+
+  const appPassword = process.env.NIPP_APP_DB_PASSWORD?.trim() || null;
+  const statements = buildRLSBootstrapStatements(appPassword);
+  for (const stmt of statements) {
+    await prisma.$executeRawUnsafe(stmt);
+  }
+  console.log(
+    `✅ RLS bootstrap applied as ${who} (${statements.length} statements, role "${APP_ROLE}"${appPassword ? ', password set from NIPP_APP_DB_PASSWORD' : ', existing password kept'})`,
+  );
+}
+
 
 // Full 43-permission catalog (4 platform + 39 tenant)
 const PERMISSION_CATALOG = [
@@ -312,6 +497,13 @@ async function seedNotificationEvents(
 
 async function main() {
   // =========================================================================
+  // 0. RLS BOOTSTRAP — run FIRST, before any tenant data work: a recreated
+  //    (db push) DB has no role/grants/policies; if the seed is connecting as
+  //    the owner this restores the full live RLS state before seeding begins.
+  // =========================================================================
+  await applyRLSBootstrap();
+
+  // =========================================================================
   // 1. STRICT ENVIRONMENT VARIABLE VALIDATION
   // =========================================================================
   const adminEmail = process.env.ADMIN_EMAIL?.trim();
@@ -378,6 +570,14 @@ async function main() {
     console.log(`✅ Created new Platform Organization: ${platformOrg.id}`);
   }
   platformOrgId = platformOrg.id;
+
+  // Keep .env in sync so the dev server and job-scheduler don't carry a stale
+  // platform org id from a previous DB recreation (causes FK failures on
+  // GLOBAL notifications). Only writes when the value actually differs.
+  persistPlatformOrgIdToEnv(platformOrgId);
+  if (platformOrgId !== envPlatformOrgId) {
+    console.log(`📝 Wrote PLATFORM_ORGANIZATION_ID=${platformOrgId} to .env`);
+  }
 
   // =========================================================================
   // 3. PERMISSION CATALOG (FORCE UPSERT)
@@ -1049,8 +1249,7 @@ async function main() {
   // =========================================================================
   console.log('\n✅ Seed completed successfully! Database overwritten with latest script values.');
   console.log('\n📝 NEXT STEPS:');
-  console.log('1. (Optional) Add the following to your .env for stability:');
-  console.log(`   PLATFORM_ORGANIZATION_ID=${platformOrgId}`);
+  console.log('1. (Done automatically) PLATFORM_ORGANIZATION_ID in .env is kept in sync with the real platform org.');
   console.log('\n2. Restart your dev server: npm run dev');
   console.log('3. Log out completely and log back in using the credentials from your .env file.');
   console.log('4. You should now see the Super Admin dashboard!\n');

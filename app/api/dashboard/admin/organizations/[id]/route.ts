@@ -5,6 +5,8 @@ import { checkAdminRateLimit } from '@/lib/rate-limiter';
 import { OrganizationService, type UpdateOrganizationInput } from '@/services/organization-service';
 import type { ServiceContext } from '@/lib/services/types';
 import { notifyOrganizationOperation } from '@/lib/notification-push';
+// RLS Phase 3: org read/update run under verified platform contexts.
+import { withPlatformContext, withTenantAdminContext } from '@/lib/platform-db';
 
 export const runtime = 'nodejs';
 
@@ -33,10 +35,13 @@ export async function GET(
 
   try {
     const id = (await params).id;
-    const result = await OrganizationService.getOrganizationById(id, {
-      userId: auth.session!.user.id,
-      role: 'PLATFORM_ADMIN',
-    });
+    // Verified target-org context for the org read.
+    const result = await withTenantAdminContext(auth.session!.user.id, id, () =>
+      OrganizationService.getOrganizationById(id, {
+        userId: auth.session!.user.id,
+        role: 'PLATFORM_ADMIN',
+      })
+    );
 
     return NextResponse.json(result);
   } catch (error) {
@@ -79,11 +84,20 @@ export async function PATCH(
     return NextResponse.json({ error: 'Invalid JSON body' }, { status: 400 });
   }
 
-  // Capture the org name for the notification label before it possibly changes
-  const targetLabel = await getOrgLabel(id, ctx);
-
+  // Notification label defaults to the id; replaced with the org's name once
+  // looked up inside the verified context below.
+  let targetLabel = id;
   try {
-    const result = await OrganizationService.updateOrganization(id, body, ctx);
+    // One verified target-org context covers label lookup + update.
+    const { label, updated: result } = await withTenantAdminContext(
+      auth.session!.user.id,
+      id,
+      async () => ({
+        label: await getOrgLabel(id, ctx),
+        updated: await OrganizationService.updateOrganization(id, body, ctx),
+      })
+    );
+    targetLabel = label;
 
     await notifyOrganizationOperation('update', targetLabel, true, undefined, id);
 

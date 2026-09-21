@@ -2,7 +2,9 @@ import { NextResponse } from 'next/server';
 import { requireSuperAdmin } from '@/lib/require-super-admin';
 import { checkAdminRateLimit } from '@/lib/rate-limiter';
 
-import globalDb from '@/lib/global-db';
+// RLS Phase 3: verified platform context for the platform resource catalog.
+import tenantDb from '@/lib/tenant-db';
+import { withPlatformContext } from '@/lib/platform-db';
 
 export const runtime = 'nodejs';
 
@@ -18,10 +20,10 @@ export async function GET() {
   }
 
   try {
-    const resources = await globalDb.resource.findMany({
-      select: { name: true },
-      orderBy: { name: 'asc' },
-    });
+    // Resource is RLS-exempt (platform catalog); verified context kept for consistency.
+    const resources = await withPlatformContext(auth.session!.user.id, () =>
+      tenantDb.resource.findMany({ select: { name: true }, orderBy: { name: 'asc' } })
+    );
 
     const names = resources.map((r) => r.name);
     return NextResponse.json({ names });

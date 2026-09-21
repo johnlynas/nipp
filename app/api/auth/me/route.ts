@@ -1,6 +1,9 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { auth } from '@/lib/auth';
-import globalDb from '@/lib/global-db';
+// RLS Phase 3: user/organization are unscoped (no RLS policy) — under the app
+// role they need a platform context bind. Verified session user only.
+import tenantDb from '@/lib/tenant-db';
+import { withPlatformContext } from '@/lib/platform-db';
 import { logger } from '@/lib/logger';
 
 export const runtime = 'nodejs';
@@ -37,10 +40,12 @@ export async function GET(req: NextRequest) {
       '[/api/auth/me] Not in session — reading from User model',
     );
 
-    const user = await globalDb.user.findUnique({
-      where: { id: session.user.id },
-      select: { activeOrganizationId: true },
-    });
+    const user = await withPlatformContext(session.user.id, () =>
+      tenantDb.user.findUnique({
+        where: { id: session.user.id },
+        select: { activeOrganizationId: true },
+      }),
+    );
 
     activeOrgId = user?.activeOrganizationId ?? null;
 
@@ -55,8 +60,12 @@ export async function GET(req: NextRequest) {
     '[/api/auth/me] Returning response',
   );
 
+  // Platform org id context: the Organization SELECT policy admits
+// `id = current_org OR platform`. This user's own org is admitted via the
+// flag (platform admin visibility) — same semantics as before.
   const organization = activeOrgId
-    ? await globalDb.organization.findUnique({ where: { id: activeOrgId }, select: { name: true } })
+    ? await withPlatformContext(session.user.id, () =>
+        tenantDb.organization.findUnique({ where: { id: activeOrgId }, select: { name: true } }))
     : null;
 
   return NextResponse.json({

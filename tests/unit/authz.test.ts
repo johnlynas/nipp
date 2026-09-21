@@ -14,6 +14,13 @@ vi.mock('@/lib/tenant-context', () => ({
   runWithTenant: vi.fn(async (_orgId: string, fn: () => Promise<unknown>) => fn()),
 }));
 
+// verifySuperAdmin resolves the platform-org membership read under a verified
+// RLS context (withPlatformContext). Unit tests exercise the DB call itself via
+// the tenantDb mock below — the wrapper is a pass-through here.
+vi.mock('@/lib/platform-db', () => ({
+  withPlatformContext: (_userId: string, op: () => unknown) => op(),
+}));
+
 vi.mock('@/lib/tenant-db', () => {
   const mockTenantDb = {
     member: { findFirst: vi.fn() },

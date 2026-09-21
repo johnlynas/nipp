@@ -8,9 +8,9 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { revalidateTag } from 'next/cache';
 import { requireSuperAdmin } from '@/lib/require-super-admin';
-import globalDb from '@/lib/global-db';
+// RLS Phase 3: tenant-role updates/deletes run under a verified target-org context.
 import tenantDb from '@/lib/tenant-db';
-import { runWithTenant } from '@/lib/tenant-context';
+import { withTenantAdminContext } from '@/lib/platform-db';
 import { recordAuditLog } from '@/lib/audit-log';
 import { logger } from '@/lib/logger';
 import { checkAdminRateLimit } from '@/lib/rate-limiter';
@@ -54,42 +54,43 @@ export async function PATCH(
   }
 
   try {
-    // Verify target org exists (globalDb)
-    const org = await globalDb.organization.findUnique({ where: { id: orgId } });
-    if (!org) {
-      return NextResponse.json({ error: 'Organization not found' }, { status: 404 });
-    }
+    // RLS: verified target-org context for org check + role update (WITH CHECK binds write)
+    return await withTenantAdminContext(session.user.id, orgId, async () => {
+      // Verify target org exists
+      const org = await tenantDb.organization.findUnique({ where: { id: orgId } });
+      if (!org) {
+        return NextResponse.json({ error: 'Organization not found' }, { status: 404 });
+      }
 
-    // Verify role exists and belongs to this org (globalDb)
-    const existingRole = await globalDb.role.findFirst({ where: { id: roleId, organizationId: orgId } });
-    if (!existingRole) {
-      return NextResponse.json({ error: 'Role not found in this organization' }, { status: 404 });
-    }
+      // Verify role exists and belongs to this org (platform pass-through; RLS scopes)
+      const existingRole = await tenantDb.role.findFirst({ where: { id: roleId, organizationId: orgId } });
+      if (!existingRole) {
+        return NextResponse.json({ error: 'Role not found in this organization' }, { status: 404 });
+      }
 
-    // Update role within tenant context (tenantDb)
-    const updatedRole = await runWithTenant(orgId, async () => {
-      return tenantDb.role.update({
+      // Update role (platform ctx pass-through; orgId in where matches RLS)
+      const updatedRole = await tenantDb.role.update({
         where: { id: roleId },
         data: { ...(name && { name }), ...(description !== undefined && { description }) },
       });
+
+      // Audit log
+      await recordAuditLog({
+        userId: session.user.id,
+        userName: session.user.name || undefined,
+        action: 'role.updated',
+        success: true,
+        resourceType: 'Organization.Role',
+        resourceId: roleId,
+        organizationId: orgId,
+      });
+
+      // Invalidate cache
+      revalidateTag('org');
+
+      logger.info({ userId: session.user.id, orgId, roleId }, 'Updated role in tenant organization');
+      return NextResponse.json({ message: 'Role updated', role: updatedRole });
     });
-
-    // Audit log (globalDb)
-    await recordAuditLog({
-      userId: session.user.id,
-      userName: session.user.name || undefined,
-      action: 'role.updated',
-      success: true,
-      resourceType: 'Organization.Role',
-      resourceId: roleId,
-      organizationId: orgId,
-    });
-
-    // Invalidate cache
-    revalidateTag('org');
-
-    logger.info({ userId: session.user.id, orgId, roleId }, 'Updated role in tenant organization');
-    return NextResponse.json({ message: 'Role updated', role: updatedRole });
   } catch (error) {
     const isDbError = error instanceof Error && error.message.includes("Can't reach database server");
     logger.error({ err: error, orgId, roleId }, isDbError ? 'Database unavailable updating role' : 'Unexpected error updating role');
@@ -121,48 +122,49 @@ export async function DELETE(
   const { orgId, roleId } = await params;
 
   try {
-    // Verify target org exists (globalDb)
-    const org = await globalDb.organization.findUnique({ where: { id: orgId } });
-    if (!org) {
-      return NextResponse.json({ error: 'Organization not found' }, { status: 404 });
-    }
+    // RLS: verified target-org context for org check + role delete (RLS DELETE binds ctx org + flag)
+    return await withTenantAdminContext(session.user.id, orgId, async () => {
+      // Verify target org exists
+      const org = await tenantDb.organization.findUnique({ where: { id: orgId } });
+      if (!org) {
+        return NextResponse.json({ error: 'Organization not found' }, { status: 404 });
+      }
 
-    // Verify role exists and belongs to this org (globalDb)
-    const existingRole = await globalDb.role.findFirst({ where: { id: roleId, organizationId: orgId } });
-    if (!existingRole) {
-      return NextResponse.json({ error: 'Role not found in this organization' }, { status: 404 });
-    }
+      // Verify role exists and belongs to this org (platform pass-through; RLS scopes)
+      const existingRole = await tenantDb.role.findFirst({ where: { id: roleId, organizationId: orgId } });
+      if (!existingRole) {
+        return NextResponse.json({ error: 'Role not found in this organization' }, { status: 404 });
+      }
 
-    // Safety check: warn if members are assigned to this role
-    const memberRoleCount = await globalDb.memberRole.count({ where: { roleId } });
-    if (memberRoleCount > 0) {
-      return NextResponse.json(
-        { error: `Cannot delete role with ${memberRoleCount} assigned member(s). Reassign or remove members first.` },
-        { status: 400 }
-      );
-    }
+      // Safety check: warn if members are assigned to this role (scoped to the org)
+      const memberRoleCount = await tenantDb.memberRole.count({ where: { roleId, organizationId: orgId } });
+      if (memberRoleCount > 0) {
+        return NextResponse.json(
+          { error: `Cannot delete role with ${memberRoleCount} assigned member(s). Reassign or remove members first.` },
+          { status: 400 }
+        );
+      }
 
-    // Delete role within tenant context (tenantDb)
-    await runWithTenant(orgId, async () => {
-      return tenantDb.role.delete({ where: { id: roleId } });
+      // Delete role (platform ctx pass-through; orgId in where matches RLS)
+      await tenantDb.role.delete({ where: { id: roleId } });
+
+      // Audit log
+      await recordAuditLog({
+        userId: session.user.id,
+        userName: session.user.name || undefined,
+        action: 'role.deleted',
+        success: true,
+        resourceType: 'Organization.Role',
+        resourceId: roleId,
+        organizationId: orgId,
+      });
+
+      // Invalidate cache
+      revalidateTag('org');
+
+      logger.info({ userId: session.user.id, orgId, roleId }, 'Deleted role from tenant organization');
+      return NextResponse.json({ message: 'Role deleted successfully' });
     });
-
-    // Audit log (globalDb)
-    await recordAuditLog({
-      userId: session.user.id,
-      userName: session.user.name || undefined,
-      action: 'role.deleted',
-      success: true,
-      resourceType: 'Organization.Role',
-      resourceId: roleId,
-      organizationId: orgId,
-    });
-
-    // Invalidate cache
-    revalidateTag('org');
-
-    logger.info({ userId: session.user.id, orgId, roleId }, 'Deleted role from tenant organization');
-    return NextResponse.json({ message: 'Role deleted successfully' });
   } catch (error) {
     const isDbError = error instanceof Error && error.message.includes("Can't reach database server");
     logger.error({ err: error, orgId, roleId }, isDbError ? 'Database unavailable deleting role' : 'Unexpected error deleting role');

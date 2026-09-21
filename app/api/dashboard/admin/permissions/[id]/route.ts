@@ -2,19 +2,20 @@ import { NextRequest, NextResponse } from 'next/server';
 import { requireSuperAdmin } from '@/lib/require-super-admin';
 import { checkAdminRateLimit } from '@/lib/rate-limiter';
 
-import globalDb from '@/lib/global-db';
+// RLS Phase 3: permission ops run under a verified platform context.
+import tenantDb from '@/lib/tenant-db';
+import { withPlatformContext } from '@/lib/platform-db';
 import { PermissionService } from '@/services/permission-service';
 import { notifyPermissionOperation } from '@/lib/notification-push';
 
 export const runtime = 'nodejs';
 
-/** Best effort: resolve a permission's key for notification labels. */
-async function getPermissionLabel(id: string): Promise<string> {
+/** Best effort: resolve a permission's key for notification labels (verified platform context). */
+async function getPermissionLabel(sessionUserId: string, id: string): Promise<string> {
   try {
-    const permission = await globalDb.permission.findUnique({
-      where: { id },
-      select: { key: true },
-    });
+    const permission = await withPlatformContext(sessionUserId, () =>
+      tenantDb.permission.findUnique({ where: { id }, select: { key: true } })
+    );
     return permission ? `Permission "${permission.key}" (${id})` : id;
   } catch {
     return id;
@@ -36,10 +37,10 @@ export async function GET(
 
   try {
     const id = (await params).id;
-    const result = await PermissionService.getById(id, {
-      userId: auth.session!.user.id,
-      role: 'PLATFORM_ADMIN',
-    });
+    // RLS: verified platform context for the permission read.
+    const result = await withPlatformContext(auth.session!.user.id, () =>
+      PermissionService.getById(id, { userId: auth.session!.user.id, role: 'PLATFORM_ADMIN' })
+    );
 
     return NextResponse.json(result);
   } catch (error) {
@@ -67,22 +68,31 @@ export async function PATCH(
   try {
     const id = (await params).id;
     if (!checkAdminRateLimit(auth.session!.user.id)) {
-    return NextResponse.json({'error': 'rate_limited'}, {status: 429});
-  }
+      return NextResponse.json({ 'error': 'rate_limited' }, { status: 429 });
+    }
 
-  const body = await request.json();
+    const body = await request.json();
 
-    // Capture the permission key for notification labels before a rename happens
-    const targetLabel = await getPermissionLabel(id);
+    // Capture the permission key for notification labels before a rename happens.
+    const targetLabel = await getPermissionLabel(auth.session!.user.id, id);
 
     try {
-      const result = await PermissionService.update(id, {
-        key: body.key,
-        resource: body.resource,
-        action: body.action,
-        description: body.description,
-        isDefault: body.isDefault,
-      }, { userId: auth.session!.user.id, role: 'PLATFORM_ADMIN' });
+      // RLS: verified platform context wraps the update (writes stay ctx-bound via RLS).
+      const result = await withPlatformContext(
+        auth.session!.user.id,
+        async () =>
+          PermissionService.update(
+            id,
+            {
+              key: body.key,
+              resource: body.resource,
+              action: body.action,
+              description: body.description,
+              isDefault: body.isDefault,
+            },
+            { userId: auth.session!.user.id, role: 'PLATFORM_ADMIN' }
+          )
+      );
 
       await notifyPermissionOperation('update', targetLabel, true);
 
@@ -122,12 +132,16 @@ export async function DELETE(
   try {
     const id = (await params).id;
 
-    // Capture a label for the notification before the permission disappears
-    const targetLabel = await getPermissionLabel(id);
+    // Capture a label for the notification before the permission disappears.
+    const targetLabel = await getPermissionLabel(auth.session!.user.id, id);
 
     let result;
     try {
-      result = await PermissionService.delete(id, { userId: auth.session!.user.id, role: 'PLATFORM_ADMIN' });
+      // RLS: verified platform context wraps the delete.
+      result = await withPlatformContext(
+        auth.session!.user.id,
+        () => PermissionService.delete(id, { userId: auth.session!.user.id, role: 'PLATFORM_ADMIN' })
+      );
     } catch (error) {
       await notifyPermissionOperation('delete', id, false, error instanceof Error && error.message ? error.message : 'Failed to delete permission');
       throw error;

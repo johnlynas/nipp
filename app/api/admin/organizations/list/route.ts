@@ -1,5 +1,7 @@
 import { NextResponse } from 'next/server';
-import globalDb from '@/lib/global-db';
+// RLS Phase 3: org list runs under the verified platform context (flag admits all).
+import tenantDb from '@/lib/tenant-db';
+import { withPlatformContext } from '@/lib/platform-db';
 import { requireSuperAdmin } from '@/lib/require-super-admin';
 import { checkAdminRateLimit } from '@/lib/rate-limiter';
 import { headers as nextHeaders } from 'next/headers';
@@ -26,13 +28,15 @@ export async function GET() {
       return NextResponse.json({ error: 'rate_limited' }, { status: 429 });
     }
 
-    const organizations = await globalDb.organization.findMany({
-      select: {
-        id: true,
-        name: true,
-        slug: true,
-      },
-    });
+    const organizations = await withPlatformContext(authResult.session!.user.id, () =>
+      tenantDb.organization.findMany({
+        select: {
+          id: true,
+          name: true,
+          slug: true,
+        },
+      }),
+    );
 
     const platform = organizations.filter((o) => o.slug === 'platform');
     const tenants = organizations

@@ -8,6 +8,8 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { requireSuperAdmin } from '@/lib/require-super-admin';
 import { UserService, CreateUserInput } from '@/services/user-service';
+// RLS Phase 3: super-admin ops run under a verified platform context.
+import { withPlatformContext } from '@/lib/platform-db';
 import { ServiceContext } from '@/lib/services/types';
 import { recordAuditLog } from '@/lib/audit-log';
 import { logger } from '@/lib/logger';
@@ -45,7 +47,10 @@ export const GET = wrapPiiRoute(async (request) => {
       role: 'PLATFORM_ADMIN',
     };
 
-    const result = await UserService.list({ search, role, organizationId }, { page, pageSize }, ctx);
+    // One verified platform context for the user listing.
+    const result = await withPlatformContext(session.user.id, () =>
+      UserService.list({ search, role, organizationId }, { page, pageSize }, ctx)
+    );
 
     logger.info({ userId: session.user.id, count: result.items.length }, '[Users API] Fetched users');
     return NextResponse.json(result, {
@@ -107,7 +112,10 @@ export const POST = wrapPiiRoute(async (request, decryptedBody) => {
       organizationId: targetOrgId,
     };
 
-    const user = await UserService.create(body, ctx);
+    // Verified platform context for the user insert.
+    const user = await withPlatformContext(session.user.id, () =>
+      UserService.create(body, ctx)
+    );
 
     logger.info({ userId: session.user.id, createdUserId: user.id }, '[Users API] User created');
 

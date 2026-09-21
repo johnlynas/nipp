@@ -1,15 +1,21 @@
 /**
  * UserService — Full CRUD for the User model.
  *
- * Model locality: Global (non-org-scoped). Uses globalDb for all queries.
+ * Model locality: Global (non-org-scoped). Uses tenantDb for all queries.
  * Tenant Admin access is enforced by filtering through the Member join table
  * (i.e., a Tenant Admin can only see/manage users who are members of their org).
  */
 
 import { Prisma } from '@prisma/client';
-import globalDb from '@/lib/global-db';
+// RLS plan Phase 3: tenantDb (unscoped bypass) removed — org-scoped models go
+// through tenantDb; Member/TeamMember calls are wrapped in runWithTenant so the
+// Prisma extension's tenant scoping resolves a context. User/Account are global
+// (non-org-scoped) and need no wrapper.
+import tenantDb from '@/lib/tenant-db';
+import { runWithTenant } from '@/lib/tenant-context';
 import { logger } from '@/lib/logger';
 import { ServiceContext, NotFoundError, ForbiddenError, ValidationError } from '@/lib/services/types';
+import { env } from '@/lib/env';
 import { requireAnyAdmin, logFailedAuth } from '@/lib/services/base-service';
 import { normalizePagination, PaginatedResult, UserFilters } from '@/lib/services/types';
 import { hashPassword } from 'better-auth/crypto';
@@ -53,7 +59,7 @@ export const UserService = {
     }
 
     // Check for duplicate email
-    const existing = await globalDb.user.findUnique({ where: { email } });
+    const existing = await tenantDb.user.findUnique({ where: { email } });
     if (existing) {
       throw new Error('A user with this email already exists');
     }
@@ -70,29 +76,33 @@ export const UserService = {
       userData.passwordHash = passwordHash;
     }
 
-    const user = await globalDb.user.create({
+    const user = await tenantDb.user.create({
       data: userData,
     });
 
     // Create credential account so Better Auth sign-in works
     if (passwordHash) {
-      await globalDb.account.create({
+      await tenantDb.account.create({
         data: { id: user.id, accountId: user.id, providerId: 'credential', password: passwordHash, userId: user.id },
       });
     }
 
     // Tenant Admin creates a Member relationship for their own org
     if (ctx.role === 'TENANT_ADMIN' && ctx.organizationId) {
-      await globalDb.member.create({
-        data: { userId: user.id, orgId: ctx.organizationId, role: 'member' },
-      });
+      await runWithTenant(ctx.organizationId, () =>
+        tenantDb.member.create({
+          data: { userId: user.id, orgId: ctx.organizationId!, role: 'member' },
+        }),
+      );
     }
 
     // Platform Admin can optionally assign the user to a specific org
     if (ctx.role === 'PLATFORM_ADMIN' && data.organizationId) {
-      await globalDb.member.create({
-        data: { userId: user.id, orgId: data.organizationId, role: 'member' },
-      });
+      await runWithTenant(data.organizationId, () =>
+        tenantDb.member.create({
+          data: { userId: user.id, orgId: data.organizationId!, role: 'member' },
+        }),
+      );
     }
 
     logger.info(
@@ -110,16 +120,18 @@ export const UserService = {
   async getById(id: string, ctx: ServiceContext) {
     requireAnyAdmin(ctx);
 
-    const user = await globalDb.user.findUnique({ where: { id } });
+    const user = await tenantDb.user.findUnique({ where: { id } });
     if (!user) {
       throw new NotFoundError('User not found');
     }
 
     // Tenant Admin can only access users who are members of their org
     if (ctx.role === 'TENANT_ADMIN' && ctx.organizationId) {
-      const member = await globalDb.member.findFirst({
-        where: { userId: id, orgId: ctx.organizationId },
-      });
+      const member = await runWithTenant(ctx.organizationId, () =>
+        tenantDb.member.findFirst({
+          where: { userId: id, orgId: ctx.organizationId! },
+        }),
+      );
       if (!member) {
         logFailedAuth(ctx, 'getById');
         throw new ForbiddenError('Cannot access users outside your organization');
@@ -181,20 +193,33 @@ export const UserService = {
         let userIds: string[] = [];
 
         if (filters.organizationId || filters.role) {
-          const matchingMembers = await globalDb.member.findMany({
-            where: memberWhere,
-            select: { userId: true },
-          });
+          // Membership lookup needs one org context: the filtered org when given,
+          // else the caller's own (super admins list from their platform org).
+          const lookupOrg =
+            filters.organizationId ?? ctx.organizationId ?? env.PLATFORM_ORGANIZATION_ID!;
+          const matchingMembers = await runWithTenant(lookupOrg, () =>
+            tenantDb.member.findMany({
+              where: memberWhere,
+              select: { userId: true },
+            }),
+          );
           userIds = matchingMembers.map((m) => m.userId);
         }
 
-        // Apply team filter if specified (intersection with existing userIds)
+        // Apply team filter if specified (intersection with existing userIds).
+        // Platform-admin listing is cross-org by product model (the platform org
+        // can reference any tenant's team); the env-derived platform org provides
+        // the extension context.
         if (filters.teamId) {
           const teamMemberWhere: Prisma.TeamMemberWhereInput = { teamId: filters.teamId };
-          const matchingTeamMembers = await globalDb.teamMember.findMany({
-            where: teamMemberWhere,
-            select: { userId: true },
-          });
+          const matchingTeamMembers: { userId: string }[] = await runWithTenant(
+            env.PLATFORM_ORGANIZATION_ID!,
+            () =>
+              tenantDb.teamMember.findMany({
+                where: teamMemberWhere,
+                select: { userId: true },
+              }),
+          );
           const teamUserIds = new Set(matchingTeamMembers.map((tm) => tm.userId));
 
           if (userIds.length > 0) {
@@ -222,7 +247,7 @@ export const UserService = {
     }
 
     const [users, total] = await Promise.all([
-      globalDb.user.findMany({
+      tenantDb.user.findMany({
         where,
         skip,
         take: pageSize,
@@ -238,7 +263,7 @@ export const UserService = {
           },
         },
       }),
-      globalDb.user.count({ where }),
+      tenantDb.user.count({ where }),
     ]);
 
     return {
@@ -255,16 +280,18 @@ export const UserService = {
     requireAnyAdmin(ctx);
 
     // Verify user exists first
-    const existingUser = await globalDb.user.findUnique({ where: { id } });
+    const existingUser = await tenantDb.user.findUnique({ where: { id } });
     if (!existingUser) {
       throw new NotFoundError('User not found');
     }
 
     // Tenant Admin can only update users who are members of their org
     if (ctx.role === 'TENANT_ADMIN' && ctx.organizationId) {
-      const member = await globalDb.member.findFirst({
-        where: { userId: id, orgId: ctx.organizationId },
-      });
+      const member = await runWithTenant(ctx.organizationId, () =>
+        tenantDb.member.findFirst({
+          where: { userId: id, orgId: ctx.organizationId! },
+        }),
+      );
       if (!member) {
         logFailedAuth(ctx, 'update');
         throw new ForbiddenError('Cannot update users outside your organization');
@@ -273,7 +300,7 @@ export const UserService = {
 
     // Validate email uniqueness if changing
     if (data.email && data.email !== existingUser.email) {
-      const emailExists = await globalDb.user.findUnique({ where: { email: data.email } });
+      const emailExists = await tenantDb.user.findUnique({ where: { email: data.email } });
       if (emailExists) {
         throw new Error('A user with this email already exists');
       }
@@ -284,7 +311,7 @@ export const UserService = {
     if (data.name !== undefined) updateData.name = data.name;
     if (data.email !== undefined) updateData.email = data.email;
 
-    const updatedUser = await globalDb.user.update({
+    const updatedUser = await tenantDb.user.update({
       where: { id },
       data: updateData,
     });
@@ -305,27 +332,32 @@ export const UserService = {
     requireAnyAdmin(ctx);
 
     // Verify user exists first
-    const existingUser = await globalDb.user.findUnique({ where: { id } });
+    const existingUser = await tenantDb.user.findUnique({ where: { id } });
     if (!existingUser) {
       throw new NotFoundError('User not found');
     }
 
     // Tenant Admin can only delete users who are members of their org
     if (ctx.role === 'TENANT_ADMIN' && ctx.organizationId) {
-      const member = await globalDb.member.findFirst({
-        where: { userId: id, orgId: ctx.organizationId },
-      });
+      const member = await runWithTenant(ctx.organizationId, () =>
+        tenantDb.member.findFirst({
+          where: { userId: id, orgId: ctx.organizationId! },
+        }),
+      );
       if (!member) {
         logFailedAuth(ctx, 'delete');
         throw new ForbiddenError('Cannot delete users outside your organization');
       }
 
       // Remove Member relationship first (User is global, so we can't cascade delete)
-      await globalDb.member.deleteMany({ where: { userId: id } });
+      // Remove this user's memberships in their org (extension-scoped write).
+      await runWithTenant(ctx.organizationId, () =>
+        tenantDb.member.deleteMany({ where: { userId: id } }),
+      );
     }
 
     // Hard delete — cascading deletes handled by Prisma onDelete: Cascade relations
-    await globalDb.user.delete({ where: { id } });
+    await tenantDb.user.delete({ where: { id } });
 
     logger.info(
       { userId: ctx.userId, targetUserId: id, method: 'UserService.delete' },

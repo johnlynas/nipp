@@ -9,7 +9,7 @@ vi.mock('@/lib/require-super-admin', () => ({
   requireSuperAdmin: vi.fn(),
 }));
 
-vi.mock('@/lib/global-db', () => ({
+vi.mock('@/lib/tenant-db', () => ({
   __esModule: true,
   default: {
     permission: {

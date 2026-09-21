@@ -3,6 +3,7 @@ import { requireSuperAdmin } from '@/lib/require-super-admin';
 import { checkAdminRateLimit } from '@/lib/rate-limiter';
 
 import { JobSchedulerService } from '@/services/job-scheduler-service';
+import { withPlatformContext } from '@/lib/platform-db';
 
 export const runtime = 'nodejs';
 
@@ -33,10 +34,13 @@ export async function POST(
 
   try {
     const id = (await params).id;
-    const result = await JobSchedulerService.triggerJob(
-      { userId: auth.session!.user.id, role: 'PLATFORM_ADMIN' },
-      id,
-      body.input
+    // Verified platform context for the triggered run (platform_org_id bound).
+    const result = await withPlatformContext(auth.session!.user.id, () =>
+      JobSchedulerService.triggerJob(
+        { userId: auth.session!.user.id, role: 'PLATFORM_ADMIN' },
+        id,
+        body.input
+      )
     );
 
     return NextResponse.json(result);

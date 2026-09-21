@@ -103,7 +103,8 @@ describe('Tenant Context — runWithTenant', () => {
       return getTenantContext();
     });
 
-    expect(result).toEqual({ orgId: orgA });
+    // Phase 1D: the store also carries userId + isPlatformAdmin (RLS context).
+    expect(result).toEqual(expect.objectContaining({ orgId: orgA }));
   });
 
   it('getTenantContext returns null outside context', () => {

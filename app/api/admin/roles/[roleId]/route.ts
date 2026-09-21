@@ -14,6 +14,8 @@ import { recordAuditLog } from '@/lib/audit-log';
 import { logger } from '@/lib/logger';
 import { wrapPiiRoute, PiiRouteParams } from '@/lib/payload-middleware';
 import { env } from '@/lib/env';
+// RLS Phase 3: super-admin role CRUD runs under a verified target-org context.
+import { withTenantAdminContext } from '@/lib/platform-db';
 import { checkAdminRateLimit } from '@/lib/rate-limiter';
 
 export const runtime = 'nodejs';
@@ -46,7 +48,10 @@ export const GET = wrapPiiRoute(async (request, _decryptedBody, params) => {
       role: 'PLATFORM_ADMIN',
     };
 
-    const role = await RoleService.getById(roleId, targetOrgId, ctx);
+    // RLS: verified target-org context for the role read (flag=1, ctx=target org).
+    const role = await withTenantAdminContext(session.user.id, targetOrgId, () =>
+      RoleService.getById(roleId, targetOrgId, ctx),
+    );
 
     return NextResponse.json({ role });
   } catch (error) {
@@ -122,7 +127,9 @@ export const PATCH = wrapPiiRoute(async (request, decryptedBody, params) => {
       role: 'PLATFORM_ADMIN',
     };
 
-    const updatedRole = await RoleService.update(roleId, body, targetOrgId, ctx);
+    const updatedRole = await withTenantAdminContext(session.user.id, targetOrgId, () =>
+      RoleService.update(roleId, body, targetOrgId, ctx),
+    );
 
     logger.info({ userId: session.user.id, roleId }, '[Roles API] Role updated');
 
@@ -188,7 +195,10 @@ export const DELETE = wrapPiiRoute(async (request, _decryptedBody, params) => {
       role: 'PLATFORM_ADMIN',
     };
 
-    await RoleService.delete(roleId, targetOrgId, ctx);
+    // RLS: verified target-org context for the role delete.
+    await withTenantAdminContext(session.user.id, targetOrgId, () =>
+      RoleService.delete(roleId, targetOrgId, ctx),
+    );
 
     logger.info({ userId: session.user.id, roleId }, '[Roles API] Role deleted');
 

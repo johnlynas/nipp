@@ -3,15 +3,9 @@
  */
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 
-vi.mock('@/lib/global-db', () => ({
+vi.mock('@/lib/tenant-db', () => ({
   default: {
     member: { findFirst: vi.fn() },
-  },
-}));
-
-vi.mock('@/lib/global-db-guard', () => ({
-  superAdminStorage: {
-    run: vi.fn((_flag: boolean, fn: () => Promise<unknown>) => fn()),
   },
 }));
 
@@ -23,7 +17,7 @@ vi.mock('@/lib/logger', () => ({
   logger: { info: vi.fn(), warn: vi.fn() },
 }));
 
-import globalDb from '@/lib/global-db';
+import globalDb from '@/lib/tenant-db';
 import { resolveTenantAccess } from '@/lib/tenant-access';
 import { verifySuperAdmin } from '@/lib/authz';
 
@@ -94,14 +88,7 @@ describe('resolveTenantAccess', () => {
     }
   });
 
-  it('scopes the membership lookup to a short-lived super-admin context (S7)', async () => {
-    vi.mocked(globalDb.member.findFirst).mockResolvedValue(null);
-     
-    (verifySuperAdmin as any).mockResolvedValue({ authorized: true });
-
-    const { superAdminStorage } = await import('@/lib/global-db-guard');
-    await resolveTenantAccess({} as never, 'platform-user', 'org-other-tenant');
-
-    expect(superAdminStorage.run).toHaveBeenCalledWith(true, expect.any(Function));
-  });
+  // Phase 3: the S7 superAdminStorage.run(true, …) wrapper no longer exists —
+  // readMembershipForAccessCheck binds a verified platform RLS context via
+  // withExplicitRLS instead (covered by tests/unit/rls-transaction.test.ts).
 });

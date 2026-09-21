@@ -7,8 +7,8 @@
 
 import { NextRequest, NextResponse } from 'next/server';
 import { auth } from '@/lib/auth';
-import { superAdminStorage } from '@/lib/global-db-guard';
-import { resolveTenantAccess } from '@/lib/tenant-access';
+import { resolveTenantAccess, toTenantContext } from '@/lib/tenant-access';
+import { withRLSContext } from '@/lib/rls-transaction';
 import { CalendarEventService } from '@/services/calendar-event-service';
 import { isSameSiteRequest } from '@/lib/csrf';
 import { checkCalendarRateLimit } from '@/lib/rate-limiter';
@@ -36,6 +36,7 @@ export async function GET(
   if (!access.ok) {
     return NextResponse.json({ error: access.error }, { status: access.status });
   }
+return withRLSContext(toTenantContext(access, session.user.id), async () => {
   const ctx = access.ctx;
 
   // Parse query params
@@ -56,15 +57,11 @@ export async function GET(
   }
 
   try {
-    // Scoping globalDb access (S7): required so unscoped Prisma queries work
-    // for super admins, and prevents context leaking across operations.
-    const events = await superAdminStorage.run(true, () =>
-      CalendarEventService.getEventsWithRecurrences(ctx, {
+    const events = await CalendarEventService.getEventsWithRecurrences(ctx, {
         startDate,
         endDate,
         calendarId: calendarId || undefined,
-      })
-    );
+      });
     return NextResponse.json(events);
   } catch (error: unknown) {
     if (error instanceof Error) {
@@ -72,6 +69,7 @@ export async function GET(
     }
     return NextResponse.json({ error: 'Internal server error' }, { status: 500 });
   }
+  });
 }
 
 // ---------------------------------------------------------------------------
@@ -103,6 +101,7 @@ export async function POST(
   if (!access.ok) {
     return NextResponse.json({ error: access.error }, { status: access.status });
   }
+return withRLSContext(toTenantContext(access, session.user.id), async () => {
   const ctx = access.ctx;
 
   // Only admins (tenant admin or platform super admin) can create events
@@ -141,8 +140,7 @@ export async function POST(
   }
 
   try {
-    // Scoping globalDb access (S7) — see GET above.
-    const event = await superAdminStorage.run(true, () => CalendarEventService.createEvent(ctx, {
+    const event = await CalendarEventService.createEvent(ctx, {
       title,
       description,
       startDate: new Date(startDate),
@@ -160,8 +158,7 @@ export async function POST(
         byMonthDay: recurrence.byMonthDay != null ? parseInt(String(recurrence.byMonthDay), 10) || undefined : undefined,
         excludedDates: recurrence.excludedDates ?? [],
       } : null,
-    }),
-    );
+    });
     return NextResponse.json({ event }, { status: 201 });
   } catch (error: unknown) {
     if (error instanceof Error) {
@@ -170,4 +167,5 @@ export async function POST(
     }
     return NextResponse.json({ error: 'Internal server error' }, { status: 500 });
   }
+  });
 }

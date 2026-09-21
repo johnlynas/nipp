@@ -1,5 +1,7 @@
 import { Prisma } from '@prisma/client';
-import globalDb from '@/lib/global-db';
+// RLS plan Phase 3: Organization/User are not in tenantDb's scoped model list —
+// pass-through swap; cross-org listing is platform-admin-only by product model.
+import tenantDb from '@/lib/tenant-db';
 import { logger } from '@/lib/logger';
 import { env } from '@/lib/env';
 import { ServiceContext, ValidationError, NotFoundError, ConflictError, ForbiddenError } from '@/lib/services/types';
@@ -121,8 +123,8 @@ export const OrganizationService = {
 
     // Global (unfiltered) counts for dashboard stat cards
     const [globalTotal, globalStatusCounts] = await Promise.all([
-      globalDb.organization.count(),
-      globalDb.organization.groupBy({
+      tenantDb.organization.count(),
+      tenantDb.organization.groupBy({
         by: ['status'],
         _count: { status: true },
       }),
@@ -134,14 +136,14 @@ export const OrganizationService = {
     }
 
     const [organizations, filteredTotal] = await Promise.all([
-      globalDb.organization.findMany({
+      tenantDb.organization.findMany({
         where,
         skip,
         take: pageSize,
         orderBy: { createdAt: 'desc' },
         include: { _count: { select: { members: true, teams: true } } },
       }),
-      globalDb.organization.count({ where }),
+      tenantDb.organization.count({ where }),
     ]);
 
     return {
@@ -174,7 +176,7 @@ export const OrganizationService = {
 
     const { name, slug, description, adminEmail } = input;
 
-    return await globalDb.$transaction(async (tx) => {
+    return await tenantDb.$transaction(async (tx) => {
       // 1. Check for existing organization by name
       const existingOrgByName = await tx.organization.findFirst({
         where: { name: { equals: name, mode: 'insensitive' } },
@@ -260,7 +262,7 @@ export const OrganizationService = {
   async getOrganizationById(id: string, ctx: ServiceContext) {
     requireAnyAdmin(ctx);
 
-    const org = await globalDb.organization.findUnique({ where: { id } });
+    const org = await tenantDb.organization.findUnique({ where: { id } });
     if (!org) {
       throw new NotFoundError('Organization not found');
     }
@@ -284,7 +286,7 @@ export const OrganizationService = {
     requireAnyAdmin(ctx);
 
     // Verify org exists first
-    const existingOrg = await globalDb.organization.findUnique({ where: { id } });
+    const existingOrg = await tenantDb.organization.findUnique({ where: { id } });
     if (!existingOrg) {
       throw new NotFoundError('Organization not found');
     }
@@ -310,7 +312,7 @@ export const OrganizationService = {
       updateData.slug = data.slug;
     }
 
-    const updatedOrg = await globalDb.organization.update({
+    const updatedOrg = await tenantDb.organization.update({
       where: { id },
       data: updateData,
     });
@@ -330,7 +332,7 @@ export const OrganizationService = {
   async deleteOrganization(id: string, ctx: ServiceContext) {
     requirePlatformAdmin(ctx);
 
-    const org = await globalDb.organization.findUnique({
+    const org = await tenantDb.organization.findUnique({
       where: { id },
       include: { _count: { select: { members: true } } },
     });
@@ -351,7 +353,7 @@ export const OrganizationService = {
       throw new ConflictError('Cannot delete organization with existing members');
     }
 
-    await globalDb.organization.delete({ where: { id } });
+    await tenantDb.organization.delete({ where: { id } });
 
     logger.info(
       { userId: ctx.userId, orgId: id, method: 'Service.deleteOrganization' },

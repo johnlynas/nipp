@@ -3,6 +3,8 @@ import { requireSuperAdmin } from '@/lib/require-super-admin';
 import { checkAdminRateLimit } from '@/lib/rate-limiter';
 
 import { RoleService } from '@/services/role-service';
+// RLS Phase 3: role permission reads/writes run under verified target-org contexts.
+import { withTenantAdminContext } from '@/lib/platform-db';
 
 export const runtime = 'nodejs';
 
@@ -28,10 +30,13 @@ export async function GET(
       return NextResponse.json({ error: 'Organization ID is required' }, { status: 400 });
     }
 
-    const result = await RoleService.getRolePermissions(id, organizationId, {
-      userId: auth.session!.user.id,
-      role: 'PLATFORM_ADMIN',
-    });
+    // Verified target-org context (flag=1, ctx=target org).
+    const result = await withTenantAdminContext(auth.session!.user.id, organizationId, () =>
+      RoleService.getRolePermissions(id, organizationId, {
+        userId: auth.session!.user.id,
+        role: 'PLATFORM_ADMIN',
+      })
+    );
 
     return NextResponse.json(result);
   } catch (error) {
@@ -72,10 +77,13 @@ export async function POST(
       return NextResponse.json({ error: 'Organization ID is required' }, { status: 400 });
     }
 
-    const result = await RoleService.assignPermission(id, organizationId, { permissionId: body.permissionId }, {
-      userId: auth.session!.user.id,
-      role: 'PLATFORM_ADMIN',
-    });
+    // Verified target-org context for the permission assignment.
+    const result = await withTenantAdminContext(auth.session!.user.id, organizationId, () =>
+      RoleService.assignPermission(id, organizationId, { permissionId: body.permissionId }, {
+        userId: auth.session!.user.id,
+        role: 'PLATFORM_ADMIN',
+      })
+    );
 
     return NextResponse.json(result, { status: 201 });
   } catch (error) {
@@ -116,10 +124,13 @@ export async function DELETE(
       return NextResponse.json({ error: 'Organization ID is required' }, { status: 400 });
     }
 
-    await RoleService.revokePermission(id, organizationId, body.permissionId, {
-      userId: auth.session!.user.id,
-      role: 'PLATFORM_ADMIN',
-    });
+    // Verified target-org context for the permission revocation.
+    await withTenantAdminContext(auth.session!.user.id, organizationId, () =>
+      RoleService.revokePermission(id, organizationId, body.permissionId, {
+        userId: auth.session!.user.id,
+        role: 'PLATFORM_ADMIN',
+      })
+    );
 
     return NextResponse.json({ success: true });
   } catch (error) {

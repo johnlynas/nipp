@@ -5,7 +5,9 @@
  * is enforced by the Prisma Extension (lib/tenant-db.ts) + PostgreSQL RLS.
  */
 
-import globalDb from '@/lib/global-db';
+// RLS plan Phase 3: scoped tenantDb + per-call org context replaces unscoped globalDb.
+import tenantDb from '@/lib/tenant-db';
+import { runWithTenant } from '@/lib/tenant-context';
 import { logger } from '@/lib/logger';
 import {
   ServiceContext,
@@ -82,9 +84,11 @@ export async function createCalendar(
   }
 
   // Check for duplicate name within the org (tenant isolation via Prisma Extension)
-  const existing = await globalDb.calendar.findFirst({
-    where: { organizationId: orgId, name: input.name.trim() },
-  });
+  const existing = await runWithTenant(orgId, () =>
+    tenantDb.calendar.findFirst({
+      where: { organizationId: orgId, name: input.name.trim() },
+    }),
+  );
 
   if (existing) {
     throw new ConflictError(
@@ -92,15 +96,17 @@ export async function createCalendar(
     );
   }
 
-  const calendar = await globalDb.calendar.create({
-    data: {
-      name: input.name.trim(),
-      description: input.description,
-      color: getNextDefaultColor(),
-      isDefault: false,
-      organization: { connect: { id: orgId } },
-    },
-  });
+  const calendar = await runWithTenant(orgId, () =>
+    tenantDb.calendar.create({
+      data: {
+        name: input.name.trim(),
+        description: input.description,
+        color: getNextDefaultColor(),
+        isDefault: false,
+        organization: { connect: { id: orgId } },
+      },
+    }),
+  );
 
   logger.info(
     { userId: ctx.userId, calendarId: calendar.id },
@@ -131,10 +137,12 @@ export async function getCalendars(
     throw new ValidationError('Organization context is required');
   }
 
-  const calendars = await globalDb.calendar.findMany({
-    where: { organizationId: targetOrgId },
-    orderBy: [{ isDefault: 'desc' }, { name: 'asc' }],
-  });
+  const calendars = await runWithTenant(targetOrgId, () =>
+    tenantDb.calendar.findMany({
+      where: { organizationId: targetOrgId },
+      orderBy: [{ isDefault: 'desc' }, { name: 'asc' }],
+    }),
+  );
 
   return calendars.map((c) => ({
     id: c.id,
@@ -154,9 +162,11 @@ export async function getCalendarById(
   ctx: ServiceContext,
   calendarId: string,
 ): Promise<CalendarWithCount> {
-  const calendar = await globalDb.calendar.findFirst({
-    where: { id: calendarId, organizationId: ctx.organizationId! },
-  });
+  const calendar = await runWithTenant(ctx.organizationId!, () =>
+    tenantDb.calendar.findFirst({
+      where: { id: calendarId, organizationId: ctx.organizationId! },
+    }),
+  );
 
   if (!calendar) {
     throw new NotFoundError(`Calendar with ID "${calendarId}" not found`);
@@ -183,9 +193,11 @@ export async function updateCalendar(
 ): Promise<CalendarWithCount> {
   requireAnyAdmin(ctx);
 
-  const calendar = await globalDb.calendar.findFirst({
-    where: { id: calendarId, organizationId: ctx.organizationId! },
-  });
+  const calendar = await runWithTenant(ctx.organizationId!, () =>
+    tenantDb.calendar.findFirst({
+      where: { id: calendarId, organizationId: ctx.organizationId! },
+    }),
+  );
 
   if (!calendar) {
     throw new NotFoundError(`Calendar with ID "${calendarId}" not found`);
@@ -208,10 +220,12 @@ export async function updateCalendar(
     updateData.color = input.color;
   }
 
-  const updated = await globalDb.calendar.update({
-    where: { id: calendarId, organizationId: ctx.organizationId! },
-    data: updateData,
-  });
+  const updated = await runWithTenant(ctx.organizationId!, () =>
+    tenantDb.calendar.update({
+      where: { id: calendarId, organizationId: ctx.organizationId! },
+      data: updateData,
+    }),
+  );
 
   logger.info(
     { userId: ctx.userId, calendarId: updated.id },
@@ -238,9 +252,11 @@ export async function deleteCalendar(
 ): Promise<void> {
   requireAnyAdmin(ctx);
 
-  const calendar = await globalDb.calendar.findFirst({
-    where: { id: calendarId, organizationId: ctx.organizationId! },
-  });
+  const calendar = await runWithTenant(ctx.organizationId!, () =>
+    tenantDb.calendar.findFirst({
+      where: { id: calendarId, organizationId: ctx.organizationId! },
+    }),
+  );
 
   if (!calendar) {
     throw new NotFoundError(`Calendar with ID "${calendarId}" not found`);
@@ -251,9 +267,11 @@ export async function deleteCalendar(
     throw new ValidationError('Cannot delete the default calendar');
   }
 
-  await globalDb.calendar.delete({
-    where: { id: calendarId, organizationId: ctx.organizationId! },
-  });
+  await runWithTenant(ctx.organizationId!, () =>
+    tenantDb.calendar.delete({
+      where: { id: calendarId, organizationId: ctx.organizationId! },
+    }),
+  );
 
   logger.info(
     { userId: ctx.userId, calendarId },
@@ -274,9 +292,11 @@ export async function getDefaultCalendar(
     throw new ValidationError('Organization context is required');
   }
 
-  const calendar = await globalDb.calendar.findFirst({
-    where: { organizationId: targetOrgId, isDefault: true },
-  });
+  const calendar = await runWithTenant(targetOrgId, () =>
+    tenantDb.calendar.findFirst({
+      where: { organizationId: targetOrgId, isDefault: true },
+    }),
+  );
 
   if (!calendar) {
     return null;
@@ -307,9 +327,11 @@ export async function ensureDefaultCalendar(
     throw new ValidationError('Organization context is required');
   }
 
-  const existing = await globalDb.calendar.findFirst({
-    where: { organizationId: targetOrgId, isDefault: true },
-  });
+  const existing = await runWithTenant(targetOrgId, () =>
+    tenantDb.calendar.findFirst({
+      where: { organizationId: targetOrgId, isDefault: true },
+    }),
+  );
 
   if (existing) {
     return {
@@ -324,15 +346,17 @@ export async function ensureDefaultCalendar(
   }
 
   // Create default calendar
-  const created = await globalDb.calendar.create({
-    data: {
-      name: 'Main Calendar',
-      description: 'Default calendar for this organization',
-      color: '#1B2A4A', // Navy
-      isDefault: true,
-      organization: { connect: { id: targetOrgId } },
-    },
-  });
+  const created = await runWithTenant(targetOrgId, () =>
+    tenantDb.calendar.create({
+      data: {
+        name: 'Main Calendar',
+        description: 'Default calendar for this organization',
+        color: '#1B2A4A', // Navy
+        isDefault: true,
+        organization: { connect: { id: targetOrgId } },
+      },
+    }),
+  );
 
   logger.info(
     { userId: ctx.userId, calendarId: created.id },

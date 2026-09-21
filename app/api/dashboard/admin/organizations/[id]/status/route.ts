@@ -5,7 +5,9 @@ import { checkAdminRateLimit } from '@/lib/rate-limiter';
 import { OrganizationService } from '@/services/organization-service';
 import type { ServiceContext } from '@/lib/services/types';
 import { notifyOrganizationOperation, notifyOrganizationSuspension, notifyOrganizationArchival, notifyOrganizationReactivation } from '@/lib/notification-push';
-import globalDb from '@/lib/global-db';
+// RLS Phase 3: org status transitions run under a verified target-org context.
+import tenantDb from '@/lib/tenant-db';
+import { withTenantAdminContext } from '@/lib/platform-db';
 import { logger } from '@/lib/logger';
 
 export const runtime = 'nodejs';
@@ -56,8 +58,10 @@ export async function PATCH(
   let targetLabel = id; // fallback label for error notifications
 
   try {
+    // RLS: verified target-org context (org read/update + member ban/unban + sessions).
+    return await withTenantAdminContext(auth.session!.user.id, id, async () => {
     // Capture the org name for the notification label before it possibly changes
-    const org = await globalDb.organization.findUnique({
+    const org = await tenantDb.organization.findUnique({
       where: { id },
       select: { name: true, status: true },
     });
@@ -137,6 +141,7 @@ export async function PATCH(
     await notifyOrganizationOperation(operation, targetLabel, true, undefined, id);
 
     return NextResponse.json(result);
+    });
   } catch (error) {
     if (error instanceof Error && error.message === 'Organization not found') {
       await notifyOrganizationOperation(operation, id, false, 'Organization not found');
@@ -156,14 +161,15 @@ export async function PATCH(
  */
 async function banOrgUsers(orgId: string, orgName: string, adminUserId: string, newStatus: string): Promise<number> {
   try {
-    const members = await globalDb.member.findMany({
+    // Runs inside the verified target-org context set by the route (Member rows are RLS-scoped).
+    const members = await tenantDb.member.findMany({
       where: { orgId },
       select: { userId: true },
     });
 
     const userIds = members.map((m) => m.userId);
     if (userIds.length > 0) {
-      await globalDb.user.updateMany({
+      await tenantDb.user.updateMany({
         where: { id: { in: userIds } },
         data: {
           banned: true,
@@ -191,14 +197,14 @@ async function banOrgUsers(orgId: string, orgName: string, adminUserId: string, 
  */
 async function unbanOrgUsers(orgId: string, adminUserId: string): Promise<number> {
   try {
-    const members = await globalDb.member.findMany({
+    const members = await tenantDb.member.findMany({
       where: { orgId },
       select: { userId: true },
     });
 
     const userIds = members.map((m) => m.userId);
     if (userIds.length > 0) {
-      await globalDb.user.updateMany({
+      await tenantDb.user.updateMany({
         where: { id: { in: userIds } },
         data: {
           banned: false,
@@ -225,7 +231,7 @@ async function unbanOrgUsers(orgId: string, adminUserId: string): Promise<number
  */
 async function invalidateOrgSessions(orgId: string) {
   try {
-    const members = await globalDb.member.findMany({
+    const members = await tenantDb.member.findMany({
       where: { orgId },
       select: { userId: true },
     });
@@ -240,9 +246,10 @@ async function invalidateOrgSessions(orgId: string) {
     }
 
     // Invalidate database sessions
+    // Session has no RLS — invalidating DB sessions of verified member users.
     const userIds = members.map((m) => m.userId);
     if (userIds.length > 0) {
-      await globalDb.session.deleteMany({
+      await tenantDb.session.deleteMany({
         where: { userId: { in: userIds } },
       });
     }

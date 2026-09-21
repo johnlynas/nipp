@@ -39,6 +39,10 @@ function testEnv(): Env {
     PAYLOAD_ENCRYPTION_REPLAY_CACHE: 'redis',
     PAYLOAD_ENCRYPTION_REQUIRE_REPLAY_CACHE: 'false',
     PAYLOAD_ENCRYPTION_MAX_KEYS_PER_SESSION: '10',
+    // RLS Phase 3: platform ops are fail-closed without a platform org id.
+    // Deterministic test fixture (cuid-shaped); individual tests that need a
+    // specific value mock lib/platform-db directly.
+    PLATFORM_ORGANIZATION_ID: 'ctestplatformorg000000000',
     ...Object.fromEntries(
       Object.entries(process.env).filter(([, v]) => v !== undefined)
     ),

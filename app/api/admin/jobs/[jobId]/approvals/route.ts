@@ -11,6 +11,8 @@ import { NextRequest, NextResponse } from 'next/server';
 import { requireSuperAdmin } from '@/lib/require-super-admin';
 import { JobSchedulerService } from '@/services/job-scheduler-service';
 import { ServiceContext } from '@/lib/services/types';
+// RLS Phase 3: super-admin job ops run under a verified platform context.
+import { withPlatformContext } from '@/lib/platform-db';
 import { logger } from '@/lib/logger';
 import { wrapPiiRoute, PiiRouteParams } from '@/lib/payload-middleware';
 import { checkAdminRateLimit } from '@/lib/rate-limiter';
@@ -64,10 +66,12 @@ export const POST = wrapPiiRoute(async (request, decryptedBody, params?: PiiRout
 
     const ctx: ServiceContext = { userId: session.user.id, role: 'PLATFORM_ADMIN' };
 
-    const job =
+    // Verified platform context for the approval/rejection decision.
+    const job = await withPlatformContext(session.user.id, () =>
       action === 'reject'
-        ? await JobSchedulerService.rejectJob(ctx, jobId, { note })
-        : await JobSchedulerService.approveJob(ctx, jobId, { note });
+        ? JobSchedulerService.rejectJob(ctx, jobId, { note })
+        : JobSchedulerService.approveJob(ctx, jobId, { note })
+    );
 
     logger.info({ userId: session.user.id, jobId, action }, `[Jobs API] Job ${action}d`);
 

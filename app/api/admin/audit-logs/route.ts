@@ -1,5 +1,7 @@
 import { NextResponse } from 'next/server';
-import globalDb from '@/lib/global-db';
+// RLS Phase 3: cross-tenant audit reads run under the verified platform context.
+import tenantDb from '@/lib/tenant-db';
+import { withPlatformContext } from '@/lib/platform-db';
 import { requireSuperAdmin } from '@/lib/require-super-admin';
 import { checkAdminRateLimit } from '@/lib/rate-limiter';
 import { logger } from '@/lib/logger';
@@ -34,26 +36,28 @@ export const GET = wrapPiiRoute(async (request) => {
       where.resourceType = resourceType;
     }
 
-    const [logs, total] = await Promise.all([
-      globalDb.auditLog.findMany({
-        where,
-        orderBy: { timestamp: 'desc' },
-        skip: (page - 1) * pageSize,
-        take: pageSize,
-        select: {
-          id: true,
-          timestamp: true,
-          userId: true,
-          userName: true,
-          action: true,
-          resourceType: true,
-          resourceId: true,
-          organizationId: true,
-          success: true,
-        },
-      }),
-      globalDb.auditLog.count({ where }),
-    ]);
+    const [logs, total] = await withPlatformContext(session.user.id, async () =>
+      Promise.all([
+        tenantDb.auditLog.findMany({
+          where,
+          orderBy: { timestamp: 'desc' },
+          skip: (page - 1) * pageSize,
+          take: pageSize,
+          select: {
+            id: true,
+            timestamp: true,
+            userId: true,
+            userName: true,
+            action: true,
+            resourceType: true,
+            resourceId: true,
+            organizationId: true,
+            success: true,
+          },
+        }),
+        tenantDb.auditLog.count({ where }),
+      ]),
+    );
 
     return NextResponse.json({
       auditLogs: logs.map((log) => ({

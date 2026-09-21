@@ -25,7 +25,9 @@
 
 import { NextRequest, NextResponse } from 'next/server';
 import { auth } from '@/lib/auth';
-import globalDb from '@/lib/global-db';
+// RLS Phase 3: User has no RLS policy — bind a platform context (verified session).
+import tenantDb from '@/lib/tenant-db';
+import { withPlatformContext } from '@/lib/platform-db';
 import { addSubscriber, removeSubscriber, getSubscriberCount, getSessionConnectionCount } from '@/lib/notification-push';
 
 // ---------------------------------------------------------------------------
@@ -101,10 +103,12 @@ export async function GET(request: NextRequest) {
   let userOrgId: string | null = (session as { activeOrganizationId?: string }).activeOrganizationId || null;
 
   if (!userOrgId) {
-    const user = await globalDb.user.findUnique({
-      where: { id: userId },
-      select: { activeOrganizationId: true },
-    });
+    const user = await withPlatformContext(userId, () =>
+      tenantDb.user.findUnique({
+        where: { id: userId },
+        select: { activeOrganizationId: true },
+      }),
+    );
     userOrgId = user?.activeOrganizationId ?? null;
   }
 

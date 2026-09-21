@@ -2,6 +2,8 @@ import { NextRequest, NextResponse } from 'next/server';
 import { requireSuperAdmin } from '@/lib/require-super-admin';
 import { checkAdminRateLimit } from '@/lib/rate-limiter';
 
+// RLS Phase 3: organization listing/creation run under a verified platform context.
+import { withPlatformContext } from '@/lib/platform-db';
 import { OrganizationService } from '@/services/organization-service';
 import { notifyOrganizationOperation } from '@/lib/notification-push';
 
@@ -24,9 +26,11 @@ export async function GET(request: NextRequest) {
     const status = url.searchParams.get('status') as 'PENDING' | 'ACTIVE' | 'SUSPENDED' | 'ARCHIVED' | undefined;
     const search = url.searchParams.get('search') || undefined;
 
-    const result = await OrganizationService.getPaginatedOrganizations({ page, pageSize, status, search });
-
-    return NextResponse.json(result);
+    // One verified platform context for the whole cross-org listing.
+    return await withPlatformContext(auth.session!.user.id, async () => {
+      const result = await OrganizationService.getPaginatedOrganizations({ page, pageSize, status, search });
+      return NextResponse.json(result);
+    });
   } catch (error) {
     console.error('Failed to list organizations:', error);
     return NextResponse.json({ error: 'Failed to fetch organizations' }, { status: 500 });
@@ -57,17 +61,22 @@ export async function POST(request: NextRequest) {
 
   const targetLabel = body.name ? `Organization "${body.name}"` : 'organization';
 
-  if (!body.name) {
+  // Narrowed once so the platform-context closure below keeps a plain string.
+  const orgName = body.name;
+  if (!orgName) {
     return NextResponse.json({ error: 'Name is required' }, { status: 400 });
   }
 
   try {
-    const result = await OrganizationService.createOrganization(
-      { name: body.name, slug: body.slug, description: body.description },
-      {
-        userId: auth.session!.user.id,
-        role: 'PLATFORM_ADMIN',
-      }
+    // Verified platform context: Organization INSERT policy checks the admin flag.
+    const result = await withPlatformContext(auth.session!.user.id, () =>
+      OrganizationService.createOrganization(
+        { name: orgName, slug: body.slug, description: body.description },
+        {
+          userId: auth.session!.user.id,
+          role: 'PLATFORM_ADMIN',
+        }
+      )
     );
 
     await notifyOrganizationOperation('create', targetLabel, true, undefined, result.id);

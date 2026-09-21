@@ -14,18 +14,25 @@ export function createStorage<T>(): AsyncLocalStorage<T> {
  * making it available to all downstream operations without explicit parameter passing.
  */
 
-const tenantContextStorage = createStorage<Record<string, string>>();
+const tenantContextStorage = createStorage<StoredContext | undefined>();
 
 /** Full verified RLS/tenant context carried through a request (RLS plan Phase 1D). */
 export interface TenantContextObject {
-  orgId: string;
+  /** Omit only in platform-global mode (isPlatformAdmin=true, no target org). */
+  orgId?: string;
   /** Verified BetterAuth user id — server-derived only. */
   userId: string;
   /** true iff the caller is a verified platform-organization member. */
   isPlatformAdmin?: boolean;
 }
 
-function toStore(ctx: TenantContextObject): Record<string, string> {
+interface StoredContext {
+  orgId?: string;
+  userId: string | null;
+  isPlatformAdmin: '1' | '0';
+}
+
+function toStore(ctx: TenantContextObject): StoredContext {
   return { orgId: ctx.orgId, userId: ctx.userId, isPlatformAdmin: ctx.isPlatformAdmin ? '1' : '0' };
 }
 
@@ -35,18 +42,26 @@ function toStore(ctx: TenantContextObject): Record<string, string> {
  * @param fn - Function to execute within the tenant context
  */
 export function runWithTenant<T>(orgId: string, fn: () => T): T {
-  return tenantContextStorage.run({ orgId }, fn);
+  // Legacy two-arg form (no userId): app-layer scoping only; DB GUC binding
+  // requires runWithTenantContext (fail-closed there).
+  return tenantContextStorage.run({ orgId, userId: null, isPlatformAdmin: '0' }, fn);
 }
 
 /**
  * Execute a function within a fully verified RLS context (RLS plan Phase 1D).
  * Carries userId + isPlatformAdmin so the database layer (lib/rls-transaction.ts)
  * can bind GUCs per request. Backward-compatible with runWithTenant(orgId, fn).
+ *
+ * Platform-global mode: `orgId` MAY be omitted when `isPlatformAdmin` is true —
+ * this mirrors the DB RLS flag (platform admin reads all orgs; writes must carry
+ * their target explicitly in the query data). Requires userId always.
  */
 export function runWithTenantContext<T>(ctx: TenantContextObject, fn: () => T): T {
-  if (!ctx.orgId) throw new Error('Tenant context invalid: orgId required (fail-closed)');
   if (!ctx.userId) throw new Error('Tenant context invalid: userId required (fail-closed)');
-  return tenantContextStorage.run(toStore(ctx), fn);
+  if (!ctx.orgId && !ctx.isPlatformAdmin) {
+    throw new Error('Tenant context invalid: orgId required (fail-closed); only verified platform admins may run org-less');
+  }
+  return tenantContextStorage.run({ ...toStore(ctx), ...(ctx.orgId ? {} : { orgId: undefined }) }, fn);
 }
 
 /**
@@ -61,7 +76,7 @@ export function getCurrentOrgId(): string | null {
 /**
  * Get the full tenant context store.
  */
-export function getTenantContext(): Record<string, string> | null {
+export function getTenantContext(): StoredContext | null {
   return tenantContextStorage.getStore() ?? null;
 }
 

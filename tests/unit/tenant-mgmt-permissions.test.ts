@@ -10,23 +10,24 @@ vi.mock('@/lib/require-super-admin', () => ({
   requireSuperAdmin: vi.fn(),
 }));
 
-vi.mock('@/lib/global-db', () => ({
+vi.mock('@/lib/tenant-db', () => ({
   default: {
     organization: { findUnique: vi.fn(), update: vi.fn(), delete: vi.fn() },
     permission: { findUnique: vi.fn(), findMany: vi.fn() },
     role: { findFirst: vi.fn(), findMany: vi.fn() },
-    rolePermission: { findFirst: vi.fn(), create: vi.fn(), deleteMany: vi.fn() },
-  },
-}));
-
-vi.mock('@/lib/tenant-db', () => ({
-  default: {
-    rolePermission: { findMany: vi.fn(), create: vi.fn(), deleteMany: vi.fn() },
+    rolePermission: { findFirst: vi.fn(), create: vi.fn(), deleteMany: vi.fn(), findMany: vi.fn() },
   },
 }));
 
 vi.mock('@/lib/tenant-context', () => ({
   runWithTenant: vi.fn(async (_orgId: string, fn: () => Promise<unknown>) => fn()),
+}));
+
+vi.mock('@/lib/platform-db', () => ({
+  // Pass-through: these unit tests exercise route logic with mocked tenantDb;
+  // the verified platform-admin RLS wrapper itself is covered by
+  // tests/unit/rls-transaction.test.ts.
+  withTenantAdminContext: vi.fn(async (_userId: string, _orgId: string, fn: () => Promise<unknown>) => fn()),
 }));
 
 vi.mock('@/lib/audit-log', () => ({
@@ -42,7 +43,7 @@ vi.mock('next/cache', () => ({
 }));
 
 const { requireSuperAdmin } = await import('@/lib/require-super-admin');
-const globalDb = (await import('@/lib/global-db')).default;
+const globalDb = (await import('@/lib/tenant-db')).default;
 const tenantDb = (await import('@/lib/tenant-db')).default;
 const { runWithTenant } = await import('@/lib/tenant-context');
 const { recordAuditLog } = await import('@/lib/audit-log');

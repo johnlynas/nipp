@@ -9,6 +9,8 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { requireSuperAdmin } from '@/lib/require-super-admin';
 import { PermissionService, CreatePermissionInput } from '@/services/permission-service';
+// RLS Phase 3: super-admin ops run under a verified platform context.
+import { withPlatformContext } from '@/lib/platform-db';
 import { ServiceContext } from '@/lib/services/types';
 import { recordAuditLog } from '@/lib/audit-log';
 import { logger } from '@/lib/logger';
@@ -45,10 +47,13 @@ export const GET = wrapPiiRoute(async (request) => {
       role: 'PLATFORM_ADMIN',
     };
 
-    const result = await PermissionService.list(
-      { resource, search },
-      { page, pageSize },
-      ctx,
+    // One verified platform context for the catalog listing.
+    const result = await withPlatformContext(session.user.id, () =>
+      PermissionService.list(
+        { resource, search },
+        { page, pageSize },
+        ctx,
+      )
     );
 
     logger.info({ userId: session.user.id, count: result.items.length }, '[Permissions API] Fetched permissions');
@@ -107,7 +112,10 @@ export const POST = wrapPiiRoute(async (request, decryptedBody) => {
       role: 'PLATFORM_ADMIN',
     };
 
-    const permission = await PermissionService.create(body, ctx);
+    // Verified platform context for the catalog insert.
+    const permission = await withPlatformContext(session.user.id, () =>
+      PermissionService.create(body, ctx)
+    );
 
     logger.info({ userId: session.user.id, permissionId: permission.id }, '[Permissions API] Permission created');
 

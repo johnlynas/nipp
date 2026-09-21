@@ -18,7 +18,7 @@ vi.mock('@/lib/payload-middleware', () => ({
   },
 }));
 
-vi.mock('@/lib/global-db', () => ({
+vi.mock('@/lib/tenant-db', () => ({
   default: {
     organization: { findUnique: vi.fn(), update: vi.fn() },
     member: { findMany: vi.fn() },
@@ -86,7 +86,7 @@ vi.mock('@/services/organization-service', () => ({
 // Resolve mocked modules after all mocks are declared
 // ---------------------------------------------------------------------------
 
-const globalDb = (await import('@/lib/global-db')).default;
+const globalDb = (await import('@/lib/tenant-db')).default;
 const { requireSuperAdmin } = await import('@/lib/require-super-admin');
 const { recordAuditLog } = await import('@/lib/audit-log');
 const { logger } = await import('@/lib/logger');

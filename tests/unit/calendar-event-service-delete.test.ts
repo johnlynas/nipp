@@ -3,7 +3,7 @@
  */
 
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import globalDb from '@/lib/global-db';
+import globalDb from '@/lib/tenant-db';
 import { CalendarEventService } from '@/services/calendar-event-service';
 import type { CalendarEventWithDetails } from '@/services/calendar-event-service';
 import { ServiceContext, ForbiddenError, NotFoundError } from '@/lib/services/types';
@@ -12,7 +12,7 @@ import { ServiceContext, ForbiddenError, NotFoundError } from '@/lib/services/ty
 // Mocks
 // ---------------------------------------------------------------------------
 
-vi.mock('@/lib/global-db', () => ({
+vi.mock('@/lib/tenant-db', () => ({
   default: {
     calendarEvent: { findFirst: vi.fn(), delete: vi.fn() },
   },

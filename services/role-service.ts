@@ -9,7 +9,8 @@
  */
 
 import { Prisma } from '@prisma/client';
-import globalDb from '@/lib/global-db';
+// RLS plan Phase 3: the unscoped globalDb client is gone; org-targeted lookups
+// run on tenantDb inside the existing runWithTenant(targetOrgId) scope.
 import tenantDb from '@/lib/tenant-db';
 import { runWithTenant } from '@/lib/tenant-context';
 import { logger } from '@/lib/logger';
@@ -59,10 +60,12 @@ export const RoleService = {
       throw new ValidationError('Role name is required');
     }
 
-    // Check for duplicate name within the org
-    const existingRole = await globalDb.role.findFirst({
-      where: { name: data.name, organizationId: targetOrgId },
-    });
+    // Check for duplicate name within the org (scoped to target org)
+    const existingRole = await runWithTenant(targetOrgId, () =>
+      tenantDb.role.findFirst({
+        where: { name: data.name, organizationId: targetOrgId },
+      }),
+    );
     if (existingRole) {
       throw new ConflictError('A role with this name already exists in this organization');
     }
@@ -179,17 +182,21 @@ export const RoleService = {
       }
     }
 
-    // Verify role exists first
-    const existingRole = await globalDb.role.findUnique({ where: { id } });
+    // Verify role exists first (scoped to target org)
+    const existingRole = await runWithTenant(targetOrgId, () =>
+      tenantDb.role.findUnique({ where: { id } }),
+    );
     if (!existingRole) {
       throw new NotFoundError('Role not found');
     }
 
     // Validate name uniqueness if changing
     if (data.name && data.name !== existingRole.name) {
-      const duplicate = await globalDb.role.findFirst({
-        where: { name: data.name, organizationId: targetOrgId },
-      });
+      const duplicate = await runWithTenant(targetOrgId, () =>
+        tenantDb.role.findFirst({
+          where: { name: data.name, organizationId: targetOrgId },
+        }),
+      );
       if (duplicate) {
         throw new ConflictError('A role with this name already exists in this organization');
       }
@@ -230,8 +237,10 @@ export const RoleService = {
       }
     }
 
-    // Verify role exists first
-    const existingRole = await globalDb.role.findUnique({ where: { id } });
+    // Verify role exists first (scoped to target org)
+    const existingRole = await runWithTenant(targetOrgId, () =>
+      tenantDb.role.findUnique({ where: { id } }),
+    );
     if (!existingRole) {
       throw new NotFoundError('Role not found');
     }
@@ -288,22 +297,27 @@ export const RoleService = {
   async assignPermission(roleId: string, targetOrgId: string, data: { permissionId: string }, ctx: ServiceContext) {
     requireAnyAdmin(ctx);
 
-    // Verify role exists
-    const existingRole = await globalDb.role.findUnique({ where: { id: roleId } });
+    // Verify role exists (scoped to target org)
+    const existingRole = await runWithTenant(targetOrgId, () =>
+      tenantDb.role.findUnique({ where: { id: roleId } }),
+    );
     if (!existingRole) {
       throw new NotFoundError('Role not found');
     }
 
-    // Verify permission exists
-    const existingPermission = await globalDb.permission.findUnique({ where: { id: data.permissionId } });
+    // Verify permission exists (global catalog — RLS Permission policy admits
+    // platform admins and permissions assigned to the context org's roles).
+    const existingPermission = await tenantDb.permission.findUnique({ where: { id: data.permissionId } });
     if (!existingPermission) {
       throw new NotFoundError('Permission not found');
     }
 
-    // Check for duplicate assignment
-    const existing = await globalDb.rolePermission.findFirst({
-      where: { roleId, permissionId: data.permissionId },
-    });
+    // Check for duplicate assignment (scoped to target org)
+    const existing = await runWithTenant(targetOrgId, () =>
+      tenantDb.rolePermission.findFirst({
+        where: { roleId, permissionId: data.permissionId },
+      }),
+    );
 
     if (existing) {
       throw new ConflictError('Permission already assigned to this role');
