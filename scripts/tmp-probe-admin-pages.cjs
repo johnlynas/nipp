@@ -7,7 +7,7 @@ const COOKIE = 'better-auth.session_token=phase3probe_token_8f3a2b67c9d4e1; ';
 
 async function get(path) {
   const r = await fetch(`${BASE}${path}`, { headers: { cookie: COOKIE, origin: BASE } });
-  let body = null; try { body = JSON.parse(await r.text()); } catch {}
+  let body = null; try { body = JSON.parse(await r.text()); } catch { /* response may not be JSON */ }
   let shape = 'n/a';
   if (body) {
     if (Array.isArray(body.items)) shape = `items=${body.items.length}`;

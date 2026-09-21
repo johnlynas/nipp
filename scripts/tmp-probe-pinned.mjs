@@ -72,7 +72,7 @@ async function runProbe(tag, gucs, orgColFilter) {
 
     return { orgs, byStatus, res, evts };
   } finally {
-    try { await prisma.$executeRawUnsafe(`SELECT set_config('app.current_user_id','',false), set_config('app.current_org_id','',false), set_config('app.is_platform_admin','0',false), set_config('app.platform_org_id','',false)`); } catch {}
+    try { await prisma.$executeRawUnsafe(`SELECT set_config('app.current_user_id','',false), set_config('app.current_org_id','',false), set_config('app.is_platform_admin','0',false), set_config('app.platform_org_id','',false)`); } catch { /* best-effort GUC cleanup on teardown */ }
     await prisma.$disconnect();
   }
 }

@@ -28,7 +28,7 @@ const cookies = res.headers.getSetCookie().map((c) => c.split(';')[0]).join('; '
 console.log(`sign-in: ${res.status}, session=${cookies ? 'yes' : 'NO'}`);
 
 let sawP2028 = 0;
-let responses: string[] = [];
+const responses: string[] = [];
 async function hit(path: string): Promise<void> {
   try {
     const r = await fetch(`${BASE}${path}`, { headers: { cookie: cookies } });
