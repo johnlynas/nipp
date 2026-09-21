@@ -36,10 +36,13 @@ export const resolveTenantAccessMock: { impl: () => TenantAccess } = {
   impl: () => ({ ok: false, status: 403, error: 'Forbidden' }),
 };
 
-vi.mock('@/lib/tenant-access', () => ({
-  resolveTenantAccess: vi.fn((...args: unknown[]) => resolveTenantAccessMock.impl()),
-  // Re-export for any type imports in the module graph.
-}));
+vi.mock('@/lib/tenant-access', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@/lib/tenant-access')>();
+  return {
+    ...actual,
+    resolveTenantAccess: vi.fn((...args: unknown[]) => resolveTenantAccessMock.impl()),
+  };
+});
 
 vi.mock('@/lib/tenant-db', () => ({
   default: {
