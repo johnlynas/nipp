@@ -16,17 +16,20 @@ if [ -f "$PROJECT_ROOT/.env.test" ]; then
   set +a
 fi
 
-DB_USER="${DB_USER:-nipp}"
-DB_PASS="${DB_PASS:-nipp_test_pass}"
+# Owner identity used to drop the DB — override in .env.test (defaults match
+# docker-compose.test.yml's POSTGRES_USER/POSTGRES_PASSWORD).
+DB_USER="${DB_USER:-${POSTGRES_USER:-postgres}}"
+DB_PASS="${DB_PASS:-${POSTGRES_PASSWORD:-postgres}}"
+PG_PORT="${PG_PORT:-${POSTGRES_PORT:-5432}}"
 
 # ---------------------------------------------------------------------------
 # 2. Drop the nipp_test database
 # ---------------------------------------------------------------------------
 echo "🗑️  Dropping nipp_test database..."
 
-if PGPASSWORD="$DB_PASS" psql -h localhost -p 5432 -U "$DB_USER" -d postgres -tAc \
+if PGPASSWORD="$DB_PASS" psql -h localhost -p "$PG_PORT" -U "$DB_USER" -d postgres -tAc \
    "SELECT 1 FROM pg_database WHERE datname = 'nipp_test'" | grep -q 1; then
-  PGPASSWORD="$DB_PASS" psql -h localhost -p 5432 -U "$DB_USER" -d postgres -c "DROP DATABASE nipp_test;"
+  PGPASSWORD="$DB_PASS" psql -h localhost -p "$PG_PORT" -U "$DB_USER" -d postgres -c "DROP DATABASE nipp_test;"
   echo "✅ Database dropped: nipp_test"
 else
   echo "ℹ️  nipp_test does not exist — skipping drop"

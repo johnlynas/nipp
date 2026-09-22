@@ -4,9 +4,12 @@ services:
       context: .
       dockerfile: Dockerfile.test
     container_name: nipp-0713-postgres-pgbouncer
+    # Host ports are overridable (defaults = historical values): the dev machine
+    # frequently already has PostgreSQL on 5432, so CI/local can do e.g.
+    #   POSTGRES_PORT=15432 PGBOUNCER_HOST_PORT=16432 docker compose -f docker-compose.test.yml up -d
     ports:
-      - "5432:5432"   # PostgreSQL direct access (for setup, seeding, migrations)
-      - "6432:6432"   # PgBouncer pooler (for app connections)
+      - "${POSTGRES_PORT:-5432}:5432"   # PostgreSQL direct access (setup, seeding, migrations)
+      - "${PGBOUNCER_HOST_PORT:-6432}:6432"   # PgBouncer pooler (app connections)
     environment:
       POSTGRES_DB: nipp_test
       POSTGRES_USER: postgres

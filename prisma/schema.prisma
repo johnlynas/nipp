@@ -7,15 +7,32 @@
 //   organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
 //   @@index([organizationId])
 //
-// This is required for both:
-//   1. Prisma Extension (lib/tenant-db.ts) - Application layer
-//   2. PostgreSQL RLS - Database layer
+// (BetterAuth-owned models — Member, Invitation, SentInvitation — use `orgId`.)
+// This is required for BOTH isolation layers:
+//   1. App layer: tenantDb extension (lib/tenant-db.ts / lib/tenant-extension-core.ts)
+//      injects the org column into where/data — its model list must match this
+//      requirement exactly (drift-guarded by tests/unit/tenant-db-hardening.test.ts).
+//   2. DB layer: PostgreSQL RLS policies (prisma/migrations/…_rls_complete_policies)
+//      keyed on the same column; policy catalog drift is hash-checked in CI
+//      (tests/isolation/database/policy-catalog.golden).
 //
-// Without organizationId, tenant isolation is BROKEN for that model.
+// Without an org column, tenant isolation is BROKEN for that model.
 //
-// Exempt models (global, not org-scoped):
-//   User, Session, Account, Organization, Member, Invitation, SentInvitation, Permission
-//   AuditLog (global audit trail), NotificationLog (notification tracking)
+// EXEMPT models (global — no org column by design, documented in SECURITY.md
+// Appendix B / documents/rls-complete-implementation.md §3.3):
+//   User, Session, Account        BetterAuth auth models (no tenant data)
+//   Permission                    global catalog; read restricted to platform org
+//                                 OR permissions assigned to the ctx org's roles
+//   Resource, ResourceRole        global feature catalog; the sensitive side sits
+//                                 on org-scoped Role rows which ARE policied.
+//                                 Re-evaluate before any route queries these directly.
+//   JobDefinition, JobExecution   platform-only by strongest stance: policies gate
+//                                 on app.is_platform_admin AND app.platform_org_id =
+//                                 the row's platformOrgId (no tenant-context path).
+//   Organization, AuditLog, NotificationLog, Notification  RLS-only tables with
+//                                 richer per-command/NULL-org visibility rules —
+//                                 policies exist; they have no single-column app
+//                                 layer injection.
 // ============================================================
 
 generator client {

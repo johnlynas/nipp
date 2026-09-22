@@ -1,0 +1,15 @@
+npm notice run nipp@0.1.0 test:isolation:app
+npm notice run vitest run tests/isolation/application/
+(!) Your Vite config uses features that are unsupported by `configLoader: 'native'`, which is planned to become the default in a future major version of Vite:
+  - ESM syntax in a file loaded as CommonJS (vitest.config.ts:1:1). Use a `.mjs` extension or set `"type": "module"` in the closest package.json
+Set `VITE_CONFIG_NATIVE_IGNORE_WARNING=true` to suppress this warning.
+
+ RUN  v4.1.11 /Users/johnlynas/dev/nipp-0807
+
+
+ Test Files  5 passed (5)
+      Tests  70 passed (70)
+   Start at  08:49:28
+   Duration  255ms (transform 241ms, setup 236ms, import 180ms, tests 89ms, environment 0ms)
+
+APP_EXIT=0

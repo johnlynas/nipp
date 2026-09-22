@@ -28,6 +28,10 @@ echo "🐳 Starting Docker test infrastructure..."
 # Use postgres superuser for all DB operations (pgbouncer forwards as postgres)
 PG_USER="postgres"
 PG_PASS="postgres"
+# Host ports for the compose stack — overridable via env/.env.test (POSTGRES_PORT /
+# PGBOUNCER_HOST_PORT flow through docker-compose.test.yml's ${VAR:-default}).
+PG_PORT="${PG_PORT:-${POSTGRES_PORT:-5432}}"
+BOUNCER_HPORT="${PGBOUNCER_HOST_PORT:-6432}"
 
 cd "$PROJECT_ROOT"
 mkdir -p tmp
@@ -37,7 +41,7 @@ docker compose -f docker-compose.test.yml up -d 2>&1
 # Wait for PostgreSQL to be ready (host port 5432)
 echo "⏳ Waiting for PostgreSQL to become available on host port 5432..."
 for i in $(seq 1 30); do
-  if PGPASSWORD="$PG_PASS" psql -h 127.0.0.1 -p 5432 -U "$PG_USER" -d nipp_test -c "SELECT 1;" > /dev/null 2>&1; then
+  if PGPASSWORD="$PG_PASS" psql -h 127.0.0.1 -p "$PG_PORT" -U "$PG_USER" -d nipp_test -c "SELECT 1;" > /dev/null 2>&1; then
     echo "✅ PostgreSQL is ready"
     break
   fi
@@ -45,12 +49,12 @@ for i in $(seq 1 30); do
 done
 
 # Wait for pgbouncer to be ready (host port 6432)
-echo "⏳ Waiting for pgbouncer to become available on host port 6432..."
+echo "⏳ Waiting for pgbouncer to become available on host port $BOUNCER_HPORT..."
 for i in $(seq 1 30); do
-  if PGPASSWORD="$PG_PASS" psql -h 127.0.0.1 -p 6432 -U "$PG_USER" -d nipp_test -c "SELECT 1;" > /dev/null 2>&1; then
+  if PGPASSWORD="$PG_PASS" psql -h 127.0.0.1 -p "$BOUNCER_HPORT" -U "$PG_USER" -d nipp_test -c "SELECT 1;" > /dev/null 2>&1; then
     echo "✅ pgbouncer is ready"
     # Terminate lingering connections so we can drop/recreate the database
-    PGPASSWORD="$PG_PASS" psql -h 127.0.0.1 -p 5432 -U "$PG_USER" -d nipp_test -c "
+    PGPASSWORD="$PG_PASS" psql -h 127.0.0.1 -p "$PG_PORT" -U "$PG_USER" -d nipp_test -c "
       SELECT pg_terminate_backend(pid) FROM pg_stat_activity
       WHERE datname = 'nipp_test' AND pid <> pg_backend_pid();
     " > /dev/null 2>&1 || true
@@ -69,13 +73,13 @@ DB_USER="${DB_USER:-nipp}"
 DB_PASS="${DB_PASS:-nipp_test_pass}"
 
 # Check if database already exists (connect to PostgreSQL on host port 5432)
-if PGPASSWORD="$PG_PASS" psql -h 127.0.0.1 -p 5432 -U "$PG_USER" -d postgres -tAc \
+if PGPASSWORD="$PG_PASS" psql -h 127.0.0.1 -p "$PG_PORT" -U "$PG_USER" -d postgres -tAc \
    "SELECT 1 FROM pg_database WHERE datname = 'nipp_test'" | grep -q 1; then
   echo "⚠️  nipp_test already exists — dropping and recreating..."
-  PGPASSWORD="$PG_PASS" psql -h 127.0.0.1 -p 5432 -U "$PG_USER" -d postgres -c "DROP DATABASE nipp_test;"
+  PGPASSWORD="$PG_PASS" psql -h 127.0.0.1 -p "$PG_PORT" -U "$PG_USER" -d postgres -c "DROP DATABASE nipp_test;"
 fi
 
-PGPASSWORD="$PG_PASS" psql -h 127.0.0.1 -p 5432 -U "$PG_USER" -d postgres -c "CREATE DATABASE nipp_test;"
+PGPASSWORD="$PG_PASS" psql -h 127.0.0.1 -p "$PG_PORT" -U "$PG_USER" -d postgres -c "CREATE DATABASE nipp_test;"
 echo "✅ Database created: nipp_test"
 
 # ---------------------------------------------------------------------------
@@ -84,8 +88,8 @@ echo "✅ Database created: nipp_test"
 echo ""
 echo "📋 Pushing Prisma schema to nipp_test..."
 
-# Use direct PostgreSQL connection (host port 5432) — avoids pgbouncer auth issues
-export DATABASE_URL="postgresql://${PG_USER}:${PG_PASS}@127.0.0.1:5432/nipp_test?pgbouncer=true"
+# Use direct PostgreSQL connection (host port $PG_PORT) — avoids pgbouncer auth issues
+export DATABASE_URL="postgresql://${PG_USER}:***@127.0.0.1:${PG_PORT}/nipp_test?pgbouncer=true"
 cd "$PROJECT_ROOT"
 
 npx prisma generate 2>&1 | tail -5
@@ -102,6 +106,13 @@ echo "🌱 Seeding test database..."
 # Seed script requires ADMIN_EMAIL and ADMIN_PASSWORD (not TEST_ prefixed)
 export ADMIN_EMAIL="${TEST_ADMIN_EMAIL:-superadmin@example.com}"
 export ADMIN_PASSWORD="${TEST_ADMIN_PASSWORD:-SuperAdmin123!}"
+
+# The seed's RLS bootstrap performs DDL — it MUST connect as owner even though
+# DATABASE_URL now points at the nipp_app role. SEED_RLS_DSN carries that owner
+# identity; NIPP_APP_DB_PASSWORD is set on the role by the bootstrap itself, so
+# the app DSN works from then on. (Both sourced from .env.test via set -a.)
+export SEED_RLS_DSN="${SEED_RLS_DSN:-}"
+export NIPP_APP_DB_PASSWORD="${NIPP_APP_DB_PASSWORD:-}"
 
 # Also export TEST_ prefixed vars for the app at runtime
 export TEST_ADMIN_EMAIL="${TEST_ADMIN_EMAIL:-superadmin@example.com}"

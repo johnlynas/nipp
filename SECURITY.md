@@ -68,65 +68,67 @@ The design follows three core principles:
 
 Tenant isolation is enforced at two independent layers:
 
-1. **Application-level**: A Prisma middleware extension (`$extends`) intercepts every query and injects a `tenantId` filter for tenant-scoped models.
-2. **Database-level**: PostgreSQL Row-Level Security (RLS) policies enforce the same tenant filter at the database engine, catching any queries that bypass the application layer.
+1. **Application level**: `lib/tenant-db.ts` (`tenantDb`) intercepts every
+   operation on the 11 tenant-scoped models — `findUnique`, `findFirst`,
+   `findMany`, `count`, `aggregate`, `groupBy`, `update`, `updateMany`,
+   `delete`, `deleteMany`, `create`, `upsert` — and injects the verified org id
+   (`organizationId`, `orgId` for BetterAuth models) into where/data. It fails
+   closed when no verified tenant context is active: a context-less scoped query
+   throws, it never silently widens. Verified platform-admin contexts pass
+   through with the DB layer as authority (cross-tenant).
 
-This dual-layer approach ensures that even if one mechanism is misconfigured or circumvented, the other prevents cross-tenant data access.
-
-### Application-Level Isolation (Prisma Extension)
-
-The Prisma extension is defined in `lib/tenant-db.ts` and applied via `prisma.$extends()`. It uses a global allowlist of models that are **not** tenant-scoped (global models) and applies an automatic `tenantId` filter to all other models.
-
-The extension runs inside a Prisma middleware hook that intercepts every `find`, `findFirst`, `count`, `create`, `update`, and `delete` operation. For tenant-scoped models, it injects:
-
-```typescript
-{ where: { ...args.where, tenantId } }
-```
-
-where `tenantId` is read from the current request context (see [Tenant Context Propagation](#tenant-context-propagation)).
+2. **Database level**: PostgreSQL Row-Level Security policies on all 18
+   org-relevant tables (`prisma/migrations/20260919093000_rls_complete_policies`).
+   The app connects as the NON-owner role `nipp_app`, so RLS applies to every
+   query — including raw SQL and code paths the extension cannot intercept. The
+   per-request context (`app.current_user_id` / `app.current_org_id` /
+   `app.is_platform_admin` / `app.platform_org_id`) is set transaction-locally
+   via `set_config(…, true)` by the single choke point
+   `lib/rls-transaction.ts` on the SAME pinned interactive-transaction
+   connection as the guarded query (verified: GUCs reset after commit, so
+   pooling cannot leak context). Unwrapped queries reach Postgres with no GUCs
+   and return zero rows — fail-closed by construction.
 
 ### Database-Level Isolation (PostgreSQL RLS)
 
-RLS policies are defined in the database schema and enforce tenant isolation at the SQL level. For each tenant-scoped table, a policy checks that the `tenantId` column matches the current session's tenant context.
-
-RLS is enforced for all roles except superusers (who can bypass tenant isolation via a dedicated role flag). This catches:
-
-- Direct database queries that bypass the Prisma extension
-- Bulk operations or migrations that may not trigger middleware
-- Future code paths that might omit tenant filters
+Policies are audited by the ownership spec
+(`tests/isolation/database/migrations-ownership.spec.ts`): it asserts no public
+table is owned by `nipp_app` (a table owner bypasses its own policies), RLS is
+enabled on exactly the 18 catalog tables, and the live `pg_policies` set hashes
+to the committed golden file `tests/isolation/database/policy-catalog.golden` —
+policy drift blocks merge.
 
 ### Tenant Context Propagation
 
-Tenant context is propagated through the request lifecycle using `AsyncLocalStorage` (Node.js built-in). The middleware in `middleware.ts` sets the tenant context at the start of each request:
+Tenant context propagates via `AsyncLocalStorage` (`lib/tenant-context.ts`). It
+is established at the route boundary from **server-verified inputs only**:
 
-1. The middleware extracts `tenantId` from the session or request headers
-2. It calls `tenantContextStore.setTenant(tenantId)` to store the context
-3. The Prisma extension reads from `tenantContextStore.getTenant()` during query execution
+1. BetterAuth session → verified user id (`auth.api.getSession`)
+2. Target org from the route, then access-checked: ordinary members → own org;
+   platform-admin flag = ONE membership lookup in the platform org (fail-closed
+   503 on lookup failure); everyone else → 403 before any query runs
+3. `withRLSContext({userId, orgId, isPlatformAdmin}, op)` wraps the handler so
+   ALS context and DB GUCs are bound for the same operation tree
 
-This ensures tenant context is available throughout the request without requiring explicit passing through function call chains.
+### Tenant-Scoped Model Inventory (app layer + RLS)
 
-### Global vs. Tenant-Scoped Models
+| Model | Org column | App-layer ext | RLS policy | Notes |
+|-------|-----------|---------------|------------|-------|
+| Role | organizationId | ✓ | ✓ | per-tenant role definitions |
+| RolePermission | organizationId | ✓ | ✓ | role ↔ permission grants |
+| MemberRole | organizationId | ✓ | ✓ | user ↔ role assignments |
+| Member | orgId | ✓ | ✓ | BetterAuth membership — authz-critical |
+| Invitation | orgId | ✓ | ✓ | pending invitations |
+| SentInvitation | orgId | ✓ | ✓ | invitation audit trail |
+| Team | organizationId | ✓ | ✓ | sub-organizational groups |
+| TeamMember | organizationId | ✓ | ✓ | team membership (+ PII linkage) |
+| TeamRole | organizationId | ✓ | ✓ | role inheritance on teams |
+| Calendar | organizationId | ✓ | ✓ | tenant calendars |
+| CalendarEvent | organizationId | ✓ | ✓ | recurrence lives in JSON fields (rrule/exdates); there is no separate model |
 
-The following table lists all models and their isolation scope:
+Tables enforced **by RLS only** (no app-layer org injection — their visibility rules are richer than a single-column filter): Organization (per-command policies; UPDATE/DELETE = platform ops acting *on* the target org, which prevents self-privilege edits), AuditLog + NotificationLog (append-only for `nipp_app` — no UPDATE/DELETE policy by design; NULL-org global rows visible cross-tenant), Notification (org ∪ NULL-global reads, admin ack path on UPDATE, GLOBAL broadcasts stored with `organizationId = NULL`), JobDefinition / JobExecution (platform-only: `is_platform_admin` flag AND `app.platform_org_id` matching the row's `platformOrgId`), Permission (global catalog — platform sees all, tenants see only permissions assigned to their org's roles via RolePermission).
 
-| Model | Scope | Isolation Method |
-|-------|-------|-----------------|
-| User | Global | Not tenant-scoped; banned flag checked at auth time |
-| Organization | Global | Not tenant-scoped; defines the organization boundary |
-| Role | Tenant | Prisma middleware + RLS |
-| RolePermission | Tenant | Prisma middleware + RLS |
-| MemberRole | Tenant | Prisma middleware + RLS |
-| Member | Tenant | Prisma middleware + RLS |
-| Invitation | Tenant | Prisma middleware + RLS |
-| SentInvitation | Tenant | Prisma middleware + RLS |
-| Team | Tenant | Prisma middleware + RLS |
-| TeamMember | Tenant | Prisma middleware + RLS |
-| TeamRole | Tenant | Prisma middleware + RLS |
-| Calendar | Tenant | Prisma middleware + RLS |
-| CalendarEvent | Tenant | Prisma middleware + RLS |
-| CalendarRecurrence | Tenant | Prisma middleware + RLS |
-
-Global models (User, Organization) are accessed without tenant filtering. All other models require a valid `tenantId` in the current request context.
+Exempt tables (no policy, documented): User / Session / Account (BetterAuth auth models containing no tenant data) and Resource / ResourceRole (global feature catalog; the sensitive side — which roles can use a resource — sits on org-scoped Role rows which ARE policied; `ResourceRole` has no direct org column by design, re-evaluate before any route ever queries it directly). All other models require a valid `tenantId` in the current request context.
 
 ---
 
@@ -570,24 +572,27 @@ All authenticated routes require a valid session cookie. Tenant-scoped routes ve
 
 ## Appendix B: Tenant-Scoped Model Inventory
 
-The complete inventory of models that are scoped to a tenant (isolated by `tenantId`):
+The complete inventory, current after the RLS rollout (org column is `organizationId`
+— historical docs referenced a nonexistent `tenantId`; recurrence is a JSON field on
+CalendarEvent, not a model):
 
-| Model | Prisma Middleware | RLS Policy | Notes |
-|-------|-------------------|------------|-------|
-| Role | Yes | Yes | Tenant-level role definitions |
-| RolePermission | Yes | Yes | Permission definitions for roles |
-| MemberRole | Yes | Yes | User-to-role assignments within a tenant |
-| Member | Yes | Yes | Tenant membership records |
-| Invitation | Yes | Yes | Pending tenant invitations |
-| SentInvitation | Yes | Yes | Previously sent invitations (audit) |
-| Team | Yes | Yes | Sub-organization groups |
-| TeamMember | Yes | Yes | Team membership records |
-| TeamRole | Yes | Yes | Role definitions within teams |
-| Calendar | Yes | Yes | User/tenant calendars |
-| CalendarEvent | Yes | Yes | Events within calendars |
-| CalendarRecurrence | Yes | Yes | Recurring event patterns |
+| Model | Org column | App-layer (tenantDb) | RLS policy | Notes |
+|-------|-----------|----------------------|------------|-------|
+| Role | organizationId | ✓ | ✓ | Tenant-level role definitions |
+| RolePermission | organizationId | ✓ | ✓ | Permission grants for roles |
+| MemberRole | organizationId | ✓ | ✓ | User-to-role assignments within a tenant |
+| Member | orgId | ✓ | ✓ | Tenant membership records (authz-critical) |
+| Invitation | orgId | ✓ | ✓ | Pending tenant invitations |
+| SentInvitation | orgId | ✓ | ✓ | Previously sent invitations (audit) |
+| Team | organizationId | ✓ | ✓ | Sub-organization groups |
+| TeamMember | organizationId | ✓ | ✓ | Team membership records |
+| TeamRole | organizationId | ✓ | ✓ | Roles assigned to teams (inheritance) |
+| Calendar | organizationId | ✓ | ✓ | Tenant calendars |
+| CalendarEvent | organizationId | ✓ | ✓ | Events incl. recurrence JSON fields |
 
-Models not listed above (User, Organization) are global and do not have a `tenantId` field.
+RLS-only tables (see Two-Layer Strategy above): Organization, AuditLog,
+NotificationLog, Notification, JobDefinition, JobExecution, Permission.
+Exempt: User, Session, Account, Resource, ResourceRole.
 
 ---
 
@@ -603,5 +608,5 @@ This document covers security-specific details. For broader architectural contex
 
 ---
 
-*Last updated: 2026-08-26*
+*Last updated: 2026-09-21*
 *Document owner: Engineering Team*

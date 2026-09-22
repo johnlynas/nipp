@@ -31,6 +31,10 @@
 import type { PrismaClient } from '@prisma/client';
 import prisma from './db';
 import { buildRLSContextQueries, type RLSContext } from './rls-context';
+// Re-exported so downstream callers (lib/platform-db.ts) import the verified
+// context TYPE from this module — the single choke point — and never touch
+// lib/rls-context directly (enforced by ESLint no-restricted-imports).
+export type { RLSContext };
 import { getRLSContext, runWithTenantContext } from './tenant-context';
 import { makeRLSTxSlot, wrapWithActiveRLSTx } from './db-context';
 import { diagLogMaxDepth } from './db-context';

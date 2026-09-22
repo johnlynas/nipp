@@ -46,10 +46,18 @@ export default tseslint.config(
     },
   },
 
-  // Tenant isolation: prevent direct prisma imports from lib/db.ts in business logic
+  // Tenant isolation import rules (design §4.2/§5.2) — one entry so the two
+  // no-restricted-imports groups merge instead of overriding each other:
+  //   * @/lib/db      → use lib/tenant-db.ts (app-layer scoping)
+  //   * rls-context   → GUC binds only via the lib/rls-transaction.ts choke point
   {
-    files: ['app/**/*.ts', 'app/**/*.tsx', 'lib/**/*.ts'],
-    ignores: ['lib/tenant-db.ts', 'lib/db.ts'],
+    files: ['**/*.ts'],
+    ignores: [
+      'lib/tenant-db.ts',
+      'lib/db.ts',
+      'lib/rls-transaction.ts', // legal GUC-builder consumer (binds inside pinned tx)
+      'tests/**', // unit tests may import internals under test
+    ],
     rules: {
       'no-restricted-imports': [
         'error',
@@ -58,6 +66,11 @@ export default tseslint.config(
             {
               group: ['@/lib/db'],
               message: 'Use lib/tenant-db.ts instead of lib/db.ts to ensure tenant isolation.',
+            },
+            {
+              group: ['*/rls-context', '**/rls-context'],
+              message:
+                'Never import lib/rls-context (GUC builder) directly — use withTenantRLS / withExplicitRLS from lib/rls-transaction.ts.',
             },
           ],
         },

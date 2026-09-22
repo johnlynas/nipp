@@ -1,0 +1,55 @@
+✅ Loaded .env.test
+
+🐳 Starting Docker test infrastructure...
+ Container nipp-0713-postgres-pgbouncer Running 
+⏳ Waiting for PostgreSQL to become available on host port 5432...
+✅ PostgreSQL is ready
+⏳ Waiting for pgbouncer to become available on host port 16432...
+✅ pgbouncer is ready
+
+📦 Creating nipp_test database...
+⚠️  nipp_test already exists — dropping and recreating...
+DROP DATABASE
+CREATE DATABASE
+✅ Database created: nipp_test
+
+📋 Pushing Prisma schema to nipp_test...
+
+Start by importing your Prisma Client (See: https://pris.ly/d/importing-client)
+
+Tip: Need your database queries to be 1000x faster? Accelerate offers you that and more: https://pris.ly/tip-2-accelerate
+
+
+Running generate... (Use --skip-generate to skip the generators)
+[2K[1A[2K[GRunning generate... - Prisma Client
+[2K[1A[2K[G✔ Generated Prisma Client (v6.19.3) to ./node_modules/@prisma/client in 77ms
+
+✅ Prisma schema pushed
+
+🌱 Seeding test database...
+   ✅ Created "QA Operations" team for Test Tenant Ltd
+   ✅ Created and added Test Tenant User A to QA Operations and Members teams
+   ✅ Created and added Test Tenant User B to QA Operations and Members teams
+✅ Testing profile seeded: Test Tenant Org (orga-tenant@example.com, orgb-tenant@example.com)
+
+📅 Seeding calendar test data...
+   ✅ Created default calendar for Platform organization
+   ✅ Calendar test data seeded for test tenant
+✅ Resource catalog overwritten/ensured: 14 resources
+🔔 Seeded 25 new SSE notification events (deduplicated on scope + org + title)
+
+✅ Seed completed successfully! Database overwritten with latest script values.
+
+📝 NEXT STEPS:
+1. (Done automatically) PLATFORM_ORGANIZATION_ID in .env is kept in sync with the real platform org.
+
+2. Restart your dev server: npm run dev
+3. Log out completely and log back in using the credentials from your .env file.
+4. You should now see the Super Admin dashboard!
+
+
+✅ Test environment setup complete!
+   Database: nipp_test (PostgreSQL host :5432, pgbouncer host :6433)
+   Super Admin: johnlynas666@gmail.com / RuthB3421
+   OrgA Tenant: orga-tenant@example.com / TenantA123!
+   OrgB Tenant: orgb-tenant@example.com / TenantB123!

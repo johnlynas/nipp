@@ -24,7 +24,13 @@ export default defineConfig({
       },
     },
     include: ['tests/**/*.test.ts', 'tests/**/*.test.tsx'],
-    exclude: ['tests/isolation/e2e/payload-encryption-browser.test.ts'],
+    exclude: [
+      'tests/isolation/e2e/payload-encryption-browser.test.ts',
+      // DB-layer RLS specs own their scratch DB (prepareDatabase) and need a
+      // real Postgres — run them via `npm run test:isolation:db`, never as part
+      // of the mock-based unit suite.
+      'tests/isolation/database/**',
+    ],
   },
   resolve: {
     alias: {

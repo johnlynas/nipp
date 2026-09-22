@@ -13,9 +13,8 @@
  * routes only call these after requireSuperAdmin passed.
  */
 import { env } from './env';
-import { withExplicitRLS } from './rls-transaction';
+import { withExplicitRLS, type RLSContext } from './rls-transaction';
 import { runWithTenantContext } from './tenant-context';
-import type { RLSContext } from './rls-context';
 
 /** Fail-closed platform org id (env-sourced; seed guarantees presence). */
 export function getVerifiedPlatformOrgId(): string {

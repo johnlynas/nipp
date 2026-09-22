@@ -26,6 +26,7 @@ jobs:
       - name: Lint
         run: npx eslint . --max-warnings=0
 
+
       - name: Type check
         run: npx tsc --noEmit
 
@@ -41,7 +42,6 @@ jobs:
           GOOGLE_CLIENT_ID: ${{ secrets.GOOGLE_CLIENT_ID }}
           GOOGLE_CLIENT_SECRET: ${{ secrets.GOOGLE_CLIENT_SECRET }}
           PII_ENCRYPTION_KEY: ${{ secrets.PII_ENCRYPTION_KEY }}
-        
 
   audit:
     runs-on: ubuntu-latest

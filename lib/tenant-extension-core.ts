@@ -23,7 +23,19 @@
 
 import { getCurrentOrgId as readCurrentOrgId, getTenantContext } from './tenant-context';
 
+/**
+ * Tenant-scoped Prisma models — the EXACT set of schema models that carry a
+ * required org column (organizationId; orgId for the BetterAuth-owned models).
+ * Cross-checked at unit-test time against prisma/schema.prisma itself
+ * (tests/unit/tenant-db-hardening.test.ts parses the schema), so a renamed
+ * model or a new org-scoped model fails the suite instead of silently losing
+ * scoping. Regeneration guard: if you touch this list, run
+ * `npm test` — coverage drift is a release-blocking failure (design §5.2).
+ */
 export const TENANT_SCOPED_MODELS = ['Role', 'RolePermission', 'MemberRole', 'Member', 'Invitation', 'SentInvitation', 'Team', 'TeamMember', 'TeamRole', 'Calendar', 'CalendarEvent'] as const;
+
+/** Compile-time name type for any tenant-scoped model. */
+export type TenantScopedModelName = (typeof TENANT_SCOPED_MODELS)[number];
 
 /** Structural type for Prisma extension query callbacks. */
 type QueryArgs = Record<string, unknown>;
@@ -79,6 +91,11 @@ function makeHandlers(model: string): Record<string, (cb: ExtensionCallback) => 
     updateMany: scopeWhere,
     delete: scopeWhere,
     deleteMany: scopeWhere,
+    // Task 4B (design §5.2): aggregate-shaped ops accept the same `where` —
+    // same scoping rule closes the silent count/aggregate/groupBy gap.
+    count: scopeWhere,
+    aggregate: scopeWhere,
+    groupBy: scopeWhere,
 
     create: ({ args, query }: ExtensionCallback): Promise<unknown> => {
       if (getFlag()) return query(args); // platform ctx: caller sets org explicitly; RLS checks it

@@ -4,10 +4,11 @@
 
 This document describes the isolation testing strategy for the Property NI Multi-Tenant Portal. Tenant isolation is a critical security boundary — a failure allows one tenant to access another tenant's data, which is a catastrophic vulnerability.
 
-The strategy uses a **defense-in-depth** approach with two complementary test layers:
+The strategy uses a **defense-in-depth** approach with three complementary test layers:
 
-1. **Application-Layer Tests (Vitest)** — Direct tests of the Prisma extension, AsyncLocalStorage context propagation, and global DB guard
-2. **End-to-End Tests (Playwright)** — Browser-level tests against a live Next.js server with real PostgreSQL + pgbouncer
+1. **Application-Layer Tests (Vitest)** — Direct tests of the Prisma extension (`tenantDb`) and AsyncLocalStorage context propagation. The unscoped `globalDb` client it used to guard is deleted (Phase 3B); the structural guarantee lives in `global-db-removed.test.ts`.
+2. **Database-Layer Tests (Vitest + raw pg)** — RLS probes that execute raw SQL as the non-owner `nipp_app` role against a freshly migrated scratch DB, verifying every policy independent of any app code (`tests/isolation/database/`, design §5.1).
+3. **End-to-End Tests (Playwright)** — Browser-level tests against a live Next.js server with real PostgreSQL + pgbouncer, exercising BOTH layers at once.
 
 ## Test Layers
 
@@ -16,22 +17,36 @@ The strategy uses a **defense-in-depth** approach with two complementary test la
 Tests the core isolation mechanisms directly, without going through the HTTP layer.
 
 **What is tested:**
-- `lib/tenant-db.ts` — Prisma `$extends` extension auto-scopes queries to the current organization
-- `lib/tenant-context.ts` — AsyncLocalStorage propagates `organizationId` through async call chains
-- `lib/global-db-guard.ts` — Runtime guard throws when `getGlobalDb()` is called outside a super-admin context
+- `lib/tenant-db.ts` — Prisma `$extends` chain auto-scopes queries to the current organization (incl. count/aggregate/groupBy); fails closed without context; platform-admin contexts pass through to RLS
+- `lib/tenant-context.ts` — AsyncLocalStorage propagates the verified `(userId, orgId, isPlatformAdmin)` context through async call chains
+- model coverage drift guard — `TENANT_SCOPED_MODELS` must match the schema's required-org-column models exactly (`tests/unit/tenant-db-hardening.test.ts`)
 
 **Test pattern:**
 1. Create test data for two organizations (OrgA and OrgB) in the test database
-2. Set tenant context to OrgA using `runWithTenant(orgA.id, ...)`
+2. Set tenant context to OrgA using `runWithTenantContext({userId, orgId: orgA.id, isPlatformAdmin}, ...)` (or via the route-boundary `withRLSContext` for request shapes)
 3. Query the model — expect only OrgA data
 4. Set tenant context to OrgB
 5. Query the same model — expect only OrgB data
 
 **Location:** `tests/isolation/application/`
 
-### Layer 2: End-to-End Tests (Playwright)
+### Layer 2: Database-Layer Tests (Vitest + raw pg) — RLS
 
-Tests the full request/response cycle through a live browser, verifying that isolation holds at every layer (middleware → API route → database).
+Tests PostgreSQL Row Level Security independently of any application code. The suite creates a SCRATCH database (`nipp_rls_test`), applies the full migration chain, seeds a deterministic two-tenant + platform fixture as owner, then probes RLS as `nipp_app` with GUCs set via parameterized transaction-local `set_config` — the same binding shape the app uses (`lib/rls-transaction.ts`) but driven from raw SQL.
+
+**What is tested:**
+- `rls-org-scoped.spec.ts` — per org table: own-org rows visible, foreign-org rows invisible; writes bound to ctx (WITH CHECK denies foreign-org inserts; UPDATE/DELETE of foreign rows silently denied)
+- `rls-platform-admin.spec.ts` — flag=1 cross-tenant reads; writes still ctx-bound (foreign-org insert/update violate RLS); Organization per-command posture (admin-only mutability, acting ON the target org); Notification ack path
+- `rls-audit-append-only.spec.ts` — AuditLog/NotificationLog have NO update/delete policy (meta-check via `pg_policies`); cross-tenant SELECT only with flag=1; NULL-org global rows visible to all
+- `rls-job-definition-platform-only.spec.ts` — job tables invisible to any tenant ctx and to flag-without-platformOrgId; full access with the verified platform context
+- `rls-context-probe.spec.ts` — NO GUCs → zero rows on every org-scoped table (fail-closed posture), with the documented global-row exceptions
+- `migrations-ownership.spec.ts` — no public table owned by `nipp_app`; RLS-enabled count = 18; live policy catalog hash == committed golden file (drift blocks merge)
+
+**Location:** `tests/isolation/database/` — run with `npm run test:isolation:db` (needs a reachable owner DSN + `NIPP_APP_DB_PASSWORD`; in CI it uses the `rls-db-tests` job's postgres:16 service).
+
+### Layer 3: End-to-End Tests (Playwright)
+
+Tests the full request/response cycle through a live browser, verifying that isolation holds at every layer (middleware → API route → both isolation layers in the database).
 
 **What is tested:**
 - Super admin exclusivity — regular tenant users get 403 on `/admin/*` routes
@@ -46,12 +61,6 @@ Tests the full request/response cycle through a live browser, verifying that iso
 4. Assert on response status, page content, or data returned
 
 **Location:** `tests/isolation/e2e/`
-
-### Layer 3: Database-Layer Tests (Future)
-
-PostgreSQL Row Level Security (RLS) tests that execute raw SQL queries to verify the database-level isolation boundary. These require RLS policies to be added first (deferred until business data models exist).
-
-**Location:** `tests/isolation/database/` (templates in place)
 
 ## Test Environment Setup
 
@@ -127,8 +136,12 @@ docker compose -f docker-compose.test.yml ps
 ### Full Test Run
 
 ```bash
-# One-command full run (setup → tests → teardown)
+# One-command full run (setup → DB-layer RLS → tests → teardown)
 npm run test:isolation
+
+# Database-layer RLS suite alone (any reachable Postgres with the owner DSN;
+# CI uses its dedicated postgres:16 service + NIPP_APP_DB_PASSWORD secret)
+npm run test:isolation:db
 
 # Or granular control:
 docker compose -f docker-compose.test.yml up -d          # Start infra
@@ -243,9 +256,9 @@ npx playwright test --grep="Tenant user cannot access /admin/organizations"
 2. Import the library function you want to test
 3. Set up test data in the `nipp_test` database using Prisma
 4. Write tests following the established patterns:
-   - Use `runWithTenant(orgId, fn)` to set tenant context
-   - Use `tenantDb` for scoped queries
-   - Use `globalDb` with `superAdminStorage.run(true, ...)` for super-admin operations
+   - Use `runWithTenantContext({userId, orgId, isPlatformAdmin}, fn)` to set the verified tenant context
+   - Use `tenantDb` for scoped queries (never a raw client)
+   - For platform-admin operations use the `lib/platform-db.ts` wrappers — an unscoped client no longer exists (`globalDb` was deleted in Phase 3B)
 5. Run with: `npm test -- tests/isolation/application/<your-file>.test.ts`
 
 ### E2E Tests (Playwright)
@@ -259,12 +272,15 @@ npx playwright test --grep="Tenant user cannot access /admin/organizations"
    - Use `expect(page).toHaveURL(...)` for navigation verification
 4. Run with: `npx playwright test tests/isolation/e2e/<your-file>.spec.ts`
 
-### Database-Layer Tests (Future — RLS)
+### Database-Layer Tests (Vitest + raw pg — RLS)
 
-1. Create a new file in `tests/isolation/database/`
-2. Use raw SQL queries via the test database connection
-3. Set session variable: `SELECT set_config('app.current_org_id', '<orgId>', true)`
-4. Execute queries and verify RLS policies enforce isolation
+1. Create a new `*.spec.ts` file in `tests/isolation/database/`
+2. Reuse the shared fixture: `prepareDatabase()` from `./rls-fixture` (fresh scratch DB, full migration chain, deterministic two-tenant seed as owner)
+3. Probe as the non-owner role with `appClient()` + `withGucTxn(client, gucs, fn)` — GUCs are set transaction-locally via parameterized `set_config($1,$2,true)`, exactly like the app's binding; every probe txn rolls back so the fixture stays intact
+4. Execute raw SQL and assert RLS visibility/denial per the policy catalog (`tests/isolation/database/policy-catalog.golden`)
+5. If you change a migration's policies: regenerate the golden with `npm run db:gen-policy-golden` and commit both
+
+Run with: `npm run test:isolation:db`. A failure MUST block merge (release-blocking by policy).
 
 ## Troubleshooting
 
