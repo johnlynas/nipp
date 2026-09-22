@@ -18,7 +18,7 @@ vi.mock('@/lib/payload-middleware', () => ({
   },
 }));
 
-vi.mock('@/lib/global-db', () => ({
+vi.mock('@/lib/tenant-db', () => ({
   default: {
     organization: { findUnique: vi.fn(), update: vi.fn() },
     member: { findMany: vi.fn() },
@@ -31,13 +31,23 @@ vi.mock('@/lib/require-super-admin', () => ({
   requireSuperAdmin: vi.fn(),
 }));
 
+// The status routes wrap their operation in withTenantAdminContext, which under
+// the real impl starts a pinned interactive Prisma transaction (GUC binding).
+// Unit tests here exercise route logic against mocked tenantDb — pass the op
+// straight through. The verified-context wrapper itself is covered by
+// tests/unit/rls-transaction.test.ts (same convention as tenant-mgmt-* tests).
+vi.mock('@/lib/platform-db', () => ({
+  withTenantAdminContext: vi.fn(
+    async (_userId: string, _orgId: string, fn: () => Promise<unknown>) => fn()
+  ),
+}));
+
 // The status routes' invalidateOrgSessions() dynamically imports @/lib/redis and
 // awaits redis.del(...) BEFORE reaching globalDb.session.deleteMany(). Without a
 // mock, the real ioredis client is instantiated and, when Redis is unreachable
 // (e.g. CI), del() blocks/errors — the try/catch swallows it and session
 // invalidation is silently skipped, making these tests flaky. Mock it to return
-// a fake client whose del() resolves, matching the convention in
-// permissions-resolver.test.ts / cache/hybrid.test.ts.
+// a fake client whose del() resolves (matching cache/hybrid.test.ts).
 const mockRedisClient = {
   get: vi.fn(),
   set: vi.fn(),
@@ -86,7 +96,7 @@ vi.mock('@/services/organization-service', () => ({
 // Resolve mocked modules after all mocks are declared
 // ---------------------------------------------------------------------------
 
-const globalDb = (await import('@/lib/global-db')).default;
+const globalDb = (await import('@/lib/tenant-db')).default;
 const { requireSuperAdmin } = await import('@/lib/require-super-admin');
 const { recordAuditLog } = await import('@/lib/audit-log');
 const { logger } = await import('@/lib/logger');

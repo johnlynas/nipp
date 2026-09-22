@@ -6,8 +6,8 @@
 
 import { NextRequest, NextResponse } from 'next/server';
 import { auth } from '@/lib/auth';
-import { superAdminStorage } from '@/lib/global-db-guard';
-import { resolveTenantAccess } from '@/lib/tenant-access';
+import { resolveTenantAccess, toTenantContext } from '@/lib/tenant-access';
+import { withRLSContext } from '@/lib/rls-transaction';
 import { CalendarEventService } from '@/services/calendar-event-service';
 import { checkCalendarRateLimit } from '@/lib/rate-limiter';
 
@@ -39,6 +39,7 @@ export async function GET(
   if (!access.ok) {
     return NextResponse.json({ error: access.error }, { status: access.status });
   }
+return withRLSContext(toTenantContext(access, session.user.id), async () => {
   const ctx = access.ctx;
 
   // Parse limit param
@@ -46,10 +47,7 @@ export async function GET(
   const limit = parseInt(url.searchParams.get('limit') || '10', 10);
 
   try {
-    // Scoping globalDb access (S7): required for tenant-org reads by super admins.
-    const events = await superAdminStorage.run(true, () =>
-      CalendarEventService.getUpcomingEvents(ctx, orgId, limit)
-    );
+    const events = await CalendarEventService.getUpcomingEvents(ctx, orgId, limit);
     return NextResponse.json(events);
   } catch (error: unknown) {
     if (error instanceof Error) {
@@ -57,4 +55,5 @@ export async function GET(
     }
     return NextResponse.json({ error: 'Internal server error' }, { status: 500 });
   }
+  });
 }

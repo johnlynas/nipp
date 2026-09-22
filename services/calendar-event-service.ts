@@ -5,7 +5,10 @@
  * Tenant isolation is enforced by the Prisma Extension (lib/tenant-db.ts) + PostgreSQL RLS.
  */
 
-import globalDb from '@/lib/global-db';
+// RLS plan Phase 3: tenantDb (scoped) replaces the unscoped globalDb; each
+// operation runs inside runWithTenant(orgId) so the Prisma extension resolves a context.
+import tenantDb from '@/lib/tenant-db';
+import { runWithTenant } from '@/lib/tenant-context';
 import { logger } from '@/lib/logger';
 import {
   ServiceContext,
@@ -206,9 +209,11 @@ export async function createEvent(
     throw new ValidationError('Event title is required');
   }
 
-  const calendar = await globalDb.calendar.findFirst({
-    where: { id: input.calendarId, organizationId: ctx.organizationId! },
-  });
+  const calendar = await runWithTenant(ctx.organizationId!, () =>
+    tenantDb.calendar.findFirst({
+      where: { id: input.calendarId, organizationId: ctx.organizationId! },
+    }),
+  );
 
   if (!calendar) {
     throw new NotFoundError(`Calendar with ID "${input.calendarId}" not found`);
@@ -235,7 +240,9 @@ export async function createEvent(
     }
   }
 
-  const event = await globalDb.calendarEvent.create({ data: eventData as unknown as Parameters<typeof globalDb.calendarEvent.create>[0]['data'] });
+  const event = await runWithTenant(ctx.organizationId!, () =>
+    tenantDb.calendarEvent.create({ data: eventData as unknown as Parameters<typeof tenantDb.calendarEvent.create>[0]['data'] }),
+  );
 
   logger.info(
     { userId: ctx.userId, eventId: event.id },
@@ -286,10 +293,12 @@ export async function getEvents(
     where.calendarId = input.calendarId;
   }
 
-  const events = await globalDb.calendarEvent.findMany({
-    where,
-    orderBy: { startDate: 'asc' },
-  });
+  const events = await runWithTenant(ctx.organizationId!, () =>
+    tenantDb.calendarEvent.findMany({
+      where,
+      orderBy: { startDate: 'asc' },
+    }),
+  );
 
   return events.map((e) => mapEventToDetails(e));
 }
@@ -312,10 +321,12 @@ export async function getEventsWithRecurrences(
     where.calendarId = input.calendarId;
   }
 
-  const events = await globalDb.calendarEvent.findMany({
-    where,
-    orderBy: { startDate: 'asc' },
-  });
+  const events = await runWithTenant(ctx.organizationId!, () =>
+    tenantDb.calendarEvent.findMany({
+      where,
+      orderBy: { startDate: 'asc' },
+    }),
+  );
 
   // Filter non-recurring events for actual date-range overlap.
   // Recurring events are included as long as the series started by rangeEnd —
@@ -364,9 +375,11 @@ export async function getEventById(
   ctx: ServiceContext,
   eventId: string,
 ): Promise<CalendarEventWithDetails> {
-  const event = await globalDb.calendarEvent.findFirst({
-    where: { id: eventId, organizationId: ctx.organizationId! },
-  });
+  const event = await runWithTenant(ctx.organizationId!, () =>
+    tenantDb.calendarEvent.findFirst({
+      where: { id: eventId, organizationId: ctx.organizationId! },
+    }),
+  );
 
   if (!event) {
     throw new NotFoundError(`Event with ID "${eventId}" not found`);
@@ -420,9 +433,11 @@ export async function updateEvent(
 ): Promise<CalendarEventWithDetails> {
   requireAnyAdmin(ctx);
 
-  const event = await globalDb.calendarEvent.findFirst({
-    where: { id: eventId, organizationId: ctx.organizationId! },
-  });
+  const event = await runWithTenant(ctx.organizationId!, () =>
+    tenantDb.calendarEvent.findFirst({
+      where: { id: eventId, organizationId: ctx.organizationId! },
+    }),
+  );
 
   if (!event) {
     throw new NotFoundError(`Event with ID "${eventId}" not found`);
@@ -499,10 +514,12 @@ export async function updateEvent(
     }
   }
 
-  const updated = await globalDb.calendarEvent.update({
-    where: { id: eventId, organizationId: ctx.organizationId! },
-    data: updateData,
-  });
+  const updated = await runWithTenant(ctx.organizationId!, () =>
+    tenantDb.calendarEvent.update({
+      where: { id: eventId, organizationId: ctx.organizationId! },
+      data: updateData,
+    }),
+  );
 
   logger.info(
     { userId: ctx.userId, eventId: updated.id },
@@ -521,17 +538,21 @@ export async function deleteEvent(
 ): Promise<void> {
   requireAnyAdmin(ctx);
 
-  const event = await globalDb.calendarEvent.findFirst({
-    where: { id: eventId, organizationId: ctx.organizationId! },
-  });
+  const event = await runWithTenant(ctx.organizationId!, () =>
+    tenantDb.calendarEvent.findFirst({
+      where: { id: eventId, organizationId: ctx.organizationId! },
+    }),
+  );
 
   if (!event) {
     throw new NotFoundError(`Event with ID "${eventId}" not found`);
   }
 
-  await globalDb.calendarEvent.delete({
-    where: { id: eventId, organizationId: ctx.organizationId! },
-  });
+  await runWithTenant(ctx.organizationId!, () =>
+    tenantDb.calendarEvent.delete({
+      where: { id: eventId, organizationId: ctx.organizationId! },
+    }),
+  );
 
   logger.info(
     { userId: ctx.userId, eventId },
@@ -559,23 +580,27 @@ export async function getUpcomingEvents(
   const upcomingWindowEnd = new Date(today.getTime() + 30 * 24 * 60 * 60 * 1000);
 
   // Get non-recurring upcoming events (filter rrule presence in code since Json columns can't be null-filtered easily)
-  const allUpcomingEvents = await globalDb.calendarEvent.findMany({
-    where: {
-      organizationId: targetOrgId,
-      startDate: { gte: today },
-    },
-    orderBy: { startDate: 'asc' },
-  });
+  const allUpcomingEvents = await runWithTenant(targetOrgId, () =>
+    tenantDb.calendarEvent.findMany({
+      where: {
+        organizationId: targetOrgId,
+        startDate: { gte: today },
+      },
+      orderBy: { startDate: 'asc' },
+    }),
+  );
 
   const singleEvents = allUpcomingEvents.filter((e) => getRruleJson(e) === null).slice(0, limit);
 
   // Get recurring events and expand for upcoming window (next 30 days)
-  const recurringEvents = await globalDb.calendarEvent.findMany({
-    where: {
-      organizationId: targetOrgId,
-      startDate: { lte: upcomingWindowEnd },
-    },
-  });
+  const recurringEvents = await runWithTenant(targetOrgId, () =>
+    tenantDb.calendarEvent.findMany({
+      where: {
+        organizationId: targetOrgId,
+        startDate: { lte: upcomingWindowEnd },
+      },
+    }),
+  );
 
   const recurringInstances: CalendarEventWithDetails[] = [];
 

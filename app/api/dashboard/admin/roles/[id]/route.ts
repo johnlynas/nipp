@@ -2,32 +2,32 @@ import { NextRequest, NextResponse } from 'next/server';
 import { requireSuperAdmin } from '@/lib/require-super-admin';
 import { checkAdminRateLimit } from '@/lib/rate-limiter';
 
-import globalDb from '@/lib/global-db';
+// RLS Phase 3: role ops run under a verified target-org context (scoped models pass through; RLS enforces)
+import tenantDb from '@/lib/tenant-db';
+import { withPlatformContext as withPlatformContextForDb, withTenantAdminContext } from '@/lib/platform-db';
 import { RoleService } from '@/services/role-service';
 import { notifyRoleOperation } from '@/lib/notification-push';
 
 export const runtime = 'nodejs';
 
-/** Best effort: resolve a role's name for notification labels. */
-async function getRoleLabel(id: string): Promise<string> {
+/** Best effort: resolve a role's name for notification labels (verified platform ctx). */
+async function getRoleLabel(userId: string, id: string): Promise<string> {
   try {
-    const role = await globalDb.role.findUnique({
-      where: { id },
-      select: { name: true },
-    });
+    const role = await withPlatformContextForDb(userId, () =>
+      tenantDb.role.findUnique({ where: { id }, select: { name: true } }),
+    );
     return role ? `Role "${role.name}" (${id})` : id;
   } catch {
     return id;
   }
 }
 
-/** Best effort: resolve a role's organization ID for notification scoping. */
-async function getRoleOrgId(id: string): Promise<string | null> {
+/** Best effort: resolve a role's organization ID for notification scoping (verified platform ctx). */
+async function getRoleOrgId(userId: string, id: string): Promise<string | null> {
   try {
-    const role = await globalDb.role.findUnique({
-      where: { id },
-      select: { organizationId: true },
-    });
+    const role = await withPlatformContextForDb(userId, () =>
+      tenantDb.role.findUnique({ where: { id }, select: { organizationId: true } }),
+    );
     return role?.organizationId ?? null;
   } catch {
     return null;
@@ -57,10 +57,12 @@ export async function GET(
       return NextResponse.json({ error: 'Organization ID is required' }, { status: 400 });
     }
 
-    const result = await RoleService.getById(id, organizationId, {
-      userId: auth.session!.user.id,
-      role: 'PLATFORM_ADMIN',
-    });
+    const result = await withTenantAdminContext(auth.session!.user.id, organizationId, () =>
+      RoleService.getById(id, organizationId, {
+        userId: auth.session!.user.id,
+        role: 'PLATFORM_ADMIN',
+      }),
+    );
 
     return NextResponse.json(result);
   } catch (error) {
@@ -102,14 +104,15 @@ export async function PATCH(
     }
 
     // Capture the role name for notification labels before a rename happens
-    const [targetLabel] = await Promise.all([getRoleLabel(id)]);
+    const [targetLabel] = await Promise.all([getRoleLabel(auth.session!.user.id, id)]);
 
     try {
-      const result = await RoleService.update(id, {
+      const result = await withTenantAdminContext(auth.session!.user.id, organizationId, () => RoleService.update(id, {
         name: body.name,
         description: body.description,
-        isDefault: body.isDefault,
-      }, organizationId, { userId: auth.session!.user.id, role: 'PLATFORM_ADMIN' });
+          isDefault: body.isDefault,
+        }, organizationId, { userId: auth.session!.user.id, role: 'PLATFORM_ADMIN' }),
+      );
 
       await notifyRoleOperation('update', targetLabel, true, undefined, organizationId);
 
@@ -155,13 +158,15 @@ export async function DELETE(
     }
 
     // Capture a label and org context for the notification before the role disappears
-    const [targetLabel, orgId] = await Promise.all([getRoleLabel(id), getRoleOrgId(id)]);
+    const [targetLabel, orgId] = await Promise.all([getRoleLabel(auth.session!.user.id, id), getRoleOrgId(auth.session!.user.id, id)]);
 
     try {
-      await RoleService.delete(id, organizationId, {
-        userId: auth.session!.user.id,
-        role: 'PLATFORM_ADMIN',
-      });
+      await withTenantAdminContext(auth.session!.user.id, organizationId, () =>
+        RoleService.delete(id, organizationId, {
+          userId: auth.session!.user.id,
+          role: 'PLATFORM_ADMIN',
+        }),
+      );
 
       await notifyRoleOperation('delete', targetLabel, true, undefined, orgId);
 

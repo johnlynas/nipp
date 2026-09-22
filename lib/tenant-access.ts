@@ -13,15 +13,30 @@
  */
 
 import type { NextRequest } from 'next/server';
-import globalDb from '@/lib/global-db';
-import { superAdminStorage } from '@/lib/global-db-guard';
+import tenantDb from '@/lib/tenant-db';
+import { buildPlatformContext } from '@/lib/platform-db';
+import { withExplicitRLS } from '@/lib/rls-transaction';
 import { verifySuperAdmin } from '@/lib/authz';
 import { logger } from '@/lib/logger';
 import type { ServiceContext } from '@/lib/services/types';
+import type { TenantContextObject } from '@/lib/tenant-context';
 
 export type TenantAccess =
   | { ok: true; ctx: ServiceContext }
   | { ok: false; status: 401 | 403 | 503; error: string };
+
+/**
+ * Read a membership row with the RLS flag bound (platform-admin visible).
+ * This is the ACCESS RESOLUTION read itself — server-side, before any context
+ * exists; binding it under the verified platform context keeps the unscoped
+ * bypass client (deleted in Phase 3) out of the critical path entirely.
+ */
+async function readMembershipForAccessCheck(userId: string, orgId: string) {
+  const ctx = { ...buildPlatformContext(userId), orgId };
+  return withExplicitRLS(ctx, () =>
+    tenantDb.member.findFirst({ where: { userId, orgId }, select: { role: true } })
+  );
+}
 
 /**
  * Resolve membership OR super-admin access for an org-scoped request.
@@ -31,15 +46,7 @@ export async function resolveTenantAccess(
   userId: string,
   orgId: string
 ): Promise<TenantAccess> {
-  // Membership lookup needs the unscoped client — this is a short-lived read
-  // inside the same request as the guarded operation; wrapped so the Async
-  // LocalStorage context (S7) does not leak to subsequent operations.
-  const membership = await superAdminStorage.run(true, async () => {
-    return globalDb.member.findFirst({
-      where: { userId, orgId },
-      select: { role: true },
-    });
-  });
+  const membership = await readMembershipForAccessCheck(userId, orgId);
 
   if (membership) {
     const role = membership.role === 'admin' ? ('TENANT_ADMIN' as const) : ('MEMBER' as const);
@@ -63,4 +70,23 @@ export async function resolveTenantAccess(
 
   logger.info({ userId, orgId }, 'Super Admin accessing tenant organization');
   return { ok: true, ctx: { userId, role: 'PLATFORM_ADMIN', organizationId: orgId } };
+}
+
+/**
+ * Build the verified RLS context object (RLS plan Phase 1D) from a resolved
+ * TenantAccess + session user id. No extra lookups: isPlatformAdmin mirrors
+ * the authoritative decision already made by resolveTenantAccess.
+ */
+export function toTenantContext(
+  access: Extract<TenantAccess, { ok: true }>,
+  sessionUserId: string
+): TenantContextObject {
+  if (!sessionUserId) throw new Error('toTenantContext: sessionUserId required (fail-closed)');
+  const orgId = access.ctx.organizationId;
+  if (!orgId) throw new Error('toTenantContext: organizationId missing (fail-closed)');
+  return {
+    userId: sessionUserId,
+    orgId,
+    isPlatformAdmin: access.ctx.role === 'PLATFORM_ADMIN',
+  };
 }

@@ -1,13 +1,15 @@
 /**
  * PermissionService — Full CRUD for the Permission model.
  *
- * Model locality: Global (non-org-scoped). Uses globalDb for all queries.
+ * Model locality: Global (non-org-scoped). Uses tenantDb for all queries.
  * Redis cache is invalidated on every update() and delete() call to prevent
  * stale cached permissions (security gap: up to 5 min without invalidation).
  */
 
 import { Prisma } from '@prisma/client';
-import globalDb from '@/lib/global-db';
+// RLS plan Phase 3: Permission/RolePermission are not in tenantDb's scoped model list —
+// pass-through swap removes the unscoped-client bypass without changing query behavior.
+import tenantDb from '@/lib/tenant-db';
 import { logger } from '@/lib/logger';
 import { ServiceContext, NotFoundError, ConflictError, ValidationError } from '@/lib/services/types';
 import { requirePlatformAdmin, requireAnyAdmin } from '@/lib/services/base-service';
@@ -58,12 +60,12 @@ export const PermissionService = {
     }
 
     // Check for duplicate key
-    const existing = await globalDb.permission.findUnique({ where: { key } });
+    const existing = await tenantDb.permission.findUnique({ where: { key } });
     if (existing) {
       throw new ConflictError('A permission with this key already exists');
     }
 
-    const permission = await globalDb.permission.create({
+    const permission = await tenantDb.permission.create({
       data: { key, resource, action, description: data.description || '', isDefault: data.isDefault ?? false },
     });
 
@@ -81,7 +83,7 @@ export const PermissionService = {
   async getById(id: string, ctx: ServiceContext) {
     requireAnyAdmin(ctx);
 
-    const permission = await globalDb.permission.findUnique({ where: { id } });
+    const permission = await tenantDb.permission.findUnique({ where: { id } });
     if (!permission) {
       throw new NotFoundError('Permission not found');
     }
@@ -118,13 +120,13 @@ export const PermissionService = {
     }
 
     const [permissions, total] = await Promise.all([
-      globalDb.permission.findMany({
+      tenantDb.permission.findMany({
         where,
         skip,
         take: pageSize,
         orderBy: [{ isDefault: 'desc' }, { resource: 'asc' }, { action: 'asc' }],
       }),
-      globalDb.permission.count({ where }),
+      tenantDb.permission.count({ where }),
     ]);
 
     return {
@@ -141,14 +143,14 @@ export const PermissionService = {
     requirePlatformAdmin(ctx);
 
     // Verify permission exists first
-    const existingPermission = await globalDb.permission.findUnique({ where: { id } });
+    const existingPermission = await tenantDb.permission.findUnique({ where: { id } });
     if (!existingPermission) {
       throw new NotFoundError('Permission not found');
     }
 
     // Validate key uniqueness if changing
     if (data.key && data.key !== existingPermission.key) {
-      const keyExists = await globalDb.permission.findUnique({ where: { key: data.key } });
+      const keyExists = await tenantDb.permission.findUnique({ where: { key: data.key } });
       if (keyExists) {
         throw new ConflictError('A permission with this key already exists');
       }
@@ -162,7 +164,7 @@ export const PermissionService = {
     if (data.description !== undefined) updateData.description = data.description;
     if (data.isDefault !== undefined) updateData.isDefault = data.isDefault;
 
-    const updatedPermission = await globalDb.permission.update({
+    const updatedPermission = await tenantDb.permission.update({
       where: { id },
       data: updateData,
     });
@@ -186,13 +188,13 @@ export const PermissionService = {
     requirePlatformAdmin(ctx);
 
     // Verify permission exists first
-    const existingPermission = await globalDb.permission.findUnique({ where: { id } });
+    const existingPermission = await tenantDb.permission.findUnique({ where: { id } });
     if (!existingPermission) {
       throw new NotFoundError('Permission not found');
     }
 
     // Safety check: cannot delete permission assigned to any role
-    const rolePermissionCount = await globalDb.rolePermission.count({
+    const rolePermissionCount = await tenantDb.rolePermission.count({
       where: { permissionId: id },
     });
 
@@ -213,7 +215,7 @@ export const PermissionService = {
       return null;
     }
 
-    await globalDb.permission.delete({ where: { id } });
+    await tenantDb.permission.delete({ where: { id } });
 
     // Invalidate Redis permission cache after mutation
     await invalidatePermissionCache();

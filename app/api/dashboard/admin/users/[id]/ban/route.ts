@@ -2,7 +2,9 @@ import { NextRequest, NextResponse } from 'next/server';
 import { requireSuperAdmin } from '@/lib/require-super-admin';
 import { checkAdminRateLimit } from '@/lib/rate-limiter';
 
-import globalDb from '@/lib/global-db';
+// RLS Phase 3: user ban toggle is a platform op (User has no RLS — verified context kept).
+import tenantDb from '@/lib/tenant-db';
+import { withPlatformContext } from '@/lib/platform-db';
 import { logger } from '@/lib/logger';
 
 export const runtime = 'nodejs';
@@ -28,20 +30,25 @@ export async function POST(
 
   const body = await request.json();
 
-    const user = await globalDb.user.findUnique({ where: { id } });
+    // RLS: verified platform context (User table has no RLS; ctx kept for audit consistency).
+    const user = await withPlatformContext(auth.session!.user.id, () =>
+      tenantDb.user.findUnique({ where: { id } })
+    );
     if (!user) {
       return NextResponse.json({ error: 'User not found' }, { status: 404 });
     }
 
     const banned = body.banned ?? !user.banned;
-    const updatedUser = await globalDb.user.update({
-      where: { id },
-      data: {
-        banned,
-        banReason: body.banReason ?? (banned ? 'Banned via dashboard' : null),
-        banExpires: body.banExpires ?? (banned ? null : undefined),
-      },
-    });
+    const updatedUser = await withPlatformContext(auth.session!.user.id, () =>
+      tenantDb.user.update({
+        where: { id },
+        data: {
+          banned,
+          banReason: body.banReason ?? (banned ? 'Banned via dashboard' : null),
+          banExpires: body.banExpires ?? (banned ? null : undefined),
+        },
+      })
+    );
 
     logger.info(
       { adminUserId: auth.session!.user.id, targetUserId: id, banned, banReason: updatedUser.banReason },

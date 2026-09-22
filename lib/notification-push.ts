@@ -15,7 +15,7 @@
  */
 
 import { NotificationPriority, NotificationScope } from '@prisma/client';
-import globalDb from '@/lib/global-db';
+import tenantDb from '@/lib/tenant-db';
 
 // ---------------------------------------------------------------------------
 // Types
@@ -252,7 +252,7 @@ export async function pushNotification(payload: Omit<NotificationPayload, 'id' |
   // consumers don't need a second lookup. Best effort — missing name is fine.
   let organizationName: string | undefined;
   if (payload.organizationId) {
-    const org = await globalDb.organization.findUnique({
+    const org = await tenantDb.organization.findUnique({
       where: { id: payload.organizationId },
       select: { name: true },
     });
@@ -273,7 +273,7 @@ export async function pushNotification(payload: Omit<NotificationPayload, 'id' |
   // catches same-process races): skip if an identical notification was
   // persisted within the last window.
   const dedupWindow = new Date(Date.now() - DEDUP_WINDOW_MS);
-  const existing = await globalDb.notification.findFirst({
+  const existing = await tenantDb.notification.findFirst({
     where: {
       title: notification.title,
       message: notification.message,
@@ -291,7 +291,7 @@ export async function pushNotification(payload: Omit<NotificationPayload, 'id' |
 
   // Persist to DB for history/replay (model has no organizationName column)
   try {
-    await globalDb.notification.create({
+    await tenantDb.notification.create({
       data: {
         title: notification.title,
         message: notification.message,

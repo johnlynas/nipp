@@ -9,7 +9,8 @@
  * PATCH endpoint when an `editScope` field is present in the request body.
  */
 
-import globalDb from '@/lib/global-db';
+import tenantDb from '@/lib/tenant-db';
+import { runWithTenant } from '@/lib/tenant-context';
 import { ServiceContext } from '@/lib/services/types';
 import { RruleJson } from './recurrence-rrule';
 import type { CalendarEventType } from '@/components/calendar/types';
@@ -45,7 +46,7 @@ function formatDateInput(date: Date): string {
 
 /** Get the rrule JSON from an event (handles both legacy and new formats). */
 async function getEventRrule(ctx: ServiceContext, eventId: string): Promise<RruleJson | null> {
-  const event = await globalDb.calendarEvent.findFirst({
+  const event = await tenantDb.calendarEvent.findFirst({
     where: { id: eventId, organizationId: ctx.organizationId! },
   });
 
@@ -58,7 +59,7 @@ async function getEventRrule(ctx: ServiceContext, eventId: string): Promise<Rrul
 
 /** Update the rrule JSON on an event. */
 async function updateEventRrule(ctx: ServiceContext, eventId: string, rruleJson: RruleJson): Promise<void> {
-  await globalDb.calendarEvent.update({
+  await tenantDb.calendarEvent.update({
     where: { id: eventId, organizationId: ctx.organizationId! },
     data: { rrule: rruleJson as unknown as string },
   });
@@ -66,7 +67,7 @@ async function updateEventRrule(ctx: ServiceContext, eventId: string, rruleJson:
 
 /** Add a date to the exdates array on an event. */
 async function addExdate(ctx: ServiceContext, eventId: string, dateStr: string): Promise<void> {
-  const event = await globalDb.calendarEvent.findFirst({
+  const event = await tenantDb.calendarEvent.findFirst({
     where: { id: eventId, organizationId: ctx.organizationId! },
   });
 
@@ -75,7 +76,7 @@ async function addExdate(ctx: ServiceContext, eventId: string, dateStr: string):
   const currentExdates = ((event.exdates as string[]) ?? []) as string[];
   if (currentExdates.includes(dateStr)) return; // Already excluded
 
-  await globalDb.calendarEvent.update({
+  await tenantDb.calendarEvent.update({
     where: { id: eventId, organizationId: ctx.organizationId! },
     data: { exdates: [...currentExdates, dateStr] as unknown as string },
   });
@@ -95,13 +96,13 @@ async function createOverrideEvent(
     propertyId?: string | null;
   },
 ): Promise<string> {
-  const baseEvent = await globalDb.calendarEvent.findFirst({
+  const baseEvent = await tenantDb.calendarEvent.findFirst({
     where: { id: baseEventId, organizationId: ctx.organizationId! },
   });
 
   if (!baseEvent) throw new Error(`Base event with ID "${baseEventId}" not found`);
 
-  const override = await globalDb.calendarEvent.create({
+  const override = await tenantDb.calendarEvent.create({
     data: {
       title: overrides.title ?? baseEvent.title,
       description: overrides.description !== undefined ? overrides.description : baseEvent.description,
@@ -112,7 +113,7 @@ async function createOverrideEvent(
       propertyId: overrides.propertyId ?? baseEvent.propertyId,
       calendarId: baseEvent.calendarId,
       organizationId: ctx.organizationId!,
-    } as unknown as Parameters<typeof globalDb.calendarEvent.create>[0]['data'],
+    } as unknown as Parameters<typeof tenantDb.calendarEvent.create>[0]['data'],
   });
 
   return override.id;
@@ -135,10 +136,20 @@ export async function applyEditScopeThis(
   clickedDate: Date,
   updates: UpdateEventInput,
 ): Promise<{ overrideId: string }> {
+  // Tenant isolation: run every query inside the org context (RLS plan Phase 3).
+  return runWithTenant(ctx.organizationId!, () => doApplyEditScopeThis(ctx, eventId, clickedDate, updates));
+}
+
+async function doApplyEditScopeThis(
+  ctx: ServiceContext,
+  eventId: string,
+  clickedDate: Date,
+  updates: UpdateEventInput,
+): Promise<{ overrideId: string }> {
   const rruleJson = await getEventRrule(ctx, eventId);
   if (!rruleJson) {
     // Not a recurring event — just update in place
-    await globalDb.calendarEvent.update({
+    await tenantDb.calendarEvent.update({
       where: { id: eventId, organizationId: ctx.organizationId! },
       data: {
         ...(updates.title !== undefined && { title: updates.title }),
@@ -148,7 +159,7 @@ export async function applyEditScopeThis(
         ...(updates.eventType !== undefined && { eventType: updates.eventType as unknown as string }),
         ...(updates.color !== undefined && { color: updates.color }),
         ...(updates.propertyId !== undefined && { propertyId: updates.propertyId }),
-      } as unknown as Parameters<typeof globalDb.calendarEvent.update>[0]['data'],
+      } as unknown as Parameters<typeof tenantDb.calendarEvent.update>[0]['data'],
     });
     return { overrideId: eventId };
   }
@@ -159,7 +170,7 @@ export async function applyEditScopeThis(
   await addExdate(ctx, eventId, clickedDateStr);
 
   // Calculate override duration from updates or base event
-  const baseEvent = await globalDb.calendarEvent.findFirst({
+  const baseEvent = await tenantDb.calendarEvent.findFirst({
     where: { id: eventId, organizationId: ctx.organizationId! },
   });
 
@@ -201,12 +212,22 @@ export async function applyEditScopeFollowing(
   clickedDate: Date,
   updates: UpdateEventInput,
 ): Promise<{ baseId: string; newSeriesId: string }> {
+  // Tenant isolation: run every query inside the org context (RLS plan Phase 3).
+  return runWithTenant(ctx.organizationId!, () => doApplyEditScopeFollowing(ctx, eventId, clickedDate, updates));
+}
+
+async function doApplyEditScopeFollowing(
+  ctx: ServiceContext,
+  eventId: string,
+  clickedDate: Date,
+  updates: UpdateEventInput,
+): Promise<{ baseId: string; newSeriesId: string }> {
   const rruleJson = await getEventRrule(ctx, eventId);
   if (!rruleJson) {
     // Not recurring — just update in place
-    await globalDb.calendarEvent.update({
+    await tenantDb.calendarEvent.update({
       where: { id: eventId, organizationId: ctx.organizationId! },
-      data: updates as unknown as Parameters<typeof globalDb.calendarEvent.update>[0]['data'],
+      data: updates as unknown as Parameters<typeof tenantDb.calendarEvent.update>[0]['data'],
     });
     return { baseId: eventId, newSeriesId: eventId };
   }
@@ -233,8 +254,8 @@ export async function applyEditScopeFollowing(
     until: rruleJson.count !== null ? null : rruleJson.until, // Reset UNTIL for new series (keep count if set)
   };
 
-  const baseEvent = await globalDb.calendarEvent.findFirst({ where: { id: eventId, organizationId: ctx.organizationId! } });
-  const newSeries = await globalDb.calendarEvent.create({
+  const baseEvent = await tenantDb.calendarEvent.findFirst({ where: { id: eventId, organizationId: ctx.organizationId! } });
+  const newSeries = await tenantDb.calendarEvent.create({
     data: {
       title: (updates.title ?? baseEvent?.title) || '',
       description: updates.description,
@@ -246,7 +267,7 @@ export async function applyEditScopeFollowing(
       calendarId: baseEvent?.calendarId || '',
       rrule: newRrule as unknown as string,
       organizationId: ctx.organizationId!,
-    } as unknown as Parameters<typeof globalDb.calendarEvent.create>[0]['data'],
+    } as unknown as Parameters<typeof tenantDb.calendarEvent.create>[0]['data'],
   });
 
   return { baseId: eventId, newSeriesId: newSeries.id };
@@ -263,13 +284,22 @@ export async function applyEditScopeAll(
   eventId: string,
   updates: UpdateEventInput,
 ): Promise<{ baseId: string }> {
+  // Tenant isolation: run every query inside the org context (RLS plan Phase 3).
+  return runWithTenant(ctx.organizationId!, () => doApplyEditScopeAll(ctx, eventId, updates));
+}
+
+async function doApplyEditScopeAll(
+  ctx: ServiceContext,
+  eventId: string,
+  updates: UpdateEventInput,
+): Promise<{ baseId: string }> {
   const rruleJson = await getEventRrule(ctx, eventId);
 
   if (!rruleJson) {
     // Not recurring — just update in place
-    await globalDb.calendarEvent.update({
+    await tenantDb.calendarEvent.update({
       where: { id: eventId, organizationId: ctx.organizationId! },
-      data: updates as unknown as Parameters<typeof globalDb.calendarEvent.update>[0]['data'],
+      data: updates as unknown as Parameters<typeof tenantDb.calendarEvent.update>[0]['data'],
     });
     return { baseId: eventId };
   }
@@ -283,13 +313,13 @@ export async function applyEditScopeAll(
   await updateEventRrule(ctx, eventId, resetRrule);
 
   // Clear all exdates
-  await globalDb.calendarEvent.update({
+  await tenantDb.calendarEvent.update({
     where: { id: eventId, organizationId: ctx.organizationId! },
     data: { exdates: [] as unknown as string },
   });
 
   // Apply updates to base event
-  await globalDb.calendarEvent.update({
+  await tenantDb.calendarEvent.update({
     where: { id: eventId, organizationId: ctx.organizationId! },
     data: {
       ...(updates.title !== undefined && { title: updates.title }),
@@ -299,7 +329,7 @@ export async function applyEditScopeAll(
       ...(updates.eventType !== undefined && { eventType: updates.eventType as unknown as string }),
       ...(updates.color !== undefined && { color: updates.color }),
       ...(updates.propertyId !== undefined && { propertyId: updates.propertyId }),
-    } as unknown as Parameters<typeof globalDb.calendarEvent.update>[0]['data'],
+    } as unknown as Parameters<typeof tenantDb.calendarEvent.update>[0]['data'],
   });
 
   return { baseId: eventId };

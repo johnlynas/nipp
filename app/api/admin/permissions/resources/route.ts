@@ -5,7 +5,9 @@
  */
 
 import { NextResponse } from 'next/server';
-import globalDb from '@/lib/global-db';
+// RLS Phase 3: resource-type listing runs under the verified platform context.
+import tenantDb from '@/lib/tenant-db';
+import { withPlatformContext } from '@/lib/platform-db';
 import { requireSuperAdmin } from '@/lib/require-super-admin';
 import { checkAdminRateLimit } from '@/lib/rate-limiter';
 import { wrapPiiRoute } from '@/lib/payload-middleware';
@@ -25,11 +27,13 @@ export const GET = wrapPiiRoute(async (request) => {
       return NextResponse.json({ error: 'rate_limited' }, { status: 429 });
     }
 
-    const resources = await globalDb.permission.findMany({
-      select: { resource: true },
-      distinct: ['resource'],
-      orderBy: { resource: 'asc' },
-    });
+    const resources = await withPlatformContext(authResult.session!.user.id, () =>
+      tenantDb.permission.findMany({
+        select: { resource: true },
+        distinct: ['resource'],
+        orderBy: { resource: 'asc' },
+      }),
+    );
 
     return NextResponse.json({ resources: resources.map((r) => r.resource) });
   } catch (error) {

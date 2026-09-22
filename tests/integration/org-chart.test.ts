@@ -36,22 +36,18 @@ export const resolveTenantAccessMock: { impl: () => TenantAccess } = {
   impl: () => ({ ok: false, status: 403, error: 'Forbidden' }),
 };
 
-vi.mock('@/lib/tenant-access', () => ({
-  resolveTenantAccess: vi.fn((...args: unknown[]) => resolveTenantAccessMock.impl()),
-  // Re-export for any type imports in the module graph.
-}));
+vi.mock('@/lib/tenant-access', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@/lib/tenant-access')>();
+  return {
+    ...actual,
+    resolveTenantAccess: vi.fn((...args: unknown[]) => resolveTenantAccessMock.impl()),
+  };
+});
 
-vi.mock('@/lib/global-db', () => ({
+vi.mock('@/lib/tenant-db', () => ({
   default: {
     member: { findFirst: vi.fn() },
     organization: { findUnique: vi.fn() },
-  },
-}));
-
-vi.mock('@/lib/global-db-guard', () => ({
-  superAdminStorage: {
-    // Passthrough: run the callback immediately (no AsyncLocalStorage needed).
-    run: vi.fn((_value: boolean, fn: () => unknown) => fn()),
   },
 }));
 
@@ -196,7 +192,7 @@ describe('GET /api/organizations/[orgId]/org-chart', () => {
     mockSession('user-admin');
     grantAccess('MEMBER');
 
-    const globalDb = (await import('@/lib/global-db')).default as unknown as {
+    const globalDb = (await import('@/lib/tenant-db')).default as unknown as {
       organization: { findUnique: ReturnType<typeof vi.fn> };
     };
     globalDb.organization.findUnique.mockResolvedValue(orgResult());
@@ -215,7 +211,7 @@ describe('GET /api/organizations/[orgId]/org-chart', () => {
     mockSession('user-admin');
     grantAccess('PLATFORM_ADMIN', 'super-admin');
 
-    const globalDb = (await import('@/lib/global-db')).default as unknown as {
+    const globalDb = (await import('@/lib/tenant-db')).default as unknown as {
       organization: { findUnique: ReturnType<typeof vi.fn> };
     };
     globalDb.organization.findUnique.mockResolvedValue(orgResult());
@@ -231,7 +227,7 @@ describe('GET /api/organizations/[orgId]/org-chart', () => {
     mockSession('user-admin');
     grantAccess('TENANT_ADMIN');
 
-    const globalDb = (await import('@/lib/global-db')).default as unknown as {
+    const globalDb = (await import('@/lib/tenant-db')).default as unknown as {
       organization: { findUnique: ReturnType<typeof vi.fn> };
     };
     globalDb.organization.findUnique.mockResolvedValue(orgResult());
@@ -259,7 +255,7 @@ describe('GET /api/organizations/[orgId]/org-chart', () => {
     mockSession('user-admin');
     grantAccess('TENANT_ADMIN');
 
-    const globalDb = (await import('@/lib/global-db')).default as unknown as {
+    const globalDb = (await import('@/lib/tenant-db')).default as unknown as {
       organization: { findUnique: ReturnType<typeof vi.fn> };
     };
     globalDb.organization.findUnique.mockResolvedValue(orgResult());
@@ -284,7 +280,7 @@ describe('GET /api/organizations/[orgId]/org-chart', () => {
     mockSession('user-admin');
     grantAccess('TENANT_ADMIN');
 
-    const globalDb = (await import('@/lib/global-db')).default as unknown as {
+    const globalDb = (await import('@/lib/tenant-db')).default as unknown as {
       organization: { findUnique: ReturnType<typeof vi.fn> };
     };
     globalDb.organization.findUnique.mockResolvedValue(null);

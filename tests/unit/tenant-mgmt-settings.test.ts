@@ -21,12 +21,19 @@ vi.mock('@/lib/authz', () => ({
   verifySuperAdmin: vi.fn().mockResolvedValue({ authorized: true, error: undefined }),
 }));
 
-vi.mock('@/lib/global-db', () => ({
+vi.mock('@/lib/tenant-db', () => ({
   default: {
     organization: { findUnique: vi.fn(), update: vi.fn(), delete: vi.fn(), findFirst: vi.fn() },
     session: { deleteMany: vi.fn() },
     member: { count: vi.fn() },
   },
+}));
+
+vi.mock('@/lib/platform-db', () => ({
+  // Pass-through: these unit tests exercise route logic with mocked tenantDb;
+  // the verified platform-admin RLS wrapper itself is covered by
+  // tests/unit/rls-transaction.test.ts.
+  withTenantAdminContext: vi.fn(async (_userId: string, _orgId: string, fn: () => Promise<unknown>) => fn()),
 }));
 
 vi.mock('@/lib/audit-log', () => ({
@@ -37,7 +44,7 @@ vi.mock('@/lib/logger', () => ({
   logger: { info: vi.fn(), warn: vi.fn(), error: vi.fn() },
 }));
 
-const globalDb = (await import('@/lib/global-db')).default;
+const globalDb = (await import('@/lib/tenant-db')).default;
 const { recordAuditLog } = await import('@/lib/audit-log');
 const { auth } = await import('@/lib/auth');
 

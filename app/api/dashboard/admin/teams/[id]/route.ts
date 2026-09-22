@@ -1,33 +1,32 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { requireSuperAdmin } from '@/lib/require-super-admin';
 import { checkAdminRateLimit } from '@/lib/rate-limiter';
-import globalDb from '@/lib/global-db';
-
+// RLS Phase 3: team ops run under verified platform contexts.
+import tenantDb from '@/lib/tenant-db';
+import { withPlatformContext } from '@/lib/platform-db';
 import { TeamService } from '@/services/team-service';
 import { notifyTeamOperation } from '@/lib/notification-push';
 
 export const runtime = 'nodejs';
 
-/** Best effort: resolve a team's name for notification labels. */
-async function getTeamLabel(id: string): Promise<string> {
+/** Best effort: resolve a team's name for notification labels (verified platform context). */
+async function getTeamLabel(sessionUserId: string, id: string): Promise<string> {
   try {
-    const team = await globalDb.team.findUnique({
-      where: { id },
-      select: { name: true },
-    });
+    const team = await withPlatformContext(sessionUserId, () =>
+      tenantDb.team.findUnique({ where: { id }, select: { name: true } })
+    );
     return team ? `Team "${team.name}" (${id})` : id;
   } catch {
     return id;
   }
 }
 
-/** Best effort: resolve a team's organization ID for notification scoping. */
-async function getTeamOrgId(id: string): Promise<string | null> {
+/** Best effort: resolve a team's organization ID for notification scoping (verified platform context). */
+async function getTeamOrgId(sessionUserId: string, id: string): Promise<string | null> {
   try {
-    const team = await globalDb.team.findUnique({
-      where: { id },
-      select: { organizationId: true },
-    });
+    const team = await withPlatformContext(sessionUserId, () =>
+      tenantDb.team.findUnique({ where: { id }, select: { organizationId: true } })
+    );
     return team?.organizationId ?? null;
   } catch {
     return null;
@@ -49,10 +48,10 @@ export async function GET(
 
   try {
     const id = (await params).id;
-    const result = await TeamService.getTeamById(id, {
-      userId: auth.session!.user.id,
-      role: 'PLATFORM_ADMIN',
-    });
+    // RLS: verified platform context (Team is RLS-scoped; flag admits cross-tenant reads).
+    const result = await withPlatformContext(auth.session!.user.id, () =>
+      TeamService.getTeamById(id, { userId: auth.session!.user.id, role: 'PLATFORM_ADMIN' })
+    );
 
     return NextResponse.json(result);
   } catch (error) {
@@ -92,16 +91,19 @@ export async function PATCH(
   }
 
   // Capture the team name and org for notification labels before the update
-  const [targetLabel, orgId] = await Promise.all([getTeamLabel(id), getTeamOrgId(id)]);
+  const [targetLabel, orgId] = await Promise.all([
+    getTeamLabel(auth.session!.user.id, id),
+    getTeamOrgId(auth.session!.user.id, id),
+  ]);
 
   try {
-    const result = await TeamService.updateTeam(
-      id,
-      {
-        name: body.name,
-        description: body.description ?? undefined,
-      },
-      { userId: auth.session!.user.id, role: 'PLATFORM_ADMIN' }
+    // RLS: verified platform context wraps the team update.
+    const result = await withPlatformContext(auth.session!.user.id, () =>
+      TeamService.updateTeam(
+        id,
+        { name: body.name, description: body.description ?? undefined },
+        { userId: auth.session!.user.id, role: 'PLATFORM_ADMIN' }
+      )
     );
 
     await notifyTeamOperation('update', targetLabel, true, undefined, orgId);
@@ -135,13 +137,16 @@ export async function DELETE(
   const id = (await params).id;
 
   // Capture a label and org context for the notification before the team disappears
-  const [targetLabel, orgId] = await Promise.all([getTeamLabel(id), getTeamOrgId(id)]);
+  const [targetLabel, orgId] = await Promise.all([
+    getTeamLabel(auth.session!.user.id, id),
+    getTeamOrgId(auth.session!.user.id, id),
+  ]);
 
   try {
-    await TeamService.deleteTeam(id, {
-      userId: auth.session!.user.id,
-      role: 'PLATFORM_ADMIN',
-    });
+    // RLS: verified platform context wraps the team delete.
+    await withPlatformContext(auth.session!.user.id, () =>
+      TeamService.deleteTeam(id, { userId: auth.session!.user.id, role: 'PLATFORM_ADMIN' })
+    );
 
     await notifyTeamOperation('delete', targetLabel, true, undefined, orgId);
 

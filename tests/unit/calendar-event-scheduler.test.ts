@@ -8,7 +8,7 @@
  */
 
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import globalDb from '@/lib/global-db';
+import globalDb from '@/lib/tenant-db';
 import {
   findDueToStartEvents,
   runCalendarEventScan,
@@ -23,7 +23,7 @@ import {
 
 const mockPush = vi.fn().mockResolvedValue(undefined);
 
-vi.mock('@/lib/global-db', () => ({
+vi.mock('@/lib/tenant-db', () => ({
   default: {
     calendarEvent: { findMany: vi.fn().mockResolvedValue([]) },
   },

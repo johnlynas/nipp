@@ -6,7 +6,9 @@
 
 import { NextRequest, NextResponse } from 'next/server';
 import { auth } from '@/lib/auth';
-import globalDb from '@/lib/global-db';
+// RLS Phase 3: verified-context tenantDb (unscoped globalDb deleted).
+import tenantDb from '@/lib/tenant-db';
+import { withRLSContext } from '@/lib/rls-transaction';
 import { checkCalendarRateLimit } from '@/lib/rate-limiter';
 
 export const runtime = 'nodejs';
@@ -31,9 +33,10 @@ export async function GET(
   }
 
   const orgId = (await params).orgId;
+return withRLSContext({ userId: session.user.id, orgId, isPlatformAdmin: false }, async () => {
 
   // Verify membership
-  const membership = await globalDb.member.findFirst({
+  const membership = await tenantDb.member.findFirst({
     where: { userId: session.user.id, orgId },
   });
 
@@ -61,13 +64,13 @@ export async function GET(
 
   try {
     const [logs, total] = await Promise.all([
-      globalDb.notificationLog.findMany({
+      tenantDb.notificationLog.findMany({
         where,
         orderBy: { timestamp: 'desc' },
         skip: (page - 1) * pageSize,
         take: pageSize,
       }),
-      globalDb.notificationLog.count({ where }),
+      tenantDb.notificationLog.count({ where }),
     ]);
 
     return NextResponse.json({
@@ -87,4 +90,5 @@ export async function GET(
     }
     return NextResponse.json({ error: 'Internal server error' }, { status: 500 });
   }
+  });
 }

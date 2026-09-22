@@ -28,7 +28,7 @@
  * Boot: `import '@/lib/job-scheduler-engine'` in an instrumentation/boot file.
  */
 
-import globalDb from '@/lib/global-db';
+import tenantDb from '@/lib/tenant-db';
 // Bree ships its own CJS + types; it stays webpack-external (next.config.ts
 // serverExternalPackages) so this import is a plain Node require at runtime.
 import later, { type Schedule as LaterSchedule } from '@breejs/later';
@@ -382,7 +382,7 @@ export function isDueAt(now: Date, scheduleExpr: string, lastRunAt: Date | null)
  * surfaced as a platform alert + FAILED-ish SKIPPED (never executed).
  */
 async function runJobInWorker(jobId: string): Promise<RunResult> {
-  const definition = await globalDb.jobDefinition.findUnique({
+  const definition = await tenantDb.jobDefinition.findUnique({
     where: { id: jobId },
     select: { timeoutMs: true, name: true, platformOrgId: true },
   });
@@ -479,7 +479,7 @@ async function dispatchJob(jobId: string): Promise<RunResult> {
 // Exported for tests (see tests/unit/job-scheduler-engine.test.ts).
 export async function scanDueJobs(now = new Date()): Promise<number> {
   try {
-    const jobs = await globalDb.jobDefinition.findMany({
+    const jobs = await tenantDb.jobDefinition.findMany({
       // Defence in depth for the approval gate: even if a row were somehow
       // enabled without approval (it shouldn't — enableJob/updateJob guard
       // it), the scheduler never runs an unapproved job.

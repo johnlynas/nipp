@@ -86,11 +86,9 @@ export function withSuperAdmin(handler: AuthMiddlewareHandler) {
       return NextResponse.json({ error: error || 'Super Admin access required' }, { status });
     }
 
-    // SECURITY (S7): Scope getGlobalDb() access to this async operation only.
-    // Using run() instead of enterWith() prevents context leaking across requests
-    // in connection-pooled Node.js environments.
-    const { superAdminStorage } = await import('@/lib/global-db-guard');
-
-    return superAdminStorage.run(true, () => handler(request, context));
+    // RLS plan Phase 3B: verifySuperAdmin above is the actual super-admin gate;
+    // cross-tenant DB access additionally requires the verified platform
+    // context (lib/platform-db.ts) — there is no unscoped client left to leak.
+    return handler(request, context);
   });
 }

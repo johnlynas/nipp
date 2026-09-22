@@ -6,7 +6,10 @@
  * - NotificationLog (Prisma model) for delivery tracking
  */
 
-import globalDb from '@/lib/global-db';
+// RLS Phase 3: tenantDb (scoped) replaces the unscoped globalDb; each read runs
+// inside runWithTenant(targetOrgId) matching calendar-event-service.
+import tenantDb from '@/lib/tenant-db';
+import { runWithTenant } from '@/lib/tenant-context';
 import { logger } from '@/lib/logger';
 import {
   ServiceContext,
@@ -94,7 +97,7 @@ export async function getTodayEvents(
   tomorrow.setDate(tomorrow.getDate() + 1);
 
   // Events where startDate falls on today OR events that span today
-  const events = await globalDb.calendarEvent.findMany({
+  const events = await runWithTenant(targetOrgId, () => tenantDb.calendarEvent.findMany({
     where: {
       organizationId: targetOrgId,
       OR: [
@@ -105,7 +108,7 @@ export async function getTodayEvents(
       ],
     },
     orderBy: { startDate: 'asc' },
-  });
+  }));
 
   return events.map((e) => ({
     id: e.id,
@@ -137,7 +140,7 @@ export async function getTodayEventsForUser(
   const tomorrow = new Date(today);
   tomorrow.setDate(tomorrow.getDate() + 1);
 
-  const events = await globalDb.calendarEvent.findMany({
+  const events = await runWithTenant(targetOrgId, () => tenantDb.calendarEvent.findMany({
     where: {
       organizationId: targetOrgId,
       OR: [
@@ -146,7 +149,7 @@ export async function getTodayEventsForUser(
       ],
     },
     orderBy: { startDate: 'asc' },
-  });
+  }));
 
   return events.map((e) => ({
     id: e.id,
@@ -317,20 +320,20 @@ export async function sendTodayEventNotifications(
 
   if (input.userId) {
     // Single user notification
-    const member = await globalDb.member.findFirst({
+    const member = await runWithTenant(targetOrgId, () => tenantDb.member.findFirst({
       where: { userId: input.userId, orgId: targetOrgId },
       include: { user: true },
-    });
+    }));
 
     if (member?.user) {
       recipients = [{ email: member.user.email, name: member.user.name }];
     }
   } else {
     // Organization-wide — all members
-    const members = await globalDb.member.findMany({
+    const members = await runWithTenant(targetOrgId, () => tenantDb.member.findMany({
       where: { orgId: targetOrgId },
       include: { user: true },
-    });
+    }));
 
     recipients = members
       .filter((m) => m.user?.email)

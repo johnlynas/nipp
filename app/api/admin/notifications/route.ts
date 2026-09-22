@@ -13,9 +13,11 @@
 
 import { NextRequest, NextResponse } from 'next/server';
 import { requireSuperAdmin } from '@/lib/require-super-admin';
+// RLS Phase 3: notification history + send run under a verified platform context.
+import tenantDb from '@/lib/tenant-db';
+import { withPlatformContext } from '@/lib/platform-db';
 import { checkAdminRateLimit } from '@/lib/rate-limiter';
 import { notifyAdminMessage } from '@/lib/notification-push';
-import globalDb from '@/lib/global-db';
 import { logger } from '@/lib/logger';
 
 export const runtime = 'nodejs';
@@ -68,11 +70,13 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    // Verify the org exists and get its details
-    const organization = await globalDb.organization.findUnique({
-      where: { id: organizationId },
-      select: { slug: true, name: true },
-    });
+    // Verify the org exists and get its details (verified platform context)
+    const organization = await withPlatformContext(auth.session!.user.id, () =>
+      tenantDb.organization.findUnique({
+        where: { id: organizationId },
+        select: { slug: true, name: true },
+      }),
+    );
 
     if (!organization) {
       return NextResponse.json(
@@ -155,32 +159,38 @@ export async function GET(request: NextRequest) {
       ];
     }
 
-    const [notifications, total] = await Promise.all([
-      globalDb.notification.findMany({
-        where,
-        orderBy: { createdAt: 'desc' },
-        skip: (page - 1) * pageSize,
-        take: pageSize,
-        include: { organization: { select: { name: true } } },
-      }),
-      globalDb.notification.count({ where }),
-    ]);
+    // Verified platform context admits the full notification history (S-rls read)
+    const [notifications, total, dashboardCounts, priorityCounts] = await withPlatformContext(
+      auth.session!.user.id,
+      async () => {
+        const [list, count, dash, prio] = await Promise.all([
+          tenantDb.notification.findMany({
+            where,
+            orderBy: { createdAt: 'desc' },
+            skip: (page - 1) * pageSize,
+            take: pageSize,
+            include: { organization: { select: { name: true } } },
+          }),
+          tenantDb.notification.count({ where }),
+          Promise.all([
+            tenantDb.notification.count(),
+            tenantDb.notification.count({ where: { acknowledged: true } }),
+            tenantDb.notification.count({ where: { acknowledged: false } }),
+          ]),
+          Promise.all([
+            tenantDb.notification.count({ where: { priority: 'INFO' } }),
+            tenantDb.notification.count({ where: { priority: 'WARNING' } }),
+            tenantDb.notification.count({ where: { priority: 'ERROR' } }),
+            tenantDb.notification.count({ where: { priority: 'CRITICAL' } }),
+            tenantDb.notification.count({ where: { priority: 'CALENDAR' } }),
+            tenantDb.notification.count({ where: { priority: 'JOB' } }),
+          ]),
+        ]);
+        return [list, count, dash, prio] as const;
+      },
+    );
 
-    // Dashboard counts: always from the full dataset, independent of filters
-    const [totalCount, acknowledgedCount, notAcknowledgedCount] = await Promise.all([
-      globalDb.notification.count(),
-      globalDb.notification.count({ where: { acknowledged: true } }),
-      globalDb.notification.count({ where: { acknowledged: false } }),
-    ]);
-
-    const priorityCounts = await Promise.all([
-      globalDb.notification.count({ where: { priority: 'INFO' } }),
-      globalDb.notification.count({ where: { priority: 'WARNING' } }),
-      globalDb.notification.count({ where: { priority: 'ERROR' } }),
-      globalDb.notification.count({ where: { priority: 'CRITICAL' } }),
-      globalDb.notification.count({ where: { priority: 'CALENDAR' } }),
-      globalDb.notification.count({ where: { priority: 'JOB' } }),
-     ]);
+    const [totalCount, acknowledgedCount, notAcknowledgedCount] = dashboardCounts;
 
     return NextResponse.json({
       notifications: notifications.map((n) => ({
@@ -243,9 +253,12 @@ export async function DELETE(request: NextRequest) {
       );
     }
 
-    await globalDb.notification.delete({
-      where: { id: notificationId },
-    });
+    // Verified platform context — the Notification DELETE policy admits only flag=1.
+    await withPlatformContext(auth.session!.user.id, () =>
+      tenantDb.notification.delete({
+        where: { id: notificationId },
+      }),
+    );
 
     return NextResponse.json({ success: true });
   } catch (error) {
@@ -283,10 +296,13 @@ export async function PATCH(request: NextRequest) {
       );
     }
 
-    const notification = await globalDb.notification.update({
-      where: { id: notificationId },
-      data: { acknowledged: true },
-    });
+    // Verified platform context — the Notification UPDATE policy admits only flag=1.
+    const notification = await withPlatformContext(auth.session!.user.id, () =>
+      tenantDb.notification.update({
+        where: { id: notificationId },
+        data: { acknowledged: true },
+      }),
+    );
 
     return NextResponse.json({ success: true, acknowledged: notification.acknowledged });
   } catch (error) {

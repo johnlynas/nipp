@@ -12,6 +12,8 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { requireSuperAdmin } from '@/lib/require-super-admin';
 import { JobSchedulerService, UpdateJobInput } from '@/services/job-scheduler-service';
+// RLS Phase 3: super-admin job ops run under a verified platform context.
+import { withPlatformContext } from '@/lib/platform-db';
 import { ServiceContext } from '@/lib/services/types';
 import { logger } from '@/lib/logger';
 import { wrapPiiRoute, PiiRouteParams } from '@/lib/payload-middleware';
@@ -41,7 +43,8 @@ export const GET = wrapPiiRoute(async (request, _decryptedBody, params?) => {
       }
 
     const ctx: ServiceContext = { userId: session.user.id, role: 'PLATFORM_ADMIN' };
-    const job = await JobSchedulerService.getJob(ctx, jobId);
+    // Verified platform context for the job read.
+    const job = await withPlatformContext(session.user.id, () => JobSchedulerService.getJob(ctx, jobId));
 
     return NextResponse.json({ job }, { headers: { 'Cache-Control': 'no-store, no-cache, must-revalidate' } });
     } catch (error) {
@@ -103,7 +106,8 @@ export const PATCH = wrapPiiRoute(async (request, decryptedBody, params?) => {
          }
 
     const ctx: ServiceContext = { userId: session.user.id, role: 'PLATFORM_ADMIN' };
-    const job = await JobSchedulerService.updateJob(ctx, jobId, body);
+    // Verified platform context for the job update.
+    const job = await withPlatformContext(session.user.id, () => JobSchedulerService.updateJob(ctx, jobId, body));
 
     logger.info({ userId: session.user.id, jobId }, '[Jobs API] Job updated');
 
@@ -154,7 +158,8 @@ export const DELETE = wrapPiiRoute(async (request, _decryptedBody, params?) => {
       }
 
     const ctx: ServiceContext = { userId: session.user.id, role: 'PLATFORM_ADMIN' };
-    const result = await JobSchedulerService.disposeJob(ctx, jobId);
+    // Verified platform context for the job delete.
+    const result = await withPlatformContext(session.user.id, () => JobSchedulerService.disposeJob(ctx, jobId));
 
     logger.info({ userId: session.user.id, jobId }, '[Jobs API] Job deleted');
 

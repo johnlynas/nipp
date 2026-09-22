@@ -3,12 +3,12 @@
  */
 
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import globalDb from '@/lib/global-db';
+import globalDb from '@/lib/tenant-db';
 import { UserService } from '@/services/user-service';
 import { ServiceContext, ForbiddenError, NotFoundError, ValidationError } from '@/lib/services/types';
 
 // Mock dependencies
-vi.mock('@/lib/global-db', () => ({
+vi.mock('@/lib/tenant-db', () => ({
   default: {
     user: {
       findUnique: vi.fn(),

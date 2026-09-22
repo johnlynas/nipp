@@ -16,6 +16,10 @@ const mockState = { orgId: null as string | null };
 
 vi.mock('@/lib/tenant-context', () => ({
   getCurrentOrgId: () => mockState.orgId,
+  // tenant-extension-core resolves the platform-admin flag + org from the full
+  // store shape; mirror it from the same mock state.
+  getTenantContext: () =>
+    mockState.orgId ? { userId: 'u-test', orgId: mockState.orgId, isPlatformAdmin: '0' as const } : null,
 }));
 
 // ---------------------------------------------------------------------------

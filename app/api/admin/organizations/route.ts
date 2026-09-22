@@ -1,6 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { requireSuperAdmin } from '@/lib/require-super-admin';
 import { OrganizationService } from '@/services/organization-service';
+// RLS Phase 3: super-admin ops run under a verified platform context.
+import { withPlatformContext } from '@/lib/platform-db';
 import { ServiceContext } from '@/lib/services/types';
 import { recordAuditLog } from '@/lib/audit-log';
 import { logger } from '@/lib/logger';
@@ -34,7 +36,10 @@ export const GET = wrapPiiRoute(async (request) => {
     const status = (statusRaw && validStatuses.includes(statusRaw)) ? statusRaw as 'PENDING' | 'ACTIVE' | 'SUSPENDED' | 'ARCHIVED' : undefined;
     const search = url.searchParams.get('search') || undefined;
 
-    const data = await OrganizationService.getPaginatedOrganizations({ page, pageSize, status, search });
+    // One verified platform context for the cross-org listing.
+    const data = await withPlatformContext(authResult.session!.user.id, () =>
+      OrganizationService.getPaginatedOrganizations({ page, pageSize, status, search })
+    );
 
     logger.info({ count: data.organizations.length, total: data.pagination.total, method: 'GET', statusFilter: status || 'all' }, 'Found organizations');
 
@@ -104,7 +109,10 @@ export const POST = wrapPiiRoute(async (request, decryptedBody) => {
         userId: session.user.id,
         role: 'PLATFORM_ADMIN',
       };
-      const organization = await OrganizationService.createOrganization({ name, slug, adminEmail }, ctx);
+      // Verified platform context for the org insert (flag checked by policy).
+      const organization = await withPlatformContext(session.user.id, () =>
+        OrganizationService.createOrganization({ name, slug, adminEmail }, ctx)
+      );
 
       logger.info({ orgId: organization.id, method: 'POST' }, 'Organization created');
 

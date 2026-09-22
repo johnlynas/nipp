@@ -12,7 +12,7 @@ import { notifyRoleOperation } from '@/lib/notification-push';
 const notificationCreate = vi.fn().mockResolvedValue({ id: 'notif-row-1' });
 const notificationFindFirst = vi.fn().mockResolvedValue(null); // no dedup hit
 
-vi.mock('@/lib/global-db', () => ({
+vi.mock('@/lib/tenant-db', () => ({
   default: {
     notification: {
       create: (...args: unknown[]) => notificationCreate(...args),

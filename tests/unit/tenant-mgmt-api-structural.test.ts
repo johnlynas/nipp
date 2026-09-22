@@ -28,12 +28,12 @@ describe('Tenant Management API — Structural Verification', () => {
       expect(content).toContain("'Email is required'");
     });
 
-    it('should use globalDb for cross-org lookups', () => {
-      expect(content).toContain('globalDb.organization.findUnique');
+    it('should use tenantDb for cross-org lookups', () => {
+      expect(content).toContain('tenantDb.organization.findUnique');
     });
 
-    it('should use runWithTenant for scoped operations', () => {
-      expect(content).toContain('runWithTenant');
+    it('should use the verified platform-admin context for scoped operations', () => {
+      expect(content).toContain('withTenantAdminContext');
     });
 
     it('should use tenantDb within tenant context', () => {
@@ -76,12 +76,12 @@ describe('Tenant Management API — Structural Verification', () => {
       expect(content).toContain("'Role is required'");
     });
 
-    it('should use globalDb for cross-org lookups', () => {
-      expect(content).toContain('globalDb.organization.findUnique');
+    it('should use tenantDb for cross-org lookups', () => {
+      expect(content).toContain('tenantDb.organization.findUnique');
     });
 
-    it('should use runWithTenant for scoped operations', () => {
-      expect(content).toContain('runWithTenant');
+    it('should use the verified platform-admin context for scoped operations', () => {
+      expect(content).toContain('withTenantAdminContext');
     });
 
     it('should record audit log on role update', () => {
@@ -122,14 +122,13 @@ describe('Tenant Management API — Structural Verification', () => {
       expect(content).toContain("'Role name is required'");
     });
 
-    it('should use globalDb for cross-org lookups', () => {
-      expect(content).toContain('globalDb.organization.findUnique');
+    it('should use tenantDb for cross-org lookups', () => {
+      expect(content).toContain('tenantDb.organization.findUnique');
     });
 
-    it('should use runWithTenant for scoped operations', () => {
-      // runWithTenant is now used in RoleService, not the route
-      const serviceContent = readRoute('services/role-service.ts');
-      expect(serviceContent).toContain('runWithTenant');
+    it('should scope role operations to the target org context', () => {
+      // Scope resolution (target-org admin context) lives in the route boundary now.
+      expect(content).toContain('withTenantAdminContext');
     });
 
     it('should check for duplicate role name', () => {
@@ -182,12 +181,12 @@ describe('Tenant Management API — Structural Verification', () => {
       expect(content).toContain("'Provide name or description to update'");
     });
 
-    it('should use globalDb for cross-org lookups', () => {
-      expect(content).toContain('globalDb.organization.findUnique');
+    it('should use tenantDb for cross-org lookups', () => {
+      expect(content).toContain('tenantDb.organization.findUnique');
     });
 
-    it('should use runWithTenant for scoped operations', () => {
-      expect(content).toContain('runWithTenant');
+    it('should use the verified platform-admin context for scoped operations', () => {
+      expect(content).toContain('withTenantAdminContext');
     });
 
     it('should check member count before role deletion', () => {
@@ -234,12 +233,12 @@ describe('Tenant Management API — Structural Verification', () => {
       expect(content).toContain("'Assignments array is required'");
     });
 
-    it('should use globalDb for cross-org lookups', () => {
-      expect(content).toContain('globalDb.organization.findUnique');
+    it('should use tenantDb for cross-org lookups', () => {
+      expect(content).toContain('tenantDb.organization.findUnique');
     });
 
-    it('should use runWithTenant for scoped operations', () => {
-      expect(content).toContain('runWithTenant');
+    it('should use the verified platform-admin context for scoped operations', () => {
+      expect(content).toContain('withTenantAdminContext');
     });
 
     it('should build permission grid in GET response', () => {
@@ -311,8 +310,8 @@ describe('Tenant Management API — Structural Verification', () => {
       expect(content).toContain("runtime = 'nodejs'");
     });
 
-    it('should use globalDb for organization updates', () => {
-      expect(content).toContain('globalDb.organization.update');
+    it('should use tenantDb for organization updates', () => {
+      expect(content).toContain('tenantDb.organization.update');
     });
   });
 
@@ -353,7 +352,7 @@ describe('Tenant Management API — Structural Verification', () => {
     it('all routes should use globalDb for cross-org lookups', () => {
       for (const file of routeFiles) {
         const content = readRoute(file);
-        expect(content).toContain('globalDb.organization.findUnique');
+        expect(content).toContain('tenantDb.organization.findUnique');
       }
     });
 

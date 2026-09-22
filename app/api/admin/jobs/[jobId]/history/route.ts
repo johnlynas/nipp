@@ -11,6 +11,8 @@ import { NextRequest, NextResponse } from 'next/server';
 import { requireSuperAdmin } from '@/lib/require-super-admin';
 import { JobSchedulerService } from '@/services/job-scheduler-service';
 import { ServiceContext } from '@/lib/services/types';
+// RLS Phase 3: super-admin job ops run under a verified platform context.
+import { withPlatformContext } from '@/lib/platform-db';
 import { logger } from '@/lib/logger';
 import { wrapPiiRoute, PiiRouteParams } from '@/lib/payload-middleware';
 
@@ -52,7 +54,10 @@ export const GET = wrapPiiRoute(async (request, _decryptedBody, params?: PiiRout
     }
 
     const ctx: ServiceContext = { userId: session.user.id, role: 'PLATFORM_ADMIN' };
-    const executions = await JobSchedulerService.getExecutionHistory(ctx, { jobId, ...opts });
+    // Verified platform context for the execution-history read.
+    const executions = await withPlatformContext(session.user.id, () =>
+      JobSchedulerService.getExecutionHistory(ctx, { jobId, ...opts })
+    );
 
     return NextResponse.json(
       { executions },

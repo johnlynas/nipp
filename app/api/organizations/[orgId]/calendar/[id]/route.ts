@@ -8,8 +8,8 @@
 
 import { NextRequest, NextResponse } from 'next/server';
 import { auth } from '@/lib/auth';
-import { superAdminStorage } from '@/lib/global-db-guard';
-import { resolveTenantAccess } from '@/lib/tenant-access';
+import { resolveTenantAccess, toTenantContext } from '@/lib/tenant-access';
+import { withRLSContext } from '@/lib/rls-transaction';
 import { CalendarService } from '@/services/calendar-service';
 import { isSameSiteRequest } from '@/lib/csrf';
 import { checkCalendarRateLimit } from '@/lib/rate-limiter';
@@ -38,13 +38,11 @@ export async function GET(
   if (!access.ok) {
     return NextResponse.json({ error: access.error }, { status: access.status });
   }
+return withRLSContext(toTenantContext(access, session.user.id), async () => {
   const ctx = access.ctx;
 
   try {
-    // Scoping globalDb access (S7): see notes in PATCH/DELETE below.
-    const calendar = await superAdminStorage.run(true, () =>
-      CalendarService.getCalendarById(ctx, calendarId)
-    );
+    const calendar = await CalendarService.getCalendarById(ctx, calendarId);
     return NextResponse.json(calendar);
   } catch (error: unknown) {
     if (error instanceof Error) {
@@ -53,6 +51,7 @@ export async function GET(
     }
     return NextResponse.json({ error: 'Internal server error' }, { status: 500 });
   }
+  });
 }
 
 // ---------------------------------------------------------------------------
@@ -85,6 +84,7 @@ export async function PATCH(
   if (!access.ok) {
     return NextResponse.json({ error: access.error }, { status: access.status });
   }
+return withRLSContext(toTenantContext(access, session.user.id), async () => {
 
   // Only admins (tenant admin or platform super admin) can update calendars
   if (access.ctx.role === 'MEMBER') {
@@ -105,10 +105,7 @@ export async function PATCH(
   };
 
   try {
-    // Scoping globalDb access (S7): see note in GET above.
-    const calendar = await superAdminStorage.run(true, () =>
-      CalendarService.updateCalendar(ctx, calendarId, { name, description, color })
-    );
+    const calendar = await CalendarService.updateCalendar(ctx, calendarId, { name, description, color });
     return NextResponse.json({ calendar });
   } catch (error: unknown) {
     if (error instanceof Error) {
@@ -117,6 +114,7 @@ export async function PATCH(
     }
     return NextResponse.json({ error: 'Internal server error' }, { status: 500 });
   }
+  });
 }
 
 // ---------------------------------------------------------------------------
@@ -149,6 +147,7 @@ export async function DELETE(
   if (!access.ok) {
     return NextResponse.json({ error: access.error }, { status: access.status });
   }
+return withRLSContext(toTenantContext(access, session.user.id), async () => {
 
   // Only admins (tenant admin or platform super admin) can delete calendars
   if (access.ctx.role === 'MEMBER') {
@@ -157,8 +156,7 @@ export async function DELETE(
   const ctx = access.ctx;
 
   try {
-    // Scoping globalDb access (S7) — see note in PATCH above.
-    await superAdminStorage.run(true, () => CalendarService.deleteCalendar(ctx, calendarId));
+    await CalendarService.deleteCalendar(ctx, calendarId);
     return NextResponse.json({ success: true });
   } catch (error: unknown) {
     if (error instanceof Error) {
@@ -167,4 +165,5 @@ export async function DELETE(
     }
     return NextResponse.json({ error: 'Internal server error' }, { status: 500 });
   }
+  });
 }

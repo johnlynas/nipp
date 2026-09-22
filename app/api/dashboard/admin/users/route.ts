@@ -5,7 +5,9 @@ import { checkAdminRateLimit } from '@/lib/rate-limiter';
 import { UserService } from '@/services/user-service';
 import { TeamService } from '@/services/team-service';
 import { notifyUserOperation } from '@/lib/notification-push';
-import globalDb from '@/lib/global-db';
+// RLS Phase 3: dashboard user listing/creation run under verified contexts.
+import tenantDb from '@/lib/tenant-db';
+import { withPlatformContext, withTenantAdminContext } from '@/lib/platform-db';
 import type { Prisma } from '@prisma/client';
 
 export const runtime = 'nodejs';
@@ -30,75 +32,78 @@ export async function GET(request: NextRequest) {
     const teamId = url.searchParams.get('teamId') || undefined;
     const status = url.searchParams.get('status') as 'active' | 'banned' | undefined;
 
-    // Build the shared where clause so counts match filtered results
-    const where: Prisma.UserWhereInput = {};
-    if (search) {
-      where.OR = [
-        { name: { contains: search, mode: 'insensitive' } },
-        { email: { contains: search, mode: 'insensitive' } },
-      ];
-    }
-
-    // Platform Admin: apply org/role/team filters to the where clause for counts
-    if (organizationId || role || teamId) {
-      const memberWhere: Prisma.MemberWhereInput = {};
-      if (organizationId) memberWhere.orgId = organizationId;
-      if (role) memberWhere.role = role;
-
-      let userIds: string[] = [];
-      if (organizationId || role) {
-        const matchingMembers = await globalDb.member.findMany({
-          where: memberWhere,
-          select: { userId: true },
-        });
-        userIds = matchingMembers.map((m) => m.userId);
+    // One verified platform context for the whole listing (cross-org reads).
+    return await withPlatformContext(auth.session!.user.id, async () => {
+      // Build the shared where clause so counts match filtered results
+      const where: Prisma.UserWhereInput = {};
+      if (search) {
+        where.OR = [
+          { name: { contains: search, mode: 'insensitive' } },
+          { email: { contains: search, mode: 'insensitive' } },
+        ];
       }
 
-      if (teamId) {
-        const teamMembers = await globalDb.teamMember.findMany({
-          where: { teamId },
-          select: { userId: true },
-        });
-        const teamUserIds = new Set(teamMembers.map((tm) => tm.userId));
-        userIds = userIds.length > 0
-          ? userIds.filter((id) => teamUserIds.has(id))
-          : Array.from(teamUserIds);
+      // Platform Admin: apply org/role/team filters to the where clause for counts
+      if (organizationId || role || teamId) {
+        const memberWhere: Prisma.MemberWhereInput = {};
+        if (organizationId) memberWhere.orgId = organizationId;
+        if (role) memberWhere.role = role;
+
+        let userIds: string[] = [];
+        if (organizationId || role) {
+          const matchingMembers = await tenantDb.member.findMany({
+            where: memberWhere,
+            select: { userId: true },
+          });
+          userIds = matchingMembers.map((m) => m.userId);
+        }
+
+        if (teamId) {
+          const teamMembers = await tenantDb.teamMember.findMany({
+            where: { teamId },
+            select: { userId: true },
+          });
+          const teamUserIds = new Set(teamMembers.map((tm) => tm.userId));
+          userIds = userIds.length > 0
+            ? userIds.filter((id) => teamUserIds.has(id))
+            : Array.from(teamUserIds);
+        }
+
+        if (userIds.length > 0) {
+          where.id = { in: userIds };
+        } else {
+          where.id = { in: [] };
+        }
       }
 
-      if (userIds.length > 0) {
-        where.id = { in: userIds };
-      } else {
-        where.id = { in: [] };
+      // Apply status filter to where clause for counts
+      if (status === 'banned') {
+        where.banned = true;
+      } else if (status === 'active') {
+        where.banned = false;
       }
-    }
 
-    // Apply status filter to where clause for counts
-    if (status === 'banned') {
-      where.banned = true;
-    } else if (status === 'active') {
-      where.banned = false;
-    }
+      // Fetch paginated items for the table (UserService runs in this context)
+      const result = await UserService.list(
+        { search, role, organizationId, teamId, status },
+        { page, pageSize },
+        { userId: auth.session!.user.id, role: 'PLATFORM_ADMIN' }
+      );
 
-    // Fetch paginated items for the table
-    const result = await UserService.list(
-      { search, role, organizationId, teamId, status },
-      { page, pageSize },
-      { userId: auth.session!.user.id, role: 'PLATFORM_ADMIN' }
-    );
+      // Compute counts from the full dataset using separate count queries
+      const [emailVerifiedCount, bannedCount] = await Promise.all([
+        tenantDb.user.count({ where: { ...where, emailVerified: true } }),
+        tenantDb.user.count({ where: { ...where, banned: true } }),
+      ]);
 
-    // Compute counts from the full dataset using separate count queries
-    const [emailVerifiedCount, bannedCount] = await Promise.all([
-      globalDb.user.count({ where: { ...where, emailVerified: true } }),
-      globalDb.user.count({ where: { ...where, banned: true } }),
-    ]);
-
-    return NextResponse.json({
-      ...result,
-      counts: {
-        emailVerifiedCount,
-        bannedCount,
-        activeCount: result.pagination.total - bannedCount,
-      },
+      return NextResponse.json({
+        ...result,
+        counts: {
+          emailVerifiedCount,
+          bannedCount,
+          activeCount: result.pagination.total - bannedCount,
+        },
+      });
     });
   } catch (error) {
     console.error('Failed to list users:', error);
@@ -139,35 +144,45 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: 'Name and email are required' }, { status: 400 });
   }
 
+  // Capture narrowed values (const) so the async closure below keeps their types.
+  const name = body.name;
+  const email = body.email;
+  const password = body.password;
+
   try {
-    const result = await UserService.create(
-      { name: body.name, email: body.email, password: body.password, organizationId },
-      {
-        userId: auth.session!.user.id,
-        role: 'PLATFORM_ADMIN',
-      }
-    );
-
-    // Auto-add user to the "Members" team in their organization
-    const membersTeam = await globalDb.team.findFirst({
-      where: { organizationId, slug: 'members' },
-    });
-
-    if (membersTeam) {
-      try {
-        await TeamService.addTeamMember(membersTeam.id, { userId: result.id }, {
+    // RLS: verified target-org context — user creation + members-team auto-add bind to it.
+    const result = await withTenantAdminContext(auth.session!.user.id, organizationId, async () => {
+      const created = await UserService.create(
+        { name, email, password, organizationId },
+        {
           userId: auth.session!.user.id,
           role: 'PLATFORM_ADMIN',
-        });
-      } catch (err) {
-        // Ignore if user is already a member of this team
-        console.warn('User may already be a team member:', err);
-      }
-    } else {
-      console.warn('Members team not found for organization', organizationId);
-    }
+        }
+      );
 
-    await notifyUserOperation('create', targetLabel, true, undefined, organizationId);
+      // Auto-add user to the "Members" team in their organization
+      const membersTeam = await tenantDb.team.findFirst({
+        where: { organizationId, slug: 'members' },
+      });
+
+      if (membersTeam) {
+        try {
+          await TeamService.addTeamMember(membersTeam.id, { userId: created.id }, {
+            userId: auth.session!.user.id,
+            role: 'PLATFORM_ADMIN',
+          });
+        } catch (err) {
+          // Ignore if user is already a member of this team
+          console.warn('User may already be a team member:', err);
+        }
+      } else {
+        console.warn('Members team not found for organization', organizationId);
+      }
+
+      await notifyUserOperation('create', targetLabel, true, undefined, organizationId);
+
+      return created;
+    });
 
     return NextResponse.json(result, { status: 201 });
   } catch (error) {

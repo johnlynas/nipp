@@ -77,7 +77,7 @@ vi.mock('@/lib/notifications/email', () => ({
   sendEmail: (...args: unknown[]) => mockSendEmail(...args),
 }));
 
-vi.mock('@/lib/global-db', () => ({
+vi.mock('@/lib/tenant-db', () => ({
   default: {
     notificationLog: { create: mockNotificationLogCreate },
   },

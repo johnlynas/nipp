@@ -10,7 +10,7 @@
     "dev:https": "next dev --experimental-https",
     "build": "next build",
     "start": "next start",
-    "lint": "next lint",
+    "lint": "next lint && node scripts/lint-guardrails.mjs",
     "type-check": "tsc --noEmit",
     "db:migrate": "prisma migrate dev",
     "db:push": "prisma db push",
@@ -24,11 +24,14 @@
     "test:all": "vitest run",
     "test:watch": "vitest tests/unit",
     "test:coverage": "vitest run tests/unit --coverage",
-    "test:isolation": "bash -c 'npm run test:isolation:setup && npm run test:isolation:app && npm run test:isolation:e2e && npm run test:isolation:teardown'",
+    "test:isolation": "bash -c 'npm run test:isolation:db && npm run test:isolation:setup && npm run test:isolation:app && npm run test:isolation:e2e && npm run test:isolation:teardown'",
     "test:isolation:setup": "bash scripts/setup-test-env.sh",
     "test:isolation:teardown": "bash scripts/teardown-test-env.sh",
     "test:isolation:app": "vitest run tests/isolation/application/",
-    "test:isolation:e2e": "playwright test tests/isolation/e2e/ --config=tests/isolation/playwright.config.ts"
+    "test:isolation:e2e": "playwright test tests/isolation/e2e/ --config=tests/isolation/playwright.config.ts",
+    "test:isolation:db": "vitest run tests/isolation/database/ --config vitest.db.config.ts",
+    "db:gen-policy-golden": "tsx scripts/rls-gen-policy-golden.ts",
+    "test:rls-perf": "bash -c 'npx tsx scripts/rls-perf-benchmark.ts'"
   },
   "dependencies": {
     "@better-auth/core": "1.6.23",

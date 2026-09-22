@@ -23,7 +23,7 @@ const mockRunJob = vi.fn();
 vi.mock('@/lib/notification-push', () => ({ pushNotification: vi.fn() }));
 vi.mock('@/lib/health-check', () => ({ checkHealthStatus: vi.fn() }));
 vi.mock('@/lib/calendar-event-scheduler', () => ({ findDueToStartEvents: vi.fn() }));
-vi.mock('@/lib/global-db', () => ({
+vi.mock('@/lib/tenant-db', () => ({
   default: { jobDefinition: { findMany: mockFindMany } },
 }));
 vi.mock('@/lib/logger', () => ({

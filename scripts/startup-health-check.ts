@@ -5,8 +5,10 @@
  */
 
 import tenantDb from '@/lib/tenant-db';
+// RLS Phase 3: pre-server bootstrap has no session — bind the env platform org
+// (withPlatformContextForDB) instead of the deleted unscoped client.
+import { withPlatformContextForDB } from '@/lib/rls-transaction';
 import { getRedis } from '@/lib/redis';
-import globalDb from '@/lib/global-db';
 import { env } from '@/lib/env';
 import { notifyHealthCheck } from '@/lib/notification-push';
 import { addSystemLog, updateHealthState } from '@/lib/system-logs';
@@ -16,10 +18,11 @@ import { PgBouncerMonitor } from '@/lib/pgbouncer-monitor';
 async function getPlatformOrgId(): Promise<string | null> {
   if (env.PLATFORM_ORGANIZATION_ID) return env.PLATFORM_ORGANIZATION_ID;
   try {
-    const org = await globalDb.organization.findFirst({
-      where: { slug: 'platform' },
-      select: { id: true },
-    });
+    // Fallback lookup needs a flag-carrying binding to be visible under RLS;
+    // we bind with the slug as org scope — Organization admits platform flag.
+    const org = await withPlatformContextForDB('platform', () =>
+      tenantDb.organization.findFirst({ where: { slug: 'platform' }, select: { id: true } }),
+    );
     return org?.id ?? null;
   } catch {
     return null;

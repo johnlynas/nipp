@@ -11,6 +11,8 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { requireSuperAdmin } from '@/lib/require-super-admin';
 import { JobSchedulerService, CreateJobInput } from '@/services/job-scheduler-service';
+// RLS Phase 3: super-admin job ops run under a verified platform context.
+import { withPlatformContext } from '@/lib/platform-db';
 import { ServiceContext } from '@/lib/services/types';
 import { logger } from '@/lib/logger';
 import { wrapPiiRoute } from '@/lib/payload-middleware';
@@ -79,7 +81,8 @@ export const GET = wrapPiiRoute(async (request, _decryptedBody) => {
     if (approvedParam === 'true' || approvedParam === 'false') opts.approved = approvedParam === 'true';
     if (limitParam) opts.limit = parseInt(limitParam, 10);
 
-    const jobs = await JobSchedulerService.listJobs(ctx, opts);
+    // One verified platform context for the job listing (platform_org_id bound).
+    const jobs = await withPlatformContext(session.user.id, () => JobSchedulerService.listJobs(ctx, opts));
 
     return NextResponse.json({ jobs }, { headers: { 'Cache-Control': 'no-store, no-cache, must-revalidate' } });
    } catch (error) {
@@ -136,16 +139,19 @@ export const POST = wrapPiiRoute(async (request, decryptedBody) => {
 
     const ctx: ServiceContext = { userId: session.user.id, role: 'PLATFORM_ADMIN' };
 
-    const job = await JobSchedulerService.createJob(ctx, {
-      name: body.name,
+    // Verified platform context for the job-definition insert.
+    const job = await withPlatformContext(session.user.id, () =>
+      JobSchedulerService.createJob(ctx, {
+        name: body.name,
       handlerKey: body.handlerKey,
       scheduleExpr: body.scheduleExpr,
       timezone: body.timezone,
       timeoutMs: body.timeoutMs,
       concurrencyLimit: body.concurrencyLimit,
-      enabled: body.enabled ?? false,
-      code: body.code ?? null,
-       });
+        enabled: body.enabled ?? false,
+        code: body.code ?? null,
+      })
+    );
 
     logger.info({ userId: session.user.id, jobId: job.id }, '[Jobs API] Job created (unapproved)');
 

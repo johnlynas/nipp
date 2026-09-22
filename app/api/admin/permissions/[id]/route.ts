@@ -9,6 +9,8 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { requireSuperAdmin } from '@/lib/require-super-admin';
 import { PermissionService, UpdatePermissionInput } from '@/services/permission-service';
+// RLS Phase 3: super-admin ops run under a verified platform context.
+import { withPlatformContext } from '@/lib/platform-db';
 import { ServiceContext } from '@/lib/services/types';
 import { recordAuditLog } from '@/lib/audit-log';
 import { logger } from '@/lib/logger';
@@ -43,7 +45,10 @@ export const GET = wrapPiiRoute(async (request, _decryptedBody, params) => {
       role: 'PLATFORM_ADMIN',
     };
 
-    const permission = await PermissionService.getById(permissionId, ctx);
+    // Verified platform context for the permission read.
+    const permission = await withPlatformContext(session.user.id, () =>
+      PermissionService.getById(permissionId, ctx)
+    );
 
     return NextResponse.json({ permission });
   } catch (error) {
@@ -106,7 +111,10 @@ export const PATCH = wrapPiiRoute(async (request, decryptedBody, params) => {
       role: 'PLATFORM_ADMIN',
     };
 
-    const updatedPermission = await PermissionService.update(permissionId, body, ctx);
+    // Verified platform context for the permission update.
+    const updatedPermission = await withPlatformContext(session.user.id, () =>
+      PermissionService.update(permissionId, body, ctx)
+    );
 
     logger.info({ userId: session.user.id, permissionId }, '[Permissions API] Permission updated');
 
@@ -167,7 +175,10 @@ export const DELETE = wrapPiiRoute(async (request, _decryptedBody, params) => {
       role: 'PLATFORM_ADMIN',
     };
 
-    await PermissionService.delete(permissionId, ctx);
+    // Verified platform context for the permission delete.
+    await withPlatformContext(session.user.id, () =>
+      PermissionService.delete(permissionId, ctx)
+    );
 
     logger.info({ userId: session.user.id, permissionId }, '[Permissions API] Permission deleted');
 

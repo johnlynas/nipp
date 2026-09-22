@@ -3,6 +3,7 @@ import { requireSuperAdmin } from '@/lib/require-super-admin';
 import { checkAdminRateLimit } from '@/lib/rate-limiter';
 
 import { TeamService } from '@/services/team-service';
+import { withPlatformContext } from '@/lib/platform-db';
 
 export const runtime = 'nodejs';
 
@@ -21,10 +22,13 @@ export async function GET(
 
   try {
     const id = (await params).id;
-    const result = await TeamService.listTeamMembers(id, {
-      userId: auth.session!.user.id,
-      role: 'PLATFORM_ADMIN',
-    });
+    // Verified platform context for the member listing.
+    const result = await withPlatformContext(auth.session!.user.id, () =>
+      TeamService.listTeamMembers(id, {
+        userId: auth.session!.user.id,
+        role: 'PLATFORM_ADMIN',
+      })
+    );
 
     return NextResponse.json(result);
   } catch (error) {
@@ -58,10 +62,13 @@ export async function POST(
       return NextResponse.json({ error: 'User ID is required' }, { status: 400 });
     }
 
-    const result = await TeamService.addTeamMember(id, { userId: body.userId }, {
-      userId: auth.session!.user.id,
-      role: 'PLATFORM_ADMIN',
-    });
+    // Verified platform context for the membership add.
+    const result = await withPlatformContext(auth.session!.user.id, () =>
+      TeamService.addTeamMember(id, { userId: body.userId }, {
+        userId: auth.session!.user.id,
+        role: 'PLATFORM_ADMIN',
+      })
+    );
 
     return NextResponse.json(result, { status: 201 });
   } catch (error) {
@@ -95,10 +102,13 @@ export async function DELETE(
       return NextResponse.json({ error: 'User ID is required' }, { status: 400 });
     }
 
-    await TeamService.removeTeamMember(id, body.userId, {
-      userId: auth.session!.user.id,
-      role: 'PLATFORM_ADMIN',
-    });
+    // Verified platform context for the membership remove.
+    await withPlatformContext(auth.session!.user.id, () =>
+      TeamService.removeTeamMember(id, body.userId, {
+        userId: auth.session!.user.id,
+        role: 'PLATFORM_ADMIN',
+      })
+    );
 
     return NextResponse.json({ success: true });
   } catch (error) {

@@ -36,6 +36,23 @@ function parseEnvFile(filePath: string): Record<string, string> {
 }
 
 /**
+ * Expand ${VAR} references — .env.test is shell-style (sourced by
+ * setup-test-env.sh) so its DSNs reference POSTGRES_PORT etc. The Playwright
+ * path never sources the file, so expand against the file's own vars plus
+ * process.env.
+ */
+function resolveEnvVars(env: Record<string, string>): void {
+  for (const key of Object.keys(env)) {
+    let value = env[key];
+    // Bounded loop guards against self-referential expansion loops.
+    for (let i = 0; i < 5 && /\$\{[^}]+\}/.test(value); i++) {
+      value = value.replace(/\$\{([^}]+)\}/g, (_, name: string) => env[name] ?? process.env[name] ?? '');
+    }
+    env[key] = value;
+  }
+}
+
+/**
  * Wait for the Next.js dev server to become reachable.
  */
 async function waitForServer(url: string, timeoutMs: number): Promise<void> {
@@ -100,8 +117,10 @@ export default async function globalSetup() {
   const projectRoot = path.resolve(__dirname, '..', '..', '..');
   const envPath = path.join(projectRoot, '.env.test');
 
-  // Load .env.test values
+  // Load .env.test values (and expand its ${VAR} references, since this path
+  // does not source the file through a shell).
   const envVars = fs.existsSync(envPath) ? parseEnvFile(envPath) : {};
+  resolveEnvVars(envVars);
 
   // Seed the test database before starting the dev server.
   // This ensures tenant users and super admin exist with correct credentials.
@@ -114,8 +133,13 @@ export default async function globalSetup() {
         ...process.env,
         NODE_ENV: 'test',
         DATABASE_URL: envVars.DATABASE_URL || process.env.DATABASE_URL,
-        ADMIN_EMAIL: envVars.ADMIN_EMAIL || '',
-        ADMIN_PASSWORD: envVars.ADMIN_PASSWORD || '',
+        // The seed performs DDL (RLS bootstrap) — it MUST connect as owner.
+        // SEED_RLS_DSN carries the owner DSN (see .env.test comments); NIPP_APP_DB_PASSWORD
+        // is what the bootstrap sets on the nipp_app role, so the app DSN works after.
+        SEED_RLS_DSN: envVars.SEED_RLS_DSN || process.env.SEED_RLS_DSN,
+        NIPP_APP_DB_PASSWORD: envVars.NIPP_APP_DB_PASSWORD || process.env.NIPP_APP_DB_PASSWORD || '',
+        ADMIN_EMAIL: envVars.ADMIN_EMAIL || envVars.TEST_ADMIN_EMAIL || '',
+        ADMIN_PASSWORD: envVars.ADMIN_PASSWORD || envVars.TEST_ADMIN_PASSWORD || '',
         TEST_ADMIN_EMAIL: envVars.TEST_ADMIN_EMAIL || '',
         TEST_ADMIN_PASSWORD: envVars.TEST_ADMIN_PASSWORD || '',
         TEST_TENANT_A_EMAIL: envVars.TEST_TENANT_A_EMAIL || '',
@@ -127,6 +151,16 @@ export default async function globalSetup() {
   } catch (seedError) {
     console.warn('⚠️  Seed failed (continuing anyway):', seedError);
   }
+
+  // The seed persists the just-created Platform org id into .env (see
+  // persistPlatformOrgIdToEnv in prisma/seed.ts). RLS platform-admin gating is
+  // fail-closed without it, so hand it to the spawned dev server.
+  let platformOrgId: string | null = null;
+  try {
+    const dotEnv = fs.readFileSync(path.join(projectRoot, '.env'), 'utf8');
+    const m = dotEnv.match(/^PLATFORM_ORGANIZATION_ID=["']?([^"'\s]+)/m);
+    if (m) platformOrgId = m[1];
+  } catch { /* no .env — env var must come from the environment */ }
 
   // Rename .env temporarily so Next.js only loads .env.test (which has test DB URL)
   // Next.js loads env files in order: .env.local, .env.test.local, .env.test, .env
@@ -147,6 +181,7 @@ export default async function globalSetup() {
       ...process.env,
       NODE_ENV: 'test',
       ...envVars,
+      ...(platformOrgId ? { PLATFORM_ORGANIZATION_ID: platformOrgId } : {}),
     },
   });
 

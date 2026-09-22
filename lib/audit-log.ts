@@ -4,7 +4,9 @@
  * Records security-relevant admin actions to the AuditLog model in PostgreSQL.
  */
 
-import globalDb from '@/lib/global-db';
+// AuditLog is NOT in tenantDb's TENANT_SCOPED_MODELS, so this pass-through swap
+// changes no query behavior (RLS plan Phase 3: remove the unscoped-client bypass).
+import tenantDb from '@/lib/tenant-db';
 import { Prisma } from '@prisma/client';
 
 /**
@@ -28,7 +30,7 @@ export interface AuditLogPayload {
  */
 export async function recordAuditLog(payload: AuditLogPayload): Promise<void> {
   try {
-    await globalDb.auditLog.create({
+    await tenantDb.auditLog.create({
       data: {
         userId: payload.userId,
         userName: payload.userName,

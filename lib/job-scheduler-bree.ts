@@ -45,7 +45,7 @@ import path from 'node:path';
 // runtime inside the Next.js server.
 import Bree from 'bree';
 import { env } from '@/lib/env';
-import globalDb from '@/lib/global-db';
+import tenantDb from '@/lib/tenant-db';
 import { logger } from '@/lib/logger';
 import { NotificationPriority, NotificationScope } from '@prisma/client';
 import { pushNotification } from '@/lib/notification-push';
@@ -486,7 +486,7 @@ async function reapStaleRunners(): Promise<number> {
     if (name === 'job-scheduler-worker-bootstrap.cjs') continue;
     const jobId = name.slice(0, -4); // '<safeJobId>.cjs' — reverse the sanitization
     try {
-      const row = await globalDb.jobDefinition.findUnique({ where: { id: jobId }, select: { id: true } });
+      const row = await tenantDb.jobDefinition.findUnique({ where: { id: jobId }, select: { id: true } });
       if (!row) {
         await fs.unlink(path.join(RUNTIME_DIR, name));
         reaped++;

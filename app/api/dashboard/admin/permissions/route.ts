@@ -2,6 +2,9 @@ import { NextRequest, NextResponse } from 'next/server';
 import { requireSuperAdmin } from '@/lib/require-super-admin';
 import { checkAdminRateLimit } from '@/lib/rate-limiter';
 
+// RLS Phase 3: permission catalog listing/creation run under a verified
+// platform context (nipp_app connection + GUCs), replacing the unscoped client.
+import { withPlatformContext } from '@/lib/platform-db';
 import { PermissionService } from '@/services/permission-service';
 import { notifyPermissionOperation } from '@/lib/notification-push';
 
@@ -30,12 +33,14 @@ export async function GET(request: NextRequest) {
     if (resource) filters.resource = resource;
     if (isDefault !== null) filters.isDefault = isDefault === 'true';
 
-    const result = await PermissionService.list(filters as import('@/lib/services/types').PermissionFilters, { page, pageSize }, {
-      userId: auth.session!.user.id,
-      role: 'PLATFORM_ADMIN',
+    // One verified platform context for the whole catalog listing.
+    return await withPlatformContext(auth.session!.user.id, async () => {
+      const result = await PermissionService.list(filters as import('@/lib/services/types').PermissionFilters, { page, pageSize }, {
+        userId: auth.session!.user.id,
+        role: 'PLATFORM_ADMIN',
+      });
+      return NextResponse.json(result);
     });
-
-    return NextResponse.json(result);
   } catch (error) {
     console.error('Failed to list permissions:', error);
     return NextResponse.json({ error: 'Failed to fetch permissions' }, { status: 500 });
@@ -67,9 +72,12 @@ export async function POST(request: NextRequest) {
     const targetLabel = body.key ? `Permission "${body.key}"` : 'permission';
 
     try {
-      const result = await PermissionService.create(
-        { key: body.key, resource: body.resource, action: body.action, description: body.description, isDefault: body.isDefault ?? false },
-        { userId: auth.session!.user.id, role: 'PLATFORM_ADMIN' }
+      // Verified platform context around the catalog mutation.
+      const result = await withPlatformContext(auth.session!.user.id, () =>
+        PermissionService.create(
+          { key: body.key, resource: body.resource, action: body.action, description: body.description, isDefault: body.isDefault ?? false },
+          { userId: auth.session!.user.id, role: 'PLATFORM_ADMIN' }
+        )
       );
 
       await notifyPermissionOperation('create', targetLabel, true);

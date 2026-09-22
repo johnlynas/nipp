@@ -5,8 +5,10 @@
  * Wrapped with wrapPiiRoute for payload encryption.
  */
 
-import { NextRequest, NextResponse } from 'next/server';
-import globalDb from '@/lib/global-db';
+import { NextResponse } from 'next/server';
+// RLS Phase 3: org settings run under a verified target-org context.
+import tenantDb from '@/lib/tenant-db';
+import { withTenantAdminContext } from '@/lib/platform-db';
 import { requireSuperAdmin } from '@/lib/require-super-admin';
 import { recordAuditLog } from '@/lib/audit-log';
 import { logger } from '@/lib/logger';
@@ -77,8 +79,10 @@ export const PATCH = wrapPiiRoute(async (request, decryptedBody, params) => {
   }
 
   try {
-    // Verify target org exists (globalDb)
-    const existingOrg = await globalDb.organization.findUnique({ where: { id: orgId } });
+    // RLS: verified target-org context wraps org read/update + session invalidation.
+    return await withTenantAdminContext(session.user.id, orgId, async () => {
+    // Verify target org exists (flag=1 admits any org row; RLS binds writes)
+    const existingOrg = await tenantDb.organization.findUnique({ where: { id: orgId } });
     if (!existingOrg) {
       return NextResponse.json({ error: 'Organization not found' }, { status: 404 });
     }
@@ -95,22 +99,23 @@ export const PATCH = wrapPiiRoute(async (request, decryptedBody, params) => {
 
       // Special handling for SUSPENDED: invalidate sessions
       if (status === 'SUSPENDED') {
-        await globalDb.session.deleteMany({ where: { user: { members: { some: { orgId } } } } });
+        // Session has no RLS; Member filter is ctx-scoped (platform pass-through).
+        await tenantDb.session.deleteMany({ where: { user: { members: { some: { orgId } } } } });
         logger.info({ userId: session.user.id, orgId }, 'Invalidated all sessions for suspended organization');
       }
 
       // Special handling for ARCHIVED: ensure no active members (warning only)
       if (status === 'ARCHIVED') {
-        const memberCount = await globalDb.member.count({ where: { orgId } });
+        const memberCount = await tenantDb.member.count({ where: { orgId } });
         if (memberCount > 0) {
           logger.warn({ userId: session.user.id, orgId, memberCount }, 'Archiving organization with active members');
         }
       }
     }
 
-    // Validate slug uniqueness (globalDb)
+    // Validate slug uniqueness (platform flag exposes all orgs for the check)
     if (slug && slug !== existingOrg.slug) {
-      const slugCollision = await globalDb.organization.findFirst({ where: { slug, id: { not: orgId } } });
+      const slugCollision = await tenantDb.organization.findFirst({ where: { slug, id: { not: orgId } } });
       if (slugCollision) {
         return NextResponse.json({ error: 'Slug already in use by another organization' }, { status: 409 });
       }
@@ -122,8 +127,8 @@ export const PATCH = wrapPiiRoute(async (request, decryptedBody, params) => {
     if (slug) updateData.slug = slug;
     if (status) updateData.status = status;
 
-    // Update organization (globalDb — Organization model is global, not org-scoped)
-    const updatedOrg = await globalDb.organization.update({
+    // Update organization (RLS Organization UPDATE policy: platform actor context)
+    const updatedOrg = await tenantDb.organization.update({
       where: { id: orgId },
       data: updateData,
     });
@@ -142,6 +147,7 @@ export const PATCH = wrapPiiRoute(async (request, decryptedBody, params) => {
 
     logger.info({ userId: session.user.id, orgId, changes: Object.keys(updateData) }, 'Updated organization settings');
     return NextResponse.json({ message: 'Organization updated', organization: updatedOrg });
+    });
   } catch (error) {
     const isDbError =
       error instanceof Error &&

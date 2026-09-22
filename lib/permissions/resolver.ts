@@ -1,4 +1,11 @@
 import tenantDb from '@/lib/tenant-db';
+// RLS Phase 3: this is the SHARED permission-resolution read (Member →
+// MemberRole → Role → RolePermission → Permission, all RLS-scoped). It runs on
+// a fresh connection with NO bound GUCs unless wrapped here — unscoped it fails
+// closed to zero permissions for everyone. The verified target-org context
+// (flag=1) exposes the catalog read; the orgId is the very org permissions are
+// being resolved against, so app-layer extension scoping agrees with it.
+import { withTenantAdminContext } from '@/lib/platform-db';
 
 const CACHE_KEY_PREFIX = 'perm:';
 
@@ -22,8 +29,9 @@ export async function resolvePermissions(
 
     const cached = await cacheGet<string[]>(
       cacheKey,
-      // Resolver: fetch from database on cache miss
-      async () => {
+      // Resolver: fetch from database on cache miss — under the verified
+      // target-org context (see module header) for RLS visibility.
+      () => withTenantAdminContext(userId, orgId, async () => {
         const memberWithRoles = await tenantDb.member.findFirst({
           where: { userId, orgId },
           select: {
@@ -53,7 +61,7 @@ export async function resolvePermissions(
         );
 
         return Array.from(new Set(permissions));
-      },
+      }),
       { ttlType: 'volatile' } // Permissions can change with role updates
     );
 

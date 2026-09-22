@@ -7,7 +7,9 @@
  */
 
 import { NextRequest, NextResponse } from 'next/server';
-import globalDb from '@/lib/global-db';
+// RLS Phase 3: permission catalog searches run under the verified platform context.
+import tenantDb from '@/lib/tenant-db';
+import { withPlatformContext } from '@/lib/platform-db';
 import { requireSuperAdmin } from '@/lib/require-super-admin';
 import { checkAdminRateLimit } from '@/lib/rate-limiter';
 import { cacheGet } from '@/lib/cache/hybrid';
@@ -77,24 +79,27 @@ export async function GET(request: NextRequest) {
     const cached = await cacheGet<{ results: Array<{ id: string; key: string; resource: string; action: string; description: string | null }>; total: number }>(
       cacheKey,
       async () => {
-        // Execute prefix search on permission key (case-insensitive)
-        const [results, total] = await Promise.all([
-          globalDb.permission.findMany({
-            where: {
-              key: { startsWith: q, mode: 'insensitive' },
-            },
-            select: { id: true, key: true, resource: true, action: true, description: true },
-            orderBy: { key: 'asc' },
-            take: limit,
-          }),
-          globalDb.permission.count({
-            where: {
-              key: { startsWith: q, mode: 'insensitive' },
-            },
-          }),
-        ]);
+        // Execute prefix search on permission key (case-insensitive) — platform
+        // context admits the full catalog under RLS.
+        return withPlatformContext(userId!, async () => {
+          const [results, total] = await Promise.all([
+            tenantDb.permission.findMany({
+              where: {
+                key: { startsWith: q, mode: 'insensitive' },
+              },
+              select: { id: true, key: true, resource: true, action: true, description: true },
+              orderBy: { key: 'asc' },
+              take: limit,
+            }),
+            tenantDb.permission.count({
+              where: {
+                key: { startsWith: q, mode: 'insensitive' },
+              },
+            }),
+          ]);
 
-        return { results, total };
+          return { results, total };
+        });
       },
       { ttlType: 'search' } // 30-second TTL for search results
     );

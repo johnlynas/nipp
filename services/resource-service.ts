@@ -1,11 +1,13 @@
 /**
  * ResourceService — Full CRUD for the Resource model.
  *
- * Model locality: Global (non-org-scoped). Uses globalDb for all queries.
+ * Model locality: Global (non-org-scoped). Uses tenantDb for all queries.
  */
 
 import { Prisma } from '@prisma/client';
-import globalDb from '@/lib/global-db';
+// RLS plan Phase 3: Resource/ResourceRole are non-org-scoped (platform resource catalog) —
+// pass-through swap removes the unscoped-client bypass.
+import tenantDb from '@/lib/tenant-db';
 import { logger } from '@/lib/logger';
 import { ServiceContext, NotFoundError, ConflictError, ValidationError } from '@/lib/services/types';
 import { requirePlatformAdmin } from '@/lib/services/base-service';
@@ -49,7 +51,7 @@ export const ResourceService = {
     }
 
     // Check for duplicate name (case-insensitive)
-    const existing = await globalDb.resource.findFirst({
+    const existing = await tenantDb.resource.findFirst({
       where: { name: { equals: name, mode: 'insensitive' } },
     });
     if (existing) {
@@ -57,7 +59,7 @@ export const ResourceService = {
     }
 
     // Create resource and optionally assign roles in a transaction
-    const resource = await globalDb.$transaction(async (tx) => {
+    const resource = await tenantDb.$transaction(async (tx) => {
       const created = await tx.resource.create({
         data: { name: name.trim(), description: description || '' },
       });
@@ -89,7 +91,7 @@ export const ResourceService = {
   async getById(id: string, ctx: ServiceContext) {
     requirePlatformAdmin(ctx);
 
-    const resource = await globalDb.resource.findUnique({
+    const resource = await tenantDb.resource.findUnique({
       where: { id },
       include: { resourceRoles: { include: { role: true } } },
     });
@@ -118,14 +120,14 @@ export const ResourceService = {
     }
 
     const [resources, total] = await Promise.all([
-      globalDb.resource.findMany({
+      tenantDb.resource.findMany({
         where,
         skip,
         take: pageSize,
         orderBy: { name: 'asc' },
         include: { resourceRoles: { include: { role: true } } },
       }),
-      globalDb.resource.count({ where }),
+      tenantDb.resource.count({ where }),
     ]);
 
     return {
@@ -141,7 +143,7 @@ export const ResourceService = {
     requirePlatformAdmin(ctx);
 
     // Verify resource exists first
-    const existingResource = await globalDb.resource.findUnique({ where: { id } });
+    const existingResource = await tenantDb.resource.findUnique({ where: { id } });
     if (!existingResource) {
       throw new NotFoundError('Resource not found');
     }
@@ -149,7 +151,7 @@ export const ResourceService = {
     // Validate name uniqueness if changing (trim first)
     const trimmedName = data.name?.trim();
     if (trimmedName && trimmedName !== existingResource.name) {
-      const nameExists = await globalDb.resource.findFirst({
+      const nameExists = await tenantDb.resource.findFirst({
         where: {
           name: { equals: trimmedName, mode: 'insensitive' },
           id: { not: id },
@@ -166,7 +168,7 @@ export const ResourceService = {
     if (data.description !== undefined) updateData.description = data.description;
 
     // Use transaction for atomic role replacement if roleIds provided
-    const updatedResource = await globalDb.$transaction(async (tx) => {
+    const updatedResource = await tenantDb.$transaction(async (tx) => {
       if (data.roleIds !== undefined) {
         // Delete all existing role assignments
         await tx.resourceRole.deleteMany({ where: { resourceId: id } });
@@ -201,19 +203,19 @@ export const ResourceService = {
     requirePlatformAdmin(ctx);
 
     // Verify resource exists first
-    const existingResource = await globalDb.resource.findUnique({ where: { id } });
+    const existingResource = await tenantDb.resource.findUnique({ where: { id } });
     if (!existingResource) {
       throw new NotFoundError('Resource not found');
     }
 
     // Safety check: cannot delete resource with assigned roles
-    const roleCount = await globalDb.resourceRole.count({ where: { resourceId: id } });
+    const roleCount = await tenantDb.resourceRole.count({ where: { resourceId: id } });
 
     if (roleCount > 0) {
       throw new ConflictError('Cannot delete resource with assigned roles');
     }
 
-    await globalDb.resource.delete({ where: { id } });
+    await tenantDb.resource.delete({ where: { id } });
 
     logger.info(
       { userId: ctx.userId, resourceId: id, method: 'ResourceService.delete' },

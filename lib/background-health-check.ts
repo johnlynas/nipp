@@ -6,7 +6,7 @@
 import { checkHealthStatus } from '@/lib/health-check';
 import { getPreviousHealthState, addSystemLog } from '@/lib/system-logs';
 import { notifyHealthCheck } from '@/lib/notification-push';
-import globalDb from '@/lib/global-db';
+import tenantDb from '@/lib/tenant-db';
 import { env } from '@/lib/env';
 import { isMainThread } from 'node:worker_threads';
 
@@ -27,7 +27,7 @@ function setHealthCheckTimer(timer: ReturnType<typeof setInterval> | null): void
 async function getPlatformOrgId(): Promise<string | null> {
   if (env.PLATFORM_ORGANIZATION_ID) return env.PLATFORM_ORGANIZATION_ID;
   try {
-    const org = await globalDb.organization.findFirst({
+    const org = await tenantDb.organization.findFirst({
       where: { slug: 'platform' },
       select: { id: true },
     });

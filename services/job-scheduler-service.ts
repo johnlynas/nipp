@@ -12,7 +12,7 @@
  *    - audit logging (recordAuditLog) on create/update/enable/disable/trigger.
  *
  * Layering: this service does NOT import Bree. It is pure orchestration over
- * `globalDb` + `pushNotification` + `recordAuditLog`, which is why it is
+ * `tenantDb` (platform context) + `pushNotification` + `recordAuditLog`, which is why it is
  * unit-testable by mocking those three (mirrors
  * tests/unit/calendar-event-scheduler.test.ts). The engine boots a Bree
  * instance and, on each tick, calls `JobSchedulerService.runJob(jobId, …)`;
@@ -31,7 +31,11 @@ import {
   NotificationScope,
   Prisma,
 } from '@prisma/client';
-import globalDb from '@/lib/global-db';
+// RLS Phase 3 (plan §3.4 sanctioned exception): platform-scoped service —
+// JobDefinition/JobExecution are platform-only at GRANT + RLS level. Routes wrap
+// each call in withPlatformContext(...); the out-of-request scheduler engine and
+// bree worker path use withPlatformOperator(...) (lib/platform-db.ts).
+import tenantDb from '@/lib/tenant-db';
 import { logger } from '@/lib/logger';
 import { env } from '@/lib/env';
 import {
@@ -125,7 +129,7 @@ export function parseSchedule(expr: string): ParsedSchedule {
 /**
  * Context passed to a handler. Carries the resolved job definition plus enough
  * context for the handler to act through scoped service calls (no ambient
- * `globalDb`/RLS is exposed — that is Phase 2's restricted surface).
+ * `globalDb`/unscoped client is exposed — removed in RLS Phase 3; handlers run inside withPlatform*Context — that is Phase 2's restricted surface).
  */
 export interface JobRunContext {
   jobDefinitionId: string;
@@ -266,7 +270,7 @@ export const JobSchedulerService = {
     const platformOrgId = await resolvePlatformOrgId(ctx);
 
     try {
-      const job = await globalDb.jobDefinition.create({
+      const job = await tenantDb.jobDefinition.create({
         data: {
           platformOrgId,
           name: input.name.trim(),
@@ -358,7 +362,7 @@ export const JobSchedulerService = {
       data.code = input.code;
      }
 
-    const updated = await globalDb.jobDefinition.update({
+    const updated = await tenantDb.jobDefinition.update({
       where: { id: existing.id },
       data,
      });
@@ -384,7 +388,7 @@ export const JobSchedulerService = {
     if (!job.approved) {
       throw new ForbiddenError('Job is not approved — approve it before enabling');
       }
-    const updated = await globalDb.jobDefinition.update({
+    const updated = await tenantDb.jobDefinition.update({
       where: { id },
       data: { enabled: true },
       });
@@ -404,7 +408,7 @@ export const JobSchedulerService = {
     requirePlatformAdmin(ctx);
     const platformOrgId = await resolvePlatformOrgId(ctx);
     await assertJobInOrg(id, platformOrgId);
-    const updated = await globalDb.jobDefinition.update({
+    const updated = await tenantDb.jobDefinition.update({
       where: { id },
       data: { enabled: false },
      });
@@ -439,7 +443,7 @@ export const JobSchedulerService = {
      return job;
      }
 
-   const updated = await globalDb.jobDefinition.update({
+   const updated = await tenantDb.jobDefinition.update({
      where: { id },
      data: {
        approved: true,
@@ -475,7 +479,7 @@ export const JobSchedulerService = {
    const platformOrgId = await resolvePlatformOrgId(ctx);
    const job = await assertJobInOrg(id, platformOrgId);
 
-   const updated = await globalDb.jobDefinition.update({
+   const updated = await tenantDb.jobDefinition.update({
      where: { id },
      data: {
        approved: false,
@@ -504,7 +508,7 @@ export const JobSchedulerService = {
     requirePlatformAdmin(ctx);
     const platformOrgId = await resolvePlatformOrgId(ctx);
     const job = await assertJobInOrg(id, platformOrgId);
-    await globalDb.jobDefinition.delete({ where: { id: job.id } });
+    await tenantDb.jobDefinition.delete({ where: { id: job.id } });
     await recordAuditLog({
       userId: ctx.userId,
       action: 'job.disposed',
@@ -591,7 +595,7 @@ export const JobSchedulerService = {
     const where: Prisma.JobDefinitionWhereInput = { platformOrgId };
     if (opts.enabled !== undefined) where.enabled = opts.enabled;
     if (opts.approved !== undefined) where.approved = opts.approved;
-    return globalDb.jobDefinition.findMany({
+    return tenantDb.jobDefinition.findMany({
       where,
       orderBy: { createdAt: 'desc' },
       take: opts.limit ? Math.min(Math.max(opts.limit, 1), 500) : undefined,
@@ -627,16 +631,16 @@ export const JobSchedulerService = {
     // from the full platform-org dataset, independent of filters — same
     // pattern as the notifications log.
     const [items, total, totalCount, approvedCount, enabledCount] = await Promise.all([
-      globalDb.jobDefinition.findMany({
+      tenantDb.jobDefinition.findMany({
         where,
         orderBy: { createdAt: 'desc' },
         skip: (page - 1) * pageSize,
         take: pageSize,
       }),
-      globalDb.jobDefinition.count({ where }),
-      globalDb.jobDefinition.count({ where: { platformOrgId } }),
-      globalDb.jobDefinition.count({ where: { platformOrgId, approved: true } }),
-      globalDb.jobDefinition.count({ where: { platformOrgId, enabled: true } }),
+      tenantDb.jobDefinition.count({ where }),
+      tenantDb.jobDefinition.count({ where: { platformOrgId } }),
+      tenantDb.jobDefinition.count({ where: { platformOrgId, approved: true } }),
+      tenantDb.jobDefinition.count({ where: { platformOrgId, enabled: true } }),
     ]);
 
     return {
@@ -675,7 +679,7 @@ export const JobSchedulerService = {
     const where: Prisma.JobExecutionWhereInput = { platformOrgId };
     if (opts.jobId) where.jobDefinitionId = opts.jobId;
     if (opts.status) where.status = opts.status;
-    return globalDb.jobExecution.findMany({
+    return tenantDb.jobExecution.findMany({
       where,
       orderBy: { startedAt: 'desc' },
       take: Math.min(Math.max(opts.limit ?? 50, 1), 500),
@@ -700,7 +704,7 @@ export const JobSchedulerService = {
       trigger: 'SCHEDULE',
      },
   ): Promise<RunResult> {
-    const job = await globalDb.jobDefinition.findUnique({
+    const job = await tenantDb.jobDefinition.findUnique({
       where: { id: jobDefinitionId },
      });
     if (!job || !job.enabled) {
@@ -713,7 +717,7 @@ export const JobSchedulerService = {
 
     let executed = true; // for scheduled, true only if we won the claim
     if (opts.trigger === 'SCHEDULE') {
-      const claim = await globalDb.jobDefinition.updateMany({
+      const claim = await tenantDb.jobDefinition.updateMany({
         where: {
           id: jobDefinitionId,
           // A job that has NEVER run has lastRunAt = NULL; in Postgres
@@ -758,7 +762,7 @@ export const JobSchedulerService = {
      }
 
      // Open the execution record.
-    const execution = await globalDb.jobExecution.create({
+    const execution = await tenantDb.jobExecution.create({
       data: {
         jobDefinitionId: job.id,
         platformOrgId: job.platformOrgId,
@@ -780,7 +784,7 @@ export const JobSchedulerService = {
 
     try {
       const result = await withTimeout(handler(handlerCtx), timeoutMs);
-      await globalDb.jobExecution.update({
+      await tenantDb.jobExecution.update({
         where: { id: execution.id },
         data: {
           status: 'SUCCEEDED',
@@ -789,7 +793,7 @@ export const JobSchedulerService = {
           },
        });
       if (opts.trigger === 'SCHEDULE') {
-        await globalDb.jobDefinition.update({
+        await tenantDb.jobDefinition.update({
           where: { id: job.id },
           data: { lastRunStatus: 'SUCCEEDED' },
          });
@@ -865,7 +869,7 @@ async function resolvePlatformOrgId(ctx: ServiceContext): Promise<string> {
   }
 
   // 3. Fallback to database lookup
-  const org = await globalDb.organization.findFirst({
+  const org = await tenantDb.organization.findFirst({
     where: { slug: 'platform' },
     select: { id: true },
   });
@@ -884,7 +888,7 @@ async function assertJobInOrg(
   if (!platformOrgId) {
     throw new ForbiddenError('A platform organization context is required');
    }
-  const job = await globalDb.jobDefinition.findUnique({ where: { id } });
+  const job = await tenantDb.jobDefinition.findUnique({ where: { id } });
   if (!job || job.platformOrgId !== platformOrgId) {
     throw new NotFoundError(`Job not found in platform org: ${id}`);
    }
@@ -899,12 +903,12 @@ async function failExecution(
 ): Promise<void> {
   try {
     if (opts.executionId) {
-      await globalDb.jobExecution.update({
+      await tenantDb.jobExecution.update({
         where: { id: opts.executionId },
         data: { status: 'FAILED', finishedAt: new Date(), error: message.slice(0, 4000) },
        });
      } else {
-       await globalDb.jobExecution.create({
+       await tenantDb.jobExecution.create({
          data: {
             jobDefinitionId: job.id,
             platformOrgId: job.platformOrgId,
@@ -918,7 +922,7 @@ async function failExecution(
            },
          });
        }
-       await globalDb.jobDefinition.update({
+       await tenantDb.jobDefinition.update({
          where: { id: job.id },
           data: { lastRunStatus: 'FAILED' },
         });
@@ -1026,7 +1030,7 @@ async function runScriptJob(
   const timeoutMs = job.timeoutMs ?? defaultTimeoutMs();
 
   // Open the execution record.
-  const execution = await globalDb.jobExecution.create({
+  const execution = await tenantDb.jobExecution.create({
     data: {
       jobDefinitionId: job.id,
       platformOrgId: job.platformOrgId,
@@ -1059,7 +1063,7 @@ async function runScriptJob(
       resultJson.dryRun = true;
      }
 
-    await globalDb.jobExecution.update({
+    await tenantDb.jobExecution.update({
       where: { id: execution.id },
       data: {
         status: 'SUCCEEDED',
@@ -1070,7 +1074,7 @@ async function runScriptJob(
 
     // In dry-run mode: do NOT update lastRunStatus, do NOT emit SSE.
     if (!dryRun) {
-      await globalDb.jobDefinition.update({
+      await tenantDb.jobDefinition.update({
         where: { id: job.id },
         data: { lastRunStatus: 'SUCCEEDED' },
        });
@@ -1090,13 +1094,13 @@ async function runScriptJob(
     const message = error instanceof Error ? error.message : String(error);
     // Persistence runs in every thread; the failure notification is parent-only
     // (worker mode re-emits on receipt — see above). Inline mode delivers here.
-    await globalDb.jobExecution.update({
+    await tenantDb.jobExecution.update({
       where: { id: execution.id },
       data: { status: 'FAILED', finishedAt: new Date(), error: message.slice(0, 4000) },
      });
 
     if (!dryRun) {
-      await globalDb.jobDefinition.update({
+      await tenantDb.jobDefinition.update({
         where: { id: job.id },
         data: { lastRunStatus: 'FAILED' },
        });

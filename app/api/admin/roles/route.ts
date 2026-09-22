@@ -13,7 +13,9 @@ import { recordAuditLog } from '@/lib/audit-log';
 import { logger } from '@/lib/logger';
 import { wrapPiiRoute } from '@/lib/payload-middleware';
 import { env } from '@/lib/env';
-import globalDb from '@/lib/global-db';
+// RLS Phase 3: super-admin surfaces run under verified platform / target-org contexts.
+import tenantDb from '@/lib/tenant-db';
+import { withPlatformContext, withTenantAdminContext } from '@/lib/platform-db';
 import { checkAdminRateLimit } from '@/lib/rate-limiter';
 
 export const runtime = 'nodejs';
@@ -57,19 +59,21 @@ export const GET = wrapPiiRoute(async (request) => {
 
     const skip = (page - 1) * pageSize;
 
-    const [roles, total] = await Promise.all([
-      globalDb.role.findMany({
-        where,
-        skip,
-        take: pageSize,
-        orderBy: [{ isDefault: 'desc' }, { name: 'asc' }],
-        include: {
-          _count: { select: { memberRoles: true } },
-          organization: { select: { id: true, name: true } },
-        },
-      }),
-      globalDb.role.count({ where }),
-    ]);
+    const [roles, total] = await withPlatformContext(session.user.id, async () =>
+      Promise.all([
+        tenantDb.role.findMany({
+          where,
+          skip,
+          take: pageSize,
+          orderBy: [{ isDefault: 'desc' }, { name: 'asc' }],
+          include: {
+            _count: { select: { memberRoles: true } },
+            organization: { select: { id: true, name: true } },
+          },
+        }),
+        tenantDb.role.count({ where }),
+      ]),
+    );
 
     const result = {
       items: roles,
@@ -136,7 +140,11 @@ export const POST = wrapPiiRoute(async (request, decryptedBody) => {
       role: 'PLATFORM_ADMIN',
     };
 
-    const role = await RoleService.create(body, targetOrgId, ctx);
+    // RLS: platform admin acts as the target tenant — the context org is the
+    // write destination (Role/RolePermission WITH CHECK binds to current_org).
+    const role = await withTenantAdminContext(session.user.id, targetOrgId, () =>
+      RoleService.create(body, targetOrgId, ctx),
+    );
 
     logger.info({ userId: session.user.id, roleId: role.id }, '[Roles API] Role created');
 

@@ -1,6 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { requireSuperAdmin } from '@/lib/require-super-admin';
-import globalDb from '@/lib/global-db';
+// RLS Phase 3: aggregate stats run under a verified platform context.
+import tenantDb from '@/lib/tenant-db';
+import { withPlatformContext } from '@/lib/platform-db';
 
 export const runtime = 'nodejs';
 
@@ -15,13 +17,20 @@ export async function GET(request: NextRequest) {
   }
 
   try {
-    const [usersTotal, orgsTotal, teamsTotal, rolesTotal, permissionsTotal] = await Promise.all([
-      globalDb.user.count(),
-      globalDb.organization.count(),
-      globalDb.team.count(),
-      globalDb.role.count(),
-      globalDb.permission.count(),
-    ]);
+    // Verified platform context: the flag-1 policies admit all rows, and the
+    // tenant extension passes through (no org auto-injection), so these counts
+    // are cross-org — matching the pre-cutover globalDb behaviour.
+    const [usersTotal, orgsTotal, teamsTotal, rolesTotal, permissionsTotal] = await withPlatformContext(
+      auth.session!.user.id,
+      () =>
+        Promise.all([
+          tenantDb.user.count(),
+          tenantDb.organization.count(),
+          tenantDb.team.count(),
+          tenantDb.role.count(),
+          tenantDb.permission.count(),
+        ]),
+    );
 
     return NextResponse.json({
       users: { total: usersTotal },

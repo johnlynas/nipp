@@ -3,52 +3,33 @@
  */
 
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import globalDb from '@/lib/global-db';
+import globalDb from '@/lib/tenant-db';
 import tenantDb from '@/lib/tenant-db';
 import { runWithTenant } from '@/lib/tenant-context';
 import { RoleService } from '@/services/role-service';
 import { ServiceContext, ForbiddenError, NotFoundError, ConflictError } from '@/lib/services/types';
 
 // Mock dependencies
-vi.mock('@/lib/global-db', () => ({
+vi.mock('@/lib/tenant-db', () => ({
   default: {
     role: {
       findFirst: vi.fn(),
+      create: vi.fn(),
       findUnique: vi.fn(),
+      findMany: vi.fn(),
+      count: vi.fn(),
       update: vi.fn(),
+      delete: vi.fn(),
     },
     permission: {
       findUnique: vi.fn(),
     },
+    memberRole: { count: vi.fn(), findMany: vi.fn() },
     rolePermission: {
       findFirst: vi.fn(),
-    },
-  },
-}));
-
-vi.mock('@/lib/tenant-db', () => ({
-  default: {
-    role: {
       create: vi.fn(),
-      findUnique: vi.fn(),
-      findMany: vi.fn(),
-      count: vi.fn(),
-      update: vi.fn(),
-      delete: vi.fn(),
+      deleteMany: vi.fn(),
     },
-    memberRole: { count: vi.fn(), findMany: vi.fn() },
-    rolePermission: { create: vi.fn(), deleteMany: vi.fn() },
-  },
-  tenantDb: {
-    role: {
-      create: vi.fn(),
-      findUnique: vi.fn(),
-      findMany: vi.fn(),
-      count: vi.fn(),
-      update: vi.fn(),
-      delete: vi.fn(),
-    },
-    memberRole: { count: vi.fn() },
   },
 }));
 

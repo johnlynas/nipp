@@ -10,7 +10,7 @@
  */
 
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import globalDb from '@/lib/global-db';
+import globalDb from '@/lib/tenant-db';
 import {
   JobSchedulerService,
   parseSchedule,
@@ -30,7 +30,7 @@ import {
 // Mocks — same pattern as job-scheduler-service.test.ts
 // ---------------------------------------------------------------------------
 
-vi.mock('@/lib/global-db', () => {
+vi.mock('@/lib/tenant-db', () => {
   const jobDefinition = {
     create: vi.fn((args: { data: Record<string, unknown> }) =>
       Promise.resolve({

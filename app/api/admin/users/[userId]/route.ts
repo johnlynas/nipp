@@ -9,6 +9,8 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { requireSuperAdmin } from '@/lib/require-super-admin';
 import { UserService, UpdateUserInput } from '@/services/user-service';
+// RLS Phase 3: super-admin ops run under a verified platform context.
+import { withPlatformContext } from '@/lib/platform-db';
 import { ServiceContext } from '@/lib/services/types';
 import { recordAuditLog } from '@/lib/audit-log';
 import { logger } from '@/lib/logger';
@@ -43,7 +45,10 @@ export const GET = wrapPiiRoute(async (request, _decryptedBody, params) => {
       role: 'PLATFORM_ADMIN',
     };
 
-    const user = await UserService.getById(userId, ctx);
+    // Verified platform context for the user read.
+    const user = await withPlatformContext(session.user.id, () =>
+      UserService.getById(userId, ctx)
+    );
 
     return NextResponse.json({ user });
   } catch (error) {
@@ -109,7 +114,10 @@ export const PATCH = wrapPiiRoute(async (request, decryptedBody, params) => {
       role: 'PLATFORM_ADMIN',
     };
 
-    const updatedUser = await UserService.update(userId, body, ctx);
+    // Verified platform context for the user update.
+    const updatedUser = await withPlatformContext(session.user.id, () =>
+      UserService.update(userId, body, ctx)
+    );
 
     logger.info({ userId: session.user.id, targetUserId: userId }, '[Users API] User updated');
 
@@ -170,7 +178,10 @@ export const DELETE = wrapPiiRoute(async (request, _decryptedBody, params) => {
       role: 'PLATFORM_ADMIN',
     };
 
-    await UserService.delete(userId, ctx);
+    // Verified platform context for the user delete.
+    await withPlatformContext(session.user.id, () =>
+      UserService.delete(userId, ctx)
+    );
 
     logger.info({ userId: session.user.id, targetUserId: userId }, '[Users API] User deleted');
 

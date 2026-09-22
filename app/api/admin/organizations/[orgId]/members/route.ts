@@ -8,9 +8,9 @@
 
 import { NextRequest, NextResponse } from 'next/server';
 import { requireSuperAdmin } from '@/lib/require-super-admin';
-import globalDb from '@/lib/global-db';
+// RLS Phase 3: cross-org admin member ops run under a verified target-org context.
 import tenantDb from '@/lib/tenant-db';
-import { runWithTenant } from '@/lib/tenant-context';
+import { withTenantAdminContext } from '@/lib/platform-db';
 import { recordAuditLog } from '@/lib/audit-log';
 import { logger } from '@/lib/logger';
 import { wrapPiiRoute, PiiRouteParams } from '@/lib/payload-middleware';
@@ -38,16 +38,17 @@ export const GET = wrapPiiRoute(async (request, _decryptedBody, params) => {
   }
 
   try {
-    // Verify target org exists (globalDb — cross-org lookup)
-    const org = await globalDb.organization.findUnique({ where: { id: urlOrgId } });
-    if (!org) {
-      logger.warn({ userId: session.user.id, orgId: urlOrgId }, 'Tenant organization not found');
-      return NextResponse.json({ error: 'Organization not found' }, { status: 404 });
-    }
+    // RLS: verified target-org context for cross-org member listing
+    return await withTenantAdminContext(session.user.id, urlOrgId, async () => {
+      // Verify target org exists (flag admits any org row)
+      const org = await tenantDb.organization.findUnique({ where: { id: urlOrgId } });
+      if (!org) {
+        logger.warn({ userId: session.user.id, orgId: urlOrgId }, 'Tenant organization not found');
+        return NextResponse.json({ error: 'Organization not found' }, { status: 404 });
+      }
 
-    // Fetch members within tenant context (tenantDb — scoped to orgId)
-    const members = await runWithTenant(urlOrgId, async () => {
-      return tenantDb.member.findMany({
+      // Fetch members (platform context passes through extension scoping; RLS + where clause scope)
+      const members = await tenantDb.member.findMany({
         where: { organization: { id: urlOrgId } },
         include: {
           user: { select: { id: true, name: true, email: true } },
@@ -55,10 +56,10 @@ export const GET = wrapPiiRoute(async (request, _decryptedBody, params) => {
         },
         orderBy: { createdAt: 'asc' },
       });
-    });
 
-    logger.info({ userId: session.user.id, orgId: urlOrgId, count: members.length }, 'Fetched tenant members');
-    return NextResponse.json({ members });
+      logger.info({ userId: session.user.id, orgId: urlOrgId, count: members.length }, 'Fetched tenant members');
+      return NextResponse.json({ members });
+    });
   } catch (error) {
     const isDbError = error instanceof Error && error.message.includes("Can't reach database server");
     logger.error({ err: error, orgId: urlOrgId }, isDbError ? 'Database unavailable fetching members' : 'Unexpected error fetching members');
@@ -116,57 +117,59 @@ export const POST = wrapPiiRoute(async (request, decryptedBody, params) => {
   }
 
   try {
-    // Verify target org exists (globalDb)
-    const org = await globalDb.organization.findUnique({ where: { id: urlOrgId } });
-    if (!org) {
-      return NextResponse.json({ error: 'Organization not found' }, { status: 404 });
-    }
+    // RLS: verified target-org context; Member INSERT WITH CHECK binds to ctx org
+    return await withTenantAdminContext(session.user.id, urlOrgId, async () => {
+      // Verify target org exists (flag admits any org row)
+      const org = await tenantDb.organization.findUnique({ where: { id: urlOrgId } });
+      if (!org) {
+        return NextResponse.json({ error: 'Organization not found' }, { status: 404 });
+      }
 
-    // Find or create user (globalDb — User model is global)
-    let user = await globalDb.user.findUnique({ where: { email } });
-    if (!user) {
-      // Create user with a temporary password hash (they'll need to set one via email)
-      const { hashPassword } = await import('better-auth/crypto');
-      const tempPassword = Math.random().toString(36).slice(-12);
-      user = await globalDb.user.create({
-        data: {
-          email,
-          name: email.split('@')[0],
-          emailVerified: false,
-          passwordHash: await hashPassword(tempPassword),
-        },
+      // Find or create user (User model is global / RLS-exempt)
+      let user = await tenantDb.user.findUnique({ where: { email } });
+      if (!user) {
+        // Create user with a temporary password hash (they'll need to set one via email)
+        const { hashPassword } = await import('better-auth/crypto');
+        const tempPassword = Math.random().toString(36).slice(-12);
+        user = await tenantDb.user.create({
+          data: {
+            email,
+            name: email.split('@')[0],
+            emailVerified: false,
+            passwordHash: await hashPassword(tempPassword),
+          },
+        });
+      }
+
+      // Check if already a member (platform context pass-through; RLS scopes)
+      const existingMember = await tenantDb.member.findFirst({
+        where: { userId: user.id, orgId: urlOrgId },
       });
-    }
+      if (existingMember) {
+        return NextResponse.json({ error: 'User is already a member of this organization' }, { status: 409 });
+      }
 
-    // Check if already a member (globalDb — Member is global)
-    const existingMember = await globalDb.member.findFirst({
-      where: { userId: user.id, orgId: urlOrgId },
-    });
-    if (existingMember) {
-      return NextResponse.json({ error: 'User is already a member of this organization' }, { status: 409 });
-    }
-
-    // Add member within tenant context (tenantDb)
-    const member = await runWithTenant(urlOrgId, async () => {
-      return tenantDb.member.create({
+      // Add member in the target org (extension passes through for platform ctx;
+      // data carries orgId explicitly, matching RLS WITH CHECK)
+      const member = await tenantDb.member.create({
         data: { userId: user.id, orgId: urlOrgId, role: role || 'member' },
         include: { user: { select: { name: true, email: true } } },
       });
-    });
 
-    // Audit log (globalDb)
-    await recordAuditLog({
-      userId: session.user.id,
-      userName: session.user.name || undefined,
-      action: 'member.created',
-      success: true,
-      resourceType: 'Organization.Member',
-      resourceId: member.id,
-      organizationId: urlOrgId,
-    });
+      // Audit log
+      await recordAuditLog({
+        userId: session.user.id,
+        userName: session.user.name || undefined,
+        action: 'member.created',
+        success: true,
+        resourceType: 'Organization.Member',
+        resourceId: member.id,
+        organizationId: urlOrgId,
+      });
 
-    logger.info({ userId: session.user.id, orgId: urlOrgId, memberId: member.id }, 'Added member to tenant organization');
-    return NextResponse.json({ message: 'Member added successfully', member }, { status: 201 });
+      logger.info({ userId: session.user.id, orgId: urlOrgId, memberId: member.id }, 'Added member to tenant organization');
+      return NextResponse.json({ message: 'Member added successfully', member }, { status: 201 });
+    });
   } catch (error) {
     const isDbError = error instanceof Error && error.message.includes("Can't reach database server");
     logger.error({ err: error, orgId: urlOrgId }, isDbError ? 'Database unavailable adding member' : 'Unexpected error adding member');

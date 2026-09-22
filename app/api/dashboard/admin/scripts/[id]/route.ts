@@ -2,9 +2,9 @@ import { NextRequest, NextResponse } from 'next/server';
 import { requireSuperAdmin } from '@/lib/require-super-admin';
 import { checkAdminRateLimit } from '@/lib/rate-limiter';
 
-import globalDb from '@/lib/global-db';
 import { JobSchedulerService } from '@/services/job-scheduler-service';
 import { NotificationPriority, NotificationScope } from '@prisma/client';
+import { withPlatformContext } from '@/lib/platform-db';
 
 export const runtime = 'nodejs';
 
@@ -23,16 +23,17 @@ export async function GET(
 
   try {
     const id = (await params).id;
-    const job = await JobSchedulerService.getJob(
-      { userId: auth.session!.user.id, role: 'PLATFORM_ADMIN' },
-      id
-    );
-
-    // Fetch execution history for this job
-    const history = await JobSchedulerService.getExecutionHistory(
-      { userId: auth.session!.user.id, role: 'PLATFORM_ADMIN' },
-      { jobId: id, limit: 50 }
-    );
+    // One verified platform context for the job + execution-history reads.
+    const { job, history } = await withPlatformContext(auth.session!.user.id, async () => ({
+      job: await JobSchedulerService.getJob(
+        { userId: auth.session!.user.id, role: 'PLATFORM_ADMIN' },
+        id
+      ),
+      history: await JobSchedulerService.getExecutionHistory(
+        { userId: auth.session!.user.id, role: 'PLATFORM_ADMIN' },
+        { jobId: id, limit: 50 }
+      ),
+    }));
 
     return NextResponse.json({ job, executions: history });
   } catch (error) {
@@ -82,20 +83,23 @@ export async function PATCH(
 
   try {
     const id = (await params).id;
-    const result = await JobSchedulerService.updateJob(
-      { userId: auth.session!.user.id, role: 'PLATFORM_ADMIN' },
-      id,
-      {
-        name: body.name,
+    // Verified platform context for the job-definition update.
+    const result = await withPlatformContext(auth.session!.user.id, () =>
+      JobSchedulerService.updateJob(
+        { userId: auth.session!.user.id, role: 'PLATFORM_ADMIN' },
+        id,
+        {
+          name: body.name,
         description: body.description,
         handlerKey: body.handlerKey,
         scheduleExpr: body.scheduleExpr,
         timezone: body.timezone,
         timeoutMs: body.timeoutMs,
         concurrencyLimit: body.concurrencyLimit,
-        enabled: body.enabled,
-        code: body.code,
-      }
+          enabled: body.enabled,
+          code: body.code,
+        }
+      )
     );
 
     return NextResponse.json(result);
@@ -132,9 +136,12 @@ export async function DELETE(
 
   try {
     const id = (await params).id;
-    await JobSchedulerService.disposeJob(
-      { userId: auth.session!.user.id, role: 'PLATFORM_ADMIN' },
-      id
+    // Verified platform context for the job-definition delete.
+    await withPlatformContext(auth.session!.user.id, () =>
+      JobSchedulerService.disposeJob(
+        { userId: auth.session!.user.id, role: 'PLATFORM_ADMIN' },
+        id
+      )
     );
 
     return NextResponse.json({ success: true });
