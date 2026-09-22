@@ -23,6 +23,13 @@ vi.mock('@/lib/logger', () => ({
   logger: { info: vi.fn(), warn: vi.fn(), error: vi.fn() },
 }));
 vi.mock('@/lib/notification-push', () => ({ pushNotification: vi.fn() }));
+// withEnvPlatformContext would otherwise open a REAL Prisma interactive tx
+// (PLATFORM_ORGANIZATION_ID is loaded from .env at test time), which hangs
+// under this file's fake timers and swallows the alert push. Passthrough keeps
+// the test hermetic — binding is prod-only behavior covered by live tests.
+vi.mock('@/lib/rls-transaction', () => ({
+  withEnvPlatformContext: (op: () => unknown) => op(),
+}));
 
 // --- Test helpers --------------------------------------------------------
 

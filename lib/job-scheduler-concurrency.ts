@@ -251,16 +251,22 @@ function reportThrottle(waitedMs: number): void {
   // Fire-and-forget: a broken notification channel must never wedge a job run.
   // Use `void async IIFE` instead of `void fn().catch(...)` so the call works
   // identically whether `pushNotification`'s resolution is a Promise or (in the
-  // mocked unit-test surface) `undefined`.
+  // mocked unit-test surface) `undefined`. The push runs OUT-OF-REQUEST (this
+  // fires from the background scanner), so it binds the platform context — an
+  // unbound Notification INSERT would 42501 under the non-owner app role and,
+  // worse, persist nothing (live-only alert).
   void (async () => {
     try {
-      await pushNotification({
-        title: 'Job scheduler concurrency circuit breaker',
-        message,
-        priority: NotificationPriority.WARNING,
-        scope: NotificationScope.GLOBAL,
-        source: 'job-scheduler:throttled',
-      });
+      const { withEnvPlatformContext } = await import('@/lib/rls-transaction');
+      await withEnvPlatformContext(() =>
+        pushNotification({
+          title: 'Job scheduler concurrency circuit breaker',
+          message,
+          priority: NotificationPriority.WARNING,
+          scope: NotificationScope.GLOBAL,
+          source: 'job-scheduler:throttled',
+        }),
+      );
     } catch {
       /* swallow — the alert path must not take down a job run */
     }

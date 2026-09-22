@@ -13,9 +13,15 @@
  *   withTenantRLS(op)    binds the current ALS RLS context (fail-closed when a
  *                        full verified context (userId+orgId) is not active)
  *                        and runs `op` with GUCs + one pinned connection.
+ *   withEnvPlatformContext(op)     out-of-request background processes (health
+ *                        check / calendar scanner / job scheduler parent):
+ *                        binds the env-verified platform org, flag=1. Passes
+ *                        through UNBOUND when PLATFORM_ORGANIZATION_ID is unset
+ *                        (unit-test mocks; non-platform deployments) rather
+ *                        than crashing — production guards guarantee presence.
  *   withPlatformContextForDB(orgId, op)  explicit binding for out-of-request /
  *                        bootstrap callers (no ALS): env platform org, flag=1,
- *                        platformOrgId set — used by startup health check and
+ *                        platformOrgId set — used by cache warming and
  *                        admin/platform routes that scope to the platform org.
  *   withPlatformOperator(userId, op)     out-of-request platform processes with
  *                        a verified operator id (job scheduler engine/bree).
@@ -50,7 +56,7 @@ function assertRLSContext(ctx: RLSContext | null | undefined, label: string): as
   }
 }
 
-function bindAndRun<T>(ctx: RLSContext, op: () => T | Promise<T>): Promise<T> {
+function bindAndRun<T>(ctx: RLSContext, op: () => T | Promise<T>, opts?: { txTimeoutMs?: number }): Promise<T> {
   assertRLSContext(ctx, 'bindAndRun');
   return prisma.$transaction(async (tx) => {
     await tx.$executeRawUnsafe(buildRLSContextQueries({ ...ctx, userId: ctx.userId || '' }));
@@ -64,7 +70,7 @@ function bindAndRun<T>(ctx: RLSContext, op: () => T | Promise<T>): Promise<T> {
       (res) => { diagLogMaxDepth(tx); return res; },
       (err) => { diagLogMaxDepth(tx); throw err; },
     );
-  });
+  }, opts?.txTimeoutMs ? { timeout: opts.txTimeoutMs } : undefined);
 }
 
 /** Bind an explicit verified context (never derived from request input). */
@@ -107,9 +113,42 @@ export async function withTenantRLS<T>(op: () => T | Promise<T>): Promise<T> {
 /**
  * Explicit platform-context binding for callers outside a request's ALS scope.
  * orgId MUST be env-verified (platform org id) by the caller — never input.
+ *
+ * `txTimeoutMs` overrides Prisma's interactive-transaction lifetime (default
+ * 5000 ms) for runs that do real work inside the bound context — e.g. the Bree
+ * job worker, whose runJob executes a handler up to the per-job cap. Callers
+ * doing only short model ops can omit it; long callers MUST pass at least
+ * their worst-case duration (+ margin), or the pinned tx is auto-terminated
+ * mid-run (P2028). The caller owns pool implications: one pinned pooled
+ * connection for the whole window.
  */
-export async function withPlatformContextForDB<T>(orgId: string, op: () => T | Promise<T>): Promise<T> {
-  return bindAndRun({ userId: '', orgId, isPlatformAdmin: true, platformOrgId: orgId }, op);
+export async function withPlatformContextForDB<T>(
+  orgId: string,
+  op: () => T | Promise<T>,
+  opts?: { txTimeoutMs?: number },
+): Promise<T> {
+  return bindAndRun({ userId: '', orgId, isPlatformAdmin: true, platformOrgId: orgId }, op, opts);
+}
+
+/**
+ * Env-sourced platform binding for OUT-OF-REQUEST background processes
+ * (30 s health checker, calendar scanner, job-scheduler parent thread).
+ * These run with no request ALS and no verified session user; the only
+ * server-derived identity available is PLATFORM_ORGANIZATION_ID. Binding it
+ * (flag=1) is what lets their Notification INSERTs pass RLS's rls_notification_insert
+ * platform branch, and their cross-tenant reads (JobDefinition / CalendarEvent)
+ * return rows — a context-less write 42501s under the non-owner app role, and
+ * a context-less read silently returns zero rows (fail-closed) instead.
+ *
+ * Passes through UNBOUND when PLATFORM_ORGANIZATION_ID is unset so mock-client
+ * unit tests keep running; live deployments seed it, and the RLS layer stays
+ * fail-closed for anything that truly has no context (e.g. the Bree worker
+ * fork itself — see lib/job-scheduler-engine.ts).
+ */
+export async function withEnvPlatformContext<T>(op: () => T | Promise<T>): Promise<T> {
+  const platformOrgId = process.env.PLATFORM_ORGANIZATION_ID;
+  if (!platformOrgId) return op();
+  return bindAndRun({ userId: '', orgId: platformOrgId, isPlatformAdmin: true, platformOrgId }, op);
 }
 
 /** Out-of-request platform process with a verified operator user id (jobs). */

@@ -107,6 +107,9 @@ const RUNNER_PATHS = {
   bootstrap: path.join(APP_ROOT, 'job-scheduler-runtime', 'job-scheduler-worker-bootstrap.cjs'),
   service: path.join(APP_ROOT, 'services', 'job-scheduler-service.ts'),
   builtins: path.join(APP_ROOT, 'lib', 'job-scheduler-builtins.ts'),
+  // RLS primitives the worker binds its run in (JobDefinition/JobExecution are
+  // platform-only at the policy level — an unbound worker persists nothing).
+  rlsTransaction: path.join(APP_ROOT, 'lib', 'rls-transaction.ts'),
 };
 
 /**
@@ -145,8 +148,27 @@ function report(outcome) {
     require(REFS.bootstrap);
     const serviceModule = require(REFS.service);
     const builtins = require(REFS.builtins);
+    const rlsTx = require(REFS.rlsTransaction);
     serviceModule.JobSchedulerService.registerBuiltins(builtins.BUILTIN_HANDLERS);
-    const res = await serviceModule.JobSchedulerService.runJob(REFS.jobId, { trigger: 'SCHEDULE' });
+    // RLS: the worker thread starts with NO tenant context and no request ALS.
+    // JobDefinition/JobExecution are platform-only at the policy level — without
+    // a bound platform-admin GUC, every write inside runJob is silently dropped
+    // under the non-owner app role (claim, execution record, lastRunStatus). The
+    // only server-derived identity available out-of-request is the env platform
+    // org; withPlatformContextForDB binds it. A missing var degrades to unbound
+    // (legacy) behavior rather than crashing the run.
+    //
+    // txTimeoutMs: Prisma auto-terminates interactive transactions after 5 s by
+    // default, but a handler can legitimately run up to the job's timeout cap —
+    // so the bound context must live at least as long as the worst-case run plus
+    // margin (30 min hard cap + teardown). Pool cost: one pinned pooled
+    // connection per in-flight worker run; MAX_CONCURRENT default 5 keeps that
+    // inside connection_limit=10 for route traffic.
+    const platformOrgId = process.env.PLATFORM_ORGANIZATION_ID;
+    const RES = serviceModule.JobSchedulerService.runJob.bind(serviceModule.JobSchedulerService);
+    const res = platformOrgId
+      ? await rlsTx.withPlatformContextForDB(platformOrgId, () => RES(REFS.jobId, { trigger: 'SCHEDULE' }), { txTimeoutMs: 1_800_000 + 60_000 })
+      : await RES(REFS.jobId, { trigger: 'SCHEDULE' });
     report({ ok: true, run: res });
   } catch (err) {
     report({ ok: false, error: err && err.message ? err.message : String(err) });

@@ -34,6 +34,13 @@ vi.mock('@/lib/logger', () => ({ logger: { info: vi.fn(), debug: vi.fn(), warn: 
 vi.mock('@/lib/notification-push', () => ({
   pushNotification: (...args: unknown[]) => mockPush(...args),
 }));
+// withEnvPlatformContext would otherwise open a REAL Prisma interactive tx
+// (PLATFORM_ORGANIZATION_ID is loaded from .env at test time), which reroutes
+// tenantDb model access off the mock. Passthrough keeps these hermetic —
+// binding is prod-only behavior exercised by the live integration tests.
+vi.mock('@/lib/rls-transaction', () => ({
+  withEnvPlatformContext: (op: () => unknown) => op(),
+}));
 
 // ---------------------------------------------------------------------------
 // Helpers

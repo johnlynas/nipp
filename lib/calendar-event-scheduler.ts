@@ -31,6 +31,7 @@ import { isMainThread } from 'node:worker_threads';
 import tenantDb from '@/lib/tenant-db';
 import { logger } from '@/lib/logger';
 import { pushNotification } from '@/lib/notification-push';
+import { withEnvPlatformContext } from '@/lib/rls-transaction';
 import { expandRecurrenceWithRrule, RruleJson } from '@/lib/recurrence-rrule';
 
 // ---------------------------------------------------------------------------
@@ -240,6 +241,14 @@ function buildUpcomingMessage(instance: DueToStartInstance): { title: string; me
  * notifications successfully pushed. Never throws.
  */
 export async function runCalendarEventScan(now: Date = new Date()): Promise<number> {
+  // RLS: the whole tick runs OUT-OF-REQUEST — cross-org CalendarEvent reads AND
+  // per-instance Notification INSERTs. Under the non-owner app role an unbound
+  // read returns zero rows (fail-closed) and an unbound write 42501s, so the
+  // entire scan binds the env platform-admin context once.
+  return withEnvPlatformContext(() => scanDueInstances(now));
+}
+
+async function scanDueInstances(now: Date): Promise<number> {
   let instances: DueToStartInstance[];
   try {
     instances = await findDueToStartEvents(now);

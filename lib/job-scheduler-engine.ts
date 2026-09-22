@@ -36,6 +36,7 @@ import { NotificationPriority, NotificationScope } from '@prisma/client';
 import { env } from '@/lib/env';
 import { logger } from '@/lib/logger';
 import { pushNotification } from '@/lib/notification-push';
+import { withEnvPlatformContext } from '@/lib/rls-transaction';
 import {
   JobSchedulerService,
   parseSchedule,
@@ -382,72 +383,100 @@ export function isDueAt(now: Date, scheduleExpr: string, lastRunAt: Date | null)
  * surfaced as a platform alert + FAILED-ish SKIPPED (never executed).
  */
 async function runJobInWorker(jobId: string): Promise<RunResult> {
-  const definition = await tenantDb.jobDefinition.findUnique({
-    where: { id: jobId },
-    select: { timeoutMs: true, name: true, platformOrgId: true },
-  });
+  // RLS context is bound per SHORT OPERATION, never across the worker fork:
+  //   1. definition lookup — JobDefinition is platform-only; unbound reads
+  //      return null (fail-closed) under the non-owner app role.
+  //   2. the fork itself — OUTSIDE any binding. A run can take up to HARD_CAP_MS
+  //      (+ grace); pinning an interactive tx (one pooled connection, cap 10)
+  //      across it would exhaust the pool under a burst of due jobs.
+  //   3. result re-emit + engine-failure alerts — Notification INSERTs need the
+  //      platform branch or they 42501 (observed live). pushNotification swallows
+  //      its own persist failures, so a missed binding degrades to "live SSE only".
+  const definition = await withEnvPlatformContext(
+    () =>
+      tenantDb.jobDefinition.findUnique({
+        where: { id: jobId },
+        select: { timeoutMs: true, name: true, platformOrgId: true },
+      }),
+  );
+
+  // The worker fork itself runs UNBOUND on the parent side — the child binds its
+  // own platform context around runJob (runner template in lib/job-scheduler-bree.ts),
+  // so claim/execution-record/lastRunStatus writes persist under RLS.
+  let outcomePromise: Promise<RunnerOutcomeLike>;
   try {
-    const outcome = await JobSchedulerBree.executeJobInWorker(jobId, definition?.timeoutMs ?? undefined);
-    if (outcome.kind === 'ok') {
-      // Re-emit the lifecycle notification HERE, on the parent thread where the
-      // live SSE subscribers actually are. The worker's own pushNotification
-      // cannot broadcast (its subscriber map is an empty thread-local copy) and
-      // now skips it entirely for SUCCEEDED/FAILED runs (isMainThread guards in
-      // JobSchedulerService); its DB persistence already happened, and this
-      // parent push reuses the identical {title,message,priority,scope,source,org}
-      // shape so pushNotification's 10 s DB dedup treats it as one event.
-      const result = outcome.result as RunResult;
-      // Only notify for runs the worker actually executed (claimed). SKIPPED
-      // (claim lost to a concurrent tick) announces nothing — matching
-      // runJob, which never calls notifyExecution on the skip paths.
-      if (result?.claimed && definition) {
-        try {
-          await pushNotification(
-            result.status === 'FAILED'
-              ? {
-                  title: `Job failed: ${definition.name}`,
-                  message: result.error
-                    ? `Job "${definition.name}" failed: ${result.error}`
-                    : `Job "${definition.name}" failed.`,
-                  priority: NotificationPriority.ERROR,
-                  scope: NotificationScope.GLOBAL,
-                  source: 'job-scheduler:failure',
-                  organizationId: definition.platformOrgId,
-                }
-              : {
-                  title: `Job completed: ${definition.name}`,
-                  message: `Job "${definition.name}" completed successfully.`,
-                  priority: NotificationPriority.JOB,
-                  scope: NotificationScope.GLOBAL,
-                  source: 'job-scheduler:execution',
-                  organizationId: definition.platformOrgId,
-                },
-          );
-        } catch {
-          // A broken notification channel must not mask the run result.
-        }
-      }
-      return result;
-    }
-    // Worker crashed / timed out at the engine level. The in-worker claim may
-    // have been taken (lastRunAt stuck RUNNING) — leave it; the next period's
-    // occurrence re-arms due-detection and the alert below is visible now.
-    const detail =
-       outcome.kind === 'timeout'
-         ? `worker exceeded its ${HARD_CAP_MS}ms wall cap`
-         : outcome.error;
-    await JobSchedulerBree.notifyWorkerEngineFailure(
-      `Job "${definition?.name ?? jobId}" failed to execute in a worker: ${detail}`,
-    );
-    return { jobDefinitionId: jobId, status: 'SKIPPED', claimed: false };
+    outcomePromise = JobSchedulerBree.executeJobInWorker(jobId, definition?.timeoutMs ?? undefined);
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
-    await JobSchedulerBree.notifyWorkerEngineFailure(
-      `Job "${definition?.name ?? jobId}" worker dispatch failed: ${message}`,
+    await withEnvPlatformContext(() =>
+      JobSchedulerBree.notifyWorkerEngineFailure(
+        `Job "${definition?.name ?? jobId}" worker dispatch failed: ${message}`,
+      ),
     );
     return { jobDefinitionId: jobId, status: 'SKIPPED', claimed: false };
   }
+  const outcome = await outcomePromise;
+
+  if (outcome.kind === 'ok') {
+    // Re-emit the lifecycle notification HERE, on the parent thread where the
+    // live SSE subscribers actually are. The worker's own pushNotification
+    // cannot broadcast (its subscriber map is an empty thread-local copy) and
+    // now skips it entirely for SUCCEEDED/FAILED runs (isMainThread guards in
+    // JobSchedulerService); its DB persistence already happened, and this
+    // parent push reuses the identical {title,message,priority,scope,source,org}
+    // shape so pushNotification's 10 s DB dedup treats it as one event.
+    const result = outcome.result as RunResult;
+    // Only notify for runs the worker actually executed (claimed). SKIPPED
+    // (claim lost to a concurrent tick) announces nothing — matching
+    // runJob, which never calls notifyExecution on the skip paths.
+    if (result?.claimed && definition) {
+      await withEnvPlatformContext(() =>
+        pushNotification(
+          result.status === 'FAILED'
+            ? {
+                title: `Job failed: ${definition.name}`,
+                message: result.error
+                  ? `Job "${definition.name}" failed: ${result.error}`
+                  : `Job "${definition.name}" failed.`,
+                priority: NotificationPriority.ERROR,
+                scope: NotificationScope.GLOBAL,
+                source: 'job-scheduler:failure',
+                organizationId: definition.platformOrgId,
+              }
+            : {
+                title: `Job completed: ${definition.name}`,
+                message: `Job "${definition.name}" completed successfully.`,
+                priority: NotificationPriority.JOB,
+                scope: NotificationScope.GLOBAL,
+                source: 'job-scheduler:execution',
+                organizationId: definition.platformOrgId,
+              },
+        ),
+      );
+    }
+    return result;
+  }
+  // Worker crashed / timed out at the engine level. The in-worker claim may
+  // have been taken (lastRunAt stuck RUNNING) — leave it; the next period's
+  // occurrence re-arms due-detection and the alert below is visible now.
+  const detail =
+    outcome.kind === 'timeout'
+      ? `worker exceeded its ${HARD_CAP_MS}ms wall cap`
+      : outcome.error;
+  await withEnvPlatformContext(() =>
+    JobSchedulerBree.notifyWorkerEngineFailure(
+      `Job "${definition?.name ?? jobId}" failed to execute in a worker: ${detail}`,
+    ),
+  );
+  return { jobDefinitionId: jobId, status: 'SKIPPED', claimed: false };
 }
+
+/** Shape of RunnerOutcome as consumed here — kept local so tests that stub
+ * JobSchedulerBree only need the fields below (kind/result/error). */
+type RunnerOutcomeLike =
+  | { kind: 'ok'; result: unknown }
+  | { kind: 'error'; error: string }
+  | { kind: 'timeout' };
 
 /**
  * Dispatch one job down the configured execution path.
@@ -479,20 +508,28 @@ async function dispatchJob(jobId: string): Promise<RunResult> {
 // Exported for tests (see tests/unit/job-scheduler-engine.test.ts).
 export async function scanDueJobs(now = new Date()): Promise<number> {
   try {
-    const jobs = await tenantDb.jobDefinition.findMany({
-      // Defence in depth for the approval gate: even if a row were somehow
-      // enabled without approval (it shouldn't — enableJob/updateJob guard
-      // it), the scheduler never runs an unapproved job.
-      where: { enabled: true, approved: true },
-      select: {
-        id: true,
-        name: true,
-        scheduleExpr: true,
-        handlerKey: true,
-        lastRunAt: true,
-      },
-      orderBy: { updatedAt: 'asc' },
-    });
+    // RLS: JobDefinition is platform-only at the policy level — an unbound read
+    // under the non-owner app role returns zero rows (fail-closed), so due
+    // detection runs in the env platform context. The dispatch below runs
+    // OUTSIDE that binding on purpose: a Bree worker fork can outlive any single
+    // transaction by up to HARD_CAP_MS, and holding a pinned Prisma tx (one
+    // pooled connection) open for half an hour would exhaust connection_limit=10.
+    const jobs = await withEnvPlatformContext(() =>
+      tenantDb.jobDefinition.findMany({
+        // Defence in depth for the approval gate: even if a row were somehow
+        // enabled without approval (it shouldn't — enableJob/updateJob guard
+        // it), the scheduler never runs an unapproved job.
+        where: { enabled: true, approved: true },
+        select: {
+          id: true,
+          name: true,
+          scheduleExpr: true,
+          handlerKey: true,
+          lastRunAt: true,
+        },
+        orderBy: { updatedAt: 'asc' },
+      }),
+    );
 
     let executed = 0;
 
