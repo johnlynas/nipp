@@ -47,8 +47,7 @@ vi.mock('@/lib/platform-db', () => ({
 // mock, the real ioredis client is instantiated and, when Redis is unreachable
 // (e.g. CI), del() blocks/errors — the try/catch swallows it and session
 // invalidation is silently skipped, making these tests flaky. Mock it to return
-// a fake client whose del() resolves, matching the convention in
-// permissions-resolver.test.ts / cache/hybrid.test.ts.
+// a fake client whose del() resolves (matching cache/hybrid.test.ts).
 const mockRedisClient = {
   get: vi.fn(),
   set: vi.fn(),
