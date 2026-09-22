@@ -9,6 +9,14 @@ vi.mock('@/lib/require-super-admin', () => ({
   requireSuperAdmin: vi.fn(),
 }));
 
+// The search route wraps its operation in withPlatformContext, which under the
+// real impl starts a pinned interactive Prisma transaction. Unit tests exercise
+// route logic against mocked tenantDb — pass the op straight through. The
+// verified-context wrapper itself is covered by rls-transaction.test.ts.
+vi.mock('@/lib/platform-db', () => ({
+  withPlatformContext: vi.fn(async (_userId: string, fn: () => Promise<unknown>) => fn()),
+}));
+
 vi.mock('@/lib/tenant-db', () => ({
   __esModule: true,
   default: {
