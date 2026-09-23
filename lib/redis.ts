@@ -121,10 +121,22 @@ export async function redisGet(key: string): Promise<string | null> {
   return client.get(key);
 }
 
+/**
+ * Set a key in Redis with an optional TTL.
+ *
+ * A ttlSeconds of Infinity (the `permanent` adaptive TTL type) sets the key
+ * without any expiry — the entry persists until explicitly deleted. Passing
+ * Infinity to ioredis' `EX` argument would send a protocol-level invalid
+ * value, so it must be handled here.
+ */
 export async function redisSet(key: string, value: string, ttlSeconds: number): Promise<void> {
   const client = getRedis();
   if (!client) return;
-  await client.set(key, value, 'EX', ttlSeconds);
+  if (!isFinite(ttlSeconds)) {
+    await client.set(key, value);
+  } else {
+    await client.set(key, value, 'EX', Math.max(1, Math.floor(ttlSeconds)));
+  }
 }
 
 export async function redisDel(key: string): Promise<void> {

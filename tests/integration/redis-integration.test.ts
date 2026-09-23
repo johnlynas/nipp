@@ -196,6 +196,32 @@ describe('redis.ts — Integration', () => {
       
       expect(result).toBe('');
     });
+
+    it('should set a key with no expiry when ttlSeconds is Infinity (permanent TTL)', async () => {
+      const { getRedis, redisSet, redisGet } = await import('@/lib/redis');
+
+      const client = getRedis()!;
+      const key = `${TEST_PREFIX}permanent`;
+
+      // Previously this threw a Redis protocol error (SET ... EX Infinity);
+      // it must now succeed and leave the key without any expiry.
+      await redisSet(key, 'no-expiry-value', Infinity);
+      expect(await redisGet(key)).toBe('no-expiry-value');
+      // TTL of -1 means the key has no associated expire
+      expect(await client.ttl(key)).toBe(-1);
+    });
+
+    it('should floor fractional second TTLs to at least 1 second', async () => {
+      const { getRedis, redisSet, redisGet } = await import('@/lib/redis');
+
+      const client = getRedis()!;
+      const key = `${TEST_PREFIX}fractional-ttl`;
+
+      // Redis EX requires an integer; 0.5 must not become EX 0 (invalid)
+      await redisSet(key, 'v', 0.5);
+      expect(await redisGet(key)).toBe('v');
+      expect(await client.ttl(key)).toBeGreaterThanOrEqual(1);
+    });
   });
 
   describe('redisDel()', () => {

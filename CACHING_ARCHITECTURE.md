@@ -323,7 +323,7 @@ In addition to entity keys (used by detail endpoints), cache warming also popula
 
 ### Entry Characteristics
 
-All warmed entries are marked as "permanent" — they have no TTL and will only be evicted on explicit delete (e.g., when an org, user, role, or permission is removed). The `invalidateEntity()` function provides a targeted invalidation API for these cases.
+All warmed entries use "permanent" — no expiry in L2 (Redis), only evicted on explicit delete (e.g., when an org, user, role, or permission is removed). Each entry is written to both L1 (in-memory) and L2 (Redis): the L2 copy makes warmed data survive process restarts and visible to other instances. Promotion writes directly via `redisSet(key, value, Infinity)` — intentionally **not** via `cacheSet()`, because `cacheSet()` publishes a pub/sub invalidation that would evict the fresh entry from peer instances' L1 caches. When Redis is unconfigured, warming degrades gracefully to L1-only. The `invalidateEntity()` function provides a targeted invalidation API for these cases (note: it currently evicts from L1 only — peer instances' L2 entries rely on explicit `cacheDel` from the mutating instance).
 
 ---
 
