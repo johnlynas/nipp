@@ -163,8 +163,13 @@ export default function OrgChart({ tree, canEdit, organizationId, focusTeamId, o
 
   const matchCount = (orgMatches ? 1 : 0) + matchedTeamIds.size + matchedMemberIds.size;
 
+  // While searching, the team row must be shown so that matches — and every
+  // element between them and the org root — render even if the user had the
+  // org collapsed. The user's own toggle state is left untouched.
+  const effectiveOrgOpen = orgOpen || searching;
+
   const canvasH = useMemo(() => {
-    if (!orgOpen) return ORG_Y + ORG_H + PADDING;
+    if (!effectiveOrgOpen) return ORG_Y + ORG_H + PADDING;
     let maxBottom = TEAM_Y + TEAM_H;
     for (const col of columns) {
       if (!isColumnOpen(col)) continue;
@@ -173,7 +178,7 @@ export default function OrgChart({ tree, canEdit, organizationId, focusTeamId, o
       if (bottom > maxBottom) maxBottom = bottom;
     }
     return maxBottom + PADDING + TEAM_H;
-  }, [columns, isColumnOpen, searching, isVisibleMember, orgOpen]);
+  }, [columns, isColumnOpen, searching, isVisibleMember, effectiveOrgOpen]);
 
   // Pan handlers (background only).
   const onPointerDown = (e: React.PointerEvent) => {
@@ -276,7 +281,7 @@ export default function OrgChart({ tree, canEdit, organizationId, focusTeamId, o
       <div className="h-full overflow-y-auto bg-[#f8f9fa] p-4" role="tree" aria-label={`Organization chart: ${tree.organization.name}`}>
         <div
           className="rounded-md p-4 text-white text-center"
-          style={{ backgroundColor: '#1B2A4A', border: `2px solid ${searching && orgMatches ? '#F5A623' : '#2A9D8F'}` }}
+          style={{ backgroundColor: '#1B2A4A', border: `2px solid ${searching && orgMatches ? '#dc3545' : '#2A9D8F'}` }}
         >
           <p className="text-base font-semibold">{tree.organization.name}</p>
           {tree.organization.description && (
@@ -342,7 +347,7 @@ export default function OrgChart({ tree, canEdit, organizationId, focusTeamId, o
                   className="w-full flex items-center justify-between px-4 py-3 text-sm font-semibold"
                   style={{
                     color: '#1B2A4A',
-                    ...(searching && matchedTeamIds.has(col.id) ? { boxShadow: 'inset 0 0 0 2px #F5A623' } : {}),
+                    ...(searching && matchedTeamIds.has(col.id) ? { boxShadow: 'inset 0 0 0 2px #dc3545' } : {}),
                   }}
                 >
                   <span>{col.name}</span>
@@ -360,7 +365,7 @@ export default function OrgChart({ tree, canEdit, organizationId, focusTeamId, o
                           aria-label={`Member ${m.name}${searching && matchedMemberIds.has(m.userId) ? ', matches search' : ''}`}
                           onClick={() => setSelectedMember(m)}
                           className="w-full text-left rounded px-2 py-2 hover:bg-gray-50"
-                          style={searching && matchedMemberIds.has(m.userId) ? { boxShadow: 'inset 0 0 0 2px #F5A623' } : undefined}
+                          style={searching && matchedMemberIds.has(m.userId) ? { boxShadow: 'inset 0 0 0 2px #dc3545' } : undefined}
                         >
                           <p className="text-sm font-medium" style={{ color: '#1B2A4A' }}>{m.name}</p>
                           <p className="text-xs text-gray-500">
@@ -491,12 +496,12 @@ export default function OrgChart({ tree, canEdit, organizationId, focusTeamId, o
             y={ORG_Y}
             w={NODE_W}
             h={ORG_H}
-            expanded={orgOpen}
+            expanded={effectiveOrgOpen}
             highlighted={orgMatches}
             onToggle={() => setOrgOpen((open) => !open)}
           />
 
-          {orgOpen && (
+          {effectiveOrgOpen && (
             <>
               {/* Connector line org → bus (stops at the horizontal bus so
                   every team gets the same short drop-line) */}
@@ -510,18 +515,30 @@ export default function OrgChart({ tree, canEdit, organizationId, focusTeamId, o
                   backgroundColor: '#b6c2d9',
                 }}
               />
-              {!searching && columns.length > 1 && (
-                <div
-                  className="absolute"
-                  style={{
-                    left: PADDING + TEAM_COL_W / 2,
-                    top: TEAM_Y - 10,
-                    height: 2,
-                    width: (columns.length - 1) * TEAM_COL_W,
-                    backgroundColor: '#b6c2d9',
-                  }}
-                />
-              )}
+              {/* Horizontal bus at the bottom of the org drop-line, spanning
+                  from the org stem across to every visible team's drop-line
+                  (all columns normally; matching ones only while searching) */}
+              {(() => {
+                const visibleCenters = searching
+                  ? columns.map((c, i) => ({ c, i })).filter(({ c }) => isColumnOpen(c)).map(({ i }) => PADDING + i * TEAM_COL_W + TEAM_COL_W / 2)
+                  : columns.map((_, i) => PADDING + i * TEAM_COL_W + TEAM_COL_W / 2);
+                if (visibleCenters.length === 0) return null;
+                const orgCx = orgNodeLeft + NODE_W / 2;
+                const left = Math.min(orgCx, ...visibleCenters);
+                const right = Math.max(orgCx, ...visibleCenters);
+                return (
+                  <div
+                    className="absolute"
+                    style={{
+                      left,
+                      top: TEAM_Y - 10,
+                      height: 2,
+                      width: right - left,
+                      backgroundColor: '#b6c2d9',
+                    }}
+                  />
+                );
+              })()}
 
               {/* Drop lines bus → each team (matched columns only while searching) */}
               {columns.map((col, i) => (searching && !isColumnOpen(col) ? null : (

@@ -55,7 +55,7 @@ export default function OrgChartNode({
   // text for contrast; only the navy org node uses white text.
   const surface = kind === 'org' ? (
     highlighted
-      ? 'bg-[#1B2A4A] text-white border-[#F5A623] border-2'
+      ? 'bg-[#1B2A4A] text-white border-[#dc3545] border-2'
       : 'bg-[#1B2A4A] text-white border-[#2A9D8F] border-2'
   ) : isTeam ? (
     expanded
@@ -68,7 +68,7 @@ export default function OrgChartNode({
   // Search highlight: bold outline + slight lift so matches pop without
   // changing the node's shape or position.
   const highlightStyle: React.CSSProperties = highlighted
-    ? { boxShadow: '0 0 0 3px #F5A623, 0 2px 8px rgba(27, 42, 74, 0.35)' }
+    ? { boxShadow: '0 0 0 3px #dc3545, 0 2px 8px rgba(27, 42, 74, 0.35)' }
     : {};
 
   return (
