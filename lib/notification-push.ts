@@ -16,6 +16,7 @@
 
 import { NotificationPriority, NotificationScope } from '@prisma/client';
 import tenantDb from '@/lib/tenant-db';
+import { withEnvPlatformContext } from '@/lib/rls-transaction';
 
 // ---------------------------------------------------------------------------
 // Types
@@ -248,62 +249,86 @@ export async function pushNotification(payload: Omit<NotificationPayload, 'id' |
     return;
   }
 
-  // Resolve organization name for display (org-scoped notifications) so SSE
-  // consumers don't need a second lookup. Best effort — missing name is fine.
+  // Build the wire payload FIRST so the broadcast below is independent of any
+  // DB lookup outcome. organizationName is resolved inside the bound txn and
+  // patched onto a mutable local before serialization.
   let organizationName: string | undefined;
-  if (payload.organizationId) {
-    const org = await tenantDb.organization.findUnique({
-      where: { id: payload.organizationId },
-      select: { name: true },
-    });
-    organizationName = org?.name ?? undefined;
-  }
-
-  const notification: NotificationPayload = {
+  const notification: NotificationPayload = Object.assign({
     ...payload,
     priority: normalizedPriority,
-    organizationName,
     id: `notif-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
     createdAt: new Date().toISOString(),
-  };
-
-  console.log(`[SSE] pushNotification: ${notification.title} | priority=${notification.priority} scope=${notification.scope} source=${notification.source ?? 'none'} orgId=${notification.organizationId ?? 'none'}`);
-
-  // Dedup (multi-instance safety net — the in-process index above already
-  // catches same-process races): skip if an identical notification was
-  // persisted within the last window.
-  const dedupWindow = new Date(Date.now() - DEDUP_WINDOW_MS);
-  const existing = await tenantDb.notification.findFirst({
-    where: {
-      title: notification.title,
-      message: notification.message,
-      priority: normalizedPriority,
-      scope: notification.scope,
-      source: notification.source ?? null,
-      organizationId: notification.organizationId ?? null,
-      createdAt: { gte: dedupWindow },
-    },
   });
-  if (existing) {
-    console.log(`[SSE] Dedup — skipping duplicate notification: ${notification.title}`);
-    return;
-  }
 
-  // Persist to DB for history/replay (model has no organizationName column)
-  try {
-    await tenantDb.notification.create({
-      data: {
-        title: notification.title,
-        message: notification.message,
-        priority: notification.priority,
-        scope: notification.scope,
-        source: notification.source ?? null,
-        organizationId: notification.organizationId ?? null,
-      },
-    });
-    console.log(`[SSE] Notification persisted: ${notification.id}`);
-  } catch (err) {
-    console.error('[SSE] Failed to persist notification:', err);
+  // DB section. pushNotification is REACHED from non-tenant code paths (rate
+  // limiter during auth, health checks, scheduler callbacks) that run with no
+  // bound tenant RLS transaction — under the nipp_app role those queries are
+  // fail-closed (notification table has RLS). Bind the env-verified platform
+  // context when no tx is active; inside an already-bound txn the call is a
+  // no-op pass-through and the pinned connection/GUCs stay authoritative.
+  // Persistence/dedup is best-effort: this must never reject into a caller,
+  // and the SSE broadcast below runs OUTSIDE the bound txn (no DB connection
+  // held while writing to subscribers).
+  const shouldBroadcast = await withEnvPlatformContext(async () => {
+    // Resolve organization name for display (org-scoped notifications) so SSE
+    // consumers don't need a second lookup. Best effort — missing name is fine.
+    if (payload.organizationId) {
+      try {
+        const org = await tenantDb.organization.findUnique({
+          where: { id: payload.organizationId },
+          select: { name: true },
+        });
+        organizationName = org?.name ?? undefined;
+      } catch {
+        // Best-effort enrichment — the notification still goes out without a name.
+      }
+    }
+
+    console.log(`[SSE] pushNotification: ${notification.title} | priority=${notification.priority} scope=${notification.scope} source=${notification.source ?? 'none'} orgId=${notification.organizationId ?? 'none'}`);
+
+    // Dedup (multi-instance safety net — the in-process index above already
+    // catches same-process races): skip if an identical notification was
+    // persisted within the last window.
+    try {
+      const dedupWindow = new Date(Date.now() - DEDUP_WINDOW_MS);
+      const existing = await tenantDb.notification.findFirst({
+        where: {
+          title: notification.title,
+          message: notification.message,
+          priority: normalizedPriority,
+          scope: notification.scope,
+          source: notification.source ?? null,
+          organizationId: notification.organizationId ?? null,
+          createdAt: { gte: dedupWindow },
+        },
+      });
+      if (existing) {
+        console.log(`[SSE] Dedup — skipping duplicate notification: ${notification.title}`);
+        return false; // do not broadcast
+      }
+
+      // Persist to DB for history/replay (model has no organizationName column)
+      await tenantDb.notification.create({
+        data: {
+          title: notification.title,
+          message: notification.message,
+          priority: notification.priority,
+          scope: notification.scope,
+          source: notification.source ?? null,
+          organizationId: notification.organizationId ?? null,
+        },
+      });
+      console.log(`[SSE] Notification persisted: ${notification.id}`);
+    } catch (err) {
+      console.error('[SSE] Failed to dedup/persist notification:', err);
+    }
+    return true; // broadcast
+  });
+
+  if (!shouldBroadcast) return; // multi-instance dedup hit — no broadcast
+
+  if (organizationName !== undefined) {
+    notification.organizationName = organizationName;
   }
 
   // Serialize once, broadcast to all matching subscribers
