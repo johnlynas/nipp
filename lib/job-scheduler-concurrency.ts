@@ -177,9 +177,13 @@ export function resetConcurrencyLimiter(): void {
  * Guarantees:
  *   - the slot is released exactly once, even if `fn` throws or rejects;
  *   - queued waiters resume in FIFO order;
- *   - a run that waits >`queueWarnMs` emits a one-shot WARNING-level alert
- *     (operator-visible) so a saturated circuit is observable in the ticker,
- *     mirroring the calendar scanner's throttle-report pattern.
+ *   - a run that queues behind a saturated circuit and then waits
+ *     ≥`queueWarnMs` emits a one-shot WARNING-level alert (operator-visible) so
+ *     a saturated circuit is observable in the ticker, mirroring the calendar
+ *     scanner's throttle-report pattern. Runs granted a slot immediately are
+ *     never reported, even if the Date.now() calls around the acquire span a
+ *     millisecond tick (which they routinely do on loaded CI runners — alerting
+ *     on elapsed time alone produced false circuit-breaker notifications).
  */
 export async function withConcurrency<T>(
   fn: () => Promise<T>,
@@ -189,14 +193,22 @@ export async function withConcurrency<T>(
   // don't hold a reference here because `releaseJobRun()` also goes through
   // `getLimiter()` — keeping the two call sites symmetric avoids a case where
   // one side has a stale reference after a `resetConcurrencyLimiter()`.
+  //
+  // Snapshot saturation BEFORE acquiring: this is what distinguishes "queued
+  // behind a full circuit" (a real throttle event) from an immediate grant that
+  // happened to cross a Date.now() tick. A pre-saturated gate means acquire
+  // WILL queue, so the wait below is a genuine queueing delay worth reporting.
+  const pre = getLimiter().active;
+  const queuedBehindSaturation = pre.inFlight >= pre.capacity;
+
   const waitedAt = Date.now();
   await acquireJobRun();
   const waitedMs = Date.now() - waitedAt;
 
   try {
-    if (waitedMs >= (opts.queueWarnMs ?? 0)) {
-      // Throttle-report: only alert on real queueing (waitedMs > 0), and only
-      // once per saturated interval to avoid a notification storm.
+    if (queuedBehindSaturation && waitedMs >= (opts.queueWarnMs ?? 0)) {
+      // Throttle-report: only alert on real queueing, and only once per
+      // saturated window to avoid a notification storm.
       if (!warnedThrottleRecently(waitedMs)) {
         reportThrottle(waitedMs);
       }
