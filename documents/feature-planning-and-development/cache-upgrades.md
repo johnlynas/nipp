@@ -257,7 +257,7 @@ On startup, the following data is loaded in parallel:
 | Roles (per org) | `role:{orgId}:{id}` | `search:role:{orgId}:{name}`, `role:list:{orgId}:{name}` |
 | Permissions (catalog) | `perm:catalog:{key}` | `search:perm:{key}`, `perm:resource:{resource}` |
 
-Each entity generates 2–4 cache entries. Warmed entries use "permanent" TTL (no expiry).
+Each entity generates 2–4 cache entries (entity key + one or more search/list keys). Warmed entries use "permanent" TTL (no expiry) and are written to both L1 and L2 — see [Entry Characteristics](#entry-characteristics).
 
 ### 4.5 Replay Cache
 

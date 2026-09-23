@@ -277,18 +277,53 @@ export async function warmCache(): Promise<void> {
     warmPermissions(),
   ]);
 
-  // Populate L1 cache with all entries (permanent, no TTL)
+  // Populate L1 cache with all entries, and promote each to L2 (Redis) as a
+  // permanent entry. The L2 copy makes warmed data survive restarts and visible
+  // to other instances; without it, warmed keys only exist in this process's
+  // memory and are lost on crash/redeploy. Deliberately NOT using cacheSet
+  // here: its pub/sub invalidation would evict the fresh entry from peer
+  // instances' L1 caches — the opposite of what we want. Redis may be
+  // unconfigured (redisSet is a no-op), which leaves warming L1-only as before.
+  //
+  // Lazy-import redis AFTER the DB loads (keeps the edge-instrumentation import
+  // graph free of ioredis until this Node-only code path runs): warm.ts is
+  // pulled into instrumentation.ts, which in Next.js 15 dev mode runs on the
+  // Edge runtime too — ioredis does not exist there and importing it crashes
+  // module evaluation (same reason hybrid.ts lazy-imports getRedis).
   const allEntries = [...orgEntries, ...userEntries, ...roleEntries, ...permEntries];
 
+  let redisSet: typeof import('../redis').redisSet;
+  try {
+    ({ redisSet } = await import('../redis'));
+  } catch {
+    // ioredis unavailable (Edge) — degrade to L1-only warming
+    console.warn('[Cache Warm] Redis module unavailable in this runtime — skipping L2 promotion');
+    for (const entry of allEntries) lru.set(entry.key, JSON.stringify(entry.value));
+    return;
+  }
+
+  let l2Populated = 0;
   for (const entry of allEntries) {
+    const serialized = JSON.stringify(entry.value);
     try {
-      lru.set(entry.key, JSON.stringify(entry.value));
+      lru.set(entry.key, serialized);
     } catch (error) {
-      console.error(`[Cache Warm] Failed to cache key ${entry.key}:`, error);
+      console.error(`[Cache Warm] Failed to cache key ${entry.key} in L1:`, error);
+    }
+    try {
+      await redisSet(entry.key, serialized, Infinity);
+      l2Populated += 1;
+    } catch (error) {
+      console.error(`[Cache Warm] Failed to promote key ${entry.key} to L2:`, error);
     }
   }
 
-  console.log(`[Cache Warm] Completed — ${allEntries.length} entries loaded into L1`);
+  console.log(
+    `[Cache Warm] Completed — ${allEntries.length} entries loaded into L1` +
+      (l2Populated === allEntries.length
+        ? `, ${l2Populated} promoted to L2`
+        : ` (L2 promotion: ${l2Populated}/${allEntries.length})`)
+  );
 }
 
 /**
