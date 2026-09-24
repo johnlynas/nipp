@@ -115,10 +115,9 @@
 - [ ] Quick-add form within context menu
 
 ### Task 3.7: Recurrence Picker
-- [ ] Create `components/calendar/CalendarRecurrencePicker.tsx`
-- [ ] Frequency dropdown (None, Daily, Weekly, Monthly, Quarterly, Semi-Annually, Annually)
-- [ ] Interval input (every N units)
-- [ ] End date or count selector
+- [ ] Create recurrence rule UI in `components/calendar/CalendarEventModal.tsx` (merged — no standalone `CalendarRecurrencePicker.tsx`)
+- [ ] Frequency dropdown (Daily, Weekly, Monthly, Quarterly, Semi-Annually, Annually) behind "Repeat Event" toggle
+- [ ] Ends strategy: Never / On Date (end date) / After Occurrences (count)
 
 ### Task 3.8: Main Calendar Container
 - [ ] Create `components/calendar/Calendar.tsx` — orchestrates all sub-components

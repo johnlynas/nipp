@@ -143,23 +143,6 @@ export interface ContextMenuEventCell {
   event: CalendarEvent;
 }
 
-// ---------------------------------------------------------------------------
-// Recurrence Picker Types
-// ---------------------------------------------------------------------------
-
-export interface RecurrencePickerValue {
-  frequency: CalendarRecurrenceFrequency;
-  interval: number;
-  endDate?: Date | null;
-  count?: number | null;
-}
-
-export interface RecurrencePickerProps {
-  /** The current recurrence rule, or null/undefined when the event does not repeat. */
-  value?: RecurrencePickerValue | null;
-  onChange: (value: RecurrencePickerValue | null) => void;
-}
-
 // Re-export from lib for convenience — components can import directly from either place.
 export { RECURRENCE_FREQUENCIES } from '@/lib/recurrence';
 
