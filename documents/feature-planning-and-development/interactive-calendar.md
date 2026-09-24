@@ -259,7 +259,6 @@ components/calendar/
 ├── CalendarEventModal.tsx            # Event detail/edit modal (recurrence picker + scope selector)
 ├── CalendarSidebar.tsx               # Upcoming Events sidebar (slide-in/out, collapsed by default)
 ├── CalendarContextMenu.tsx           # Right-click context menu on dates (quick add)
-├── CalendarRecurrencePicker.tsx      # Recurrence rule picker UI (frequency/interval/end)
 ├── RecurrenceEditScopePicker.tsx     # Scope selector ("this", "following", "all") for recurring edits
 ├── calendar-utils.ts                 # Date math, month grid generation, event instance keying, formatting
 ├── types.ts                          # Shared TypeScript types (CalendarEventWithDetails, rrule JSON)
@@ -305,7 +304,6 @@ prisma/seed.ts                         # Idempotent calendar seed data (ensureCa
 | `CalendarEventModal.tsx` | Event detail/edit modal: form fields, recurrence picker, scope selector (for recurring events); reuses dashboard `<Modal>` component |
 | `CalendarSidebar.tsx` | Upcoming Events sidebar: collapsed (icon-only, 64px) or expanded (320px); smooth CSS transition (~200ms) |
 | `CalendarContextMenu.tsx` | Right-click context menu on calendar dates; "Add Event" opens create modal pre-populated with clicked date |
-| `CalendarRecurrencePicker.tsx` | Recurrence rule picker UI: frequency, interval, end date/count; writes rrule JSON on save |
 | `RecurrenceEditScopePicker.tsx` | Scope selector for recurring event edits: "This occurrence", "This & following", "All occurrences"; shown only when editing a recurring event instance |
 | `calendar-utils.ts` | Pure functions: date math, month grid generation, event instance keying (`id + startDate` for dedup), formatting |
 | `hooks/useVerticalDragScroll.ts` | Hook providing vertical drag-scroll behavior for calendar views |
@@ -608,7 +606,7 @@ Calendar-specific isolation tests (`tests/isolation/application/calendar-isolati
 **Phase 3: UI Updates (2 days) — Complete**
 1. Updated `CalendarEventModal.tsx`: added scope picker when editing a recurring event instance, passes `editScope` and clicked date in PATCH request body
 2. Updated drag-and-drop in `Calendar.tsx`: uses PATCH with `editScope: "this"` + creates override (replaced old two-step exclude+create-one-off flow)
-3. `CalendarRecurrencePicker.tsx`: no changes needed — works with legacy format and API handles conversion to rrule JSON on save
+3. Recurrence rule picker merged into `CalendarEventModal.tsx` (All Day / Repeat toggle row + "Recurrence Rules" panel) — standalone `CalendarRecurrencePicker.tsx` removed
 
 **Phase 4: Testing (2 days) — Complete**
 1. Created `tests/unit/recurrence-rrule.test.ts` (25+ tests): all frequency types, intervals, BYDAY/BYMONTHDAY edge cases, month-end overflow, leap year handling, EXDATE filtering, count vs until termination
