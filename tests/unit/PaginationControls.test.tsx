@@ -30,7 +30,7 @@ describe('PaginationControls', () => {
     expect(screen.queryByRole('button')).not.toBeInTheDocument();
     expect(screen.getByText('Previous')).toHaveClass('opacity-40');
     expect(screen.getByText('Next')).toHaveClass('opacity-40');
-    expect(screen.getByText('1')).toHaveClass('bg-[#1B2A4A]');
+    expect(screen.getByText('1')).toHaveClass('bg-navy-850');
   });
 
   it('renders nothing when there are zero pages', () => {
@@ -92,14 +92,14 @@ describe('PaginationControls', () => {
   it('highlights the current page with active styling', () => {
     renderComponent({ ...defaultProps, currentPage: 3 });
     const active = screen.getByRole('button', { name: '3' });
-    expect(active).toHaveClass('bg-[#1B2A4A]');
+    expect(active).toHaveClass('bg-navy-850');
     expect(active).toHaveTextContent('3');
   });
 
   it('non-active pages have border styling', () => {
     renderComponent({ ...defaultProps, currentPage: 2 });
     const inactive = screen.getByRole('button', { name: '1' });
-    expect(inactive).toHaveClass('border-gray-300');
+    expect(inactive).toHaveClass('border-slate-300');
   });
 
   // ── Ellipsis truncation ─────────────────────────────────────

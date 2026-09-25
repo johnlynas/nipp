@@ -146,13 +146,14 @@ describe('TenantRoleForm', () => {
       <TenantRoleForm onSubmit={vi.fn()} onCancel={vi.fn()} />
     );
 
-    // Check header has Navy color
+    // Header and button use design tokens as inline CSS vars (see app/globals.css:
+    // --color-navy-850 = #1B2A4A, --color-accent = #F5A623)
     const header = container.querySelector('h3');
-    expect(header).toHaveStyle({ color: '#1B2A4A' });
+    expect(header).toHaveStyle({ color: 'var(--color-navy-850)' });
 
     // Check submit button has Amber background
     const submitButton = screen.getByRole('button', { name: /create role/i });
-    expect(submitButton).toHaveStyle({ backgroundColor: '#F5A623' });
+    expect(submitButton).toHaveStyle({ backgroundColor: 'var(--color-accent)' });
   });
 
   it('has required attribute on name input', () => {
