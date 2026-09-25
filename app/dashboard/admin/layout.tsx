@@ -7,6 +7,8 @@ import { Menu, X, UserRound, Building2, UsersRound, Shield, Key, Layers, LogOut,
 import { authClient } from '@/lib/auth-client';
 import { RequireSuperAdmin } from '@/components/auth/RequireSuperAdmin';
 import { useNotifications, PRIORITY_COLORS, getPriorityIcon } from '@/hooks/useNotifications';
+import { TopBarNotificationBell } from '@/components/dashboard/TopBarNotificationBell';
+import { TopBarUserIdentityChip } from '@/components/dashboard/TopBarUserIdentityChip';
 
 type NavItem = { href: string; label: string; icon: React.ComponentType<{ className?: string }> };
 type NavGroup = { label: string; items: NavItem[] };
@@ -53,7 +55,8 @@ export default function AdminDashboardLayout({ children }: { children: React.Rea
   const router = useRouter();
   const pathname = usePathname();
   const isCalendarPage = useMemo(() => pathname === '/dashboard/admin/calendar', [pathname]);
-  // Org chart is full-bleed like the calendar (no top header, no content padding).
+  // Full-bleed pages (no content padding) so their canvases + slide-in panels
+  // anchor edge-to-edge between the top bar and the footer rail.
   const isFullScreenPage = isCalendarPage || pathname === '/dashboard/admin/org-chart';
   const { notifications, isConnected, dismissNotification, clearNotifications } = useNotifications();
 
@@ -100,7 +103,7 @@ export default function AdminDashboardLayout({ children }: { children: React.Rea
           </div>
 
           {/* Navigation — grouped */}
-          <nav className="flex-1 mt-4 overflow-y-auto">
+          <nav className="flex-1 mt-4 overflow-y-auto scroll-dark">
             {navGroups.map((group, gi) => (
               <div key={group.label} className={gi > 0 ? 'mt-3 border-t pt-2' : ''} style={{ borderColor: 'var(--color-navy-800)' }}>
                 {sidebarOpen && (
@@ -149,14 +152,16 @@ export default function AdminDashboardLayout({ children }: { children: React.Rea
 
         {/* Main Content */}
         <div className="flex-1 flex flex-col min-w-0">
-          {/* Top Bar */}
-          {!isFullScreenPage && (
-            <header className="bg-white border-b px-6 py-3 flex items-center justify-between shadow-sm" style={{ borderColor: 'var(--color-slate-200)' }}>
-              <p className="text-xs font-medium uppercase tracking-widest text-slate-500">
-                {navItems.find((item) => item.href === pathname)?.label || 'Dashboard'}
-              </p>
-            </header>
-          )}
+          {/* Top Bar — page title left; identity chip + notification bell right on every page */}
+          <header className="bg-white border-b px-6 py-2.5 flex items-center justify-between gap-4 shadow-sm" style={{ borderColor: 'var(--color-slate-200)' }}>
+            <p className="min-w-0 truncate text-xs font-medium uppercase tracking-widest text-slate-500">
+              {navItems.find((item) => item.href === pathname)?.label || 'Dashboard'}
+            </p>
+            <div className="flex items-center gap-1 pl-4" style={{ borderLeft: '1px solid var(--color-slate-200)' }}>
+              <TopBarUserIdentityChip />
+              <TopBarNotificationBell />
+            </div>
+          </header>
 
           {/* Page Content */}
           <main className={`flex-1 min-h-0 min-w-0 ${isFullScreenPage ? 'flex flex-col overflow-hidden' : 'p-6 pb-24 sm:pb-6 overflow-y-auto'}`}>

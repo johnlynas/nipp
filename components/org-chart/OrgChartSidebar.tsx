@@ -222,7 +222,7 @@ export default function OrgChartSidebar({
           </p>
 
           {/* Scrollable content */}
-          <div className="flex-1 min-h-0 overflow-y-auto px-4 pb-4">
+          <div className="flex-1 min-h-0 overflow-y-auto px-4 pb-4 scroll-dark">
             {tree.teams.length === 0 ? (
               <p className="text-sm text-slate-400 pt-2">No teams in this organization</p>
             ) : (

@@ -74,7 +74,7 @@ function Wordmark({ onDark }: { onDark?: boolean }) {
   return (
     <div className="flex items-center gap-3">
       <BrandMark onDark={onDark} />
-      <span className={`text-[17px] font-semibold tracking-tight ${onDark ? 'text-white' : 'text-slate-900'}`}>
+      <span className={`text-[30px] font-semibold tracking-tight ${onDark ? 'text-white' : 'text-slate-900'}`}>
         Property NI
       </span>
     </div>
@@ -261,10 +261,6 @@ function WaterfrontScene() {
         ))}
       </g>
 
-      {/* Tower antenna on the tallest block */}
-      <line x1={292} y1={QUAY_Y - 330} x2={292} y2={QUAY_Y - 354} stroke="#3A4F7A" strokeWidth={1.5} opacity={0.7} />
-      <circle cx={292} cy={QUAY_Y - 356} r={2} fill="#F5A623" opacity={0.8} filter="url(#login-blur-sm)" />
-
       {/* Quay edge — the accent line marking the working waterway */}
       <rect x={0} y={QUAY_Y - 4} width={SCENE_W} height={8} fill="#121C30" opacity={0.9} />
       <line x1={0} y1={QUAY_Y + 4} x2={SCENE_W} y2={QUAY_Y + 4} stroke="#F5A623" strokeWidth={1} opacity={0.3} />
@@ -354,8 +350,8 @@ function LoginForm() {
           <Wordmark onDark />
 
           <div className="mt-16 w-full max-w-[400px] login-rise-delayed">
-            <h1 className="text-[30px] leading-[1.25] font-semibold tracking-tight text-white">
-              Multi-tenant property management, built for Northern Ireland.
+            <h1 className="text-[24px] leading-[1.25] font-semibold tracking-tight text-white">
+              Multi-tenant property management, built for Northern Ireland
             </h1>
             <span className="mt-4 block h-[3px] w-full bg-accent" aria-hidden="true" />
             <p className="mt-5 text-[17px] leading-relaxed text-white/65">
