@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect, useState } from 'react';
+import { PageSkeleton } from '@/components/dashboard/PageSkeleton';
 
 // Sources emitted by lib/notification-push.ts — any of these means the
 // monitored services changed state and the health card must re-fetch.
@@ -73,10 +74,17 @@ export default function SystemHealthCard() {
   }, []);
 
   const getStatusColor = () => {
-    if (status === 'healthy') return 'bg-green-100 border-green-500 text-green-800';
-    if (status === 'degraded') return 'bg-yellow-100 border-yellow-500 text-yellow-800';
-    if (status === 'unhealthy') return 'bg-red-100 border-red-500 text-red-800';
-    return 'bg-gray-100 border-gray-500 text-gray-800';
+    if (status === 'healthy') return 'bg-success-tint border-success-border text-success';
+    if (status === 'degraded') return 'bg-warning-tint border-warning-border text-warning-ink';
+    if (status === 'unhealthy') return 'bg-danger-tint border-danger-border text-danger-ink';
+    return 'bg-slate-100 border-slate-200 text-slate-700';
+  };
+
+  const getStatusDot = () => {
+    if (status === 'healthy') return 'bg-success';
+    if (status === 'degraded') return 'bg-warning-ink';
+    if (status === 'unhealthy') return 'bg-danger';
+    return 'bg-slate-500';
   };
 
   const formatUptime = (seconds: number): string => {
@@ -95,14 +103,16 @@ export default function SystemHealthCard() {
   };
 
   if (status === 'loading') {
-    return <div className="p-4 border rounded-lg bg-gray-50">Loading system health...</div>;
+    return <PageSkeleton rows={3} cols={3} />;
   }
 
   return (
-    <div className={`p-6 border-l-4 rounded-lg shadow-sm ${getStatusColor()}`}>
-      <div className="flex justify-between items-center mb-4">
-        <span className="text-sm font-mono">Uptime: {formatUptime(Math.floor(health?.uptime || 0))}</span>
-      </div>
+    <div className={`p-6 border rounded-lg shadow-sm ${getStatusColor()} flex items-start gap-3`}>
+      <span className={`mt-1 h-2.5 w-2.5 rounded-full shrink-0 ${getStatusDot()}`} aria-hidden />
+      <div className="flex-1 min-w-0">
+        <div className="flex justify-between items-center mb-4">
+          <span className="text-sm font-mono">Uptime: {formatUptime(Math.floor(health?.uptime || 0))}</span>
+        </div>
 
       <div className="grid grid-cols-3 gap-4">
         <div>
@@ -112,7 +122,7 @@ export default function SystemHealthCard() {
             <p className="text-xs opacity-75">{health.checks.database.latency_ms}ms</p>
           )}
           {health?.checks.database.error && (
-            <p className="text-xs text-red-600 mt-1">{health.checks.database.error}</p>
+            <p className="text-xs text-danger-ink mt-1">{health.checks.database.error}</p>
           )}
         </div>
 
@@ -123,7 +133,7 @@ export default function SystemHealthCard() {
             <p className="text-xs opacity-75">{health.checks.cache.latency_ms}ms</p>
           )}
           {health?.checks.cache.error && (
-            <p className="text-xs text-red-600 mt-1">{health.checks.cache.error}</p>
+            <p className="text-xs text-danger-ink mt-1">{health.checks.cache.error}</p>
           )}
         </div>
 
@@ -137,12 +147,13 @@ export default function SystemHealthCard() {
             <p className="text-xs opacity-75">{health.checks["connection-pool"].total_connections} conns</p>
           )}
           {health?.checks["connection-pool"]?.error && (
-            <p className="text-xs text-red-600 mt-1">{health.checks["connection-pool"].error}</p>
+            <p className="text-xs text-danger-ink mt-1">{health.checks["connection-pool"].error}</p>
           )}
         </div>
       </div>
 
       <p className="text-xs opacity-75 mt-4">Last checked: {new Date(health?.timestamp || '').toLocaleTimeString()}</p>
+    </div>
     </div>
   );
 }

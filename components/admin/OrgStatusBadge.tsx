@@ -9,10 +9,10 @@ interface OrgStatusBadgeProps {
  */
 export function OrgStatusBadge({ status }: OrgStatusBadgeProps) {
   const styles: Record<string, string> = {
-    ACTIVE: 'bg-green-500 text-white',
-    PENDING: 'bg-amber-500 text-white',
-    SUSPENDED: 'bg-red-500 text-white',
-    ARCHIVED: 'bg-gray-400 text-white',
+    ACTIVE: 'text-success bg-success-tint border border-success-border',
+    PENDING: 'text-warning-ink bg-warning-tint border border-warning-border',
+    SUSPENDED: 'text-danger-ink bg-danger-tint border border-danger-border',
+    ARCHIVED: 'text-slate-600 bg-slate-100 border border-slate-200',
   };
 
   const labels: Record<string, string> = {

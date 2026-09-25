@@ -14,17 +14,18 @@ import { PaginationControls } from '@/components/admin/PaginationControls';
 import { encryptedFetch } from '@/lib/api-client';
 import { ConfirmDialog } from '@/components/dashboard/ConfirmDialog';
 import { StatCard } from '@/components/dashboard/StatCard';
+import { DataTable } from '@/components/dashboard/DataTable';
 
 // Priority level labels for the events table — plain colored text, no border/icon.
 // CALENDAR is the "event due to start" reminder priority; JOB is the job
 // scheduler's success/failure signal.
 const PRIORITY_LABELS: Record<string, string> = {
-  INFO: 'text-blue-500',
-  WARNING: 'text-yellow-500',
-  ERROR: 'text-red-500',
-  CRITICAL: 'text-red-600 font-semibold',
-  CALENDAR: 'text-green-600 font-semibold',
-  JOB: 'text-purple-600 font-semibold',
+  INFO: 'text-slate-600 bg-slate-100 border-slate-200',
+  WARNING: 'text-warning-ink bg-warning-tint border-warning-border',
+  ERROR: 'text-danger-ink bg-danger-tint border-danger-border',
+  CRITICAL: 'text-white bg-danger border-danger',
+  CALENDAR: 'text-success bg-success-tint border-success-border',
+  JOB: 'text-slate-700 bg-canvas-subtle border-slate-200 font-semibold',
 };
 
 // ---------------------------------------------------------------------------
@@ -249,8 +250,8 @@ export default function NotificationsLogPage() {
         <select
           value={scopeFilter}
           onChange={(e) => handleFilterChange(setScopeFilter, e.target.value)}
-          className="px-3 py-2 border rounded text-sm bg-white text-gray-900"
-          style={{ borderColor: '#dee2e6' }}
+          className="px-3 py-2 border rounded text-sm bg-white text-slate-900"
+          style={{ borderColor: 'var(--color-slate-200)' }}
         >
           <option value="">All Scopes</option>
           <option value="GLOBAL">Global</option>
@@ -260,8 +261,8 @@ export default function NotificationsLogPage() {
         <select
           value={priorityFilter}
           onChange={(e) => handleFilterChange(setPriorityFilter, e.target.value)}
-          className="px-3 py-2 border rounded text-sm bg-white text-gray-900"
-          style={{ borderColor: '#dee2e6' }}
+          className="px-3 py-2 border rounded text-sm bg-white text-slate-900"
+          style={{ borderColor: 'var(--color-slate-200)' }}
         >
           <option value="">All Priorities</option>
           <option value="INFO">Info</option>
@@ -275,8 +276,8 @@ export default function NotificationsLogPage() {
         <select
           value={organizationFilter}
           onChange={(e) => handleFilterChange(setOrganizationFilter, e.target.value)}
-          className="px-3 py-2 border rounded text-sm bg-white text-gray-900"
-          style={{ borderColor: '#dee2e6' }}
+          className="px-3 py-2 border rounded text-sm bg-white text-slate-900"
+          style={{ borderColor: 'var(--color-slate-200)' }}
         >
           <option value="">All Organizations</option>
           {organizations.map((org) => (
@@ -287,8 +288,8 @@ export default function NotificationsLogPage() {
         <select
           value={acknowledgedFilter}
           onChange={(e) => handleFilterChange(setAcknowledgedFilter, e.target.value)}
-          className="px-3 py-2 border rounded text-sm bg-white text-gray-900"
-          style={{ borderColor: '#dee2e6' }}
+          className="px-3 py-2 border rounded text-sm bg-white text-slate-900"
+          style={{ borderColor: 'var(--color-slate-200)' }}
         >
           <option value="">All Statuses</option>
           <option value="true">Acknowledged</option>
@@ -300,88 +301,89 @@ export default function NotificationsLogPage() {
           value={searchQuery}
           onChange={(e) => setSearchQuery(e.target.value)}
           placeholder="Search source or message..."
-          className="px-3 py-2 border rounded text-sm bg-white text-gray-900"
-          style={{ borderColor: '#dee2e6' }}
+          className="px-3 py-2 border rounded text-sm bg-white text-slate-900"
+          style={{ borderColor: 'var(--color-slate-200)' }}
         />
       </div>
 
       {/* Notifications Table */}
-      <div className="bg-white rounded-lg border overflow-hidden" style={{ borderColor: '#dee2e6' }}>
-        {loading ? (
-          <div className="flex items-center justify-center py-12">
-            <div className="animate-spin rounded-full h-8 w-8 border-b-2" style={{ borderColor: '#1B2A4A' }} />
-          </div>
-        ) : notifications.length === 0 ? (
-          <div className="flex items-center justify-center py-12 text-gray-500">
-            No notifications found.
-          </div>
-        ) : (
-          <table className="w-full text-sm">
-            <thead>
-              <tr className="bg-[#1B2A4A]">
-                <th className="px-4 py-3 text-left text-xs font-medium uppercase tracking-wider text-white" scope="col">Time</th>
-                <th className="px-4 py-3 text-left text-xs font-medium uppercase tracking-wider text-white" scope="col">Priority</th>
-                <th className="px-4 py-3 text-left text-xs font-medium uppercase tracking-wider text-white" scope="col">Scope</th>
-                <th className="px-4 py-3 text-left text-xs font-medium uppercase tracking-wider text-white" scope="col">Organization</th>
-                <th className="px-4 py-3 text-left text-xs font-medium uppercase tracking-wider text-white" scope="col">Source</th>
-                <th className="px-4 py-3 text-left text-xs font-medium uppercase tracking-wider text-white" scope="col">Message</th>
-                <th className="px-4 py-3 text-left text-xs font-medium uppercase tracking-wider text-white" scope="col">Actions</th>
-              </tr>
-            </thead>
-            <tbody>
-              {notifications.map((notif) => (
-                <tr key={notif.id} className="border-b hover:bg-gray-50 transition-colors" style={{ borderColor: '#f1f3f4' }}>
-                  <td className="px-4 py-3">
-                    <span className="text-xs text-gray-900">{new Date(notif.createdAt).toLocaleString()}</span>
-                  </td>
-                  <td className="px-4 py-3">
-                    <span className={`text-xs ${PRIORITY_LABELS[notif.priority] || PRIORITY_LABELS.INFO}`}>
-                      {notif.priority}
-                    </span>
-                  </td>
-                  <td className="px-4 py-3">
-                    <span className="text-xs font-medium text-gray-900">{notif.scope || 'N/A'}</span>
-                  </td>
-                  <td className="px-4 py-3">
-                    <span className="text-xs text-gray-900">{notif.organizationName || '-'}</span>
-                  </td>
-                  <td className="px-4 py-3">
-                    <span className="text-xs text-gray-900">{notif.source || '-'}</span>
-                  </td>
-                  <td className="px-4 py-3">
-                    <div className="font-medium text-gray-900">{notif.title}</div>
-                    <div className="text-xs text-gray-500 mt-1 line-clamp-2">{notif.message}</div>
-                  </td>
-                  <td className="px-4 py-3">
-                    <div className="flex items-center gap-1">
-                      <button
-                        title={notif.acknowledged ? 'Acknowledged' : 'Acknowledge'}
-                        onClick={() => handleAcknowledge(notif)}
-                        disabled={notif.acknowledged}
-                        className={`rounded p-1.5 transition-colors ${
-                          notif.acknowledged
-                            ? 'text-green-400 cursor-default'
-                            : 'text-gray-400 hover:bg-[#f8f9fa] cursor-pointer'
-                        }`}
-                        aria-label={notif.acknowledged ? 'Acknowledged notification' : 'Acknowledge notification'}
-                      >
-                        <Check className="h-4 w-4" />
-                      </button>
-                      <button
-                        title="Delete"
-                        onClick={() => handleDeleteClick(notif)}
-                        className="rounded p-1.5 text-gray-400 hover:bg-red-50 hover:text-red-700 transition-colors"
-                        aria-label="Delete notification"
-                      >
-                        <Trash2 className="h-4 w-4" />
-                      </button>
-                    </div>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        )}
+      <div className="bg-white rounded-lg border" style={{ borderColor: 'var(--color-slate-200)' }}>
+        <DataTable
+          columns={[
+            {
+              key: 'time',
+              label: 'Time',
+              render: (n) => <span className="text-xs text-slate-900 tabular-nums">{new Date(n.createdAt).toLocaleString()}</span>,
+            },
+            {
+              key: 'priority',
+              label: 'Priority',
+              render: (n) => (
+                <span className={`text-xs ${PRIORITY_LABELS[n.priority] || PRIORITY_LABELS.INFO}`}>
+                  {n.priority}
+                </span>
+              ),
+            },
+            {
+              key: 'scope',
+              label: 'Scope',
+              render: (n) => <span className="text-xs font-medium text-slate-900">{n.scope || 'N/A'}</span>,
+            },
+            {
+              key: 'organizationName',
+              label: 'Organization',
+              render: (n) => <span className="text-xs text-slate-900">{n.organizationName || '-'}</span>,
+            },
+            {
+              key: 'source',
+              label: 'Source',
+              render: (n) => <span className="text-xs text-slate-900">{n.source || '-'}</span>,
+            },
+            {
+              key: 'message',
+              label: 'Message',
+              render: (n) => (
+                <div>
+                  <div className="font-medium text-slate-900">{n.title}</div>
+                  <div className="text-xs text-slate-500 mt-1 line-clamp-2">{n.message}</div>
+                </div>
+              ),
+            },
+            {
+              key: 'actions',
+              label: 'Actions',
+              render: (n) => (
+                <div className="flex items-center gap-1">
+                  <button
+                    title={n.acknowledged ? 'Acknowledged' : 'Acknowledge'}
+                    onClick={() => handleAcknowledge(n)}
+                    disabled={n.acknowledged}
+                    className={`rounded p-1.5 transition-colors ${
+                      n.acknowledged
+                        ? 'text-slate-300 cursor-default'
+                        : 'text-slate-400 hover:bg-canvas-subtle cursor-pointer'
+                    }`}
+                    aria-label={n.acknowledged ? 'Acknowledged notification' : 'Acknowledge notification'}
+                  >
+                    <Check className="h-4 w-4" />
+                  </button>
+                  <button
+                    title="Delete"
+                    onClick={() => handleDeleteClick(n)}
+                    className="rounded p-1.5 text-slate-500 hover:bg-danger-tint hover:text-danger-ink transition-colors"
+                    aria-label="Delete notification"
+                  >
+                    <Trash2 className="h-4 w-4" />
+                  </button>
+                </div>
+              ),
+            },
+          ]}
+          data={notifications}
+          loading={loading}
+          emptyMessage="No notifications found."
+          rowKey={(n) => n.id}
+        />
 
         {/* Pagination */}
         {Math.ceil(pagination.total / pagination.pageSize) > 0 && (

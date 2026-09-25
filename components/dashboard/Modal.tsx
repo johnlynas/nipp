@@ -30,15 +30,15 @@ export function Modal({ isOpen, onClose, title, children, size = 'md' }: ModalPr
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4" role="dialog" aria-modal="true">
       <div className="fixed inset-0 bg-black/50" />
       <div 
-        className="relative w-full max-h-[90vh] overflow-y-auto rounded-lg border border-[#dee2e6] bg-white shadow-xl"
+        className="relative w-full max-h-[90vh] overflow-y-auto rounded-lg border border-slate-200 bg-white shadow-xl"
         style={{ maxWidth: sizeMap[size] }}
       >
         {title && (
-          <div className="flex items-center justify-between border-b px-6 py-4" style={{ borderColor: '#dee2e6' }}>
-            <h3 className="text-lg font-semibold" style={{ color: '#1B2A4A' }}>{title}</h3>
+          <div className="flex items-center justify-between border-b px-6 py-4" style={{ borderColor: 'var(--color-slate-200)' }}>
+            <h3 className="text-lg font-semibold" style={{ color: 'var(--color-navy-850)' }}>{title}</h3>
             <button
               onClick={onClose}
-              className="rounded p-1 text-gray-400 hover:text-gray-600 transition-colors"
+              className="rounded p-1 text-slate-400 hover:text-slate-600 transition-colors"
               aria-label="Close modal"
             >
               ×

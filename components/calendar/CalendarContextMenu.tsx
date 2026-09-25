@@ -76,7 +76,7 @@ export default function CalendarContextMenu({
       style={{
         left: position.x,
         top: position.y,
-        borderColor: '#dee2e6',
+        borderColor: 'var(--color-slate-200)',
       }}
     >
       {eventCell ? (
@@ -89,8 +89,8 @@ export default function CalendarContextMenu({
                 onViewEvent(eventCell.event);
                 onClose();
               }}
-              className="w-full px-4 py-2 text-left text-sm hover:bg-gray-50 transition-colors flex items-center gap-2"
-              style={{ color: '#1B2A4A' }}
+              className="w-full px-4 py-2 text-left text-sm hover:bg-slate-50 transition-colors flex items-center gap-2"
+              style={{ color: 'var(--color-slate-800)' }}
             >
               <span>👁</span> View Event
             </button>
@@ -103,8 +103,8 @@ export default function CalendarContextMenu({
                 onEditEvent(eventCell.event);
                 onClose();
               }}
-              className="w-full px-4 py-2 text-left text-sm hover:bg-gray-50 transition-colors flex items-center gap-2"
-              style={{ color: '#1B2A4A' }}
+              className="w-full px-4 py-2 text-left text-sm hover:bg-slate-50 transition-colors flex items-center gap-2"
+              style={{ color: 'var(--color-slate-800)' }}
             >
               <span>✏️</span> Edit Event
             </button>
@@ -113,7 +113,7 @@ export default function CalendarContextMenu({
           {/* Delete option */}
           <button
             onClick={handleDeleteEvent}
-            className="w-full px-4 py-2 text-left text-sm hover:bg-gray-50 transition-colors flex items-center gap-2"
+            className="w-full px-4 py-2 text-left text-sm hover:bg-slate-50 transition-colors flex items-center gap-2"
             style={{ color: '#E76F51' }}
           >
             <span>🗑</span> Delete Event
@@ -126,8 +126,8 @@ export default function CalendarContextMenu({
           {onAddEvent && (
             <button
               onClick={handleAddEvent}
-              className="w-full px-4 py-2 text-left text-sm hover:bg-gray-50 transition-colors flex items-center gap-2"
-              style={{ color: '#1B2A4A' }}
+              className="w-full px-4 py-2 text-left text-sm hover:bg-slate-50 transition-colors flex items-center gap-2"
+              style={{ color: 'var(--color-slate-800)' }}
             >
               <span>+</span> Add Event
             </button>

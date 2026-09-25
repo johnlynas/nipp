@@ -34,10 +34,10 @@ export default async function HomePage() {
   // Render the tenant dashboard securely.
   return (
     <div className="p-8">
-      <h1 className="text-2xl font-bold" style={{ color: '#1B2A4A' }}>
+      <h1 className="text-2xl font-semibold tracking-tight text-slate-900">
         Welcome to your Tenant Dashboard
       </h1>
-      <p className="mt-2 text-gray-600">
+      <p className="mt-2 text-slate-600">
         You are logged in as a tenant user.
       </p>
       

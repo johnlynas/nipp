@@ -27,18 +27,18 @@ export function PaginationControls({
     // Single page: still render the "Showing X–Y of Z entries" label and
     // inert prev/next so the layout is consistent across admin pages.
     return (
-      <div className="mt-4 flex items-center justify-between px-4 py-3 border-t border-gray-200">
+      <div className="mt-4 flex items-center justify-between px-4 py-3 border-t border-slate-200">
         {showRangeLabel ? (
-          <div className="text-sm text-gray-500">
+          <div className="text-sm text-slate-500">
             Showing 1–{Math.min(totalItems, pageSize)} of {totalItems} entries
           </div>
         ) : (
           <div aria-hidden />
         )}
         <div className="flex items-center gap-1">
-          <span className="rounded border border-gray-300 text-gray-700 px-3 py-1 text-sm opacity-40">Previous</span>
-          <span className="rounded bg-[#1B2A4A] text-white px-3 py-1 text-sm">1</span>
-          <span className="rounded border border-gray-300 text-gray-700 px-3 py-1 text-sm opacity-40">Next</span>
+          <span className="rounded border border-slate-300 text-slate-700 px-3 py-1 text-sm opacity-40">Previous</span>
+          <span className="rounded bg-navy-850 text-white px-3 py-1 text-sm">1</span>
+          <span className="rounded border border-slate-300 text-slate-700 px-3 py-1 text-sm opacity-40">Next</span>
         </div>
       </div>
     );
@@ -79,9 +79,9 @@ export function PaginationControls({
   }
 
   return (
-    <div className="mt-4 flex items-center justify-between px-4 py-3 border-t border-gray-200">
+    <div className="mt-4 flex items-center justify-between px-4 py-3 border-t border-slate-200">
       {showRangeLabel ? (
-        <div className="text-sm text-gray-500">
+        <div className="text-sm text-slate-500">
           Showing {start}–{end} of {totalItems} entries
         </div>
       ) : (
@@ -90,7 +90,7 @@ export function PaginationControls({
       <div className="flex items-center gap-1">
         <button
           onClick={() => onPageChange(currentPage - 1)}
-          className={`rounded border border-gray-300 text-gray-700 px-3 py-1 text-sm hover:bg-gray-100 ${
+          className={`rounded border border-slate-300 text-slate-700 px-3 py-1 text-sm hover:bg-slate-100 ${
             currentPage <= 1 ? 'opacity-40 pointer-events-none' : ''
           }`}
           aria-label="Previous page"
@@ -100,7 +100,7 @@ export function PaginationControls({
 
         {pages.map((p, idx) =>
           p === 'ellipsis' ? (
-            <span key={`e-${idx}`} className="px-2 py-1 text-sm text-gray-400 select-none">
+            <span key={`e-${idx}`} className="px-2 py-1 text-sm text-slate-400 select-none">
               …
             </span>
           ) : (
@@ -109,8 +109,8 @@ export function PaginationControls({
               onClick={() => onPageChange(p)}
               className={`rounded px-3 py-1 text-sm ${
                 p === currentPage
-                  ? 'bg-[#1B2A4A] text-white'
-                  : 'border border-gray-300 text-gray-700 hover:bg-gray-100'
+                  ? 'bg-navy-850 text-white'
+                  : 'border border-slate-300 text-slate-700 hover:bg-slate-100'
               }`}
             >
               {p}
@@ -120,7 +120,7 @@ export function PaginationControls({
 
         <button
           onClick={() => onPageChange(currentPage + 1)}
-          className={`rounded border border-gray-300 text-gray-700 px-3 py-1 text-sm hover:bg-gray-100 ${
+          className={`rounded border border-slate-300 text-slate-700 px-3 py-1 text-sm hover:bg-slate-100 ${
             currentPage >= totalPages ? 'opacity-40 pointer-events-none' : ''
           }`}
           aria-label="Next page"

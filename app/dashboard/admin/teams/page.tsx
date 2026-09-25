@@ -239,19 +239,19 @@ export default function TeamsPage() {
 
   const columns = [
     { key: 'name', label: 'Team Name', render: (t: Team) => (
-      <div className="font-medium" style={{ color: '#1B2A4A' }}>{t.name}</div>
+      <div className="font-medium" style={{ color: 'var(--color-navy-850)' }}>{t.name}</div>
     )},
     { key: '_count', label: 'Members', render: (t: Team) => t._count?.members ?? 0 },
     { key: 'organization', label: 'Organization', render: (t: Team) => {
       const org = organizations.find((o) => o.id === t.organizationId);
-      return <span style={{ color: '#1B2A4A' }}>{org?.name || '—'}</span>;
+      return <span style={{ color: 'var(--color-navy-850)' }}>{org?.name || '—'}</span>;
     }},
     { key: 'actions', label: 'Actions', render: (t: Team) => (
       <div className="flex items-center gap-1">
         <button
           onClick={() => { setSelectedTeam(t); setDetailModalOpen(true); }}
           title={`View ${t.name}`}
-          className="rounded p-1.5 text-gray-400 hover:bg-gray-100 hover:text-[#1B2A4A] transition-colors"
+          className="rounded p-1.5 text-slate-400 hover:bg-slate-100 hover:text-navy-850 transition-colors"
           aria-label={`View ${t.name}`}
         >
           <Eye className="h-4 w-4" />
@@ -259,7 +259,7 @@ export default function TeamsPage() {
         <button
           onClick={() => { setSelectedTeam(t); setEditForm({ name: t.name, description: t.description || '' }); setEditModalOpen(true); }}
           title={`Edit ${t.name}`}
-          className="rounded p-1.5 text-gray-400 hover:bg-gray-100 hover:text-[#1B2A4A] transition-colors"
+          className="rounded p-1.5 text-slate-400 hover:bg-slate-100 hover:text-navy-850 transition-colors"
           aria-label={`Edit ${t.name}`}
         >
           <Pencil className="h-4 w-4" />
@@ -267,7 +267,7 @@ export default function TeamsPage() {
         <button
           onClick={() => { setSelectedTeam(t); setDeleteModalOpen(true); }}
           title={`Delete ${t.name}`}
-          className="rounded p-1.5 text-gray-400 hover:bg-red-50 hover:text-red-700 transition-colors"
+          className="rounded p-1.5 text-slate-500 hover:bg-danger-tint hover:text-danger-ink transition-colors"
           aria-label={`Delete ${t.name}`}
         >
           <Trash2 className="h-4 w-4" />
@@ -280,7 +280,7 @@ export default function TeamsPage() {
     <div>
       {/* Error Banner */}
       {error && (
-        <div className="mb-4 rounded border bg-red-50 p-3 text-sm text-red-700" role="alert">
+        <div className="mb-4 rounded border bg-danger-tint border-danger-border p-3 text-sm text-danger-ink" role="alert">
           {error}
         </div>
       )}
@@ -293,23 +293,21 @@ export default function TeamsPage() {
       </div>
 
       {/* Page Header */}
-      <PageHeader title="Teams" description="Manage teams within organizations">
-        <button
+      <PageHeader title="Teams" description="Manage teams within organizations" primaryAction=<button
           onClick={() => setCreateModalOpen(true)}
-          className="rounded px-4 py-2 text-sm font-medium text-white transition-colors hover:opacity-90"
-          style={{ backgroundColor: '#F5A623' }}
+          className="w-full sm:w-auto rounded px-4 py-2 text-center text-sm font-medium text-accent-ink transition-colors hover:opacity-90"
+          style={{ backgroundColor: 'var(--color-accent)' }}
         >
           + Create Team
-        </button>
-      </PageHeader>
+        </button> />
 
       {/* Filters */}
       <div className="mb-4 flex items-center gap-3">
         <select
           value={orgFilter}
           onChange={(e) => setOrgFilter(e.target.value)}
-          className="rounded border px-3 py-2 text-sm bg-white hover:bg-gray-50 transition-colors focus:outline-none"
-          style={{ borderColor: '#dee2e6', color: '#1B2A4A' }}
+          className="rounded border px-3 py-2 text-sm bg-white hover:bg-slate-50 transition-colors focus:outline-none"
+          style={{ borderColor: 'var(--color-slate-200)', color: 'var(--color-navy-850)' }}
           aria-label="Filter by organization"
         >
           <option value="">All Organizations</option>
@@ -337,25 +335,25 @@ export default function TeamsPage() {
         {selectedTeam && (
           <div className="space-y-4">
             <div>
-              <label className="text-sm font-medium" style={{ color: '#6c757d' }}>Name</label>
-              <p className="mt-1" style={{ color: '#1B2A4A' }}>{selectedTeam.name}</p>
+              <label className="text-sm font-medium" style={{ color: 'var(--color-slate-500)' }}>Name</label>
+              <p className="mt-1" style={{ color: 'var(--color-navy-850)' }}>{selectedTeam.name}</p>
             </div>
             <div>
-              <label className="text-sm font-medium" style={{ color: '#6c757d' }}>Slug</label>
-              <p className="mt-1" style={{ color: '#1B2A4A' }}>{selectedTeam.slug || '—'}</p>
+              <label className="text-sm font-medium" style={{ color: 'var(--color-slate-500)' }}>Slug</label>
+              <p className="mt-1" style={{ color: 'var(--color-navy-850)' }}>{selectedTeam.slug || '—'}</p>
             </div>
             <div>
-              <label className="text-sm font-medium" style={{ color: '#6c757d' }}>Description</label>
-              <p className="mt-1" style={{ color: '#1B2A4A' }}>{selectedTeam.description || '—'}</p>
+              <label className="text-sm font-medium" style={{ color: 'var(--color-slate-500)' }}>Description</label>
+              <p className="mt-1" style={{ color: 'var(--color-navy-850)' }}>{selectedTeam.description || '—'}</p>
             </div>
             <div className="flex gap-4">
               <div>
-                <label className="text-sm font-medium" style={{ color: '#6c757d' }}>Members</label>
-                <p className="mt-1" style={{ color: '#1B2A4A' }}>{selectedTeam._count?.members ?? 0}</p>
+                <label className="text-sm font-medium" style={{ color: 'var(--color-slate-500)' }}>Members</label>
+                <p className="mt-1" style={{ color: 'var(--color-navy-850)' }}>{selectedTeam._count?.members ?? 0}</p>
               </div>
               <div>
-                <label className="text-sm font-medium" style={{ color: '#6c757d' }}>Organization</label>
-                <p className="mt-1" style={{ color: '#1B2A4A' }}>
+                <label className="text-sm font-medium" style={{ color: 'var(--color-slate-500)' }}>Organization</label>
+                <p className="mt-1" style={{ color: 'var(--color-navy-850)' }}>
                   {organizations.find((o) => o.id === selectedTeam.organizationId)?.name || '—'}
                 </p>
               </div>
@@ -380,40 +378,40 @@ export default function TeamsPage() {
         {selectedTeam && (
           <div className="space-y-4">
             <div>
-              <label htmlFor="edit-team-name" className="mb-1 block text-sm font-medium" style={{ color: '#6c757d' }}>Name</label>
+              <label htmlFor="edit-team-name" className="mb-1 block text-sm font-medium" style={{ color: 'var(--color-slate-500)' }}>Name</label>
               <input
                 id="edit-team-name"
                 type="text"
                 value={editForm.name}
                 onChange={(e) => setEditForm((f) => ({ ...f, name: e.target.value }))}
                 className="w-full rounded border px-3 py-2 text-sm focus:outline-none"
-                style={{ borderColor: '#dee2e6', color: '#1B2A4A' }}
+                style={{ borderColor: 'var(--color-slate-200)', color: 'var(--color-navy-850)' }}
               />
             </div>
             <div>
-              <label htmlFor="edit-team-desc" className="mb-1 block text-sm font-medium" style={{ color: '#6c757d' }}>Description (optional)</label>
+              <label htmlFor="edit-team-desc" className="mb-1 block text-sm font-medium" style={{ color: 'var(--color-slate-500)' }}>Description (optional)</label>
               <textarea
                 id="edit-team-desc"
                 value={editForm.description}
                 onChange={(e) => setEditForm((f) => ({ ...f, description: e.target.value }))}
                 className="w-full rounded border px-3 py-2 text-sm focus:outline-none"
-                style={{ borderColor: '#dee2e6', color: '#1B2A4A' }}
+                style={{ borderColor: 'var(--color-slate-200)', color: 'var(--color-navy-850)' }}
                 rows={3}
               />
             </div>
             <div className="flex justify-end gap-3">
               <button
                 onClick={() => setEditModalOpen(false)}
-                className="rounded border px-4 py-2 text-sm font-medium transition-colors hover:bg-gray-50"
-                style={{ borderColor: '#dee2e6', color: '#1B2A4A' }}
+                className="rounded border px-4 py-2 text-sm font-medium transition-colors hover:bg-slate-50"
+                style={{ borderColor: 'var(--color-slate-200)', color: 'var(--color-navy-850)' }}
               >
                 Cancel
               </button>
               <button
                 onClick={handleEdit}
                 disabled={!editForm.name.trim()}
-                className="rounded px-4 py-2 text-sm font-medium text-white transition-colors hover:opacity-90 disabled:opacity-50"
-                style={{ backgroundColor: '#F5A623' }}
+                className="rounded px-4 py-2 text-sm font-medium text-accent-ink transition-colors hover:opacity-90 disabled:opacity-50"
+                style={{ backgroundColor: 'var(--color-accent)' }}
               >
                 Save Changes
               </button>
@@ -426,13 +424,13 @@ export default function TeamsPage() {
       <Modal isOpen={createModalOpen} onClose={() => setCreateModalOpen(false)} title="Create Team" size="md">
         <div className="space-y-4">
           <div>
-            <label htmlFor="create-team-org" className="mb-1 block text-sm font-medium" style={{ color: '#6c757d' }}>Organization <span className="text-red-500">*</span></label>
+            <label htmlFor="create-team-org" className="mb-1 block text-sm font-medium" style={{ color: 'var(--color-slate-500)' }}>Organization <span className="text-danger">*</span></label>
             <select
               id="create-team-org"
               value={createOrgId}
               onChange={(e) => setCreateOrgId(e.target.value)}
               className="w-full rounded border px-3 py-2 text-sm bg-white focus:outline-none"
-              style={{ borderColor: '#dee2e6', color: '#1B2A4A' }}
+              style={{ borderColor: 'var(--color-slate-200)', color: 'var(--color-navy-850)' }}
               required
             >
               <option value="">Select organization</option>
@@ -442,25 +440,25 @@ export default function TeamsPage() {
             </select>
           </div>
           <div>
-            <label htmlFor="team-name" className="mb-1 block text-sm font-medium" style={{ color: '#6c757d' }}>Name</label>
+            <label htmlFor="team-name" className="mb-1 block text-sm font-medium" style={{ color: 'var(--color-slate-500)' }}>Name</label>
             <input
               id="team-name"
               type="text"
               value={createForm.name}
               onChange={(e) => setCreateForm((f) => ({ ...f, name: e.target.value }))}
               className="w-full rounded border px-3 py-2 text-sm focus:outline-none"
-              style={{ borderColor: '#dee2e6', color: '#1B2A4A' }}
+              style={{ borderColor: 'var(--color-slate-200)', color: 'var(--color-navy-850)' }}
               placeholder="Team name"
             />
           </div>
           <div>
-            <label htmlFor="team-desc" className="mb-1 block text-sm font-medium" style={{ color: '#6c757d' }}>Description (optional)</label>
+            <label htmlFor="team-desc" className="mb-1 block text-sm font-medium" style={{ color: 'var(--color-slate-500)' }}>Description (optional)</label>
             <textarea
               id="team-desc"
               value={createForm.description}
               onChange={(e) => setCreateForm((f) => ({ ...f, description: e.target.value }))}
               className="w-full rounded border px-3 py-2 text-sm focus:outline-none"
-              style={{ borderColor: '#dee2e6', color: '#1B2A4A' }}
+              style={{ borderColor: 'var(--color-slate-200)', color: 'var(--color-navy-850)' }}
               placeholder="Team description"
               rows={3}
             />
@@ -468,16 +466,16 @@ export default function TeamsPage() {
           <div className="flex justify-end gap-3">
             <button
               onClick={() => setCreateModalOpen(false)}
-              className="rounded border px-4 py-2 text-sm font-medium transition-colors hover:bg-gray-50"
-              style={{ borderColor: '#dee2e6', color: '#1B2A4A' }}
+              className="rounded border px-4 py-2 text-sm font-medium transition-colors hover:bg-slate-50"
+              style={{ borderColor: 'var(--color-slate-200)', color: 'var(--color-navy-850)' }}
             >
               Cancel
             </button>
             <button
               onClick={handleCreate}
               disabled={!createForm.name.trim()}
-              className="rounded px-4 py-2 text-sm font-medium text-white transition-colors hover:opacity-90 disabled:opacity-50"
-              style={{ backgroundColor: '#F5A623' }}
+              className="rounded px-4 py-2 text-sm font-medium text-accent-ink transition-colors hover:opacity-90 disabled:opacity-50"
+              style={{ backgroundColor: 'var(--color-accent)' }}
             >
               Create Team
             </button>

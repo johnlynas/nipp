@@ -229,7 +229,7 @@ export default function OrganizationsPage() {
 
   const columns = [
     { key: 'name', label: 'Name', render: (o: Organization) => (
-      <div className="font-medium" style={{ color: '#1B2A4A' }}>{o.name}</div>
+      <div className="font-medium" style={{ color: 'var(--color-navy-850)' }}>{o.name}</div>
     )},
     { key: 'description', label: 'Description', render: (o: Organization) => o.description || '—' },
     { key: 'status', label: 'Status', render: (o: Organization) => <StatusBadge status={o.status} /> },
@@ -241,7 +241,7 @@ export default function OrganizationsPage() {
         <button
           onClick={() => { setSelectedOrg(o); setDetailModalOpen(true); }}
           title={`View ${o.name}`}
-          className="rounded p-1.5 text-gray-400 hover:bg-gray-100 hover:text-[#1B2A4A] transition-colors"
+          className="rounded p-1.5 text-slate-400 hover:bg-slate-100 hover:text-navy-850 transition-colors"
           aria-label={`View ${o.name}`}
         >
           <Eye className="h-4 w-4" />
@@ -250,7 +250,7 @@ export default function OrganizationsPage() {
           <button
             onClick={() => { setSelectedOrg(o); setEditForm({ name: o.name, description: o.description || '', status: o.status }); setEditModalOpen(true); }}
             title={`Edit ${o.name}`}
-            className="rounded p-1.5 text-gray-400 hover:bg-gray-100 hover:text-[#1B2A4A] transition-colors"
+            className="rounded p-1.5 text-slate-400 hover:bg-slate-100 hover:text-navy-850 transition-colors"
             aria-label={`Edit ${o.name}`}
           >
             <Pencil className="h-4 w-4" />
@@ -260,7 +260,7 @@ export default function OrganizationsPage() {
           <button
             onClick={() => { setSelectedOrg(o); setArchiveModalOpen(true); }}
             title={`Archive ${o.name}`}
-            className="rounded p-1.5 text-gray-400 hover:bg-red-50 hover:text-red-700 transition-colors"
+            className="rounded p-1.5 text-slate-500 hover:bg-danger-tint hover:text-danger-ink transition-colors"
             aria-label={`Archive ${o.name}`}
           >
             <Archive className="h-4 w-4" />
@@ -274,7 +274,7 @@ export default function OrganizationsPage() {
     <div>
       {/* Error Banner */}
       {error && (
-        <div className="mb-4 rounded border bg-red-50 p-3 text-sm text-red-700" role="alert">
+        <div className="mb-4 rounded border bg-danger-tint border-danger-border p-3 text-sm text-danger-ink" role="alert">
           {error}
         </div>
       )}
@@ -289,15 +289,13 @@ export default function OrganizationsPage() {
       </div>
 
       {/* Page Header */}
-      <PageHeader title="Organizations" description="Manage tenant organizations">
-        <button
+      <PageHeader title="Organizations" description="Manage tenant organizations" primaryAction=<button
           onClick={() => setCreateModalOpen(true)}
-          className="rounded px-4 py-2 text-sm font-medium text-white transition-colors hover:opacity-90"
-          style={{ backgroundColor: '#F5A623' }}
+          className="w-full sm:w-auto rounded px-4 py-2 text-center text-sm font-medium text-accent-ink transition-colors hover:opacity-90"
+          style={{ backgroundColor: 'var(--color-accent)' }}
         >
           + Create Organization
-        </button>
-      </PageHeader>
+        </button> />
 
       {/* Filters */}
       <div className="mb-4 flex items-center gap-3">
@@ -305,8 +303,8 @@ export default function OrganizationsPage() {
         <select
           value={statusFilter}
           onChange={(e) => setStatusFilter(e.target.value)}
-          className="rounded border px-3 py-2 text-sm bg-white hover:bg-gray-50 transition-colors focus:outline-none"
-          style={{ borderColor: '#dee2e6', color: '#1B2A4A' }}
+          className="rounded border px-3 py-2 text-sm bg-white hover:bg-slate-50 transition-colors focus:outline-none"
+          style={{ borderColor: 'var(--color-slate-200)', color: 'var(--color-navy-850)' }}
           aria-label="Filter by status"
         >
           <option value="">All Statuses</option>
@@ -334,30 +332,30 @@ export default function OrganizationsPage() {
         {selectedOrg && (
           <div className="space-y-4">
             <div>
-              <label className="text-sm font-medium" style={{ color: '#6c757d' }}>Name</label>
-              <p className="mt-1" style={{ color: '#1B2A4A' }}>{selectedOrg.name}</p>
+              <label className="text-sm font-medium" style={{ color: 'var(--color-slate-500)' }}>Name</label>
+              <p className="mt-1" style={{ color: 'var(--color-navy-850)' }}>{selectedOrg.name}</p>
             </div>
             <div>
-              <label className="text-sm font-medium" style={{ color: '#6c757d' }}>Description</label>
-              <p className="mt-1" style={{ color: '#1B2A4A' }}>{selectedOrg.description || '—'}</p>
+              <label className="text-sm font-medium" style={{ color: 'var(--color-slate-500)' }}>Description</label>
+              <p className="mt-1" style={{ color: 'var(--color-navy-850)' }}>{selectedOrg.description || '—'}</p>
             </div>
             <div>
-              <label className="text-sm font-medium" style={{ color: '#6c757d' }}>Slug</label>
-              <p className="mt-1" style={{ color: '#1B2A4A' }}>{selectedOrg.slug || '—'}</p>
+              <label className="text-sm font-medium" style={{ color: 'var(--color-slate-500)' }}>Slug</label>
+              <p className="mt-1" style={{ color: 'var(--color-navy-850)' }}>{selectedOrg.slug || '—'}</p>
             </div>
             <div className="flex gap-4">
               <div>
-                <label className="text-sm font-medium" style={{ color: '#6c757d' }}>Status</label>
+                <label className="text-sm font-medium" style={{ color: 'var(--color-slate-500)' }}>Status</label>
                 <div className="mt-1"><StatusBadge status={selectedOrg.status} /></div>
               </div>
               <div>
-                <label className="text-sm font-medium" style={{ color: '#6c757d' }}>Members</label>
-                <p className="mt-1" style={{ color: '#1B2A4A' }}>{selectedOrg.memberCount}</p>
+                <label className="text-sm font-medium" style={{ color: 'var(--color-slate-500)' }}>Members</label>
+                <p className="mt-1" style={{ color: 'var(--color-navy-850)' }}>{selectedOrg.memberCount}</p>
               </div>
             </div>
             <div>
-              <label className="text-sm font-medium" style={{ color: '#6c757d' }}>Created</label>
-              <p className="mt-1" style={{ color: '#1B2A4A' }}>{new Date(selectedOrg.createdAt).toLocaleDateString()}</p>
+              <label className="text-sm font-medium" style={{ color: 'var(--color-slate-500)' }}>Created</label>
+              <p className="mt-1" style={{ color: 'var(--color-navy-850)' }}>{new Date(selectedOrg.createdAt).toLocaleDateString()}</p>
             </div>
           </div>
         )}
@@ -378,25 +376,25 @@ export default function OrganizationsPage() {
       <Modal isOpen={createModalOpen} onClose={() => setCreateModalOpen(false)} title="Create Organization" size="md">
         <div className="space-y-4">
           <div>
-            <label htmlFor="org-name" className="mb-1 block text-sm font-medium" style={{ color: '#1B2A4A' }}>Name</label>
+            <label htmlFor="org-name" className="mb-1 block text-sm font-medium" style={{ color: 'var(--color-navy-850)' }}>Name</label>
             <input
               id="org-name"
               type="text"
               value={createForm.name}
               onChange={(e) => setCreateForm((f) => ({ ...f, name: e.target.value }))}
               className="w-full rounded border px-3 py-2 text-sm focus:outline-none"
-              style={{ borderColor: '#dee2e6', color: '#1B2A4A' }}
+              style={{ borderColor: 'var(--color-slate-200)', color: 'var(--color-navy-850)' }}
               placeholder="Organization name"
             />
           </div>
           <div>
-            <label htmlFor="org-description" className="mb-1 block text-sm font-medium" style={{ color: '#1B2A4A' }}>Description</label>
+            <label htmlFor="org-description" className="mb-1 block text-sm font-medium" style={{ color: 'var(--color-navy-850)' }}>Description</label>
             <textarea
               id="org-description"
               value={createForm.description}
               onChange={(e) => setCreateForm((f) => ({ ...f, description: e.target.value }))}
               className="w-full rounded border px-3 py-2 text-sm focus:outline-none resize-y"
-              style={{ borderColor: '#dee2e6', color: '#1B2A4A' }}
+              style={{ borderColor: 'var(--color-slate-200)', color: 'var(--color-navy-850)' }}
               rows={3}
               placeholder="Organization description"
             />
@@ -404,16 +402,16 @@ export default function OrganizationsPage() {
           <div className="flex justify-end gap-3">
             <button
               onClick={() => setCreateModalOpen(false)}
-              className="rounded border px-4 py-2 text-sm font-medium transition-colors hover:bg-gray-50"
-              style={{ borderColor: '#dee2e6', color: '#1B2A4A' }}
+              className="rounded border px-4 py-2 text-sm font-medium transition-colors hover:bg-slate-50"
+              style={{ borderColor: 'var(--color-slate-200)', color: 'var(--color-navy-850)' }}
             >
               Cancel
             </button>
             <button
               onClick={handleCreate}
               disabled={!createForm.name.trim()}
-              className="rounded px-4 py-2 text-sm font-medium text-white transition-colors hover:opacity-90 disabled:opacity-50"
-              style={{ backgroundColor: '#F5A623' }}
+              className="rounded px-4 py-2 text-sm font-medium text-accent-ink transition-colors hover:opacity-90 disabled:opacity-50"
+              style={{ backgroundColor: 'var(--color-accent)' }}
             >
               Create Organization
             </button>
@@ -426,36 +424,36 @@ export default function OrganizationsPage() {
         {selectedOrg && (
           <div className="space-y-4">
             <div>
-              <label htmlFor="edit-org-name" className="mb-1 block text-sm font-medium" style={{ color: '#6c757d' }}>Name</label>
+              <label htmlFor="edit-org-name" className="mb-1 block text-sm font-medium" style={{ color: 'var(--color-slate-500)' }}>Name</label>
               <input
                 id="edit-org-name"
                 type="text"
                 value={editForm.name}
                 onChange={(e) => setEditForm((f) => ({ ...f, name: e.target.value }))}
                 className="w-full rounded border px-3 py-2 text-sm focus:outline-none"
-                style={{ borderColor: '#dee2e6', color: '#1B2A4A' }}
+                style={{ borderColor: 'var(--color-slate-200)', color: 'var(--color-navy-850)' }}
               />
             </div>
             <div>
-              <label htmlFor="edit-org-description" className="mb-1 block text-sm font-medium" style={{ color: '#6c757d' }}>Description</label>
+              <label htmlFor="edit-org-description" className="mb-1 block text-sm font-medium" style={{ color: 'var(--color-slate-500)' }}>Description</label>
               <textarea
                 id="edit-org-description"
                 value={editForm.description}
                 onChange={(e) => setEditForm((f) => ({ ...f, description: e.target.value }))}
                 className="w-full rounded border px-3 py-2 text-sm focus:outline-none resize-y"
-                style={{ borderColor: '#dee2e6', color: '#1B2A4A' }}
+                style={{ borderColor: 'var(--color-slate-200)', color: 'var(--color-navy-850)' }}
                 rows={3}
                 placeholder="Organization description"
               />
             </div>
             <div>
-              <label htmlFor="edit-org-status" className="mb-1 block text-sm font-medium" style={{ color: '#6c757d' }}>Status</label>
+              <label htmlFor="edit-org-status" className="mb-1 block text-sm font-medium" style={{ color: 'var(--color-slate-500)' }}>Status</label>
               <select
                 id="edit-org-status"
                 value={editForm.status}
                 onChange={(e) => setEditForm((f) => ({ ...f, status: e.target.value }))}
                 className="w-full rounded border px-3 py-2 text-sm focus:outline-none"
-                style={{ borderColor: '#dee2e6', color: '#1B2A4A' }}
+                style={{ borderColor: 'var(--color-slate-200)', color: 'var(--color-navy-850)' }}
               >
                 <option value="PENDING">Pending</option>
                 <option value="ACTIVE">Active</option>
@@ -466,16 +464,16 @@ export default function OrganizationsPage() {
             <div className="flex justify-end gap-3">
               <button
                 onClick={() => setEditModalOpen(false)}
-                className="rounded border px-4 py-2 text-sm font-medium transition-colors hover:bg-gray-50"
-                style={{ borderColor: '#dee2e6', color: '#1B2A4A' }}
+                className="rounded border px-4 py-2 text-sm font-medium transition-colors hover:bg-slate-50"
+                style={{ borderColor: 'var(--color-slate-200)', color: 'var(--color-navy-850)' }}
               >
                 Cancel
               </button>
               <button
                 onClick={handleEdit}
                 disabled={!editForm.name.trim()}
-                className="rounded px-4 py-2 text-sm font-medium text-white transition-colors hover:opacity-90 disabled:opacity-50"
-                style={{ backgroundColor: '#F5A623' }}
+                className="rounded px-4 py-2 text-sm font-medium text-accent-ink transition-colors hover:opacity-90 disabled:opacity-50"
+                style={{ backgroundColor: 'var(--color-accent)' }}
               >
                 Save Changes
               </button>

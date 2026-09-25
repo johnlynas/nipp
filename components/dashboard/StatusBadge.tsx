@@ -11,9 +11,9 @@ const statusStyles: Record<string, { bg: string; text: string }> = {
   PENDING: { bg: '#fffbeb', text: '#92400e' },
   SUSPENDED: { bg: '#fef2f2', text: '#991b1b' },
   Banned: { bg: '#fef2f2', text: '#991b1b' },
-  ARCHIVED: { bg: '#f8f9fa', text: '#6c757d' },
-  INACTIVE: { bg: '#f8f9fa', text: '#6c757d' },
-  Default: { bg: '#f8f9fa', text: '#6c757d' },
+  ARCHIVED: { bg: 'var(--color-canvas-subtle)', text: 'var(--color-slate-500)' },
+  INACTIVE: { bg: 'var(--color-canvas-subtle)', text: 'var(--color-slate-500)' },
+  Default: { bg: 'var(--color-canvas-subtle)', text: 'var(--color-slate-500)' },
 };
 
 export function StatusBadge({ status }: StatusBadgeProps) {

@@ -3,6 +3,7 @@
 import { useState, useEffect } from 'react';
 import { useParams } from 'next/navigation';
 import { RoleManager } from '@/components/admin/RoleManager';
+import { PageSkeleton } from '@/components/dashboard/PageSkeleton';
 
 interface Role {
   id: string;
@@ -41,7 +42,9 @@ export default function OrgRolesPage() {
     }
   }
 
-  if (loading) return <div className="p-6">Loading roles...</div>;
+  if (loading) {
+    return <PageSkeleton rows={4} cols={4} />;
+  }
 
   // Separate default and custom roles
   const defaultRoles = roles.filter((r) => r.isDefault);
@@ -49,13 +52,13 @@ export default function OrgRolesPage() {
 
   return (
     <div className="min-h-screen p-6">
-      <h1 className="mb-6 text-2xl font-bold" style={{ color: '#1B2A4A' }}>
+      <h1 className="mb-4 text-2xl font-semibold tracking-tight text-slate-900">
         Role Management
       </h1>
 
       {/* Default Roles — Read Only */}
       <section className="mb-8">
-        <h2 className="mb-3 text-lg font-semibold" style={{ color: '#1B2A4A' }}>
+        <h2 className="mb-3 text-base font-semibold text-slate-900">
           Default Roles (Read-Only)
         </h2>
         <RoleManager roles={defaultRoles} canEdit={false} canDelete={false} />
@@ -63,7 +66,7 @@ export default function OrgRolesPage() {
 
       {/* Custom Roles — Full CRUD */}
       <section>
-        <h2 className="mb-3 text-lg font-semibold" style={{ color: '#1B2A4A' }}>
+        <h2 className="mb-3 text-base font-semibold text-slate-900">
           Custom Roles
         </h2>
         <RoleManager roles={customRoles} canEdit={true} canDelete={true} />

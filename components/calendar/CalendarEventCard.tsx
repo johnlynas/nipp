@@ -70,7 +70,6 @@ export default function CalendarEventCard({
         isDragging ? 'opacity-50 shadow-lg' : 'shadow-sm hover:shadow-md'
       } ${expanded ? '' : 'hover:brightness-95'}`}
       style={{
-        borderLeft: `3px solid ${color}`,
         backgroundColor: expanded ? '#ffffff' : `${color}15`,
       }}
     >
@@ -80,7 +79,7 @@ export default function CalendarEventCard({
           <div className="flex items-center gap-1.5 min-w-0">
             {/* Icon placeholder */}
             <span className="text-xs flex-shrink-0" title={icon}>●</span>
-            <span className="text-xs font-medium truncate text-[#1B2A4A]">
+            <span className="text-xs font-medium truncate text-slate-800">
               {event.title}
             </span>
             <RecurrenceIndicator hasRecurrence={!!event.recurrence} />
@@ -93,13 +92,13 @@ export default function CalendarEventCard({
         <div className="px-3 py-2">
           <div className="flex items-center gap-1.5 mb-1">
             <span style={{ color }} className="text-sm">●</span>
-            <h4 className="font-semibold text-[#1B2A4A]">{event.title}</h4>
+            <h4 className="font-semibold text-slate-800">{event.title}</h4>
             <RecurrenceIndicator hasRecurrence={!!event.recurrence} />
           </div>
           {event.description && (
-            <p className="text-xs text-gray-600 mb-1">{event.description}</p>
+            <p className="text-xs text-slate-600 mb-1">{event.description}</p>
           )}
-          <div className="text-xs text-gray-500">
+          <div className="text-xs text-slate-500">
             {formatTime(event.startDate instanceof Date ? event.startDate : new Date(event.startDate))} – {formatTime(event.endDate instanceof Date ? event.endDate : new Date(event.endDate))}
           </div>
         </div>
@@ -118,7 +117,7 @@ interface EventOverflowIndicatorProps {
 
 export function EventOverflowIndicator({ count }: EventOverflowIndicatorProps) {
   return (
-    <div className="text-xs text-gray-500 font-medium px-1 py-0.5">
+    <div className="text-xs text-slate-500 font-medium px-1 py-0.5">
       +{count} more
     </div>
   );

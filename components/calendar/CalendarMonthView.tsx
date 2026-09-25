@@ -144,14 +144,14 @@ export default function CalendarMonthView({
   };
 
   return (
-    <div className="flex-1 flex flex-col min-h-0 bg-white rounded-lg shadow-sm border" style={{ borderColor: '#dee2e6' }}>
+    <div className="flex-1 flex flex-col min-h-0 bg-white rounded-lg shadow-sm border" style={{ borderColor: 'var(--color-slate-200)' }}>
       {/* Day headers */}
-      <div className="grid grid-cols-7 border-b" style={{ borderColor: '#dee2e6' }}>
+      <div className="grid grid-cols-7 border-b" style={{ borderColor: 'var(--color-slate-200)' }}>
         {['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'].map((day) => (
           <div
             key={day}
             className="py-2 text-center text-xs font-semibold uppercase tracking-wide"
-            style={{ color: '#1B2A4A' }}
+            style={{ color: 'var(--color-slate-600)' }}
           >
             {day}
           </div>
@@ -163,22 +163,22 @@ export default function CalendarMonthView({
         {days.map(({ date, isCurrentMonth }, index) => {
           const dayStr = formatDateKey(date);
           const dayEvents = eventsByDate[dayStr] || [];
-          const todayClass = isToday(date) ? 'bg-[#F5A623]/10' : '';
-          const currentMonthClass = isCurrentMonth ? 'text-[#1B2A4A]' : 'text-gray-400';
+          const todayClass = '';
+          const currentMonthClass = isCurrentMonth ? 'text-slate-800' : 'text-slate-400';
 
           return (
             <div
               key={index}
               className={`min-h-[100px] p-1 transition-all ${
-                isCurrentMonth ? 'bg-white' : 'bg-gray-50'
-              } ${todayClass} border border-[#f0f0f0]`}
+                isCurrentMonth ? 'bg-white' : 'bg-slate-50'
+              } ${todayClass} border border-slate-200`}
               onClick={() => handleDateClick(date)}
               onContextMenu={(e) => handleDateRightClick(e, date)}
               onDrop={(e) => handleDrop(e, date)}
               onDragOver={handleDragOver}
             >
               {/* Day number */}
-              <div className={`text-xs font-medium mb-1 text-right ${isToday(date) ? 'text-[#F5A623]' : currentMonthClass}`}>
+              <div className={`text-xs mb-1 text-right ${isToday(date) ? "font-bold" : "font-medium"} ${currentMonthClass}`}>
                 {date.getDate()}
               </div>
 
@@ -203,7 +203,6 @@ export default function CalendarMonthView({
                         className="w-full h-4 rounded cursor-grab hover:brightness-95 transition-all"
                         style={{
                           backgroundColor: `${event.color || '#2A9D8F'}30`,
-                          borderLeft: `3px solid ${event.color || '#2A9D8F'}`,
                           opacity: isDragging ? 0.5 : 1,
                         }}
                       />
@@ -227,11 +226,10 @@ export default function CalendarMonthView({
                         className="flex items-center gap-1 px-1 py-0.5 rounded cursor-grab hover:brightness-95 transition-all overflow-hidden"
                         style={{
                           backgroundColor: `${event.color || '#2A9D8F'}30`,
-                          borderLeft: `3px solid ${event.color || '#2A9D8F'}`,
                           opacity: isDragging ? 0.5 : 1,
                         }}
                       >
-                        <span className="text-xs font-medium truncate" style={{ color: event.color || '#1B2A4A' }}>
+                        <span className="text-xs font-medium truncate" style={{ color: 'var(--color-slate-800)' }}>
                           ▸ {event.recurrence && <span title="Recurring event">↻</span>} {event.title}
                         </span>
                       </div>
@@ -255,11 +253,10 @@ export default function CalendarMonthView({
                         className="flex items-center gap-1 px-1 py-0.5 rounded cursor-grab hover:brightness-95 transition-all overflow-hidden"
                         style={{
                           backgroundColor: `${event.color || '#2A9D8F'}30`,
-                          borderLeft: `3px solid ${event.color || '#2A9D8F'}`,
                           opacity: isDragging ? 0.5 : 1,
                         }}
                       >
-                        <span className="text-xs font-medium truncate" style={{ color: event.color || '#1B2A4A' }}>
+                        <span className="text-xs font-medium truncate" style={{ color: 'var(--color-slate-800)' }}>
                           {event.recurrence && <span title="Recurring event">↻</span>} {event.title} ◂
                         </span>
                       </div>

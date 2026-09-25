@@ -33,13 +33,13 @@ export function MultiSelect({ options, selected, onChange, placeholder = 'Select
       <button
         type="button"
         onClick={() => setOpen(!open)}
-        className="flex min-h-[38px] flex-wrap items-center gap-1 rounded border border-[#dee2e6] px-3 py-2 text-sm bg-white hover:bg-gray-50 transition-colors focus:outline-none"
-        style={{ '--tw-ring-color': '#F5A623' } as React.CSSProperties}
+        className="flex min-h-[38px] flex-wrap items-center gap-1 rounded border border-slate-200 px-3 py-2 text-sm bg-white hover:bg-slate-50 transition-colors focus:outline-none"
+        style={{ '--tw-ring-color': 'var(--color-accent)' } as React.CSSProperties}
         aria-label={placeholder}
         aria-expanded={open}
       >
         {selected.length === 0 && (
-          <span className="text-gray-400">{placeholder}</span>
+          <span className="text-slate-400">{placeholder}</span>
         )}
         {selected.map((id) => {
           const opt = options.find((o) => o.id === id);
@@ -47,7 +47,7 @@ export function MultiSelect({ options, selected, onChange, placeholder = 'Select
             <span
               key={id}
               className="inline-flex items-center gap-1 rounded px-2 py-0.5 text-xs font-medium"
-              style={{ backgroundColor: '#1B2A4A', color: '#F5A623' }}
+              style={{ backgroundColor: 'var(--color-navy-850)', color: 'var(--color-accent)' }}
             >
               {opt?.label || id}
               <button
@@ -67,7 +67,7 @@ export function MultiSelect({ options, selected, onChange, placeholder = 'Select
       {open && (
         <>
           <div className="fixed inset-0 z-10" onClick={() => setOpen(false)} />
-          <div className="absolute z-20 mt-1 w-full rounded border border-[#dee2e6] bg-white shadow-lg" style={{ maxHeight: '240px' }}>
+          <div className="absolute z-20 mt-1 w-full rounded border border-slate-200 bg-white shadow-lg" style={{ maxHeight: '240px' }}>
             <input
               type="text"
               value={search}
@@ -78,7 +78,7 @@ export function MultiSelect({ options, selected, onChange, placeholder = 'Select
             />
             <div className="overflow-y-auto" style={{ maxHeight: '200px' }}>
               {filtered.length === 0 ? (
-                <p className="px-3 py-2 text-sm text-gray-400">No results</p>
+                <p className="px-3 py-2 text-sm text-slate-400">No results</p>
               ) : (
                 filtered.map((opt) => {
                   const isSelected = selected.includes(opt.id);
@@ -87,11 +87,11 @@ export function MultiSelect({ options, selected, onChange, placeholder = 'Select
                       key={opt.id}
                       type="button"
                       onClick={() => toggle(opt.id)}
-                      className={`flex w-full items-center gap-2 px-3 py-2 text-left text-sm hover:bg-gray-50 transition-colors ${isSelected ? 'font-medium' : ''}`}
-                      style={isSelected ? { color: '#1B2A4A', backgroundColor: '#f0fdf4' } : {}}
+                      className={`flex w-full items-center gap-2 px-3 py-2 text-left text-sm hover:bg-slate-50 transition-colors ${isSelected ? 'font-medium' : ''}`}
+                      style={isSelected ? { color: 'var(--color-navy-850)', backgroundColor: '#f0fdf4' } : {}}
                       aria-pressed={isSelected}
                     >
-                      <span className="h-4 w-4 shrink-0 rounded border flex items-center justify-center" style={{ borderColor: isSelected ? '#1B2A4A' : '#dee2e6', backgroundColor: isSelected ? '#1B2A4A' : 'transparent' }}>
+                      <span className="h-4 w-4 shrink-0 rounded border flex items-center justify-center" style={{ borderColor: isSelected ? 'var(--color-navy-850)' : 'var(--color-slate-200)', backgroundColor: isSelected ? 'var(--color-navy-850)' : 'transparent' }}>
                         {isSelected && <span className="text-white text-xs">✓</span>}
                       </span>
                       {opt.label}

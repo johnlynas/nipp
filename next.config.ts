@@ -81,6 +81,20 @@ const nextConfig: NextConfig = {
     ],
   },
 
+  async redirects() {
+    // Legacy app/admin/* shell retired — forward to the dashboard/admin equivalents.
+    const base = ':path*';
+    return [
+      { source: `/admin/users/${base}`, destination: '/dashboard/admin/users', permanent: true },
+      { source: `/admin/organizations/${base}`, destination: '/dashboard/admin/organizations', permanent: true },
+      { source: `/admin/roles/${base}`, destination: '/dashboard/admin/roles', permanent: true },
+      { source: `/admin/permissions/${base}`, destination: '/dashboard/admin/permissions', permanent: true },
+      { source: `/admin/system-logs/${base}`, destination: '/dashboard/admin/system-logs', permanent: true },
+      { source: `/admin/audit-logs/${base}`, destination: '/dashboard/admin/audit-logs', permanent: true },
+      { source: '/admin/:other*', destination: '/dashboard/admin/users', permanent: true },
+    ];
+  },
+
   async rewrites() {
     return [];
   },

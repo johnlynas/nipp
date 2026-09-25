@@ -91,8 +91,10 @@ describe('calendar-utils', () => {
         getEventColor('KEY_EXCHANGE'),
         getEventColor('OTHER'),
       ];
+      // Colors are hex literals or CSS design-token vars (both resolve to the
+      // Property NI palette via app/globals.css).
       for (const color of colors) {
-        expect(color).toMatch(/^#[0-9A-Fa-f]{6}$/);
+        expect(color).toMatch(/^(#[0-9A-Fa-f]{6}|var\(--color-[a-z0-9-]+\))$/);
       }
     });
 

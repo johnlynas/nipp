@@ -1,26 +1,59 @@
 @import 'tailwindcss';
 
 /* ============================================================
-   Property NI Navy & Amber Design Tokens
+   Property NI — Neutral-Modern Design Tokens
+   World: near-white canvas, slate ink hierarchy, one deep
+   navy for dark chrome (sidebar/status rails), a single
+   amber reserved as THE functional accent (primary CTA +
+   live status). Amber never carries white text: use ink on
+   accent for ~7:1 contrast.
    ============================================================ */
 
 @theme {
-  /* Color Palette */
-  --color-brand-primary: #1e3a5f;
-  --color-brand-primary-dark: #152940;
-  --color-brand-accent: #f4a261;
-  --color-brand-accent-hover: #e76f51;
-  --color-surface-default: #ffffff;
-  --color-surface-subtle: #f8f9fa;
-  --color-text-primary: #1e3a5f;
-  --color-text-secondary: #6c757d;
-  --color-text-placeholder: #adb5bd;
-  --color-border-default: #dee2e6;
-  --color-state-error: #dc3545;
-  --color-state-success: #28a745;
+  /* Dark chrome — sidebar, footer rail, table-free dark surfaces */
+  --color-navy-950: #121C30;   /* deepest: hover sinks, separators */
+  --color-navy-900: #16223A;   /* footer/rail surface */
+  --color-navy-850: #1B2A4A;   /* primary dark chrome (sidebar) */
+  --color-navy-800: #24355C;   /* elevated/active on dark chrome */
+  --color-navy-700: #3A4F7A;   /* borders on dark, inactive icon stroke */
 
-  /* Typography */
-  --font-sans: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  /* Ink — text hierarchy on light surfaces */
+  --color-slate-100: #F1F5F9;
+  --color-slate-200: #E2E8F0;
+  --color-slate-300: #CBD5E1;
+  --color-slate-400: #94A3B8;
+  --color-slate-500: #64748B;
+  --color-slate-600: #475569;
+  --color-slate-700: #334155;
+  --color-slate-800: #1E293B;
+  --color-slate-900: #0F172A;
+
+  /* Canvas */
+  --color-canvas: #FFFFFF;
+  --color-canvas-subtle: #F8FAFC;
+
+  /* THE accent — functional only: primary CTA, live status, focus */
+  --color-accent: #F5A623;
+  --color-accent-ink: #1E293B;      /* text on accent (~7.5:1) */
+  --color-accent-strong: #C2741A;   /* darker state on accent fills */
+
+  /* Semantic states (tint bg / border / ink — all ≥4.5:1) */
+  --color-success: #0E7A6B;         /* deep teal-ink for text/icons/fills */
+  --color-success-tint: #F0FBF8;
+  --color-success-border: #BFEDE2;
+  --color-danger: #DC3545;          /* large/graphic only (fills, status dots) */
+  --color-danger-ink: #991B1B;      /* text on light + danger tints */
+  --color-danger-tint: #FEF2F2;
+  --color-danger-border: #FECACA;
+  --color-warning: #B45309;         /* warning ink as fill (progress bars, dots) */
+  --color-warning-tint: #FFFBEB;
+  --color-warning-border: #FDE68A;
+  --color-warning-ink: #92400E;
+
+  /* Typography — Inter is self-hosted via next/font (--font-inter in app/layout.tsx).
+     Role scale (Operate mode): page title 2xl/semibold/tight · section base/medium
+     · body sm · label/metadata xs–sm on slate-500. */
+  --font-sans: var(--font-inter), 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
 
   /* Spacing Scale (8px grid) */
   --spacing-xs: 0.5rem;   /* 8px */
@@ -34,10 +67,10 @@
   --radius-sm: 8px;
   --radius-md: 12px;
 
-  /* Shadows */
-  --shadow-button: 0 4px 12px rgba(244, 162, 97, 0.3);
-  --shadow-button-hover: 0 6px 16px rgba(244, 162, 97, 0.4);
-  --shadow-focus-ring: 0 0 0 3px rgba(30, 58, 95, 0.1);
+  /* Shadows — offset + soft blur, low-opacity ink tint */
+  --shadow-button: 0 4px 12px rgba(30, 41, 59, 0.16);
+  --shadow-button-hover: 0 6px 16px rgba(30, 41, 59, 0.22);
+  --shadow-focus-ring: 0 0 0 3px rgba(245, 166, 35, 0.35);
 
   /* Transitions */
   --transition-fast: 0.15s ease;
@@ -51,14 +84,7 @@
 
 :root {
   --background: #ffffff;
-  --foreground: #1e3a5f;
-}
-
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
-  }
+  --foreground: var(--color-slate-900);
 }
 
 body {
@@ -70,13 +96,49 @@ body {
 }
 
 /* ============================================================
-   Accessibility Rules
+   Browser surfaces — the parts we didn't draw still carry the system
    ============================================================ */
 
-/* WCAG AA: Amber (#f4a261) MUST NEVER be used for text on white background (~2.5:1 contrast ratio) */
-/* Amber is strictly for backgrounds, borders, and icons only. Text on Amber backgrounds MUST be White. */
+::selection {
+  background: rgba(245, 166, 35, 0.28);
+  color: var(--color-slate-900);
+}
 
-/* Focus ring utility for keyboard navigation */
+:focus-visible {
+  outline: none;
+  box-shadow: var(--shadow-focus-ring);
+  border-radius: var(--radius-sm);
+}
+
+/* Placeholder text — one role, slate tinted (never raw gray) */
+::placeholder {
+  color: var(--color-slate-500);
+  opacity: 1;
+}
+
+/* Tabular numerals everywhere numbers line up (tables, stat values) */
+th,
+td,
+.tabular {
+  font-variant-numeric: tabular-nums;
+}
+
+/* Scrollbars on the dark chrome — themed, not browser default */
+aside::-webkit-scrollbar,
+footer::-webkit-scrollbar {
+  width: 8px;
+}
+aside::-webkit-scrollbar-track,
+footer::-webkit-scrollbar-track {
+  background: transparent;
+}
+aside::-webkit-scrollbar-thumb,
+footer::-webkit-scrollbar-thumb {
+  background: var(--color-navy-700);
+  border-radius: 4px;
+}
+
+/* Focus ring utility for keyboard navigation (kept for legacy consumers) */
 .focus-ring {
   outline: none;
   box-shadow: var(--shadow-focus-ring);
@@ -98,11 +160,3 @@ body {
   appearance: none;
   display: none;
 }
-
-/* ============================================================
-   Split-Screen Login Layout Structure (Scaffolded for Future Implementation)
-   ============================================================ */
-
-/* Desktop (>1024px): 50/50 split */
-/* Tablet (768px-1024px): Split maintained with reduced padding */
-/* Mobile (<768px): Stacked vertically, left panel min-height 40vh */

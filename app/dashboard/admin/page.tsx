@@ -2,6 +2,7 @@
 
 import { useEffect } from 'react';
 import { useRouter } from 'next/navigation';
+import { PageSkeleton } from '@/components/dashboard/PageSkeleton';
 
 export default function AdminDashboardPage() {
   const router = useRouter();
@@ -11,8 +12,8 @@ export default function AdminDashboardPage() {
   }, [router]);
 
   return (
-    <div className="flex h-64 items-center justify-center" style={{ color: '#6c757d' }}>
-      Loading...
+    <div className="flex h-64 items-center justify-center" style={{ color: 'var(--color-slate-500)' }}>
+      <PageSkeleton rows={5} cols={4} />
     </div>
   );
 }

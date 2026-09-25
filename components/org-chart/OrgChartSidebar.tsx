@@ -111,15 +111,15 @@ export default function OrgChartSidebar({
 
   return (
     <aside
-      className={`flex-shrink-0 bg-[#1B2A4A] text-white flex flex-col h-full transition-all duration-200 overflow-hidden ${
+      className={`flex-shrink-0 bg-navy-850 text-white flex flex-col h-full transition-all duration-200 overflow-hidden ${
         isExpanded ? 'w-80' : 'w-16'
       }`}
     >
       {/* Title bar — toggle only */}
-      <div className="flex items-center justify-end px-4 py-3 border-b flex-shrink-0" style={{ borderColor: '#24355c' }}>
+      <div className="flex items-center justify-end px-4 py-3 border-b flex-shrink-0" style={{ borderColor: 'var(--color-navy-800)' }}>
         <button
           onClick={onToggle}
-          className="text-gray-300 hover:text-white transition-colors"
+          className="text-slate-300 hover:text-white transition-colors"
           aria-label={isExpanded ? 'Collapse sidebar' : 'Expand sidebar'}
         >
           {isExpanded ? (
@@ -137,7 +137,7 @@ export default function OrgChartSidebar({
       {isExpanded && (
         <>
           {/* Organization switcher — typeable combobox (super admin only) */}
-          <div className="px-4 py-3 border-b flex-shrink-0" style={{ borderColor: '#24355c' }}>
+          <div className="px-4 py-3 border-b flex-shrink-0" style={{ borderColor: 'var(--color-navy-800)' }}>
             <p className="text-sm font-semibold mt-1 mb-1.5" style={{ color: '#e2e8f0' }}>
               Organization
             </p>
@@ -151,11 +151,11 @@ export default function OrgChartSidebar({
                   onBlur={handleOrgBlur}
                   onKeyDown={handleOrgKeyDown}
                   placeholder="Select organization"
-                  className="w-full pl-3 pr-8 py-2 rounded text-sm bg-[#24355c] border placeholder:text-gray-500 focus:outline-none"
-                  style={{ borderColor: orgDropdownOpen ? '#F5A623' : '#3a4f7a', color: '#e2e8f0' }}
+                  className="w-full pl-3 pr-8 py-2 rounded text-sm bg-navy-800 border placeholder:text-slate-500 focus:outline-none"
+                  style={{ borderColor: orgDropdownOpen ? 'var(--color-accent)' : 'var(--color-navy-700)', color: '#e2e8f0' }}
                 />
                 <svg
-                  className={`w-4 h-4 absolute right-2.5 top-1/2 -translate-y-1/2 pointer-events-none transition-transform ${orgDropdownOpen ? 'rotate-180 text-[#F5A623]' : 'text-gray-400'}`}
+                  className={`w-4 h-4 absolute right-2.5 top-1/2 -translate-y-1/2 pointer-events-none transition-transform ${orgDropdownOpen ? 'rotate-180 text-accent' : 'text-slate-400'}`}
                   fill="none"
                   stroke="currentColor"
                   viewBox="0 0 24 24"
@@ -164,7 +164,7 @@ export default function OrgChartSidebar({
                 </svg>
 
                 {orgDropdownOpen && (
-                  <div className="absolute top-full left-0 right-0 mt-1 bg-[#24355c] border rounded shadow-lg z-50 max-h-60 overflow-y-auto" style={{ borderColor: '#3a4f7a' }}>
+                  <div className="absolute top-full left-0 right-0 mt-1 bg-navy-800 border rounded shadow-lg z-50 max-h-60 overflow-y-auto" style={{ borderColor: 'var(--color-navy-700)' }}>
                     {filteredOrganizations.length === 0 ? (
                       <div className="px-3 py-2 text-sm" style={{ color: '#94a3b8' }}>
                         No organizations match "{effectiveOrgQuery.trim()}"
@@ -177,8 +177,8 @@ export default function OrgChartSidebar({
                           onClick={() => handleOrgSelect(org.id, org.name)}
                           className={`w-full px-3 py-2 text-left text-sm transition-colors truncate ${
                             org.id === selectedOrgId
-                              ? 'bg-[#1B2A4A] text-[#F5A623]'
-                              : 'text-gray-300 hover:bg-[#1B2A4A] hover:text-white'
+                              ? 'text-white font-semibold bg-navy-700/40'
+                              : 'text-slate-400 hover:bg-navy-800/60 hover:text-white'
                           }`}
                         >
                           {org.name}
@@ -197,7 +197,7 @@ export default function OrgChartSidebar({
 
           {/* Manage section (edit rights only) */}
           {tree.viewerCanEdit && (
-            <div className="px-4 py-3 border-b flex-shrink-0" style={{ borderColor: '#24355c' }}>
+            <div className="px-4 py-3 border-b flex-shrink-0" style={{ borderColor: 'var(--color-navy-800)' }}>
               <p className="text-sm font-semibold mb-1.5" style={{ color: '#e2e8f0' }}>
                 Manage
               </p>
@@ -206,7 +206,7 @@ export default function OrgChartSidebar({
                   <li key={link.href}>
                     <a
                       href={link.href}
-                      className="block rounded px-2 py-1.5 text-sm text-gray-300 hover:bg-[#24355c] hover:text-white transition-colors"
+                      className="block rounded px-2 py-1.5 text-sm text-slate-300 hover:bg-navy-800 hover:text-white transition-colors"
                     >
                       {link.label}
                     </a>
@@ -224,7 +224,7 @@ export default function OrgChartSidebar({
           {/* Scrollable content */}
           <div className="flex-1 min-h-0 overflow-y-auto px-4 pb-4">
             {tree.teams.length === 0 ? (
-              <p className="text-sm text-gray-400 pt-2">No teams in this organization</p>
+              <p className="text-sm text-slate-400 pt-2">No teams in this organization</p>
             ) : (
               <ul className="space-y-1">
                 {tree.teams.map((team) => (
@@ -232,7 +232,7 @@ export default function OrgChartSidebar({
                     <button
                       type="button"
                       onClick={() => onTeamClick?.(team.id)}
-                      className="w-full flex items-center justify-between rounded px-2 py-2 text-left hover:bg-[#24355c] transition-colors"
+                      className="w-full flex items-center justify-between rounded px-2 py-2 text-left hover:bg-navy-800 transition-colors"
                     >
                       <span className="text-sm truncate" style={{ color: '#e2e8f0' }}>{team.name}</span>
                       <span className="text-xs ml-2 flex-shrink-0" style={{ color: '#94a3b8' }}>
@@ -256,7 +256,7 @@ export default function OrgChartSidebar({
                       <button
                         type="button"
                         onClick={() => onMemberClick?.(member.userId)}
-                        className="w-full rounded px-2 py-1.5 text-left hover:bg-[#24355c] transition-colors"
+                        className="w-full rounded px-2 py-1.5 text-left hover:bg-navy-800 transition-colors"
                       >
                         <p className="text-sm truncate" style={{ color: '#e2e8f0' }}>{member.name}</p>
                         <p className="text-xs truncate" style={{ color: '#94a3b8' }}>{member.memberRole}</p>

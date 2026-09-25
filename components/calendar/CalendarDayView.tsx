@@ -97,14 +97,14 @@ export default function CalendarDayView({
   };
 
   return (
-    <div className="bg-white rounded-lg shadow-sm border overflow-hidden" style={{ borderColor: '#dee2e6' }}>
+    <div className="bg-white rounded-lg shadow-sm border overflow-hidden" style={{ borderColor: 'var(--color-slate-200)' }}>
       {/* Day header */}
-      <div className="py-3 px-4 border-b text-center" style={{ borderColor: '#dee2e6' }}>
-        <div className="text-sm font-medium" style={{ color: '#6c757d' }}>
+      <div className="py-3 px-4 border-b text-center" style={{ borderColor: 'var(--color-slate-200)' }}>
+        <div className="text-sm font-medium" style={{ color: 'var(--color-slate-500)' }}>
           {date.toLocaleDateString('en-GB', { weekday: 'long' })}
         </div>
         <div className={`text-2xl font-bold mt-1 ${isToday(date) ? 'rounded-full w-10 h-10 flex items-center justify-center mx-auto' : ''}`}
-          style={isToday(date) ? { backgroundColor: '#F5A623', color: '#ffffff' } : { color: '#1B2A4A' }}
+          style={isToday(date) ? { color: '#fff', backgroundColor: 'var(--color-navy-850)' } : { color: 'var(--color-slate-900)' }}
         >
           {date.getDate()}
         </div>
@@ -120,12 +120,12 @@ export default function CalendarDayView({
       >
         {/* Time labels column */}
         <div className="flex">
-          <div className="w-16 flex-shrink-0 border-r" style={{ borderColor: '#f0f0f0' }}>
+          <div className="w-16 flex-shrink-0 border-r" style={{ borderColor: 'var(--color-slate-200)' }}>
             {hours.map((hour) => (
               <div
                 key={hour}
                 className="text-xs text-right pr-2"
-                style={{ height: '64px', color: '#6c757d' }}
+                style={{ height: '64px', color: 'var(--color-slate-500)' }}
               >
                 {hour === 0 ? '' : formatTime(new Date(2000, 0, 1, hour, 0))}
               </div>
@@ -135,7 +135,7 @@ export default function CalendarDayView({
           {/* Day column */}
           <div
             className="flex-1 border-l relative"
-            style={{ borderColor: '#f0f0f0' }}
+            style={{ borderColor: 'var(--color-slate-200)' }}
             onClick={() => onDateClick?.(date)}
             onContextMenu={(e) => { e.preventDefault(); onDateRightClick?.(date, e); }}
             onDrop={handleDrop}
@@ -146,7 +146,7 @@ export default function CalendarDayView({
               <div
                 key={hour}
                 className="border-b"
-                style={{ height: '64px', borderColor: '#f0f0f0' }}
+                style={{ height: '64px', borderColor: 'var(--color-slate-200)' }}
               />
             ))}
 
@@ -176,17 +176,16 @@ export default function CalendarDayView({
                     top: `${startHour * 64}px`,
                     height: `${duration * 64}px`,
                     backgroundColor: `${event.color || '#2A9D8F'}30`,
-                    borderLeft: `3px solid ${event.color || '#2A9D8F'}`,
                     zIndex: 10,
                     opacity: isDragging ? 0.5 : 1,
                   }}
                 >
                   <div className="px-2 py-1 overflow-hidden" style={{ maxHeight: '100%' }}>
-                    <div className="text-sm font-semibold truncate" style={{ color: event.color || '#1B2A4A' }}>
+                    <div className="text-sm font-semibold truncate" style={{ color: 'var(--color-slate-800)' }}>
                       {event.recurrence && <span className="mr-1" title="Recurring event">↻</span>}
                       {event.title}
                     </div>
-                    <div className="text-xs text-gray-500">
+                    <div className="text-xs text-slate-500">
                       {formatTime(start)} – {formatTime(end)}
                     </div>
                   </div>

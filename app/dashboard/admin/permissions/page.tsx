@@ -281,7 +281,7 @@ export default function PermissionsPage() {
 
   const columns = [
     { key: 'key', label: 'Permission Key', render: (p: Permission) => (
-      <code className="text-sm font-mono" style={{ color: '#1B2A4A' }}>{p.key}</code>
+      <code className="text-sm font-mono" style={{ color: 'var(--color-navy-850)' }}>{p.key}</code>
     )},
     { key: 'resource', label: 'Resource' },
     { key: 'isDefault', label: 'Type', render: (p: Permission) => <StatusBadge status={p.isDefault ? 'Default' : 'Custom'} /> },
@@ -291,7 +291,7 @@ export default function PermissionsPage() {
         <button
           onClick={() => handleView(p)}
           title={`View ${p.key}`}
-          className="rounded p-1.5 text-gray-400 hover:bg-gray-100 hover:text-[#1B2A4A] transition-colors"
+          className="rounded p-1.5 text-slate-400 hover:bg-slate-100 hover:text-navy-850 transition-colors"
           aria-label={`View ${p.key}`}
         >
           <Eye className="h-4 w-4" />
@@ -299,7 +299,7 @@ export default function PermissionsPage() {
         <button
           onClick={() => handleEditClick(p)}
           title={`Edit ${p.key}`}
-          className="rounded p-1.5 text-gray-400 hover:bg-gray-100 hover:text-[#1B2A4A] transition-colors"
+          className="rounded p-1.5 text-slate-400 hover:bg-slate-100 hover:text-navy-850 transition-colors"
           aria-label={`Edit ${p.key}`}
         >
           <Pencil className="h-4 w-4" />
@@ -307,7 +307,7 @@ export default function PermissionsPage() {
         <button
           onClick={() => handleDeleteClick(p)}
           title={`Delete ${p.key}`}
-          className="rounded p-1.5 text-gray-400 hover:bg-red-50 hover:text-red-700 transition-colors"
+          className="rounded p-1.5 text-slate-500 hover:bg-danger-tint hover:text-danger-ink transition-colors"
           aria-label={`Delete ${p.key}`}
         >
           <Trash2 className="h-4 w-4" />
@@ -320,7 +320,7 @@ export default function PermissionsPage() {
     <div>
       {/* Error Banner */}
       {error && (
-        <div className="mb-4 rounded border bg-red-50 p-3 text-sm text-red-700" role="alert">
+        <div className="mb-4 rounded border bg-danger-tint border-danger-border p-3 text-sm text-danger-ink" role="alert">
           {error}
         </div>
       )}
@@ -332,15 +332,13 @@ export default function PermissionsPage() {
       </div>
 
       {/* Page Header */}
-      <PageHeader title="Permissions" description="Global permission catalog">
-        <button
+      <PageHeader title="Permissions" description="Global permission catalog" primaryAction=<button
           onClick={() => setCreateModalOpen(true)}
-          className="rounded px-4 py-2 text-sm font-medium text-white transition-colors hover:opacity-90"
-          style={{ backgroundColor: '#F5A623' }}
+          className="w-full sm:w-auto rounded px-4 py-2 text-center text-sm font-medium text-accent-ink transition-colors hover:opacity-90"
+          style={{ backgroundColor: 'var(--color-accent)' }}
         >
           + Create Permission
-        </button>
-      </PageHeader>
+        </button> />
 
       {/* Filters */}
       <div className="mb-4 flex items-center gap-3">
@@ -348,8 +346,8 @@ export default function PermissionsPage() {
         <select
           value={resourceFilter}
           onChange={(e) => setResourceFilter(e.target.value)}
-          className="rounded border px-3 py-2 text-sm bg-white hover:bg-gray-50 transition-colors focus:outline-none"
-          style={{ borderColor: '#dee2e6', color: '#1B2A4A' }}
+          className="rounded border px-3 py-2 text-sm bg-white hover:bg-slate-50 transition-colors focus:outline-none"
+          style={{ borderColor: 'var(--color-slate-200)', color: 'var(--color-navy-850)' }}
           aria-label="Filter by resource"
         >
           <option value="">All Resources</option>
@@ -360,8 +358,8 @@ export default function PermissionsPage() {
         <select
           value={typeFilter}
           onChange={(e) => setTypeFilter(e.target.value)}
-          className="rounded border px-3 py-2 text-sm bg-white hover:bg-gray-50 transition-colors focus:outline-none"
-          style={{ borderColor: '#dee2e6', color: '#1B2A4A' }}
+          className="rounded border px-3 py-2 text-sm bg-white hover:bg-slate-50 transition-colors focus:outline-none"
+          style={{ borderColor: 'var(--color-slate-200)', color: 'var(--color-navy-850)' }}
           aria-label="Filter by type"
         >
           <option value="">All Types</option>
@@ -387,26 +385,26 @@ export default function PermissionsPage() {
         {selectedPermission && (
           <div className="space-y-4">
             <div>
-              <label className="text-sm font-medium" style={{ color: '#6c757d' }}>Key</label>
-              <p className="mt-1 font-mono text-sm" style={{ color: '#1B2A4A' }}>{selectedPermission.key}</p>
+              <label className="text-sm font-medium" style={{ color: 'var(--color-slate-500)' }}>Key</label>
+              <p className="mt-1 font-mono text-sm" style={{ color: 'var(--color-navy-850)' }}>{selectedPermission.key}</p>
             </div>
             <div className="grid grid-cols-2 gap-4">
               <div>
-                <label className="text-sm font-medium" style={{ color: '#6c757d' }}>Resource</label>
-                <p className="mt-1" style={{ color: '#1B2A4A' }}>{selectedPermission.resource}</p>
+                <label className="text-sm font-medium" style={{ color: 'var(--color-slate-500)' }}>Resource</label>
+                <p className="mt-1" style={{ color: 'var(--color-navy-850)' }}>{selectedPermission.resource}</p>
               </div>
               <div>
-                <label className="text-sm font-medium" style={{ color: '#6c757d' }}>Action</label>
-                <p className="mt-1" style={{ color: '#1B2A4A' }}>{selectedPermission.action}</p>
+                <label className="text-sm font-medium" style={{ color: 'var(--color-slate-500)' }}>Action</label>
+                <p className="mt-1" style={{ color: 'var(--color-navy-850)' }}>{selectedPermission.action}</p>
               </div>
             </div>
             <div>
-              <label className="text-sm font-medium" style={{ color: '#6c757d' }}>Type</label>
+              <label className="text-sm font-medium" style={{ color: 'var(--color-slate-500)' }}>Type</label>
               <div className="mt-1"><StatusBadge status={selectedPermission.isDefault ? 'Default' : 'Custom'} /></div>
             </div>
             <div>
-              <label className="text-sm font-medium" style={{ color: '#6c757d' }}>Description</label>
-              <p className="mt-1" style={{ color: '#1B2A4A' }}>{selectedPermission.description || '—'}</p>
+              <label className="text-sm font-medium" style={{ color: 'var(--color-slate-500)' }}>Description</label>
+              <p className="mt-1" style={{ color: 'var(--color-navy-850)' }}>{selectedPermission.description || '—'}</p>
             </div>
           </div>
         )}
@@ -429,13 +427,13 @@ export default function PermissionsPage() {
           <div className="space-y-4">
             <div className="grid grid-cols-2 gap-4">
               <div>
-                <label htmlFor="edit-perm-resource" className="mb-1 block text-sm font-medium" style={{ color: '#6c757d' }}>Resource</label>
+                <label htmlFor="edit-perm-resource" className="mb-1 block text-sm font-medium" style={{ color: 'var(--color-slate-500)' }}>Resource</label>
                 <select
                   id="edit-perm-resource"
                   value={editForm.resource}
                   onChange={(e) => setEditForm((f) => ({ ...f, resource: e.target.value }))}
                   className="w-full rounded border px-3 py-2 text-sm focus:outline-none"
-                  style={{ borderColor: '#dee2e6', color: '#1B2A4A' }}
+                  style={{ borderColor: 'var(--color-slate-200)', color: 'var(--color-navy-850)' }}
                 >
                   <option value="" disabled>Select resource</option>
                   {resourcesLoading && <option value="" disabled>Loading resources...</option>}
@@ -450,13 +448,13 @@ export default function PermissionsPage() {
                 </select>
               </div>
               <div>
-                <label htmlFor="edit-perm-action" className="mb-1 block text-sm font-medium" style={{ color: '#6c757d' }}>Action</label>
+                <label htmlFor="edit-perm-action" className="mb-1 block text-sm font-medium" style={{ color: 'var(--color-slate-500)' }}>Action</label>
                 <select
                   id="edit-perm-action"
                   value={editForm.action}
                   onChange={(e) => setEditForm((f) => ({ ...f, action: e.target.value }))}
                   className="w-full rounded border px-3 py-2 text-sm focus:outline-none"
-                  style={{ borderColor: '#dee2e6', color: '#1B2A4A' }}
+                  style={{ borderColor: 'var(--color-slate-200)', color: 'var(--color-navy-850)' }}
                 >
                   <option value="" disabled>Select action</option>
                   {availableActions.map((a) => (
@@ -466,13 +464,13 @@ export default function PermissionsPage() {
               </div>
             </div>
             <div>
-              <label htmlFor="edit-perm-desc" className="mb-1 block text-sm font-medium" style={{ color: '#6c757d' }}>Description (optional)</label>
+              <label htmlFor="edit-perm-desc" className="mb-1 block text-sm font-medium" style={{ color: 'var(--color-slate-500)' }}>Description (optional)</label>
               <textarea
                 id="edit-perm-desc"
                 value={editForm.description}
                 onChange={(e) => setEditForm((f) => ({ ...f, description: e.target.value }))}
                 className="w-full rounded border px-3 py-2 text-sm focus:outline-none"
-                style={{ borderColor: '#dee2e6', color: '#1B2A4A' }}
+                style={{ borderColor: 'var(--color-slate-200)', color: 'var(--color-navy-850)' }}
                 rows={3}
               />
             </div>
@@ -484,21 +482,21 @@ export default function PermissionsPage() {
                 onChange={(e) => setEditForm((f) => ({ ...f, isDefault: e.target.checked }))}
                 className="h-4 w-4 rounded"
               />
-              <label htmlFor="edit-perm-isDefault" className="text-sm font-medium" style={{ color: '#6c757d' }}>Default</label>
+              <label htmlFor="edit-perm-isDefault" className="text-sm font-medium" style={{ color: 'var(--color-slate-500)' }}>Default</label>
             </div>
             <div className="flex justify-end gap-3">
               <button
                 onClick={() => setEditModalOpen(false)}
-                className="rounded border px-4 py-2 text-sm font-medium transition-colors hover:bg-gray-50"
-                style={{ borderColor: '#dee2e6', color: '#1B2A4A' }}
+                className="rounded border px-4 py-2 text-sm font-medium transition-colors hover:bg-slate-50"
+                style={{ borderColor: 'var(--color-slate-200)', color: 'var(--color-navy-850)' }}
               >
                 Cancel
               </button>
               <button
                 onClick={handleUpdate}
                 disabled={!editForm.resource || !editForm.action}
-                className="rounded px-4 py-2 text-sm font-medium text-white transition-colors hover:opacity-90 disabled:opacity-50"
-                style={{ backgroundColor: '#F5A623' }}
+                className="rounded px-4 py-2 text-sm font-medium text-accent-ink transition-colors hover:opacity-90 disabled:opacity-50"
+                style={{ backgroundColor: 'var(--color-accent)' }}
               >
                 Save Changes
               </button>
@@ -512,13 +510,13 @@ export default function PermissionsPage() {
         <div className="space-y-4">
           <div className="grid grid-cols-2 gap-4">
             <div>
-              <label htmlFor="perm-resource" className="mb-1 block text-sm font-medium" style={{ color: '#6c757d' }}>Resource</label>
+              <label htmlFor="perm-resource" className="mb-1 block text-sm font-medium" style={{ color: 'var(--color-slate-500)' }}>Resource</label>
               <select
                 id="perm-resource"
                 value={createForm.resource}
                 onChange={(e) => setCreateForm((f) => ({ ...f, resource: e.target.value }))}
                 className="w-full rounded border px-3 py-2 text-sm focus:outline-none"
-                style={{ borderColor: '#dee2e6', color: '#1B2A4A' }}
+                style={{ borderColor: 'var(--color-slate-200)', color: 'var(--color-navy-850)' }}
               >
                 <option value="" disabled>Select resource</option>
                 {resources.map((r) => (
@@ -527,13 +525,13 @@ export default function PermissionsPage() {
               </select>
             </div>
             <div>
-              <label htmlFor="perm-action" className="mb-1 block text-sm font-medium" style={{ color: '#6c757d' }}>Action</label>
+              <label htmlFor="perm-action" className="mb-1 block text-sm font-medium" style={{ color: 'var(--color-slate-500)' }}>Action</label>
               <select
                 id="perm-action"
                 value={createForm.action}
                 onChange={(e) => setCreateForm((f) => ({ ...f, action: e.target.value }))}
                 className="w-full rounded border px-3 py-2 text-sm focus:outline-none"
-                style={{ borderColor: '#dee2e6', color: '#1B2A4A' }}
+                style={{ borderColor: 'var(--color-slate-200)', color: 'var(--color-navy-850)' }}
               >
                 <option value="" disabled>Select action</option>
                 {availableActions.map((a) => (
@@ -543,13 +541,13 @@ export default function PermissionsPage() {
             </div>
           </div>
           <div>
-            <label htmlFor="perm-desc" className="mb-1 block text-sm font-medium" style={{ color: '#6c757d' }}>Description (optional)</label>
+            <label htmlFor="perm-desc" className="mb-1 block text-sm font-medium" style={{ color: 'var(--color-slate-500)' }}>Description (optional)</label>
             <textarea
               id="perm-desc"
               value={createForm.description}
               onChange={(e) => setCreateForm((f) => ({ ...f, description: e.target.value }))}
               className="w-full rounded border px-3 py-2 text-sm focus:outline-none"
-              style={{ borderColor: '#dee2e6', color: '#1B2A4A' }}
+              style={{ borderColor: 'var(--color-slate-200)', color: 'var(--color-navy-850)' }}
               placeholder="Permission description"
               rows={3}
             />
@@ -563,22 +561,22 @@ export default function PermissionsPage() {
                 onChange={(e) => setCreateForm((f) => ({ ...f, isDefault: e.target.checked }))}
                 className="h-4 w-4 rounded"
               />
-              <label htmlFor="perm-isDefault" className="text-sm font-medium" style={{ color: '#6c757d' }}>Default</label>
+              <label htmlFor="perm-isDefault" className="text-sm font-medium" style={{ color: 'var(--color-slate-500)' }}>Default</label>
             </div>
           )}
           <div className="flex justify-end gap-3">
             <button
               onClick={() => setCreateModalOpen(false)}
-              className="rounded border px-4 py-2 text-sm font-medium transition-colors hover:bg-gray-50"
-              style={{ borderColor: '#dee2e6', color: '#1B2A4A' }}
+              className="rounded border px-4 py-2 text-sm font-medium transition-colors hover:bg-slate-50"
+              style={{ borderColor: 'var(--color-slate-200)', color: 'var(--color-navy-850)' }}
             >
               Cancel
             </button>
             <button
               onClick={handleCreate}
               disabled={!createForm.resource || !createForm.action}
-              className="rounded px-4 py-2 text-sm font-medium text-white transition-colors hover:opacity-90 disabled:opacity-50"
-              style={{ backgroundColor: '#F5A623' }}
+              className="rounded px-4 py-2 text-sm font-medium text-accent-ink transition-colors hover:opacity-90 disabled:opacity-50"
+              style={{ backgroundColor: 'var(--color-accent)' }}
             >
               Create Permission
             </button>

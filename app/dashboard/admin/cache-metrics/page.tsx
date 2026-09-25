@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect, useState } from 'react';
+import { PageSkeleton } from '@/components/dashboard/PageSkeleton';
 
 interface CacheMetricsData {
   l1Hits: number;
@@ -74,16 +75,16 @@ export default function CacheMetricsPage() {
     return num.toLocaleString();
   };
 
-  const getHitRateColor = (rate: number): string => {
-    if (rate >= 80) return 'text-green-600';
-    if (rate >= 50) return 'text-yellow-600';
-    return 'text-red-600';
+  const getHitRateInk = (rate: number): string => {
+    if (rate >= 80) return 'var(--color-success)';
+    if (rate >= 50) return 'var(--color-warning-ink)';
+    return 'var(--color-danger-ink)';
   };
 
-  const getHitRateBg = (rate: number): string => {
-    if (rate >= 80) return 'bg-green-100';
-    if (rate >= 50) return 'bg-yellow-100';
-    return 'bg-red-100';
+  const getHitRateFill = (rate: number): string => {
+    if (rate >= 80) return 'var(--color-success)';
+    if (rate >= 50) return 'var(--color-warning-ink)';
+    return 'var(--color-danger)';
   };
 
   if (loading) {
@@ -91,14 +92,12 @@ export default function CacheMetricsPage() {
       <div className="space-y-6">
         <div className="flex justify-between items-center">
           <div>
-            <h1 className="text-3xl font-bold text-gray-900">Cache Metrics</h1>
-            <p className="mt-1 text-sm text-gray-500">Real-time cache performance monitoring</p>
+            <h1 className="text-xl font-semibold tracking-tight text-slate-900">Cache Metrics</h1>
+            <p className="mt-1 text-sm text-slate-500">Real-time cache performance monitoring</p>
           </div>
         </div>
-        <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-6">
-          <div className="flex items-center justify-center h-64">
-            <div className="text-gray-500">Loading cache metrics...</div>
-          </div>
+        <div className="bg-white rounded-lg shadow-sm border border-slate-200 p-6">
+          <PageSkeleton rows={4} cols={3} />
         </div>
       </div>
     );
@@ -109,12 +108,12 @@ export default function CacheMetricsPage() {
       <div className="space-y-6">
         <div className="flex justify-between items-center">
           <div>
-            <h1 className="text-3xl font-bold text-gray-900">Cache Metrics</h1>
-            <p className="mt-1 text-sm text-gray-500">Real-time cache performance monitoring</p>
+            <h1 className="text-xl font-semibold tracking-tight text-slate-900">Cache Metrics</h1>
+            <p className="mt-1 text-sm text-slate-500">Real-time cache performance monitoring</p>
           </div>
         </div>
-        <div className="bg-red-50 border-l-4 border-red-500 p-6 rounded-lg">
-          <p className="text-red-800">{error}</p>
+        <div className="bg-danger-tint border border-danger-border p-6 rounded-lg">
+          <p className="text-danger-ink">{error}</p>
         </div>
       </div>
     );
@@ -125,45 +124,45 @@ export default function CacheMetricsPage() {
       {/* Page Header */}
       <div className="flex justify-between items-center">
         <div>
-          <h1 className="text-3xl font-bold text-gray-900">Cache Metrics</h1>
-          <p className="mt-1 text-sm text-gray-500">Real-time cache performance monitoring</p>
+          <h1 className="text-xl font-semibold tracking-tight text-slate-900">Cache Metrics</h1>
+          <p className="mt-1 text-sm text-slate-500">Real-time cache performance monitoring</p>
         </div>
-        <div className="text-sm text-gray-500">
+        <div className="text-sm text-slate-500">
           Last updated: {metrics ? new Date(metrics.timestamp || Date.now()).toLocaleTimeString() : 'N/A'}
         </div>
       </div>
 
       {/* L1 Cache Status */}
-      <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-6">
-        <h2 className="text-lg font-semibold text-gray-900 mb-4">L1 In-Memory Cache</h2>
+      <div className="bg-white rounded-lg shadow-sm border border-slate-200 p-6">
+        <h2 className="text-lg font-semibold text-slate-900 mb-4">L1 In-Memory Cache</h2>
         <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
           <div>
-            <p className="text-sm font-medium text-gray-500">Status</p>
+            <p className="text-sm font-medium text-slate-500">Status</p>
             <div className="mt-1 flex items-center">
               {l1Details?.enabled ? (
                 <>
                   <span className="inline-block w-2 h-2 bg-green-500 rounded-full mr-2"></span>
-                  <span className="text-green-700 font-medium">Active</span>
+                  <span style={{ color: 'var(--color-success)' }} className="font-medium">Active</span>
                 </>
               ) : (
                 <>
-                  <span className="inline-block w-2 h-2 bg-gray-400 rounded-full mr-2"></span>
-                  <span className="text-gray-500 font-medium">Disabled</span>
+                  <span className="inline-block w-2 h-2 bg-slate-400 rounded-full mr-2"></span>
+                  <span className="text-slate-500 font-medium">Disabled</span>
                 </>
               )}
             </div>
           </div>
 
           <div>
-            <p className="text-sm font-medium text-gray-500">Entries</p>
-            <p className="mt-1 text-2xl font-bold text-gray-900">
+            <p className="text-sm font-medium text-slate-500">Entries</p>
+            <p className="mt-1 text-2xl font-bold text-slate-900">
               {formatNumber(metrics?.l1Size || 0)} / {formatNumber(l1Details?.maxSize || 0)}
             </p>
           </div>
 
           <div>
-            <p className="text-sm font-medium text-gray-500">Memory Usage</p>
-            <p className="mt-1 text-2xl font-bold text-gray-900">
+            <p className="text-sm font-medium text-slate-500">Memory Usage</p>
+            <p className="mt-1 text-2xl font-bold text-slate-900">
               {formatBytes(metrics?.l1MemoryBytes || 0)}
             </p>
           </div>
@@ -172,15 +171,15 @@ export default function CacheMetricsPage() {
         {/* Hit Rate Progress Bar */}
         <div className="mt-6">
           <div className="flex justify-between items-center mb-2">
-            <p className="text-sm font-medium text-gray-500">L1 Hit Rate</p>
-            <p className={`text-sm font-bold ${getHitRateColor(metrics?.l1HitRate || 0)}`}>
+            <p className="text-sm font-medium text-slate-500">L1 Hit Rate</p>
+            <p className="text-sm font-bold" style={{ color: getHitRateInk(metrics?.l1HitRate || 0) }}>
               {metrics ? metrics.l1HitRate.toFixed(1) : '0'}%
             </p>
           </div>
-          <div className="w-full bg-gray-200 rounded-full h-3">
+          <div className="w-full bg-slate-200 rounded-full h-3">
             <div
-              className={`h-3 rounded-full transition-all duration-500 ${getHitRateBg(metrics?.l1HitRate || 0)}`}
-              style={{ width: `${metrics ? metrics.l1HitRate : 0}%` }}
+              className="h-3 rounded-full transition-all duration-500"
+              style={{ background: getHitRateFill(metrics?.l1HitRate || 0), width: `${metrics ? metrics.l1HitRate : 0}%` }}
             ></div>
           </div>
         </div>
@@ -189,20 +188,20 @@ export default function CacheMetricsPage() {
       {/* Cache Performance */}
       <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
         {/* L1 Cache Performance */}
-        <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-6">
-          <h2 className="text-lg font-semibold text-gray-900 mb-4">L1 Cache Performance</h2>
+        <div className="bg-white rounded-lg shadow-sm border border-slate-200 p-6">
+          <h2 className="text-lg font-semibold text-slate-900 mb-4">L1 Cache Performance</h2>
           <div className="space-y-4">
-            <div className="flex justify-between items-center p-3 bg-gray-50 rounded">
-              <span className="text-sm text-gray-600">Hits</span>
-              <span className="text-lg font-bold text-green-600">{formatNumber(metrics?.l1Hits || 0)}</span>
+            <div className="flex justify-between items-center p-3 bg-slate-50 rounded">
+              <span className="text-sm text-slate-600">Hits</span>
+              <span className="text-lg font-bold" style={{ color: 'var(--color-success)' }}>{formatNumber(metrics?.l1Hits || 0)}</span>
             </div>
-            <div className="flex justify-between items-center p-3 bg-gray-50 rounded">
-              <span className="text-sm text-gray-600">Misses</span>
-              <span className="text-lg font-bold text-red-600">{formatNumber(metrics?.l1Misses || 0)}</span>
+            <div className="flex justify-between items-center p-3 bg-slate-50 rounded">
+              <span className="text-sm text-slate-600">Misses</span>
+              <span className="text-lg font-bold" style={{ color: 'var(--color-danger-ink)' }}>{formatNumber(metrics?.l1Misses || 0)}</span>
             </div>
-            <div className="flex justify-between items-center p-3 bg-gray-50 rounded">
-              <span className="text-sm text-gray-600">Total Requests</span>
-              <span className="text-lg font-bold text-gray-900">
+            <div className="flex justify-between items-center p-3 bg-slate-50 rounded">
+              <span className="text-sm text-slate-600">Total Requests</span>
+              <span className="text-lg font-bold text-slate-900">
                 {formatNumber((metrics?.l1Hits || 0) + (metrics?.l1Misses || 0))}
               </span>
             </div>
@@ -210,29 +209,29 @@ export default function CacheMetricsPage() {
         </div>
 
         {/* L2 (Redis) Performance */}
-        <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-6">
-          <h2 className="text-lg font-semibold text-gray-900 mb-4">L2 Cache (Redis) Performance</h2>
+        <div className="bg-white rounded-lg shadow-sm border border-slate-200 p-6">
+          <h2 className="text-lg font-semibold text-slate-900 mb-4">L2 Cache (Redis) Performance</h2>
           <div className="space-y-4">
-            <div className="flex justify-between items-center p-3 bg-gray-50 rounded">
-              <span className="text-sm text-gray-600">Hits</span>
-              <span className="text-lg font-bold text-green-600">{formatNumber(metrics?.l2Hits || 0)}</span>
+            <div className="flex justify-between items-center p-3 bg-slate-50 rounded">
+              <span className="text-sm text-slate-600">Hits</span>
+              <span className="text-lg font-bold" style={{ color: 'var(--color-success)' }}>{formatNumber(metrics?.l2Hits || 0)}</span>
             </div>
-            <div className="flex justify-between items-center p-3 bg-gray-50 rounded">
-              <span className="text-sm text-gray-600">Misses</span>
-              <span className="text-lg font-bold text-red-600">{formatNumber(metrics?.l2Misses || 0)}</span>
+            <div className="flex justify-between items-center p-3 bg-slate-50 rounded">
+              <span className="text-sm text-slate-600">Misses</span>
+              <span className="text-lg font-bold" style={{ color: 'var(--color-danger-ink)' }}>{formatNumber(metrics?.l2Misses || 0)}</span>
             </div>
-            <div className="flex justify-between items-center p-3 bg-gray-50 rounded">
-              <span className="text-sm text-gray-600">Redis Status</span>
+            <div className="flex justify-between items-center p-3 bg-slate-50 rounded">
+              <span className="text-sm text-slate-600">Redis Status</span>
               <div className="flex items-center">
                 {metrics?.redisConnected ? (
                   <>
                     <span className="inline-block w-2 h-2 bg-green-500 rounded-full mr-2"></span>
-                    <span className="text-green-700 font-medium">Connected</span>
+                    <span style={{ color: 'var(--color-success)' }} className="font-medium">Connected</span>
                   </>
                 ) : (
                   <>
                     <span className="inline-block w-2 h-2 bg-red-500 rounded-full mr-2"></span>
-                    <span className="text-red-700 font-medium">Disconnected</span>
+                    <span className="text-danger-ink font-medium">Disconnected</span>
                   </>
                 )}
               </div>
@@ -242,38 +241,38 @@ export default function CacheMetricsPage() {
       </div>
 
       {/* Cache Configuration */}
-      <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-6">
-        <h2 className="text-lg font-semibold text-gray-900 mb-4">Cache Configuration</h2>
+      <div className="bg-white rounded-lg shadow-sm border border-slate-200 p-6">
+        <h2 className="text-lg font-semibold text-slate-900 mb-4">Cache Configuration</h2>
         <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
           <div>
-            <p className="text-sm font-medium text-gray-500">Max Entries</p>
-            <p className="mt-1 text-lg font-bold text-gray-900">{formatNumber(l1Details?.maxSize || 0)}</p>
+            <p className="text-sm font-medium text-slate-500">Max Entries</p>
+            <p className="mt-1 text-lg font-bold text-slate-900">{formatNumber(l1Details?.maxSize || 0)}</p>
           </div>
           <div>
-            <p className="text-sm font-medium text-gray-500">Max Entry Size</p>
-            <p className="mt-1 text-lg font-bold text-gray-900">{formatBytes(l1Details?.maxEntrySize || 0)}</p>
+            <p className="text-sm font-medium text-slate-500">Max Entry Size</p>
+            <p className="mt-1 text-lg font-bold text-slate-900">{formatBytes(l1Details?.maxEntrySize || 0)}</p>
           </div>
           <div>
-            <p className="text-sm font-medium text-gray-500">TTL Type</p>
-            <p className="mt-1 text-lg font-bold text-gray-900">Adaptive</p>
+            <p className="text-sm font-medium text-slate-500">TTL Type</p>
+            <p className="mt-1 text-lg font-bold text-slate-900">Adaptive</p>
           </div>
         </div>
       </div>
 
       {/* Cache Warming Status */}
-      <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-6">
-        <h2 className="text-lg font-semibold text-gray-900 mb-4">Cache Warming</h2>
+      <div className="bg-white rounded-lg shadow-sm border border-slate-200 p-6">
+        <h2 className="text-lg font-semibold text-slate-900 mb-4">Cache Warming</h2>
         <div className="space-y-3">
-          <p className="text-sm text-gray-600">
+          <p className="text-sm text-slate-600">
             On application startup, the L1 cache is pre-populated with frequently accessed data:
           </p>
-          <ul className="text-sm text-gray-600 space-y-1 ml-4 list-disc">
+          <ul className="text-sm text-slate-600 space-y-1 ml-4 list-disc">
             <li>Organizations (all)</li>
             <li>Users (all)</li>
             <li>Roles (per organization)</li>
             <li>Permissions (master catalog)</li>
           </ul>
-          <p className="text-xs text-gray-500 mt-2">
+          <p className="text-xs text-slate-500 mt-2">
             These entries are marked as "permanent" — they have no TTL and will only be evicted if explicitly deleted.
           </p>
         </div>

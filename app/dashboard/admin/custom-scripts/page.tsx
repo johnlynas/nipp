@@ -435,12 +435,12 @@ export default function ScriptsPage() {
   const columns = [
     { key: 'name', label: 'Name', render: (j: JobDefinition) => (
       <div className="flex flex-col">
-        <span className="font-medium" style={{ color: '#1B2A4A' }}>{j.name}</span>
-        <span className="text-xs text-gray-500">{j.handlerKey}</span>
+        <span className="font-medium" style={{ color: 'var(--color-navy-850)' }}>{j.name}</span>
+        <span className="text-xs text-slate-500">{j.handlerKey}</span>
       </div>
     )},
     { key: 'description', label: 'Description', render: (j: JobDefinition) => (
-      <span className="block max-w-[280px] truncate text-sm text-gray-600" title={j.description || undefined}>
+      <span className="block max-w-[280px] truncate text-sm text-slate-600" title={j.description || undefined}>
         {j.description || '—'}
       </span>
     )},
@@ -458,7 +458,7 @@ export default function ScriptsPage() {
         <button
           onClick={() => handleView(j)}
           title="View details"
-          className="rounded p-1.5 text-gray-400 hover:bg-gray-100 hover:text-[#1B2A4A] transition-colors"
+          className="rounded p-1.5 text-slate-400 hover:bg-slate-100 hover:text-navy-850 transition-colors"
           aria-label="View details"
         >
           <Eye className="h-4 w-4" />
@@ -466,7 +466,7 @@ export default function ScriptsPage() {
         <button
           onClick={() => handleEditClick(j)}
           title="Edit"
-          className="rounded p-1.5 text-gray-400 hover:bg-gray-100 hover:text-[#1B2A4A] transition-colors"
+          className="rounded p-1.5 text-slate-400 hover:bg-slate-100 hover:text-navy-850 transition-colors"
           aria-label="Edit"
         >
           <Pencil className="h-4 w-4" />
@@ -474,7 +474,7 @@ export default function ScriptsPage() {
         <button
           onClick={() => handleViewExecutions(j)}
           title="View executions"
-          className="rounded p-1.5 text-gray-400 hover:bg-gray-100 hover:text-[#1B2A4A] transition-colors"
+          className="rounded p-1.5 text-slate-400 hover:bg-slate-100 hover:text-navy-850 transition-colors"
           aria-label="View executions"
         >
           <FileCode className="h-4 w-4" />
@@ -484,7 +484,7 @@ export default function ScriptsPage() {
           <button
             onClick={() => { setSelectedJob(j); setApprovalAction('approve'); setApprovalModalOpen(true); }}
             title="Approve"
-            className="rounded p-1.5 text-blue-600 hover:bg-blue-50 hover:text-blue-700 transition-colors"
+            className="rounded p-1.5 text-slate-600 hover:bg-canvas-subtle hover:text-slate-900 transition-colors"
             aria-label="Approve"
           >
             <CheckCircle className="h-4 w-4" />
@@ -496,7 +496,7 @@ export default function ScriptsPage() {
           title={j.enabled ? 'Disable' : (j.approved ? 'Enable' : 'Approve to Enable')}
           className="rounded p-1.5 transition-colors"
           style={{
-            color: j.enabled || j.approved ? '#6c757d' : '#9ca3af',
+            color: j.enabled || j.approved ? 'var(--color-slate-500)' : 'var(--color-slate-400)',
             cursor: j.approved ? 'pointer' : 'not-allowed',
           }}
           aria-label={j.enabled ? 'Disable' : 'Enable'}
@@ -509,8 +509,8 @@ export default function ScriptsPage() {
           title="Trigger"
           className={`rounded p-1.5 transition-colors ${
             !j.enabled || !j.approved
-              ? 'text-gray-300 cursor-not-allowed'
-              : 'text-gray-400 hover:bg-gray-100 hover:text-[#1B2A4A]'
+              ? 'text-slate-300 cursor-not-allowed'
+              : 'text-slate-400 hover:bg-slate-100 hover:text-navy-850'
           }`}
           aria-label="Trigger"
           disabled={!j.enabled || !j.approved}
@@ -520,7 +520,7 @@ export default function ScriptsPage() {
         <button
           onClick={() => handleDeleteClick(j)}
           title="Delete"
-          className="rounded p-1.5 text-gray-400 hover:bg-red-50 hover:text-red-700 transition-colors"
+          className="rounded p-1.5 text-slate-500 hover:bg-danger-tint hover:text-danger-ink transition-colors"
           aria-label="Delete"
         >
           <Trash2 className="h-4 w-4" />
@@ -533,7 +533,7 @@ export default function ScriptsPage() {
     <div className="space-y-6">
       {/* Error Banner */}
       {error && (
-        <div className="mb-4 rounded border bg-red-50 p-3 text-sm text-red-700" role="alert">
+        <div className="mb-4 rounded border bg-danger-tint border-danger-border p-3 text-sm text-danger-ink" role="alert">
           {error}
         </div>
       )}
@@ -548,15 +548,15 @@ export default function ScriptsPage() {
       </div>
 
       {/* Page Header */}
-      <PageHeader description="Background job scheduler for custom scripts">
+      <PageHeader title="Custom Scripts" description="Background job scheduler for custom scripts" primaryAction={
         <button
           onClick={() => setCreateModalOpen(true)}
-          className="rounded px-4 py-2 text-sm font-medium text-white transition-colors hover:opacity-90"
-          style={{ backgroundColor: '#F5A623' }}
+          className="w-full sm:w-auto rounded px-4 py-2 text-center text-sm font-medium text-accent-ink transition-colors hover:opacity-90"
+          style={{ backgroundColor: 'var(--color-accent)' }}
         >
           + Create Script
         </button>
-      </PageHeader>
+      } />
 
       {/* Filters */}
       <div className="mb-4 flex items-center gap-3">
@@ -564,8 +564,8 @@ export default function ScriptsPage() {
         <select
           value={enabledFilter}
           onChange={(e) => setEnabledFilter(e.target.value as 'all' | 'enabled' | 'disabled')}
-          className="rounded border px-3 py-2 text-sm bg-white hover:bg-gray-50 transition-colors focus:outline-none"
-          style={{ borderColor: '#dee2e6', color: '#1B2A4A' }}
+          className="rounded border px-3 py-2 text-sm bg-white hover:bg-slate-50 transition-colors focus:outline-none"
+          style={{ borderColor: 'var(--color-slate-200)', color: 'var(--color-navy-850)' }}
           aria-label="Filter by enabled status"
         >
           <option value="all">All Scripts</option>
@@ -576,8 +576,8 @@ export default function ScriptsPage() {
         <select
           value={approvedFilter}
           onChange={(e) => setApprovedFilter(e.target.value as 'all' | 'approved' | 'unapproved')}
-          className="rounded border px-3 py-2 text-sm bg-white hover:bg-gray-50 transition-colors focus:outline-none"
-          style={{ borderColor: '#dee2e6', color: '#1B2A4A' }}
+          className="rounded border px-3 py-2 text-sm bg-white hover:bg-slate-50 transition-colors focus:outline-none"
+          style={{ borderColor: 'var(--color-slate-200)', color: 'var(--color-navy-850)' }}
           aria-label="Filter by approval status"
         >
           <option value="all">All Approval Status</option>
@@ -588,8 +588,8 @@ export default function ScriptsPage() {
         <select
           value={runStatusFilter}
           onChange={(e) => setRunStatusFilter(e.target.value as 'all' | 'RUNNING' | 'SUCCEEDED' | 'FAILED')}
-          className="rounded border px-3 py-2 text-sm bg-white hover:bg-gray-50 transition-colors focus:outline-none"
-          style={{ borderColor: '#dee2e6', color: '#1B2A4A' }}
+          className="rounded border px-3 py-2 text-sm bg-white hover:bg-slate-50 transition-colors focus:outline-none"
+          style={{ borderColor: 'var(--color-slate-200)', color: 'var(--color-navy-850)' }}
           aria-label="Filter by run status"
         >
           <option value="all">All Run Status</option>
@@ -617,42 +617,42 @@ export default function ScriptsPage() {
           <div className="space-y-4">
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
               <div>
-                <label className="text-sm font-medium" style={{ color: '#6c757d' }}>Name</label>
-                <p className="mt-1 font-medium" style={{ color: '#1B2A4A' }}>{selectedJob.name}</p>
+                <label className="text-sm font-medium" style={{ color: 'var(--color-slate-500)' }}>Name</label>
+                <p className="mt-1 font-medium" style={{ color: 'var(--color-navy-850)' }}>{selectedJob.name}</p>
               </div>
               <div>
-                <label className="text-sm font-medium" style={{ color: '#6c757d' }}>Handler</label>
-                <p className="mt-1 font-mono text-sm" style={{ color: '#1B2A4A' }}>{selectedJob.handlerKey}</p>
+                <label className="text-sm font-medium" style={{ color: 'var(--color-slate-500)' }}>Handler</label>
+                <p className="mt-1 font-mono text-sm" style={{ color: 'var(--color-navy-850)' }}>{selectedJob.handlerKey}</p>
               </div>
               <div>
-                <label className="text-sm font-medium" style={{ color: '#6c757d' }}>Status</label>
+                <label className="text-sm font-medium" style={{ color: 'var(--color-slate-500)' }}>Status</label>
                 <div className="mt-1"><StatusBadge status={selectedJob.enabled ? (selectedJob.approved ? 'Active' : 'Pending Approval') : 'Disabled'} /></div>
               </div>
               <div>
-                <label className="text-sm font-medium" style={{ color: '#6c757d' }}>Timeout</label>
-                <p className="mt-1" style={{ color: '#1B2A4A' }}>{selectedJob.timeoutMs ? `${selectedJob.timeoutMs}ms` : 'Default'}</p>
+                <label className="text-sm font-medium" style={{ color: 'var(--color-slate-500)' }}>Timeout</label>
+                <p className="mt-1" style={{ color: 'var(--color-navy-850)' }}>{selectedJob.timeoutMs ? `${selectedJob.timeoutMs}ms` : 'Default'}</p>
               </div>
               <div>
-                <label className="text-sm font-medium" style={{ color: '#6c757d' }}>Concurrency</label>
-                <p className="mt-1" style={{ color: '#1B2A4A' }}>{selectedJob.concurrencyLimit}</p>
+                <label className="text-sm font-medium" style={{ color: 'var(--color-slate-500)' }}>Concurrency</label>
+                <p className="mt-1" style={{ color: 'var(--color-navy-850)' }}>{selectedJob.concurrencyLimit}</p>
               </div>
               <div>
-                <label className="text-sm font-medium" style={{ color: '#6c757d' }}>Last Run</label>
-                <p className="mt-1" style={{ color: '#1B2A4A' }}>
+                <label className="text-sm font-medium" style={{ color: 'var(--color-slate-500)' }}>Last Run</label>
+                <p className="mt-1" style={{ color: 'var(--color-navy-850)' }}>
                   {selectedJob.lastRunAt ? new Date(selectedJob.lastRunAt).toLocaleString() : 'Never'}
                 </p>
               </div>
             </div>
 
             <div>
-              <label className="text-sm font-medium" style={{ color: '#6c757d' }}>Description</label>
-              <p className="mt-1 text-sm whitespace-pre-wrap" style={{ color: '#1B2A4A' }}>{selectedJob.description || '—'}</p>
+              <label className="text-sm font-medium" style={{ color: 'var(--color-slate-500)' }}>Description</label>
+              <p className="mt-1 text-sm whitespace-pre-wrap" style={{ color: 'var(--color-navy-850)' }}>{selectedJob.description || '—'}</p>
             </div>
 
             <div>
-              <label className="text-sm font-medium" style={{ color: '#6c757d' }}>Code</label>
+              <label className="text-sm font-medium" style={{ color: 'var(--color-slate-500)' }}>Code</label>
               <div className="mt-1">
-                <pre className="bg-gray-50 p-3 rounded text-xs overflow-x-auto" style={{ color: '#1B2A4A' }}>
+                <pre className="bg-slate-50 p-3 rounded text-xs overflow-x-auto" style={{ color: 'var(--color-navy-850)' }}>
                   {selectedJob.code || '// No code defined'}
                 </pre>
               </div>
@@ -662,21 +662,21 @@ export default function ScriptsPage() {
               <button
                 onClick={() => setExecutionsModalOpen(true)}
                 className="rounded px-4 py-2 text-sm font-medium"
-                style={{ backgroundColor: '#F5A623', color: 'white' }}
+                style={{ backgroundColor: 'var(--color-accent)', color: 'var(--color-accent-ink)' }}
               >
                 View Executions
               </button>
               <button
                 onClick={() => { setDetailModalOpen(false); setEditModalOpen(true); }}
                 className="rounded px-4 py-2 text-sm font-medium"
-                style={{ borderColor: '#dee2e6', color: '#1B2A4A' }}
+                style={{ borderColor: 'var(--color-slate-200)', color: 'var(--color-navy-850)' }}
               >
                 Edit
               </button>
               <button
                 onClick={() => { setDetailModalOpen(false); setDeleteModalOpen(true); }}
                 className="rounded px-4 py-2 text-sm font-medium"
-                style={{ borderColor: '#dee2e6', color: '#dc3545' }}
+                style={{ borderColor: 'var(--color-slate-200)', color: 'var(--color-danger)' }}
               >
                 Delete
               </button>
@@ -690,25 +690,25 @@ export default function ScriptsPage() {
         {executions.length > 0 ? (
           <div className="space-y-2 max-h-96 overflow-y-auto">
             {executions.map((exec) => (
-              <div key={exec.id} className="border rounded p-3" style={{ borderColor: '#dee2e6' }}>
+              <div key={exec.id} className="border rounded p-3" style={{ borderColor: 'var(--color-slate-200)' }}>
                 <div className="flex items-center justify-between">
                   <div>
-                    <span className="font-medium" style={{ color: '#1B2A4A' }}>
+                    <span className="font-medium" style={{ color: 'var(--color-navy-850)' }}>
                       Execution #{executions.indexOf(exec) + 1}
                     </span>
-                    <span className="text-xs text-gray-500 ml-2">
+                    <span className="text-xs text-slate-500 ml-2">
                       • {exec.trigger} • {new Date(exec.startedAt).toLocaleString()}
                     </span>
                   </div>
                   <StatusBadge status={exec.status} />
                 </div>
                 {exec.finishedAt && (
-                  <span className="text-xs text-gray-500">
+                  <span className="text-xs text-slate-500">
                     Duration: {Math.round((new Date(exec.finishedAt).getTime() - new Date(exec.startedAt).getTime()) / 1000)}s
                   </span>
                 )}
                 {exec.error && (
-                  <pre className="mt-2 text-xs bg-red-50 p-2 rounded overflow-x-auto" style={{ color: '#dc3545' }}>
+                  <pre className="mt-2 text-xs bg-danger-tint p-2 rounded overflow-x-auto text-danger-ink">
                     {exec.error}
                   </pre>
                 )}
@@ -716,7 +716,7 @@ export default function ScriptsPage() {
             ))}
           </div>
         ) : (
-          <p className="text-gray-500 text-sm">No executions found for this script.</p>
+          <p className="text-slate-500 text-sm">No executions found for this script.</p>
         )}
       </Modal>
 
@@ -724,26 +724,26 @@ export default function ScriptsPage() {
       <Modal isOpen={createModalOpen} onClose={() => setCreateModalOpen(false)} title="Create Script" size="lg">
         <div className="space-y-4">
           <div>
-            <label htmlFor="script-name" className="mb-1 block text-sm font-medium" style={{ color: '#6c757d' }}>Name</label>
+            <label htmlFor="script-name" className="mb-1 block text-sm font-medium" style={{ color: 'var(--color-slate-500)' }}>Name</label>
             <input
               id="script-name"
               type="text"
               value={createForm.name}
               onChange={(e) => setCreateForm(f => ({ ...f, name: e.target.value }))}
               className="w-full rounded border px-3 py-2 text-sm focus:outline-none"
-              style={{ borderColor: '#dee2e6', color: '#1B2A4A' }}
+              style={{ borderColor: 'var(--color-slate-200)', color: 'var(--color-navy-850)' }}
               placeholder="My Background Script"
             />
           </div>
 
           <div>
-            <label htmlFor="script-description" className="mb-1 block text-sm font-medium" style={{ color: '#6c757d' }}>Description</label>
+            <label htmlFor="script-description" className="mb-1 block text-sm font-medium" style={{ color: 'var(--color-slate-500)' }}>Description</label>
             <textarea
               id="script-description"
               value={createForm.description}
               onChange={(e) => setCreateForm(f => ({ ...f, description: e.target.value }))}
               className="w-full rounded border px-3 py-2 text-sm focus:outline-none"
-              style={{ borderColor: '#dee2e6', color: '#1B2A4A' }}
+              style={{ borderColor: 'var(--color-slate-200)', color: 'var(--color-navy-850)' }}
               rows={2}
               placeholder="What does this script do?"
             />
@@ -751,19 +751,19 @@ export default function ScriptsPage() {
 
           <div className="grid grid-cols-2 gap-4">
             <div>
-              <label htmlFor="script-handler" className="mb-1 block text-sm font-medium" style={{ color: '#6c757d' }}>Handler Key</label>
+              <label htmlFor="script-handler" className="mb-1 block text-sm font-medium" style={{ color: 'var(--color-slate-500)' }}>Handler Key</label>
               <input
                 id="script-handler"
                 type="text"
                 value={createForm.handlerKey}
                 onChange={(e) => setCreateForm(f => ({ ...f, handlerKey: e.target.value }))}
                 className="w-full rounded border px-3 py-2 text-sm focus:outline-none"
-                style={{ borderColor: '#dee2e6', color: '#1B2A4A' }}
+                style={{ borderColor: 'var(--color-slate-200)', color: 'var(--color-navy-850)' }}
                 placeholder="script-handler"
               />
             </div>
             <div>
-              <label htmlFor="script-concurrency" className="mb-1 block text-sm font-medium" style={{ color: '#6c757d' }}>Concurrency</label>
+              <label htmlFor="script-concurrency" className="mb-1 block text-sm font-medium" style={{ color: 'var(--color-slate-500)' }}>Concurrency</label>
               <input
                 id="script-concurrency"
                 type="number"
@@ -771,13 +771,13 @@ export default function ScriptsPage() {
                 value={createForm.concurrencyLimit}
                 onChange={(e) => setCreateForm(f => ({ ...f, concurrencyLimit: parseInt(e.target.value) || 1 }))}
                 className="w-full rounded border px-3 py-2 text-sm focus:outline-none"
-                style={{ borderColor: '#dee2e6', color: '#1B2A4A' }}
+                style={{ borderColor: 'var(--color-slate-200)', color: 'var(--color-navy-850)' }}
               />
             </div>
           </div>
 
           <div>
-            <label className="mb-2 block text-sm font-medium" style={{ color: '#6c757d' }}>Schedule Type</label>
+            <label className="mb-2 block text-sm font-medium" style={{ color: 'var(--color-slate-500)' }}>Schedule Type</label>
             <div className="flex gap-2">
               {(['interval', 'cron', 'oneshot'] as const).map((type) => (
                 <button
@@ -786,8 +786,8 @@ export default function ScriptsPage() {
                   onClick={() => setCreateForm(f => ({ ...f, scheduleType: type }))}
                   className={`flex-1 rounded-lg p-3 border flex items-center gap-2 transition-colors ${
                     createForm.scheduleType === type
-                      ? 'bg-[#F5A623] text-white border-[#F5A623]'
-                      : 'border-gray-200 hover:bg-gray-50'
+                      ? 'bg-navy-850 text-white border-navy-850'
+                      : 'border-slate-200 hover:bg-slate-50'
                   }`}
                 >
                   {{
@@ -802,7 +802,7 @@ export default function ScriptsPage() {
           </div>
 
           <div>
-            <label className="mb-1 block text-sm font-medium" style={{ color: '#6c757d' }}>
+            <label className="mb-1 block text-sm font-medium" style={{ color: 'var(--color-slate-500)' }}>
               {{
                 interval: 'Interval (milliseconds)',
                 cron: 'Cron Expression (e.g., "0 * * * *")',
@@ -815,7 +815,7 @@ export default function ScriptsPage() {
                 value={createForm.intervalMs}
                 onChange={(e) => setCreateForm(f => ({ ...f, intervalMs: e.target.value }))}
                 className="w-full rounded border px-3 py-2 text-sm focus:outline-none mt-1"
-                style={{ borderColor: '#dee2e6', color: '#1B2A4A' }}
+                style={{ borderColor: 'var(--color-slate-200)', color: 'var(--color-navy-850)' }}
               />
             )}
             {createForm.scheduleType === 'cron' && (
@@ -824,7 +824,7 @@ export default function ScriptsPage() {
                 value={createForm.cronExpr}
                 onChange={(e) => setCreateForm(f => ({ ...f, cronExpr: e.target.value }))}
                 className="w-full rounded border px-3 py-2 text-sm focus:outline-none mt-1"
-                style={{ borderColor: '#dee2e6', color: '#1B2A4A' }}
+                style={{ borderColor: 'var(--color-slate-200)', color: 'var(--color-navy-850)' }}
                 placeholder="0 * * * * (every hour)"
               />
             )}
@@ -834,13 +834,13 @@ export default function ScriptsPage() {
                 value={createForm.oneshotTime}
                 onChange={(e) => setCreateForm(f => ({ ...f, oneshotTime: e.target.value }))}
                 className="w-full rounded border px-3 py-2 text-sm focus:outline-none mt-1"
-                style={{ borderColor: '#dee2e6', color: '#1B2A4A' }}
+                style={{ borderColor: 'var(--color-slate-200)', color: 'var(--color-navy-850)' }}
               />
             )}
           </div>
 
           <div>
-            <label htmlFor="script-timeout" className="mb-1 block text-sm font-medium" style={{ color: '#6c757d' }}>Timeout (ms)</label>
+            <label htmlFor="script-timeout" className="mb-1 block text-sm font-medium" style={{ color: 'var(--color-slate-500)' }}>Timeout (ms)</label>
             <input
               id="script-timeout"
               type="number"
@@ -848,18 +848,18 @@ export default function ScriptsPage() {
               value={createForm.timeoutMs}
               onChange={(e) => setCreateForm(f => ({ ...f, timeoutMs: parseInt(e.target.value) || 300000 }))}
               className="w-full rounded border px-3 py-2 text-sm focus:outline-none"
-              style={{ borderColor: '#dee2e6', color: '#1B2A4A' }}
+              style={{ borderColor: 'var(--color-slate-200)', color: 'var(--color-navy-850)' }}
             />
           </div>
 
           <div>
-            <label htmlFor="script-code" className="mb-1 block text-sm font-medium" style={{ color: '#6c757d' }}>Code</label>
+            <label htmlFor="script-code" className="mb-1 block text-sm font-medium" style={{ color: 'var(--color-slate-500)' }}>Code</label>
             <textarea
               id="script-code"
               value={createForm.code}
               onChange={(e) => setCreateForm(f => ({ ...f, code: e.target.value }))}
               className="w-full rounded border px-3 py-2 text-sm focus:outline-none font-mono"
-              style={{ borderColor: '#dee2e6', color: '#1B2A4A' }}
+              style={{ borderColor: 'var(--color-slate-200)', color: 'var(--color-navy-850)' }}
               rows={6}
               placeholder={`// Your script code here
 // Example:
@@ -873,16 +873,16 @@ export default function ScriptsPage() {
           <div className="flex justify-end gap-3">
             <button
               onClick={() => setCreateModalOpen(false)}
-              className="rounded border px-4 py-2 text-sm font-medium transition-colors hover:bg-gray-50"
-              style={{ borderColor: '#dee2e6', color: '#1B2A4A' }}
+              className="rounded border px-4 py-2 text-sm font-medium transition-colors hover:bg-slate-50"
+              style={{ borderColor: 'var(--color-slate-200)', color: 'var(--color-navy-850)' }}
             >
               Cancel
             </button>
             <button
               onClick={handleCreate}
               disabled={!createForm.name.trim()}
-              className="rounded px-4 py-2 text-sm font-medium text-white transition-colors hover:opacity-90 disabled:opacity-50"
-              style={{ backgroundColor: '#F5A623' }}
+              className="rounded px-4 py-2 text-sm font-medium text-accent-ink transition-colors hover:opacity-90 disabled:opacity-50"
+              style={{ backgroundColor: 'var(--color-accent)' }}
             >
               Create Script
             </button>
@@ -894,25 +894,25 @@ export default function ScriptsPage() {
       <Modal isOpen={editModalOpen} onClose={() => setEditModalOpen(false)} title="Edit Script" size="lg">
         <div className="space-y-4">
           <div>
-            <label htmlFor="edit-script-name" className="mb-1 block text-sm font-medium" style={{ color: '#6c757d' }}>Name</label>
+            <label htmlFor="edit-script-name" className="mb-1 block text-sm font-medium" style={{ color: 'var(--color-slate-500)' }}>Name</label>
             <input
               id="edit-script-name"
               type="text"
               value={editForm.name}
               onChange={(e) => setEditForm(f => ({ ...f, name: e.target.value }))}
               className="w-full rounded border px-3 py-2 text-sm focus:outline-none"
-              style={{ borderColor: '#dee2e6', color: '#1B2A4A' }}
+              style={{ borderColor: 'var(--color-slate-200)', color: 'var(--color-navy-850)' }}
             />
           </div>
 
           <div>
-            <label htmlFor="edit-script-description" className="mb-1 block text-sm font-medium" style={{ color: '#6c757d' }}>Description</label>
+            <label htmlFor="edit-script-description" className="mb-1 block text-sm font-medium" style={{ color: 'var(--color-slate-500)' }}>Description</label>
             <textarea
               id="edit-script-description"
               value={editForm.description}
               onChange={(e) => setEditForm(f => ({ ...f, description: e.target.value }))}
               className="w-full rounded border px-3 py-2 text-sm focus:outline-none"
-              style={{ borderColor: '#dee2e6', color: '#1B2A4A' }}
+              style={{ borderColor: 'var(--color-slate-200)', color: 'var(--color-navy-850)' }}
               rows={2}
               placeholder="What does this script do?"
             />
@@ -920,18 +920,18 @@ export default function ScriptsPage() {
 
           <div className="grid grid-cols-2 gap-4">
             <div>
-              <label htmlFor="edit-script-handler" className="mb-1 block text-sm font-medium" style={{ color: '#6c757d' }}>Handler Key</label>
+              <label htmlFor="edit-script-handler" className="mb-1 block text-sm font-medium" style={{ color: 'var(--color-slate-500)' }}>Handler Key</label>
               <input
                 id="edit-script-handler"
                 type="text"
                 value={editForm.handlerKey}
                 onChange={(e) => setEditForm(f => ({ ...f, handlerKey: e.target.value }))}
                 className="w-full rounded border px-3 py-2 text-sm focus:outline-none"
-                style={{ borderColor: '#dee2e6', color: '#1B2A4A' }}
+                style={{ borderColor: 'var(--color-slate-200)', color: 'var(--color-navy-850)' }}
               />
             </div>
             <div>
-              <label htmlFor="edit-script-concurrency" className="mb-1 block text-sm font-medium" style={{ color: '#6c757d' }}>Concurrency</label>
+              <label htmlFor="edit-script-concurrency" className="mb-1 block text-sm font-medium" style={{ color: 'var(--color-slate-500)' }}>Concurrency</label>
               <input
                 id="edit-script-concurrency"
                 type="number"
@@ -939,13 +939,13 @@ export default function ScriptsPage() {
                 value={editForm.concurrencyLimit}
                 onChange={(e) => setEditForm(f => ({ ...f, concurrencyLimit: parseInt(e.target.value) || 1 }))}
                 className="w-full rounded border px-3 py-2 text-sm focus:outline-none"
-                style={{ borderColor: '#dee2e6', color: '#1B2A4A' }}
+                style={{ borderColor: 'var(--color-slate-200)', color: 'var(--color-navy-850)' }}
               />
             </div>
           </div>
 
           <div>
-            <label htmlFor="edit-script-timeout" className="mb-1 block text-sm font-medium" style={{ color: '#6c757d' }}>Timeout (ms)</label>
+            <label htmlFor="edit-script-timeout" className="mb-1 block text-sm font-medium" style={{ color: 'var(--color-slate-500)' }}>Timeout (ms)</label>
             <input
               id="edit-script-timeout"
               type="number"
@@ -953,18 +953,18 @@ export default function ScriptsPage() {
               value={editForm.timeoutMs}
               onChange={(e) => setEditForm(f => ({ ...f, timeoutMs: parseInt(e.target.value) || 300000 }))}
               className="w-full rounded border px-3 py-2 text-sm focus:outline-none"
-              style={{ borderColor: '#dee2e6', color: '#1B2A4A' }}
+              style={{ borderColor: 'var(--color-slate-200)', color: 'var(--color-navy-850)' }}
             />
           </div>
 
           <div>
-            <label htmlFor="edit-script-code" className="mb-1 block text-sm font-medium" style={{ color: '#6c757d' }}>Code</label>
+            <label htmlFor="edit-script-code" className="mb-1 block text-sm font-medium" style={{ color: 'var(--color-slate-500)' }}>Code</label>
             <textarea
               id="edit-script-code"
               value={editForm.code}
               onChange={(e) => setEditForm(f => ({ ...f, code: e.target.value }))}
               className="w-full rounded border px-3 py-2 text-sm focus:outline-none font-mono"
-              style={{ borderColor: '#dee2e6', color: '#1B2A4A' }}
+              style={{ borderColor: 'var(--color-slate-200)', color: 'var(--color-navy-850)' }}
               rows={6}
               placeholder={`// Your script code here
 // Example:
@@ -983,7 +983,7 @@ export default function ScriptsPage() {
               onChange={(e) => setEditForm(f => ({ ...f, enabled: e.target.checked }))}
               className="h-4 w-4 rounded"
             />
-            <label htmlFor="edit-script-enabled" className="text-sm font-medium" style={{ color: '#6c757d' }}>
+            <label htmlFor="edit-script-enabled" className="text-sm font-medium" style={{ color: 'var(--color-slate-500)' }}>
               Enabled
             </label>
           </div>
@@ -991,16 +991,16 @@ export default function ScriptsPage() {
           <div className="flex justify-end gap-3">
             <button
               onClick={() => setEditModalOpen(false)}
-              className="rounded border px-4 py-2 text-sm font-medium transition-colors hover:bg-gray-50"
-              style={{ borderColor: '#dee2e6', color: '#1B2A4A' }}
+              className="rounded border px-4 py-2 text-sm font-medium transition-colors hover:bg-slate-50"
+              style={{ borderColor: 'var(--color-slate-200)', color: 'var(--color-navy-850)' }}
             >
               Cancel
             </button>
             <button
               onClick={handleUpdate}
               disabled={!editForm.name.trim()}
-              className="rounded px-4 py-2 text-sm font-medium text-white transition-colors hover:opacity-90 disabled:opacity-50"
-              style={{ backgroundColor: '#F5A623' }}
+              className="rounded px-4 py-2 text-sm font-medium text-accent-ink transition-colors hover:opacity-90 disabled:opacity-50"
+              style={{ backgroundColor: 'var(--color-accent)' }}
             >
               Save Changes
             </button>
@@ -1011,17 +1011,17 @@ export default function ScriptsPage() {
       {/* Trigger Modal */}
       <Modal isOpen={triggerModalOpen} onClose={() => setTriggerModalOpen(false)} title="Trigger Script" size="md">
         <div className="space-y-4">
-          <p className="text-sm" style={{ color: '#6c757d' }}>
+          <p className="text-sm" style={{ color: 'var(--color-slate-500)' }}>
             Run <strong>{selectedJob?.name}</strong> manually. You can optionally provide input data for the script.
           </p>
           <div>
-            <label htmlFor="trigger-input" className="mb-1 block text-sm font-medium" style={{ color: '#6c757d' }}>Input (JSON)</label>
+            <label htmlFor="trigger-input" className="mb-1 block text-sm font-medium" style={{ color: 'var(--color-slate-500)' }}>Input (JSON)</label>
             <textarea
               id="trigger-input"
               value={triggerInput}
               onChange={(e) => setTriggerInput(e.target.value)}
               className="w-full rounded border px-3 py-2 text-sm focus:outline-none font-mono"
-              style={{ borderColor: '#dee2e6', color: '#1B2A4A' }}
+              style={{ borderColor: 'var(--color-slate-200)', color: 'var(--color-navy-850)' }}
               rows={4}
               placeholder='{"key": "value"}'
             />
@@ -1029,15 +1029,15 @@ export default function ScriptsPage() {
           <div className="flex justify-end gap-3">
             <button
               onClick={() => setTriggerModalOpen(false)}
-              className="rounded border px-4 py-2 text-sm font-medium transition-colors hover:bg-gray-50"
-              style={{ borderColor: '#dee2e6', color: '#1B2A4A' }}
+              className="rounded border px-4 py-2 text-sm font-medium transition-colors hover:bg-slate-50"
+              style={{ borderColor: 'var(--color-slate-200)', color: 'var(--color-navy-850)' }}
             >
               Cancel
             </button>
             <button
               onClick={handleTrigger}
-              className="rounded px-4 py-2 text-sm font-medium text-white transition-colors hover:opacity-90"
-              style={{ backgroundColor: '#F5A623' }}
+              className="rounded px-4 py-2 text-sm font-medium text-accent-ink transition-colors hover:opacity-90"
+              style={{ backgroundColor: 'var(--color-accent)' }}
             >
               Trigger
             </button>
@@ -1048,20 +1048,20 @@ export default function ScriptsPage() {
       {/* Approval Confirmation Modal */}
       <Modal isOpen={approvalModalOpen} onClose={() => setApprovalModalOpen(false)} title={approvalAction === 'approve' ? 'Approve Script' : 'Reject Script'} size="md">
         <div className="space-y-4">
-          <p className="text-sm" style={{ color: '#6c757d' }}>
+          <p className="text-sm" style={{ color: 'var(--color-slate-500)' }}>
             {approvalAction === 'approve'
               ? `Approve "${selectedJob?.name}"? Approved jobs can be enabled and triggered.`
               : `Reject "${selectedJob?.name}"? This will disable and clear approval.`
             }
           </p>
           <div>
-            <label htmlFor="approval-note" className="mb-1 block text-sm font-medium" style={{ color: '#6c757d' }}>Note (optional)</label>
+            <label htmlFor="approval-note" className="mb-1 block text-sm font-medium" style={{ color: 'var(--color-slate-500)' }}>Note (optional)</label>
             <textarea
               id="approval-note"
               value={approvalNote}
               onChange={(e) => setApprovalNote(e.target.value)}
               className="w-full rounded border px-3 py-2 text-sm focus:outline-none font-mono"
-              style={{ borderColor: '#dee2e6', color: '#1B2A4A' }}
+              style={{ borderColor: 'var(--color-slate-200)', color: 'var(--color-navy-850)' }}
               rows={3}
               placeholder={`Add a note about this ${approvalAction === 'approve' ? 'approval' : 'rejection'}...`}
             />
@@ -1069,8 +1069,8 @@ export default function ScriptsPage() {
           <div className="flex justify-end gap-3">
             <button
               onClick={() => setApprovalModalOpen(false)}
-              className="rounded border px-4 py-2 text-sm font-medium transition-colors hover:bg-gray-50"
-              style={{ borderColor: '#dee2e6', color: '#1B2A4A' }}
+              className="rounded border px-4 py-2 text-sm font-medium transition-colors hover:bg-slate-50"
+              style={{ borderColor: 'var(--color-slate-200)', color: 'var(--color-navy-850)' }}
             >
               Cancel
             </button>
@@ -1078,7 +1078,7 @@ export default function ScriptsPage() {
               onClick={handleApproval}
               className="rounded px-4 py-2 text-sm font-medium text-white transition-colors hover:opacity-90"
               style={{
-                backgroundColor: approvalAction === 'approve' ? '#28a745' : '#dc3545',
+                backgroundColor: approvalAction === 'approve' ? '#28a745' : 'var(--color-danger)',
               }}
             >
               {approvalAction === 'approve' ? 'Approve' : 'Reject'}

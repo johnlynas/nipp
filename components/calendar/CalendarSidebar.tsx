@@ -145,16 +145,16 @@ export default function CalendarSidebar({
 
   return (
     <aside
-      className={`flex-shrink-0 bg-[#1B2A4A] text-white flex flex-col h-full transition-all duration-200 overflow-hidden ${
+      className={`flex-shrink-0 bg-navy-850 text-white flex flex-col h-full transition-all duration-200 overflow-hidden ${
         isExpanded ? 'w-80' : 'w-16'
       }`}
     >
       {/* Title bar — toggle only; the "Upcoming Events" label has moved
           down between the org selector and the search field */}
-      <div className="flex items-center justify-end px-4 py-3 border-b flex-shrink-0" style={{ borderColor: '#24355c' }}>
+      <div className="flex items-center justify-end px-4 py-3 border-b flex-shrink-0" style={{ borderColor: 'var(--color-navy-800)' }}>
         <button
           onClick={onToggle}
-          className="text-gray-300 hover:text-white transition-colors"
+          className="text-slate-300 hover:text-white transition-colors"
           aria-label={isExpanded ? 'Collapse sidebar' : 'Expand sidebar'}
         >
           {isExpanded ? (
@@ -174,7 +174,7 @@ export default function CalendarSidebar({
           {/* Organization Switcher — typeable combobox: focusing opens the list
               and the visible orgs filter live as you type */}
           {organizations.length > 0 && (
-            <div className="px-4 py-3 border-b flex-shrink-0" style={{ borderColor: '#24355c' }}>
+            <div className="px-4 py-3 border-b flex-shrink-0" style={{ borderColor: 'var(--color-navy-800)' }}>
               <p className="text-sm font-semibold mt-1 mb-1.5" style={{ color: '#e2e8f0' }}>
                 Organization
               </p>
@@ -188,11 +188,11 @@ export default function CalendarSidebar({
                   onBlur={handleOrgBlur}
                   onKeyDown={handleOrgKeyDown}
                   placeholder="Select organization"
-                  className="w-full pl-3 pr-8 py-2 rounded text-sm bg-[#24355c] border placeholder:text-gray-500 focus:outline-none"
-                  style={{ borderColor: orgDropdownOpen ? '#F5A623' : '#3a4f7a', color: '#e2e8f0' }}
+                  className="w-full pl-3 pr-8 py-2 rounded text-sm bg-navy-800 border placeholder:text-slate-500 focus:outline-none"
+                  style={{ borderColor: orgDropdownOpen ? 'var(--color-accent)' : 'var(--color-navy-700)', color: '#e2e8f0' }}
                 />
                 <svg
-                  className={`w-4 h-4 absolute right-2.5 top-1/2 -translate-y-1/2 pointer-events-none transition-transform ${orgDropdownOpen ? 'rotate-180 text-[#F5A623]' : 'text-gray-400'}`}
+                  className={`w-4 h-4 absolute right-2.5 top-1/2 -translate-y-1/2 pointer-events-none transition-transform ${orgDropdownOpen ? 'rotate-180 text-accent' : 'text-slate-400'}`}
                   fill="none"
                   stroke="currentColor"
                   viewBox="0 0 24 24"
@@ -201,7 +201,7 @@ export default function CalendarSidebar({
                 </svg>
 
                 {orgDropdownOpen && (
-                  <div className="absolute top-full left-0 right-0 mt-1 bg-[#24355c] border rounded shadow-lg z-50 max-h-60 overflow-y-auto" style={{ borderColor: '#3a4f7a' }}>
+                  <div className="absolute top-full left-0 right-0 mt-1 bg-navy-800 border rounded shadow-lg z-50 max-h-60 overflow-y-auto" style={{ borderColor: 'var(--color-navy-700)' }}>
                     {filteredOrganizations.length === 0 ? (
                       <div className="px-3 py-2 text-sm" style={{ color: '#94a3b8' }}>
                         No organizations match "{effectiveOrgQuery.trim()}"
@@ -214,8 +214,8 @@ export default function CalendarSidebar({
                           onClick={() => handleOrgSelect(org.id)}
                           className={`w-full px-3 py-2 text-left text-sm transition-colors truncate ${
                             org.id === selectedOrgId
-                              ? 'bg-[#1B2A4A] text-[#F5A623]'
-                              : 'text-gray-300 hover:bg-[#1B2A4A] hover:text-white'
+                              ? 'text-white font-semibold bg-navy-700/40'
+                              : 'text-slate-400 hover:bg-navy-800/60 hover:text-white'
                           }`}
                         >
                           {org.name}
@@ -235,20 +235,20 @@ export default function CalendarSidebar({
           </p>
 
           {/* Search box — filters the upcoming events list below by event title */}
-          <div className="px-4 py-3 border-b flex-shrink-0" style={{ borderColor: '#24355c' }}>
+          <div className="px-4 py-3 border-b flex-shrink-0" style={{ borderColor: 'var(--color-navy-800)' }}>
             <div className="relative">
               <input
                 type="text"
                 value={searchQuery}
                 onChange={(e) => setSearchQuery(e.target.value)}
                 placeholder="Search upcoming events..."
-                className="w-full pl-3 pr-8 py-2 rounded text-sm bg-[#24355c] border placeholder:text-gray-500 focus:outline-none"
-                style={{ borderColor: '#3a4f7a', color: '#e2e8f0' }}
+                className="w-full pl-3 pr-8 py-2 rounded text-sm bg-navy-800 border placeholder:text-slate-500 focus:outline-none"
+                style={{ borderColor: 'var(--color-navy-700)', color: '#e2e8f0' }}
               />
               {searchQuery && (
                 <button
                   onClick={() => setSearchQuery('')}
-                  className="absolute right-2 top-1/2 -translate-y-1/2 text-gray-400 hover:text-white"
+                  className="absolute right-2 top-1/2 -translate-y-1/2 text-slate-400 hover:text-white"
                   aria-label="Clear search"
                 >
                   <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -264,9 +264,9 @@ export default function CalendarSidebar({
               overflowing the sidebar page) */}
           <div className="flex-1 min-h-0 overflow-y-auto px-4 pb-4">
             {upcomingEvents.length === 0 ? (
-              <p className="text-sm text-gray-400">No upcoming events</p>
+              <p className="text-sm text-slate-400">No upcoming events</p>
             ) : filteredUpcomingEvents.length === 0 ? (
-              <p className="text-sm text-gray-400">No events match "{searchQuery.trim()}"</p>
+              <p className="text-sm text-slate-400">No events match "{searchQuery.trim()}"</p>
             ) : (
               <ul className="space-y-2">
                 {filteredUpcomingEvents.map((event) => (
@@ -277,7 +277,7 @@ export default function CalendarSidebar({
                       title="View day in calendar"
                       className="w-full text-left"
                     >
-                      <div className="flex items-start gap-2 p-2 rounded hover:bg-[#24355c] transition-colors">
+                      <div className="flex items-start gap-2 p-2 rounded hover:bg-navy-800 transition-colors">
                         <div
                           className="w-2 h-2 rounded-full mt-1.5 flex-shrink-0"
                           style={{ backgroundColor: event.color || '#2A9D8F' }}
