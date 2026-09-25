@@ -28,7 +28,7 @@ function ViewValue({ children }: { children: React.ReactNode }) {
   return (
     <div
       className="w-full px-3 py-2 rounded-lg border text-sm min-h-[40px]"
-      style={{ borderColor: '#dee2e6', color: '#1a1a2e' }}
+      style={{ borderColor: 'var(--color-slate-200)', color: 'var(--color-slate-800)' }}
     >
       {children}
     </div>
@@ -44,7 +44,7 @@ function FieldLabel({ htmlFor, children }: { htmlFor?: string; children: React.R
   );
 }
 
-const inputStyles: React.CSSProperties = { borderColor: '#dee2e6', color: '#1a1a2e' };
+const inputStyles: React.CSSProperties = { borderColor: 'var(--color-slate-200)', color: 'var(--color-slate-800)' };
 const inputClasses = 'w-full px-3 py-2 rounded-lg border text-sm focus:outline-none disabled:bg-[#f1f5f9] disabled:text-[#94a3b8]';
 
 // ---------------------------------------------------------------------------
@@ -378,7 +378,7 @@ export default function CalendarEventModal({
         </div>
 
         {/* Repeat Option section — buttons in edit mode, text in view mode */}
-        <div className="rounded-lg border p-4 mb-4" style={{ borderColor: '#dee2e6', backgroundColor: '#f8fafc' }}>
+        <div className="rounded-lg border p-4 mb-4" style={{ borderColor: 'var(--color-slate-200)', backgroundColor: '#f8fafc' }}>
           <h3 className="m-0 mb-3 text-xs uppercase tracking-wider font-semibold" style={{ color: '#64748b' }}>
             Repeat Option
           </h3>
@@ -400,8 +400,8 @@ export default function CalendarEventModal({
                     }`}
                     style={
                       selected
-                        ? { backgroundColor: '#F5A623', borderColor: '#F5A623', color: '#ffffff' }
-                        : { backgroundColor: '#ffffff', borderColor: '#dee2e6', color: '#475569' }
+                        ? { backgroundColor: 'var(--color-accent)', borderColor: 'var(--color-accent)', color: '#ffffff' }
+                        : { backgroundColor: '#ffffff', borderColor: 'var(--color-slate-200)', color: '#475569' }
                     }
                   >
                     {option.label}
@@ -441,11 +441,11 @@ export default function CalendarEventModal({
 
         {/* Recurrence summary — read-only text in view mode only (no rule editing) */}
         {isViewMode && recurrence ? (
-          <div className="rounded-lg border p-4 mb-1" style={{ borderColor: '#dee2e6', backgroundColor: '#f8fafc' }}>
+          <div className="rounded-lg border p-4 mb-1" style={{ borderColor: 'var(--color-slate-200)', backgroundColor: '#f8fafc' }}>
             <h3 className="m-0 mb-3 text-xs uppercase tracking-wider font-semibold" style={{ color: '#64748b' }}>
               Recurrence Rules
             </h3>
-            <div className="px-3 py-2 rounded-lg border text-sm whitespace-pre-wrap" style={{ borderColor: '#dee2e6', backgroundColor: '#ffffff', color: '#1a1a2e' }}>
+            <div className="px-3 py-2 rounded-lg border text-sm whitespace-pre-wrap" style={{ borderColor: 'var(--color-slate-200)', backgroundColor: '#ffffff', color: 'var(--color-slate-800)' }}>
               <span className="mr-1" title="Recurring event">↻</span>
               {getRecurrenceEndDateLabel(recurrence.endDate, recurrence.count) || 'Repeats indefinitely'}
             </div>
@@ -454,7 +454,7 @@ export default function CalendarEventModal({
 
         {/* Error message */}
         {saveError && (
-          <div className="mt-4 p-3 rounded-lg border text-sm" style={{ borderColor: '#f5c6cb', backgroundColor: '#fef2f2', color: '#dc3545' }}>
+          <div className="mt-4 p-3 rounded-lg border text-sm" style={{ borderColor: '#f5c6cb', backgroundColor: '#fef2f2', color: 'var(--color-danger)' }}>
             {saveError}
           </div>
         )}
@@ -465,8 +465,8 @@ export default function CalendarEventModal({
             <button
               type="button"
               onClick={onClose}
-              className="px-4 py-2 rounded-lg text-sm font-semibold text-white cursor-pointer"
-              style={{ backgroundColor: '#F5A623' }}
+              className="px-4 py-2 rounded-lg text-sm font-semibold text-accent-ink cursor-pointer"
+              style={{ backgroundColor: 'var(--color-accent)' }}
             >
               Close
             </button>
@@ -476,15 +476,15 @@ export default function CalendarEventModal({
                 type="button"
                 onClick={onClose}
                 className="px-4 py-2 rounded-lg text-sm font-medium border cursor-pointer hover:bg-[#e2e8f0] transition-colors"
-                style={{ borderColor: '#dee2e6', color: '#475569', backgroundColor: '#f1f5f9' }}
+                style={{ borderColor: 'var(--color-slate-200)', color: '#475569', backgroundColor: '#f1f5f9' }}
               >
                 Cancel
               </button>
               <button
                 type="submit"
                 disabled={!title.trim()}
-                className="px-4 py-2 rounded-lg text-sm font-semibold text-white cursor-pointer disabled:opacity-50 transition-colors"
-                style={{ backgroundColor: '#F5A623' }}
+                className="px-4 py-2 rounded-lg text-sm font-semibold text-accent-ink cursor-pointer disabled:opacity-50 transition-colors"
+                style={{ backgroundColor: 'var(--color-accent)' }}
               >
                 {isExisting ? 'Save Changes' : 'Add Event'}
               </button>

@@ -78,21 +78,21 @@ export function ConfirmDialog({
 
       {/* Dialog */}
       <div ref={dialogRef} className="relative z-10 w-full max-w-md rounded-lg bg-white p-6 shadow-xl pointer-events-auto">
-        <h2 id="confirm-title" className="mb-2 text-lg font-semibold text-[#1B2A4A]">
+        <h2 id="confirm-title" className="mb-2 text-lg font-semibold text-navy-850">
           {title}
         </h2>
-        <p className="mb-6 text-sm text-gray-600">{message}</p>
+        <p className="mb-6 text-sm text-slate-600">{message}</p>
         <div className="flex justify-end gap-3">
           <button
             onClick={onCancel}
-            className="rounded px-4 py-2 text-sm font-medium text-gray-700 transition hover:bg-gray-100"
+            className="rounded px-4 py-2 text-sm font-medium text-slate-700 transition hover:bg-slate-100"
           >
             {cancelLabel}
           </button>
           <button
             onClick={onConfirm}
             className={`rounded px-4 py-2 text-sm font-medium text-white transition ${
-              danger ? 'bg-red-600 hover:bg-red-700' : 'bg-[#F5A623]'
+              danger ? 'bg-danger hover:bg-danger/90' : 'bg-accent'
             }`}
             aria-label={confirmLabel}
           >

@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useRef } from "react";
 import Calendar from "@/components/calendar/Calendar";
+import { PageSkeleton } from '@/components/dashboard/PageSkeleton';
 export default function CalendarPage() {
   const [orgId, setOrgId] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
@@ -62,7 +63,7 @@ export default function CalendarPage() {
   if (loading) {
     return (
       <div className="flex items-center justify-center h-full">
-        <p style={{ color: "#1B2A4A" }}>Loading calendar...</p>
+        <PageSkeleton rows={4} cols={3} />
       </div>
     );
   }
@@ -70,7 +71,7 @@ export default function CalendarPage() {
   if (!orgId) {
     return (
       <div className="flex items-center justify-center h-full">
-        <p style={{ color: "#1B2A4A" }}>No organization selected</p>
+        <p style={{ color: "var(--color-slate-700)" }}>No organization selected</p>
       </div>
     );
   }

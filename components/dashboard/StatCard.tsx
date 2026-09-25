@@ -11,10 +11,10 @@ interface StatCardProps {
 }
 
 const colorMap = {
-  default: { bg: '#ffffff', border: '#dee2e6', text: '#1B2A4A' },
-  success: { bg: '#f0fdf4', border: '#bbf7d0', text: '#166534' },
-  danger: { bg: '#fef2f2', border: '#fecaca', text: '#991b1b' },
-  warning: { bg: '#fffbeb', border: '#fde68a', text: '#92400e' },
+  default: { bg: 'var(--color-canvas)', border: 'var(--color-slate-200)', text: 'var(--color-slate-900)' },
+  success: { bg: 'var(--color-success-tint)', border: 'var(--color-success-border)', text: 'var(--color-success)' },
+  danger: { bg: 'var(--color-danger-tint)', border: 'var(--color-danger-border)', text: 'var(--color-danger-ink)' },
+  warning: { bg: 'var(--color-warning-tint)', border: 'var(--color-warning-border)', text: 'var(--color-warning-ink)' },
 };
 
 export function StatCard({ label, value, icon, color = 'default', className }: StatCardProps) {
@@ -22,14 +22,14 @@ export function StatCard({ label, value, icon, color = 'default', className }: S
 
   return (
     <div
-      className={`flex flex-col rounded-lg border p-4 transition-shadow hover:shadow-md ${className ?? ''}`}
+      className={`flex flex-col rounded-lg border p-4 ${className ?? ''}`}
       style={{ backgroundColor: c.bg, borderColor: c.border }}
     >
       <div className="mb-1 flex items-center gap-2">
         {icon && <span style={{ color: c.text }}>{icon}</span>}
-        <span className="text-sm font-medium" style={{ color: c.text }}>{label}</span>
+        <span className="text-sm font-medium" style={{ color: 'var(--color-slate-500)' }}>{label}</span>
       </div>
-      <span className="text-2xl font-bold" style={{ color: c.text }}>{value}</span>
+      <span className="text-2xl font-semibold tracking-tight tabular" style={{ color: c.text }}>{value}</span>
     </div>
   );
 }

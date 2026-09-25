@@ -36,12 +36,12 @@ export interface NotificationItem {
 // CALENDAR is rendered in bright green so "event due to start" reminders stand
 // out from the operational alert colors (blue/yellow/red).
 export const PRIORITY_COLORS: Record<string, string> = {
-  INFO: 'text-blue-400 bg-blue-500/10 border-blue-500/30',
-  WARNING: 'text-yellow-400 bg-yellow-500/10 border-yellow-500/30',
-  ERROR: 'text-red-400 bg-red-500/10 border-red-500/30',
-  CRITICAL: 'text-red-400 bg-red-500/20 border-red-500/50',
-  CALENDAR: 'text-green-300 bg-green-500/20 border-green-400/60',
-  JOB: 'text-purple-300 bg-purple-500/20 border-purple-400/60',
+  INFO: 'text-slate-200 bg-slate-400/10 border-slate-400/40',
+  WARNING: 'text-amber-300 bg-amber-400/10 border-amber-400/40',
+  ERROR: 'text-red-300 bg-red-400/10 border-red-400/40',
+  CRITICAL: 'text-red-200 bg-red-400/25 border-red-400/60',
+  CALENDAR: 'text-green-300 bg-green-400/15 border-green-400/50',
+  JOB: 'text-purple-300 bg-purple-400/15 border-purple-400/50',
 };
 
 export function getPriorityIcon(priority: string): string {

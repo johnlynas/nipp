@@ -21,19 +21,19 @@ export function ConfirmDialog({
 
   return (
     <Modal isOpen={isOpen} onClose={onClose} title={title}>
-      <p className="mb-6 text-sm" style={{ color: '#6c757d' }}>{message}</p>
+      <p className="mb-6 text-sm" style={{ color: 'var(--color-slate-500)' }}>{message}</p>
       <div className="flex justify-end gap-3">
         <button
           onClick={onClose}
-          className="rounded border px-4 py-2 text-sm font-medium transition-colors hover:bg-gray-50"
-          style={{ borderColor: '#dee2e6', color: '#1B2A4A' }}
+          className="rounded border px-4 py-2 text-sm font-medium transition-colors hover:bg-slate-50"
+          style={{ borderColor: 'var(--color-slate-200)', color: 'var(--color-navy-850)' }}
         >
           {cancelLabel}
         </button>
         <button
           onClick={handleConfirm}
           className="rounded px-4 py-2 text-sm font-medium text-white transition-colors hover:opacity-90"
-          style={{ backgroundColor: variant === 'danger' ? '#dc3545' : '#F5A623' }}
+          style={{ backgroundColor: variant === 'danger' ? 'var(--color-danger)' : 'var(--color-accent)' }}
         >
           {confirmLabel}
         </button>

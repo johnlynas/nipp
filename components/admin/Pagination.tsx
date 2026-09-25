@@ -52,15 +52,15 @@ export function Pagination({ currentPage, totalPages, totalItems, pageSize, onPa
   }
 
   return (
-    <div className="mt-4 flex items-center justify-between px-4 py-3 border-t border-gray-200">
-      <div className="text-sm text-gray-500">
+    <div className="mt-4 flex items-center justify-between px-4 py-3 border-t border-slate-200">
+      <div className="text-sm text-slate-500">
         Showing {start}–{end} of {totalItems} entries
       </div>
       <div className="flex items-center gap-1">
         {/* Previous */}
         <button
           onClick={() => onPageChange(currentPage - 1)}
-          className={`rounded border border-gray-300 text-gray-700 px-3 py-1 text-sm hover:bg-gray-100 ${
+          className={`rounded border border-slate-300 text-slate-700 px-3 py-1 text-sm hover:bg-slate-100 ${
             currentPage <= 1 ? 'opacity-40 pointer-events-none' : ''
           }`}
           aria-label="Previous page"
@@ -71,7 +71,7 @@ export function Pagination({ currentPage, totalPages, totalItems, pageSize, onPa
         {/* Page numbers */}
         {pages.map((p, idx) =>
           p === 'ellipsis' ? (
-            <span key={`e-${idx}`} className="px-2 py-1 text-sm text-gray-400 select-none">
+            <span key={`e-${idx}`} className="px-2 py-1 text-sm text-slate-400 select-none">
               …
             </span>
           ) : (
@@ -80,8 +80,8 @@ export function Pagination({ currentPage, totalPages, totalItems, pageSize, onPa
               onClick={() => onPageChange(p)}
               className={`rounded px-3 py-1 text-sm ${
                 p === currentPage
-                  ? 'bg-[#1B2A4A] text-white'
-                  : 'border border-gray-300 text-gray-700 hover:bg-gray-100'
+                  ? 'bg-navy-850 text-white'
+                  : 'border border-slate-300 text-slate-700 hover:bg-slate-100'
               }`}
             >
               {p}
@@ -92,7 +92,7 @@ export function Pagination({ currentPage, totalPages, totalItems, pageSize, onPa
         {/* Next */}
         <button
           onClick={() => onPageChange(currentPage + 1)}
-          className={`rounded border border-gray-300 text-gray-700 px-3 py-1 text-sm hover:bg-gray-100 ${
+          className={`rounded border border-slate-300 text-slate-700 px-3 py-1 text-sm hover:bg-slate-100 ${
             currentPage >= totalPages ? 'opacity-40 pointer-events-none' : ''
           }`}
           aria-label="Next page"

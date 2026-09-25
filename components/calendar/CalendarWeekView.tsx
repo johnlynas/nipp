@@ -145,7 +145,7 @@ export default function CalendarWeekView({
   };
 
   return (
-    <div className="bg-white rounded-lg shadow-sm border overflow-hidden" style={{ borderColor: '#dee2e6' }}>
+    <div className="bg-white rounded-lg shadow-sm border overflow-hidden" style={{ borderColor: 'var(--color-slate-200)' }}>
       {/* Single scrollable grid holding BOTH the day-header row and the time
           body. Both rows share identical track widths — a fixed 4rem time-label
           column plus equal-width day columns — so the header day dividers line
@@ -161,7 +161,7 @@ export default function CalendarWeekView({
         {/* Day headers (sticky so they stay pinned while the body scrolls) */}
         <div
           className="sticky top-0 z-20 bg-white py-2 px-1 text-center text-xs font-semibold border-b border-r"
-          style={{ color: '#6c757d', borderBottomColor: '#dee2e6', borderRightColor: '#f0f0f0' }}
+          style={{ color: 'var(--color-slate-500)', borderBottomColor: 'var(--color-slate-200)', borderRightColor: 'var(--color-slate-200)' }}
         >
           GMT
         </div>
@@ -169,13 +169,13 @@ export default function CalendarWeekView({
           <div
             key={i}
             className="sticky top-0 z-20 bg-white py-2 text-center border-b border-l"
-            style={{ borderBottomColor: '#dee2e6', borderLeftColor: '#f0f0f0' }}
+            style={{ borderBottomColor: 'var(--color-slate-200)', borderLeftColor: 'var(--color-slate-200)' }}
           >
-            <div className="text-xs font-medium" style={{ color: '#6c757d' }}>
+            <div className="text-xs font-medium" style={{ color: 'var(--color-slate-500)' }}>
               {day.toLocaleDateString('en-GB', { weekday: 'short' })}
             </div>
             <div className={`text-lg font-bold ${isToday(day) ? 'rounded-full w-8 h-8 flex items-center justify-center mx-auto' : ''}`}
-              style={isToday(day) ? { backgroundColor: '#F5A623', color: '#ffffff' } : { color: '#1B2A4A' }}
+              style={isToday(day) ? { color: '#fff', backgroundColor: 'var(--color-navy-850)' } : { color: 'var(--color-slate-600)' }}
             >
               {day.getDate()}
             </div>
@@ -183,12 +183,12 @@ export default function CalendarWeekView({
         ))}
 
         {/* Time labels column — 4rem wide, matching the Day view's w-16 */}
-        <div className="border-r border-b" style={{ borderColor: '#f0f0f0' }}>
+        <div className="border-r border-b" style={{ borderColor: 'var(--color-slate-200)' }}>
           {hours.map((hour) => (
             <div
               key={hour}
               className="text-xs text-right pr-2 py-0"
-              style={{ height: '64px', color: '#6c757d' }}
+              style={{ height: '64px', color: 'var(--color-slate-500)' }}
             >
               {hour === 0 ? '' : formatTime(new Date(2000, 0, 1, hour, 0))}
             </div>
@@ -203,7 +203,7 @@ export default function CalendarWeekView({
             <div
               key={dayIndex}
               className="border-l relative"
-              style={{ borderColor: '#f0f0f0' }}
+              style={{ borderColor: 'var(--color-slate-200)' }}
               onClick={() => onDateClick?.(day)}
               onContextMenu={(e) => { e.preventDefault(); onDateRightClick?.(day, e); }}
               onDrop={(e) => handleDrop(e, day)}
@@ -214,7 +214,7 @@ export default function CalendarWeekView({
                 <div
                   key={hour}
                   className="border-b"
-                  style={{ height: '64px', borderColor: '#f0f0f0' }}
+                  style={{ height: '64px', borderColor: 'var(--color-slate-200)' }}
                 />
               ))}
 
@@ -246,7 +246,6 @@ export default function CalendarWeekView({
                         top: `${startHour * 64}px`,
                         height: `${duration * 64}px`,
                         backgroundColor: `${event.color || '#2A9D8F'}30`,
-                        borderLeft: `3px solid ${event.color || '#2A9D8F'}`,
                         zIndex: 10,
                         opacity: isDragging ? 0.5 : 1,
                       }}
@@ -273,16 +272,15 @@ export default function CalendarWeekView({
                         top: `${startHour * 64}px`,
                         height: `${duration * 64}px`,
                         backgroundColor: `${event.color || '#2A9D8F'}30`,
-                        borderLeft: `3px solid ${event.color || '#2A9D8F'}`,
                         zIndex: 10,
                         opacity: isDragging ? 0.5 : 1,
                       }}
                     >
                       <div className="px-1.5 py-0.5 overflow-hidden" style={{ maxHeight: '100%' }}>
-                        <div className="text-xs font-semibold truncate" style={{ color: event.color || '#1B2A4A' }}>
+                        <div className="text-xs font-semibold truncate" style={{ color: 'var(--color-slate-800)' }}>
                           ▸ {event.recurrence && <span title="Recurring event">↻</span>} {event.title}
                         </div>
-                        <div className="text-[10px] text-gray-500">
+                        <div className="text-[10px] text-slate-500">
                           {formatTime(start)} – {formatTime(end)}
                         </div>
                       </div>
@@ -309,16 +307,15 @@ export default function CalendarWeekView({
                         top: `${startHour * 64}px`,
                         height: `${duration * 64}px`,
                         backgroundColor: `${event.color || '#2A9D8F'}30`,
-                        borderLeft: `3px solid ${event.color || '#2A9D8F'}`,
                         zIndex: 10,
                         opacity: isDragging ? 0.5 : 1,
                       }}
                     >
                       <div className="px-1.5 py-0.5 overflow-hidden" style={{ maxHeight: '100%' }}>
-                        <div className="text-xs font-semibold truncate" style={{ color: event.color || '#1B2A4A' }}>
+                        <div className="text-xs font-semibold truncate" style={{ color: 'var(--color-slate-800)' }}>
                           {event.recurrence && <span title="Recurring event">↻</span>} {event.title} ◂
                         </div>
-                        <div className="text-[10px] text-gray-500">
+                        <div className="text-[10px] text-slate-500">
                           {formatTime(start)} – {formatTime(end)}
                         </div>
                       </div>
@@ -345,16 +342,15 @@ export default function CalendarWeekView({
                       top: `${startHour * 64}px`,
                       height: `${duration * 64}px`,
                       backgroundColor: `${event.color || '#2A9D8F'}30`,
-                      borderLeft: `3px solid ${event.color || '#2A9D8F'}`,
                       zIndex: 10,
                       opacity: isDragging ? 0.5 : 1,
                     }}
                   >
                     <div className="px-1.5 py-0.5 overflow-hidden" style={{ maxHeight: '100%' }}>
-                      <div className="text-xs font-semibold truncate" style={{ color: event.color || '#1B2A4A' }}>
+                      <div className="text-xs font-semibold truncate" style={{ color: 'var(--color-slate-800)' }}>
                         {event.recurrence && <span title="Recurring event">↻</span>} {event.title}
                       </div>
-                      <div className="text-[10px] text-gray-500">
+                      <div className="text-[10px] text-slate-500">
                         {formatTime(start)} – {formatTime(end)}
                       </div>
                     </div>

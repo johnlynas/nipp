@@ -66,12 +66,12 @@ export function EditModal({ isOpen, onClose, title, children }: EditModalProps) 
       {/* Modal */}
       <div ref={modalRef} className="relative z-10 w-full max-w-lg rounded-lg bg-white p-6 shadow-xl pointer-events-auto">
         <div className="mb-4 flex items-center justify-between">
-          <h2 id="edit-title" className="text-lg font-semibold text-[#1B2A4A]">
+          <h2 id="edit-title" className="text-lg font-semibold text-navy-850">
             {title}
           </h2>
           <button
             onClick={onClose}
-            className="text-gray-400 hover:text-gray-600 transition-colors"
+            className="text-slate-400 hover:text-slate-600 transition-colors"
             aria-label="Close modal"
           >
             ✕

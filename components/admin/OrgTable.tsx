@@ -31,39 +31,39 @@ export function OrgTable({ organizations }: OrgTableProps) {
 
   return (
     <div className="overflow-x-auto">
-      <table className="min-w-full divide-y divide-gray-200" role="table">
-        <thead className="bg-[#1B2A4A]">
+      <table className="min-w-full divide-y divide-slate-200" role="table">
+        <thead className="bg-canvas-subtle border-b" style={{ borderColor: 'var(--color-slate-200)' }}>
           <tr>
-            <th className="px-6 py-3 text-left text-xs font-medium uppercase tracking-wider text-white" scope="col">
+            <th className="px-6 py-3 text-left text-xs font-medium uppercase tracking-wider text-slate-500" scope="col">
               Organization Name
             </th>
-            <th className="px-6 py-3 text-left text-xs font-medium uppercase tracking-wider text-white" scope="col">
+            <th className="px-6 py-3 text-left text-xs font-medium uppercase tracking-wider text-slate-500" scope="col">
               Status
             </th>
-            <th className="px-6 py-3 text-left text-xs font-medium uppercase tracking-wider text-white" scope="col">
+            <th className="px-6 py-3 text-left text-xs font-medium uppercase tracking-wider text-slate-500" scope="col">
               Members
             </th>
-            <th className="px-6 py-3 text-left text-xs font-medium uppercase tracking-wider text-white" scope="col">
+            <th className="px-6 py-3 text-left text-xs font-medium uppercase tracking-wider text-slate-500" scope="col">
               Created Date
             </th>
-            <th className="px-6 py-3 text-right text-xs font-medium uppercase tracking-wider text-white" scope="col">
+            <th className="px-6 py-3 text-right text-xs font-medium uppercase tracking-wider text-slate-500" scope="col">
               Actions
             </th>
           </tr>
         </thead>
-        <tbody className="divide-y divide-gray-200 bg-white">
+        <tbody className="divide-y divide-slate-200 bg-white">
           {organizations.map((org) => (
-            <tr key={org.id} className="hover:bg-gray-50">
-              <td className="whitespace-nowrap px-6 py-4 text-sm font-medium" style={{ color: '#1B2A4A' }}>
+            <tr key={org.id} className="hover:bg-slate-50">
+              <td className="whitespace-nowrap px-6 py-4 text-sm font-medium" style={{ color: 'var(--color-navy-850)' }}>
                 {org.name}
               </td>
               <td className="whitespace-nowrap px-6 py-4">
                 <OrgStatusBadge status={org.status} />
               </td>
-              <td className="whitespace-nowrap px-6 py-4 text-sm text-gray-500">
+              <td className="whitespace-nowrap px-6 py-4 text-sm text-slate-500">
                 {org.memberCount}
               </td>
-              <td className="whitespace-nowrap px-6 py-4 text-sm text-gray-500">
+              <td className="whitespace-nowrap px-6 py-4 text-sm text-slate-500">
                 {formatDate(org.createdAt)}
               </td>
               <td className="whitespace-nowrap px-6 py-4 text-right">

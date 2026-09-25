@@ -26,7 +26,7 @@ export default function CalendarYearView({ year, events, onMonthClick }: Calenda
   const isCurrentYear = now.getFullYear() === year;
 
   return (
-    <div className="bg-white rounded-lg shadow-sm border" style={{ borderColor: '#dee2e6' }}>
+    <div className="bg-white rounded-lg shadow-sm border" style={{ borderColor: 'var(--color-slate-200)' }}>
       <div className="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-4 gap-3 p-3">
         {months.map((m) => {
           const isCurrentMonth = isCurrentYear && now.getMonth() === m.month;
@@ -37,24 +37,24 @@ export default function CalendarYearView({ year, events, onMonthClick }: Calenda
               type="button"
               onClick={() => onMonthClick?.(m.month)}
               title={`${m.name} ${year}`}
-              className="text-left rounded-lg border p-2 transition-colors hover:bg-gray-50"
+              className="text-left rounded-lg border p-2 transition-colors hover:bg-slate-50"
               style={{
-                borderColor: isCurrentMonth ? '#F5A623' : '#dee2e6',
+                borderColor: isCurrentMonth ? 'var(--color-accent)' : 'var(--color-slate-200)',
                 borderWidth: isCurrentMonth ? 2 : 1,
               }}
             >
               {/* Month header */}
               <div className="flex items-center justify-between mb-1">
                 <span
-                  className={`text-xs font-semibold ${isCurrentMonth ? 'text-[#F5A623]' : ''}`}
-                  style={isCurrentMonth ? undefined : { color: '#1B2A4A' }}
+                  className={`text-xs font-semibold ${isCurrentMonth ? 'text-accent' : ''}`}
+                  style={isCurrentMonth ? undefined : { color: 'var(--color-slate-600)' }}
                 >
                   {m.name}
                 </span>
                 {m.totalEvents > 0 && (
                   <span
-                    className="text-[10px] font-semibold px-1.5 py-0.5 rounded-full text-white"
-                    style={{ backgroundColor: '#F5A623' }}
+                    className="text-[10px] font-semibold px-1.5 py-0.5 rounded-full text-accent-ink"
+                    style={{ backgroundColor: 'var(--color-accent)' }}
                   >
                     {m.totalEvents}
                   </span>
@@ -74,8 +74,8 @@ export default function CalendarYearView({ year, events, onMonthClick }: Calenda
                   return (
                     <span key={day} className="flex flex-col items-center">
                       <span
-                        className={`text-[10px] leading-3 ${isTodayCell ? 'font-bold text-[#F5A623]' : ''}`}
-                        style={isTodayCell ? undefined : { color: '#1B2A4A' }}
+                        className={`text-[10px] leading-3 ${isTodayCell ? 'font-bold text-accent' : ''}`}
+                        style={isTodayCell ? undefined : { color: 'var(--color-slate-600)' }}
                       >
                         {day}
                       </span>

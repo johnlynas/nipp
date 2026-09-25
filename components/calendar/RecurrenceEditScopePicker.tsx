@@ -58,7 +58,7 @@ export default function RecurrenceEditScopePicker({
 
   return (
     <div className="space-y-2">
-      <label className="block text-sm font-medium" style={{ color: '#1B2A4A' }}>
+      <label className="block text-sm font-medium" style={{ color: 'var(--color-slate-800)' }}>
         Edit scope
       </label>
       <div className="flex flex-col gap-1.5">
@@ -67,8 +67,8 @@ export default function RecurrenceEditScopePicker({
             key={opt.value}
             className={`flex items-start gap-2.5 px-3 py-2 rounded border cursor-pointer transition-colors text-sm ${
               selected === opt.value
-                ? 'border-amber-400 bg-amber-50'
-                : 'border-gray-200 hover:bg-gray-50'
+                ? 'border-accent bg-canvas-subtle'
+                : 'border-slate-200 hover:bg-slate-50'
             }`}
           >
             <input
@@ -79,10 +79,10 @@ export default function RecurrenceEditScopePicker({
               className="mt-0.5 accent-amber-500"
             />
             <div className="flex-1 min-w-0">
-              <span className={`font-medium ${selected === opt.value ? 'text-amber-700' : ''}`}>
+              <span className={`font-medium ${selected === opt.value ? 'text-slate-900 font-semibold' : ''}`}>
                 {opt.label}
               </span>
-              <div className="text-xs text-gray-500 mt-0.5">{opt.description}</div>
+              <div className="text-xs text-slate-500 mt-0.5">{opt.description}</div>
             </div>
           </label>
         ))}

@@ -13,6 +13,7 @@ import CalendarSidebar from './CalendarSidebar';
 import CalendarEventModal from './CalendarEventModal';
 import CalendarContextMenu from './CalendarContextMenu';
 import { ConfirmDialog } from '@/components/dashboard/ConfirmDialog';
+import { PageSkeleton } from '@/components/dashboard/PageSkeleton';
 
 // ---------------------------------------------------------------------------
 // Props
@@ -918,24 +919,24 @@ export default function Calendar({
   // ---------------------------------------------------------------------------
 
   return (
-    <div className={`flex h-full ${className || ''}`} style={{ backgroundColor: '#f8f9fa' }}>
+    <div className={`flex h-full ${className || ''}`} style={{ backgroundColor: 'var(--color-canvas-subtle)' }}>
       {/* Main calendar area */}
       <div className="flex-1 flex flex-col overflow-hidden">
         {/* Org title bar — lives inside the left column so the right-hand
             Upcoming Events sidebar extends to the top of the screen. */}
         {organizationName && (
-          <div className="bg-white border-b px-4 py-3 flex items-center shadow-sm flex-shrink-0" style={{ borderColor: '#dee2e6' }}>
-            <h1 className="text-lg font-semibold" style={{ color: '#1B2A4A' }}>
+          <div className="bg-white border-b px-4 py-3 flex items-center shadow-sm flex-shrink-0" style={{ borderColor: 'var(--color-slate-200)' }}>
+            <h1 className="text-lg font-semibold" style={{ color: 'var(--color-slate-800)' }}>
               {organizationName} Calendar
             </h1>
           </div>
         )}
         {/* Toolbar */}
-        <div className="flex items-center justify-between px-4 py-3 bg-white border-b" style={{ borderColor: '#dee2e6' }}>
+        <div className="flex items-center justify-between px-4 py-3 bg-white border-b" style={{ borderColor: 'var(--color-slate-200)' }}>
 
 
           {/* View title */}
-          <h2 className="text-lg font-semibold" style={{ color: '#1B2A4A' }}>
+          <h2 className="text-lg font-semibold" style={{ color: 'var(--color-slate-800)' }}>
             {renderViewTitle()}
           </h2>
 
@@ -949,9 +950,9 @@ export default function Calendar({
                 key={v}
                 onClick={() => setView(v)}
                 className={`px-3 py-1.5 rounded text-sm font-medium transition-colors ${
-                  view === v ? 'text-white' : 'hover:bg-gray-100'
+                  view === v ? 'text-accent-ink' : 'hover:bg-slate-100'
                 }`}
-                style={view === v ? { backgroundColor: '#F5A623' } : { color: '#1B2A4A' }}
+                style={view === v ? { backgroundColor: 'var(--color-navy-850)', color: '#fff' } : undefined}
               >
                 {v.charAt(0).toUpperCase() + v.slice(1)}
               </button>
@@ -963,7 +964,7 @@ export default function Calendar({
           <button
             onClick={handleCreateNewEvent}
             className="px-3 py-1.5 rounded text-sm font-medium transition-colors hover:opacity-90"
-            style={{ backgroundColor: '#F5A623', color: '#ffffff' }}
+            style={{ backgroundColor: 'var(--color-accent)', color: '#ffffff' }}
           >
             + Create Event
           </button>
@@ -973,22 +974,22 @@ export default function Calendar({
           <div className="flex items-center gap-2">
             <button
               onClick={navigatePrev}
-              className="p-1.5 rounded hover:bg-gray-100 transition-colors"
-              style={{ color: '#1B2A4A' }}
+              className="p-1.5 rounded hover:bg-slate-100 transition-colors"
+              style={{ color: 'var(--color-slate-800)' }}
             >
               ‹
             </button>
             <button
               onClick={navigateToday}
-              className="px-3 py-1.5 rounded text-sm font-medium border hover:bg-gray-50 transition-colors"
-              style={{ borderColor: '#dee2e6', color: '#1B2A4A' }}
+              className="px-3 py-1.5 rounded text-sm font-medium border hover:bg-slate-50 transition-colors"
+              style={{ borderColor: 'var(--color-slate-200)', color: '#1B2A4A' }}
             >
               Today
             </button>
             <button
               onClick={navigateNext}
-              className="p-1.5 rounded hover:bg-gray-100 transition-colors"
-              style={{ color: '#1B2A4A' }}
+              className="p-1.5 rounded hover:bg-slate-100 transition-colors"
+              style={{ color: 'var(--color-slate-800)' }}
             >
               ›
             </button>
@@ -998,9 +999,7 @@ export default function Calendar({
         {/* Calendar grid */}
         <div className="flex-1 flex flex-col overflow-y-auto p-4">
           {loading ? (
-            <div className="flex items-center justify-center h-full" style={{ color: '#1B2A4A' }}>
-              Loading calendar...
-            </div>
+            <PageSkeleton rows={6} cols={7} />
           ) : (
             renderCalendarGrid()
           )}

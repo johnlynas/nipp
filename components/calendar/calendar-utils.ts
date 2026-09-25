@@ -61,7 +61,7 @@ export function getEventIcon(eventType: CalendarEventType): string {
 export function getEventColor(eventType: CalendarEventType): string {
   switch (eventType) {
     case 'VIEWING': return '#2A9D8F';   // Teal
-    case 'INSPECTION': return '#F5A623'; // Amber
+    case 'INSPECTION': return 'var(--color-accent)'; // Amber
     case 'MAINTENANCE': return '#E76F51'; // Orange
     case 'LEASE_SIGNING': return '#1B2A4A'; // Navy
     case 'LEASE_RENEWAL': return '#7B68AE'; // Purple

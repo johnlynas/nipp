@@ -233,8 +233,8 @@ export default function RolesPage() {
   const columns = [
     { key: 'name', label: 'Role Name', render: (r: Role) => (
       <div>
-        <div className="font-medium" style={{ color: '#1B2A4A' }}>{r.name}</div>
-        {r.description && <div className="text-xs text-gray-500">{r.description}</div>}
+        <div className="font-medium" style={{ color: 'var(--color-navy-850)' }}>{r.name}</div>
+        {r.description && <div className="text-xs text-slate-500">{r.description}</div>}
       </div>
     )},
     { key: 'isDefault', label: 'Type', render: (r: Role) => <StatusBadge status={r.isDefault ? 'Default' : 'Custom'} /> },
@@ -245,7 +245,7 @@ export default function RolesPage() {
         <button
           onClick={() => { setSelectedRole(r); setDetailModalOpen(true); }}
           title={`View ${r.name}`}
-          className="rounded p-1.5 text-gray-400 hover:bg-gray-100 hover:text-[#1B2A4A] transition-colors"
+          className="rounded p-1.5 text-slate-400 hover:bg-slate-100 hover:text-navy-850 transition-colors"
           aria-label={`View ${r.name}`}
         >
           <Eye className="h-4 w-4" />
@@ -253,7 +253,7 @@ export default function RolesPage() {
         <button
           onClick={() => { setSelectedRole(r); setEditForm({ name: r.name, description: r.description || '' }); setEditModalOpen(true); }}
           title={`Edit ${r.name}`}
-          className="rounded p-1.5 text-gray-400 hover:bg-gray-100 hover:text-[#1B2A4A] transition-colors"
+          className="rounded p-1.5 text-slate-400 hover:bg-slate-100 hover:text-navy-850 transition-colors"
           aria-label={`Edit ${r.name}`}
         >
           <Pencil className="h-4 w-4" />
@@ -261,7 +261,7 @@ export default function RolesPage() {
         <button
           onClick={() => { setSelectedRole(r); setDeleteModalOpen(true); }}
           title={`Delete ${r.name}`}
-          className="rounded p-1.5 text-gray-400 hover:bg-red-50 hover:text-red-700 transition-colors"
+          className="rounded p-1.5 text-slate-500 hover:bg-danger-tint hover:text-danger-ink transition-colors"
           aria-label={`Delete ${r.name}`}
         >
           <Trash2 className="h-4 w-4" />
@@ -274,7 +274,7 @@ export default function RolesPage() {
     <div>
       {/* Error Banner */}
       {error && (
-        <div className="mb-4 rounded border bg-red-50 p-3 text-sm text-red-700" role="alert">
+        <div className="mb-4 rounded border bg-danger-tint border-danger-border p-3 text-sm text-danger-ink" role="alert">
           {error}
         </div>
       )}
@@ -288,23 +288,21 @@ export default function RolesPage() {
       </div>
 
       {/* Page Header */}
-      <PageHeader title="Roles" description="Manage roles within organizations">
-        <button
+      <PageHeader title="Roles" description="Manage roles within organizations" primaryAction=<button
           onClick={() => setCreateModalOpen(true)}
-          className="rounded px-4 py-2 text-sm font-medium text-white transition-colors hover:opacity-90"
-          style={{ backgroundColor: '#F5A623' }}
+          className="w-full sm:w-auto rounded px-4 py-2 text-center text-sm font-medium text-accent-ink transition-colors hover:opacity-90"
+          style={{ backgroundColor: 'var(--color-accent)' }}
         >
           + Create Role
-        </button>
-      </PageHeader>
+        </button> />
 
       {/* Filters */}
       <div className="mb-4 flex items-center gap-3">
         <select
           value={orgFilter}
           onChange={(e) => setOrgFilter(e.target.value)}
-          className="rounded border px-3 py-2 text-sm bg-white hover:bg-gray-50 transition-colors focus:outline-none"
-          style={{ borderColor: '#dee2e6', color: '#1B2A4A' }}
+          className="rounded border px-3 py-2 text-sm bg-white hover:bg-slate-50 transition-colors focus:outline-none"
+          style={{ borderColor: 'var(--color-slate-200)', color: 'var(--color-navy-850)' }}
           aria-label="Filter by organization"
         >
           <option value="">All Organizations</option>
@@ -316,8 +314,8 @@ export default function RolesPage() {
         <select
           value={typeFilter}
           onChange={(e) => setTypeFilter(e.target.value)}
-          className="rounded border px-3 py-2 text-sm bg-white hover:bg-gray-50 transition-colors focus:outline-none"
-          style={{ borderColor: '#dee2e6', color: '#1B2A4A' }}
+          className="rounded border px-3 py-2 text-sm bg-white hover:bg-slate-50 transition-colors focus:outline-none"
+          style={{ borderColor: 'var(--color-slate-200)', color: 'var(--color-navy-850)' }}
           aria-label="Filter by type"
         >
           <option value="">All Types</option>
@@ -343,26 +341,26 @@ export default function RolesPage() {
         {selectedRole && (
           <div className="space-y-4">
             <div>
-              <label className="text-sm font-medium" style={{ color: '#6c757d' }}>Name</label>
-              <p className="mt-1" style={{ color: '#1B2A4A' }}>{selectedRole.name}</p>
+              <label className="text-sm font-medium" style={{ color: 'var(--color-slate-500)' }}>Name</label>
+              <p className="mt-1" style={{ color: 'var(--color-navy-850)' }}>{selectedRole.name}</p>
             </div>
             <div>
-              <label className="text-sm font-medium" style={{ color: '#6c757d' }}>Description</label>
-              <p className="mt-1" style={{ color: '#1B2A4A' }}>{selectedRole.description || '—'}</p>
+              <label className="text-sm font-medium" style={{ color: 'var(--color-slate-500)' }}>Description</label>
+              <p className="mt-1" style={{ color: 'var(--color-navy-850)' }}>{selectedRole.description || '—'}</p>
             </div>
             <div className="flex gap-4">
               <div>
-                <label className="text-sm font-medium" style={{ color: '#6c757d' }}>Type</label>
+                <label className="text-sm font-medium" style={{ color: 'var(--color-slate-500)' }}>Type</label>
                 <div className="mt-1"><StatusBadge status={selectedRole.isDefault ? 'Default' : 'Custom'} /></div>
               </div>
               <div>
-                <label className="text-sm font-medium" style={{ color: '#6c757d' }}>Members</label>
-                <p className="mt-1" style={{ color: '#1B2A4A' }}>{selectedRole._count?.memberRoles ?? 0}</p>
+                <label className="text-sm font-medium" style={{ color: 'var(--color-slate-500)' }}>Members</label>
+                <p className="mt-1" style={{ color: 'var(--color-navy-850)' }}>{selectedRole._count?.memberRoles ?? 0}</p>
               </div>
             </div>
             <div>
-              <label className="text-sm font-medium" style={{ color: '#6c757d' }}>Created</label>
-              <p className="mt-1" style={{ color: '#1B2A4A' }}>{new Date(selectedRole.createdAt).toLocaleDateString()}</p>
+              <label className="text-sm font-medium" style={{ color: 'var(--color-slate-500)' }}>Created</label>
+              <p className="mt-1" style={{ color: 'var(--color-navy-850)' }}>{new Date(selectedRole.createdAt).toLocaleDateString()}</p>
             </div>
           </div>
         )}
@@ -384,40 +382,40 @@ export default function RolesPage() {
         {selectedRole && (
           <div className="space-y-4">
             <div>
-              <label htmlFor="edit-role-name" className="mb-1 block text-sm font-medium" style={{ color: '#6c757d' }}>Name</label>
+              <label htmlFor="edit-role-name" className="mb-1 block text-sm font-medium" style={{ color: 'var(--color-slate-500)' }}>Name</label>
               <input
                 id="edit-role-name"
                 type="text"
                 value={editForm.name}
                 onChange={(e) => setEditForm((f) => ({ ...f, name: e.target.value }))}
                 className="w-full rounded border px-3 py-2 text-sm focus:outline-none"
-                style={{ borderColor: '#dee2e6', color: '#1B2A4A' }}
+                style={{ borderColor: 'var(--color-slate-200)', color: 'var(--color-navy-850)' }}
               />
             </div>
             <div>
-              <label htmlFor="edit-role-desc" className="mb-1 block text-sm font-medium" style={{ color: '#6c757d' }}>Description (optional)</label>
+              <label htmlFor="edit-role-desc" className="mb-1 block text-sm font-medium" style={{ color: 'var(--color-slate-500)' }}>Description (optional)</label>
               <textarea
                 id="edit-role-desc"
                 value={editForm.description}
                 onChange={(e) => setEditForm((f) => ({ ...f, description: e.target.value }))}
                 className="w-full rounded border px-3 py-2 text-sm focus:outline-none"
-                style={{ borderColor: '#dee2e6', color: '#1B2A4A' }}
+                style={{ borderColor: 'var(--color-slate-200)', color: 'var(--color-navy-850)' }}
                 rows={3}
               />
             </div>
             <div className="flex justify-end gap-3">
               <button
                 onClick={() => setEditModalOpen(false)}
-                className="rounded border px-4 py-2 text-sm font-medium transition-colors hover:bg-gray-50"
-                style={{ borderColor: '#dee2e6', color: '#1B2A4A' }}
+                className="rounded border px-4 py-2 text-sm font-medium transition-colors hover:bg-slate-50"
+                style={{ borderColor: 'var(--color-slate-200)', color: 'var(--color-navy-850)' }}
               >
                 Cancel
               </button>
               <button
                 onClick={handleEdit}
                 disabled={!editForm.name.trim()}
-                className="rounded px-4 py-2 text-sm font-medium text-white transition-colors hover:opacity-90 disabled:opacity-50"
-                style={{ backgroundColor: '#F5A623' }}
+                className="rounded px-4 py-2 text-sm font-medium text-accent-ink transition-colors hover:opacity-90 disabled:opacity-50"
+                style={{ backgroundColor: 'var(--color-accent)' }}
               >
                 Save Changes
               </button>
@@ -430,13 +428,13 @@ export default function RolesPage() {
       <Modal isOpen={createModalOpen} onClose={() => { setCreateModalOpen(false); setCreateOrgId(''); }} title="Create Role" size="md">
         <div className="space-y-4">
           <div>
-            <label htmlFor="create-org" className="mb-1 block text-sm font-medium" style={{ color: '#6c757d' }}>Organization</label>
+            <label htmlFor="create-org" className="mb-1 block text-sm font-medium" style={{ color: 'var(--color-slate-500)' }}>Organization</label>
             <select
               id="create-org"
               value={createOrgId}
               onChange={(e) => setCreateOrgId(e.target.value)}
-              className="w-full rounded border px-3 py-2 text-sm bg-white hover:bg-gray-50 transition-colors focus:outline-none"
-              style={{ borderColor: '#dee2e6', color: '#1B2A4A' }}
+              className="w-full rounded border px-3 py-2 text-sm bg-white hover:bg-slate-50 transition-colors focus:outline-none"
+              style={{ borderColor: 'var(--color-slate-200)', color: 'var(--color-navy-850)' }}
               aria-label="Select organization for new role"
             >
               <option value="">Select Organization</option>
@@ -446,25 +444,25 @@ export default function RolesPage() {
             </select>
           </div>
           <div>
-            <label htmlFor="role-name" className="mb-1 block text-sm font-medium" style={{ color: '#1B2A4A' }}>Name</label>
+            <label htmlFor="role-name" className="mb-1 block text-sm font-medium" style={{ color: 'var(--color-navy-850)' }}>Name</label>
             <input
               id="role-name"
               type="text"
               value={createForm.name}
               onChange={(e) => setCreateForm((f) => ({ ...f, name: e.target.value }))}
               className="w-full rounded border px-3 py-2 text-sm focus:outline-none"
-              style={{ borderColor: '#dee2e6', color: '#1B2A4A' }}
+              style={{ borderColor: 'var(--color-slate-200)', color: 'var(--color-navy-850)' }}
               placeholder="Role name"
             />
           </div>
           <div>
-            <label htmlFor="role-desc" className="mb-1 block text-sm font-medium" style={{ color: '#1B2A4A' }}>Description (optional)</label>
+            <label htmlFor="role-desc" className="mb-1 block text-sm font-medium" style={{ color: 'var(--color-navy-850)' }}>Description (optional)</label>
             <textarea
               id="role-desc"
               value={createForm.description}
               onChange={(e) => setCreateForm((f) => ({ ...f, description: e.target.value }))}
               className="w-full rounded border px-3 py-2 text-sm focus:outline-none"
-              style={{ borderColor: '#dee2e6', color: '#1B2A4A' }}
+              style={{ borderColor: 'var(--color-slate-200)', color: 'var(--color-navy-850)' }}
               placeholder="Role description"
               rows={3}
             />
@@ -472,16 +470,16 @@ export default function RolesPage() {
           <div className="flex justify-end gap-3">
             <button
               onClick={() => setCreateModalOpen(false)}
-              className="rounded border px-4 py-2 text-sm font-medium transition-colors hover:bg-gray-50"
-              style={{ borderColor: '#dee2e6', color: '#1B2A4A' }}
+              className="rounded border px-4 py-2 text-sm font-medium transition-colors hover:bg-slate-50"
+              style={{ borderColor: 'var(--color-slate-200)', color: 'var(--color-navy-850)' }}
             >
               Cancel
             </button>
             <button
               onClick={handleCreate}
               disabled={!createForm.name.trim()}
-              className="rounded px-4 py-2 text-sm font-medium text-white transition-colors hover:opacity-90 disabled:opacity-50"
-              style={{ backgroundColor: '#F5A623' }}
+              className="rounded px-4 py-2 text-sm font-medium text-accent-ink transition-colors hover:opacity-90 disabled:opacity-50"
+              style={{ backgroundColor: 'var(--color-accent)' }}
             >
               Create Role
             </button>

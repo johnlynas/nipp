@@ -2,6 +2,7 @@
 
 import { useState } from 'react';
 import { Pagination } from './Pagination';
+import { PageSkeleton } from '@/components/dashboard/PageSkeleton';
 
 interface AuditEntry {
   id: string;
@@ -48,51 +49,51 @@ export function AuditLogViewer({ entries, isLoading }: AuditLogViewerProps) {
   }
 
   if (isLoading) {
-    return <div className="py-8 text-center">Loading audit logs...</div>;
+    return <PageSkeleton rows={8} cols={5} />;
   }
 
   return (
     <div>
       <div className="overflow-x-auto">
-        <table className="min-w-full divide-y divide-gray-200" role="table">
-          <thead className="bg-[#1B2A4A]">
+        <table className="min-w-full divide-y divide-slate-200" role="table">
+          <thead className="bg-canvas-subtle border-b" style={{ borderColor: 'var(--color-slate-200)' }}>
             <tr>
-              <th className="px-4 py-2 text-left text-xs font-medium uppercase tracking-wider text-white" scope="col">
+              <th className="px-4 py-2 text-left text-xs font-medium uppercase tracking-wider text-slate-500" scope="col">
                 Timestamp
               </th>
-              <th className="px-4 py-2 text-left text-xs font-medium uppercase tracking-wider text-white" scope="col">
+              <th className="px-4 py-2 text-left text-xs font-medium uppercase tracking-wider text-slate-500" scope="col">
                 User
               </th>
-              <th className="px-4 py-2 text-left text-xs font-medium uppercase tracking-wider text-white" scope="col">
+              <th className="px-4 py-2 text-left text-xs font-medium uppercase tracking-wider text-slate-500" scope="col">
                 Action
               </th>
-              <th className="px-4 py-2 text-left text-xs font-medium uppercase tracking-wider text-white" scope="col">
+              <th className="px-4 py-2 text-left text-xs font-medium uppercase tracking-wider text-slate-500" scope="col">
                 Resource
               </th>
-              <th className="px-4 py-2 text-left text-xs font-medium uppercase tracking-wider text-white" scope="col">
+              <th className="px-4 py-2 text-left text-xs font-medium uppercase tracking-wider text-slate-500" scope="col">
                 Status
               </th>
             </tr>
           </thead>
-          <tbody className="divide-y divide-gray-200 bg-white">
+          <tbody className="divide-y divide-slate-200 bg-white">
             {paginatedEntries.map((entry) => (
               <tr key={entry.id}>
-                <td className="whitespace-nowrap px-4 py-2 text-sm text-gray-500">
+                <td className="whitespace-nowrap px-4 py-2 text-sm text-slate-500">
                   {formatDate(entry.timestamp)}
                 </td>
-                <td className="whitespace-nowrap px-4 py-2 text-sm" style={{ color: '#1B2A4A' }}>
+                <td className="whitespace-nowrap px-4 py-2 text-sm" style={{ color: 'var(--color-navy-850)' }}>
                   {entry.userName || entry.userId || '—'}
                 </td>
-                <td className="whitespace-nowrap px-4 py-2 text-sm font-mono text-gray-600">
+                <td className="whitespace-nowrap px-4 py-2 text-sm font-mono text-slate-600">
                   {entry.action}
                 </td>
-                <td className="whitespace-nowrap px-4 py-2 text-sm text-gray-500">
+                <td className="whitespace-nowrap px-4 py-2 text-sm text-slate-500">
                   {entry.resourceType}
                 </td>
                 <td className="whitespace-nowrap px-4 py-2">
                   <span
                     className={`inline-flex rounded-full px-2 py-0.5 text-xs font-medium ${
-                      entry.success ? 'bg-green-100 text-green-800' : 'bg-red-100 text-red-800'
+                      entry.success ? 'text-success bg-success-tint border border-success-border' : 'text-danger-ink bg-danger-tint border border-danger-border'
                     }`}
                   >
                     {entry.success ? 'Success' : 'Failed'}

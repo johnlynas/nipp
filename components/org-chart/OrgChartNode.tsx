@@ -48,27 +48,27 @@ export default function OrgChartNode({
   };
 
   const base =
-    'absolute flex flex-col items-center justify-center rounded-md border text-center transition-colors focus:outline-none focus:ring-2 focus:ring-[#1B2A4A]';
+    'absolute flex flex-col items-center justify-center rounded-md border text-center transition-colors focus:outline-none focus:ring-2 focus:ring-navy-850';
 
   // Complementary fill scheme: navy (org) and amber (team) are colour-wheel
   // opposites; teal (member) bridges the two. Warm/cool fills carry dark ink
   // text for contrast; only the navy org node uses white text.
   const surface = kind === 'org' ? (
     highlighted
-      ? 'bg-[#1B2A4A] text-white border-[#dc3545] border-2'
-      : 'bg-[#1B2A4A] text-white border-[#2A9D8F] border-2'
+      ? 'bg-navy-850 text-white border-danger border-2'
+      : 'bg-navy-850 text-white border-success border-2'
   ) : isTeam ? (
     expanded
-      ? 'bg-[#F5A623] text-[#16233A] border-[#1B2A4A] border-2'
-      : 'bg-[#F5A623] text-[#16233A] border-[#C9861B]'
+      ? 'bg-accent text-[#16233A] border-navy-850 border-2'
+      : 'bg-accent text-[#16233A] border-accent-strong'
   ) : (
-    'bg-[#2A9D8F] text-[#16233A] border-[#1F7A70] hover:border-[#1B2A4A]'
+    'bg-[#2A9D8F] text-[#16233A] border-[#1F7A70] hover:border-navy-850'
   );
 
   // Search highlight: bold outline + slight lift so matches pop without
   // changing the node's shape or position.
   const highlightStyle: React.CSSProperties = highlighted
-    ? { boxShadow: '0 0 0 3px #dc3545, 0 2px 8px rgba(27, 42, 74, 0.35)' }
+    ? { boxShadow: '0 0 0 3px var(--color-danger), 0 2px 8px rgba(27, 42, 74, 0.35)' }
     : {};
 
   return (

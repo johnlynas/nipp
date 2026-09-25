@@ -4,6 +4,7 @@ import { useState, useEffect, useCallback, useRef } from 'react';
 import OrgChart from '@/components/org-chart/OrgChart';
 import OrgChartSidebar from '@/components/org-chart/OrgChartSidebar';
 import type { ChartTree } from '@/components/org-chart/types';
+import { PageSkeleton } from '@/components/dashboard/PageSkeleton';
 
 export default function OrgChartPage() {
   const [orgId, setOrgId] = useState<string | null>(null);
@@ -99,7 +100,7 @@ export default function OrgChartPage() {
   if (loading) {
     return (
       <div className="flex items-center justify-center h-full">
-        <p style={{ color: '#1B2A4A' }}>Loading organization chart...</p>
+        <PageSkeleton rows={4} cols={4} />
       </div>
     );
   }
@@ -107,7 +108,7 @@ export default function OrgChartPage() {
   if (!orgId) {
     return (
       <div className="flex items-center justify-center h-full">
-        <p style={{ color: '#1B2A4A' }}>No organization selected</p>
+        <p style={{ color: 'var(--color-navy-850)' }}>No organization selected</p>
       </div>
     );
   }
@@ -115,11 +116,11 @@ export default function OrgChartPage() {
   if (error && !tree) {
     return (
       <div className="flex flex-col items-center justify-center h-full gap-2">
-        <p style={{ color: '#1B2A4A' }}>{error}</p>
+        <p style={{ color: 'var(--color-navy-850)' }}>{error}</p>
         <button
           onClick={() => fetchTree(orgId)}
           className="rounded px-4 py-2 text-sm text-white"
-          style={{ backgroundColor: '#1B2A4A' }}
+          style={{ backgroundColor: 'var(--color-navy-850)' }}
         >
           Retry
         </button>

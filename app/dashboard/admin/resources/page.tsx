@@ -276,7 +276,7 @@ export default function ResourcesPage() {
           <button
             onClick={() => handleView(r)}
             title="View"
-            className="rounded p-1.5 text-gray-500 hover:bg-[#f8f9fa] transition-colors"
+            className="rounded p-1.5 text-slate-500 hover:bg-canvas-subtle transition-colors"
             aria-label="View resource details"
           >
             <Eye className="h-4 w-4" />
@@ -284,7 +284,7 @@ export default function ResourcesPage() {
           <button
             onClick={() => handleEditClick(r)}
             title="Edit"
-            className="rounded p-1.5 text-gray-500 hover:bg-[#f8f9fa] transition-colors"
+            className="rounded p-1.5 text-slate-500 hover:bg-canvas-subtle transition-colors"
             aria-label="Edit resource"
           >
             <Pencil className="h-4 w-4" />
@@ -292,7 +292,7 @@ export default function ResourcesPage() {
           <button
             onClick={() => handleDeleteClick(r)}
             title="Delete"
-            className="rounded p-1.5 text-gray-500 hover:bg-red-50 hover:text-red-700 transition-colors"
+            className="rounded p-1.5 text-slate-500 hover:bg-danger-tint hover:text-danger-ink transition-colors"
             aria-label="Delete resource"
           >
             <Trash2 className="h-4 w-4" />
@@ -312,10 +312,10 @@ export default function ResourcesPage() {
 
       {/* Error Banner */}
       {error && (
-        <div className="mb-4 rounded border p-3 text-sm" style={{ borderColor: '#dee2e6', backgroundColor: '#fee2e2' }}>
+        <div className="mb-4 rounded border p-3 text-sm" style={{ borderColor: 'var(--color-slate-200)', backgroundColor: '#fee2e2' }}>
           <div className="flex items-center justify-between">
             <span style={{ color: '#991b1b' }}>{error}</span>
-            <button onClick={() => setError(null)} className="text-red-700 hover:text-red-900">
+            <button onClick={() => setError(null)} className="text-danger-ink hover:text-danger-ink/80">
               ✕
             </button>
           </div>
@@ -327,8 +327,8 @@ export default function ResourcesPage() {
         <SearchBar value={search} onChange={setSearch} placeholder="Search resources..." />
         <button
           onClick={() => setCreateModalOpen(true)}
-          className="flex flex-shrink-0 items-center gap-2 rounded px-4 py-2 text-sm font-medium text-white"
-          style={{ backgroundColor: '#F5A623' }}
+          className="flex flex-shrink-0 items-center gap-2 rounded px-4 py-2 text-sm font-medium text-accent-ink"
+          style={{ backgroundColor: 'var(--color-accent)' }}
         >
           <Layers className="h-4 w-4" />
           Create Resource
@@ -360,27 +360,27 @@ export default function ResourcesPage() {
       <Modal isOpen={createModalOpen} onClose={() => setCreateModalOpen(false)} title="Create Resource">
         <div className="space-y-4">
           <div>
-            <label className="mb-1 block text-sm font-medium" style={{ color: '#1B2A4A' }}>
-              Name <span className="text-red-500">*</span>
+            <label className="mb-1 block text-sm font-medium" style={{ color: 'var(--color-navy-850)' }}>
+              Name <span className="text-danger">*</span>
             </label>
             <input
               type="text"
               value={createForm.name}
               onChange={(e) => setCreateForm((f) => ({ ...f, name: e.target.value }))}
               className="w-full rounded border px-3 py-2 text-sm"
-              style={{ borderColor: '#dee2e6', color: '#1B2A4A' }}
+              style={{ borderColor: 'var(--color-slate-200)', color: 'var(--color-navy-850)' }}
               placeholder="e.g., Maintenance Requests"
             />
           </div>
           <div>
-            <label className="mb-1 block text-sm font-medium" style={{ color: '#1B2A4A' }}>
+            <label className="mb-1 block text-sm font-medium" style={{ color: 'var(--color-navy-850)' }}>
               Description
             </label>
             <textarea
               value={createForm.description}
               onChange={(e) => setCreateForm((f) => ({ ...f, description: e.target.value }))}
               className="w-full rounded border px-3 py-2 text-sm"
-              style={{ borderColor: '#dee2e6', color: '#1B2A4A' }}
+              style={{ borderColor: 'var(--color-slate-200)', color: 'var(--color-navy-850)' }}
               rows={3}
               placeholder="Manage maintenance requests..."
             />
@@ -389,14 +389,14 @@ export default function ResourcesPage() {
             <button
               onClick={() => setCreateModalOpen(false)}
               className="rounded border px-4 py-2 text-sm font-medium"
-              style={{ borderColor: '#dee2e6', color: '#1B2A4A' }}
+              style={{ borderColor: 'var(--color-slate-200)', color: 'var(--color-navy-850)' }}
             >
               Cancel
             </button>
             <button
               onClick={handleCreate}
-              className="rounded px-4 py-2 text-sm font-medium text-white"
-              style={{ backgroundColor: '#F5A623' }}
+              className="rounded px-4 py-2 text-sm font-medium text-accent-ink"
+              style={{ backgroundColor: 'var(--color-accent)' }}
             >
               Save
             </button>
@@ -408,26 +408,26 @@ export default function ResourcesPage() {
       <Modal isOpen={editModalOpen} onClose={() => setEditModalOpen(false)} title="Edit Resource">
         <div className="space-y-4">
           <div>
-            <label className="mb-1 block text-sm font-medium" style={{ color: '#1B2A4A' }}>
-              Name <span className="text-red-500">*</span>
+            <label className="mb-1 block text-sm font-medium" style={{ color: 'var(--color-navy-850)' }}>
+              Name <span className="text-danger">*</span>
             </label>
             <input
               type="text"
               value={editForm.name}
               onChange={(e) => setEditForm((f) => ({ ...f, name: e.target.value }))}
               className="w-full rounded border px-3 py-2 text-sm"
-              style={{ borderColor: '#dee2e6', color: '#1B2A4A' }}
+              style={{ borderColor: 'var(--color-slate-200)', color: 'var(--color-navy-850)' }}
             />
           </div>
           <div>
-            <label className="mb-1 block text-sm font-medium" style={{ color: '#1B2A4A' }}>
+            <label className="mb-1 block text-sm font-medium" style={{ color: 'var(--color-navy-850)' }}>
               Description
             </label>
             <textarea
               value={editForm.description}
               onChange={(e) => setEditForm((f) => ({ ...f, description: e.target.value }))}
               className="w-full rounded border px-3 py-2 text-sm"
-              style={{ borderColor: '#dee2e6', color: '#1B2A4A' }}
+              style={{ borderColor: 'var(--color-slate-200)', color: 'var(--color-navy-850)' }}
               rows={3}
             />
           </div>
@@ -435,14 +435,14 @@ export default function ResourcesPage() {
             <button
               onClick={() => setEditModalOpen(false)}
               className="rounded border px-4 py-2 text-sm font-medium"
-              style={{ borderColor: '#dee2e6', color: '#1B2A4A' }}
+              style={{ borderColor: 'var(--color-slate-200)', color: 'var(--color-navy-850)' }}
             >
               Cancel
             </button>
             <button
               onClick={handleUpdate}
-              className="rounded px-4 py-2 text-sm font-medium text-white"
-              style={{ backgroundColor: '#F5A623' }}
+              className="rounded px-4 py-2 text-sm font-medium text-accent-ink"
+              style={{ backgroundColor: 'var(--color-accent)' }}
             >
               Save
             </button>
@@ -455,27 +455,27 @@ export default function ResourcesPage() {
         {selectedResource && (
           <div className="space-y-4">
             <div>
-              <h3 className="text-sm font-medium" style={{ color: '#6b7280' }}>Name</h3>
-              <p className="mt-1 text-base font-semibold" style={{ color: '#1B2A4A' }}>{selectedResource.name}</p>
+              <h3 className="text-sm font-medium" style={{ color: 'var(--color-slate-500)' }}>Name</h3>
+              <p className="mt-1 text-base font-semibold" style={{ color: 'var(--color-navy-850)' }}>{selectedResource.name}</p>
             </div>
             <div>
-              <h3 className="text-sm font-medium" style={{ color: '#6b7280' }}>Description</h3>
-              <p className="mt-1 text-sm" style={{ color: '#374151' }}>
+              <h3 className="text-sm font-medium" style={{ color: 'var(--color-slate-500)' }}>Description</h3>
+              <p className="mt-1 text-sm" style={{ color: 'var(--color-slate-700)' }}>
                 {selectedResource.description || 'No description'}
               </p>
             </div>
             <div>
-              <h3 className="text-sm font-medium" style={{ color: '#6b7280' }}>Assigned Roles</h3>
+              <h3 className="text-sm font-medium" style={{ color: 'var(--color-slate-500)' }}>Assigned Roles</h3>
               {selectedResource.resourceRoles && selectedResource.resourceRoles.length > 0 ? (
                 <ul className="mt-1 space-y-1">
                   {selectedResource.resourceRoles.map((rr) => (
-                    <li key={rr.id} className="text-sm" style={{ color: '#374151' }}>
-                      {rr.role.name} <span style={{ color: '#6b7280' }}>(via {rr.role.organizationId})</span>
+                    <li key={rr.id} className="text-sm" style={{ color: 'var(--color-slate-700)' }}>
+                      {rr.role.name} <span style={{ color: 'var(--color-slate-500)' }}>(via {rr.role.organizationId})</span>
                     </li>
                   ))}
                 </ul>
               ) : (
-                <p className="mt-1 text-sm italic" style={{ color: '#6b7280' }}>No roles assigned</p>
+                <p className="mt-1 text-sm italic" style={{ color: 'var(--color-slate-500)' }}>No roles assigned</p>
               )}
             </div>
           </div>
