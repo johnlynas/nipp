@@ -548,7 +548,7 @@ export default function ScriptsPage() {
       </div>
 
       {/* Page Header */}
-      <PageHeader title="Custom Scripts" description="Background job scheduler for custom scripts" primaryAction={
+      <PageHeader title="" description="Background job scheduler for custom scripts" primaryAction={
         <button
           onClick={() => setCreateModalOpen(true)}
           className="w-full sm:w-auto rounded px-4 py-2 text-center text-sm font-medium text-accent-ink transition-colors hover:opacity-90"

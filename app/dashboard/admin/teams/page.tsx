@@ -293,7 +293,7 @@ export default function TeamsPage() {
       </div>
 
       {/* Page Header */}
-      <PageHeader title="Teams" description="Manage teams within organizations" primaryAction=<button
+      <PageHeader title="" description="Manage teams within organizations" primaryAction=<button
           onClick={() => setCreateModalOpen(true)}
           className="w-full sm:w-auto rounded px-4 py-2 text-center text-sm font-medium text-accent-ink transition-colors hover:opacity-90"
           style={{ backgroundColor: 'var(--color-accent)' }}

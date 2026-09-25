@@ -591,7 +591,7 @@ CalendarEvent, not a model):
 | CalendarEvent | organizationId | ✓ | ✓ | Events incl. recurrence JSON fields |
 
 RLS-only tables (see Two-Layer Strategy above): Organization, AuditLog,
-NotificationLog, Notification, JobDefinition, JobExecution, Permission.
+NotificationLog, Notification, JobDefinition, JobExecution, Permission. (Permission writes — create/update/delete via `/api/dashboard/admin/permissions` — are additionally gated at the DB layer to verified platform admins only: `rls_permission_platform_insert`/`_update`/`_delete` on the `is_platform_admin` flag; tenants have no catalog write path.)
 Exempt: User, Session, Account, Resource, ResourceRole.
 
 ---

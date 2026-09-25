@@ -36,7 +36,7 @@
  */
 import type { PrismaClient } from '@prisma/client';
 import prisma from './db';
-import { buildRLSContextQueries, type RLSContext } from './rls-context';
+import { buildRLSContextQueries, buildOrgRebindQuery, type RLSContext } from './rls-context';
 // Re-exported so downstream callers (lib/platform-db.ts) import the verified
 // context TYPE from this module — the single choke point — and never touch
 // lib/rls-context directly (enforced by ESLint no-restricted-imports).
@@ -76,6 +76,30 @@ function bindAndRun<T>(ctx: RLSContext, op: () => T | Promise<T>, opts?: { txTim
 /** Bind an explicit verified context (never derived from request input). */
 export async function withExplicitRLS<T>(ctx: RLSContext, op: () => T | Promise<T>): Promise<T> {
   return bindAndRun(ctx, op);
+}
+
+/**
+ * Rebind `app.current_org_id` to a NEW org id ON THE ACTIVE PINNED RLS tx
+ * (transaction-local scope — no cross-connection / cross-request leak).
+ *
+ * Needed by platform bootstrap flows that create a tenant AND its child rows in
+ * one operation: the context is bound to the PLATFORM org at the route boundary,
+ * so `Organization` INSERTs pass (platform-admin branch), but every
+ * org-scoped WITH CHECK policy — `("organizationId"::text =
+ * current_setting('app.current_org_id', true))` — rejects rows for a NOT-YET-BOUNDED
+ * org (42501). Rebinding after the Organization row exists binds the same
+ * pinned connection to the new tenant for the rest of the txn: default team,
+ * calendar, and admin Membership INSERTs then pass their WITH CHECK.
+ *
+ * Must run INSIDE an active withRLS/withPlatformContext op (the pinned tx is
+ * where the GUC is visible); calling outside one leaves every policy fail-closed.
+ */
+export async function rebindTxCtxOrg(
+  tx: { $executeRawUnsafe(query: string): Promise<unknown> },
+  orgId: string,
+): Promise<unknown> {
+  if (!orgId) throw new Error('rebindTxCtxOrg: orgId required (fail-closed)');
+  return tx.$executeRawUnsafe(buildOrgRebindQuery(orgId));
 }
 
 /**

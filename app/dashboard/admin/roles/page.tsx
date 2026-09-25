@@ -50,12 +50,12 @@ export default function RolesPage() {
   const [selectedRole, setSelectedRole] = useState<Role | null>(null);
   const [deleteModalOpen, setDeleteModalOpen] = useState(false);
   const [createModalOpen, setCreateModalOpen] = useState(false);
-  const [createForm, setCreateForm] = useState({ name: '', description: '' });
+  const [createForm, setCreateForm] = useState({ name: '', description: '', isDefault: false });
   const [createOrgId, setCreateOrgId] = useState('');
 
   // Edit modal states
   const [editModalOpen, setEditModalOpen] = useState(false);
-  const [editForm, setEditForm] = useState({ name: '', description: '' });
+  const [editForm, setEditForm] = useState({ name: '', description: '', isDefault: false });
 
   // Fetch organizations for dropdown
   useEffect(() => {
@@ -81,7 +81,7 @@ export default function RolesPage() {
   // Reset edit form when modal opens/closes
   useEffect(() => {
     if (!editModalOpen) {
-      setEditForm({ name: '', description: '' });
+      setEditForm({ name: '', description: '', isDefault: false });
     }
   }, [editModalOpen]);
 
@@ -219,7 +219,7 @@ export default function RolesPage() {
       }
 
       setCreateModalOpen(false);
-      setCreateForm({ name: '', description: '' });
+      setCreateForm({ name: '', description: '', isDefault: false });
       setCreateOrgId('');
       fetchData();
     } catch (err) {
@@ -251,7 +251,7 @@ export default function RolesPage() {
           <Eye className="h-4 w-4" />
         </button>
         <button
-          onClick={() => { setSelectedRole(r); setEditForm({ name: r.name, description: r.description || '' }); setEditModalOpen(true); }}
+          onClick={() => { setSelectedRole(r); setEditForm({ name: r.name, description: r.description || '', isDefault: r.isDefault }); setEditModalOpen(true); }}
           title={`Edit ${r.name}`}
           className="rounded p-1.5 text-slate-400 hover:bg-slate-100 hover:text-navy-850 transition-colors"
           aria-label={`Edit ${r.name}`}
@@ -288,7 +288,7 @@ export default function RolesPage() {
       </div>
 
       {/* Page Header */}
-      <PageHeader title="Roles" description="Manage roles within organizations" primaryAction=<button
+      <PageHeader title="" description="Manage roles within organizations" primaryAction=<button
           onClick={() => setCreateModalOpen(true)}
           className="w-full sm:w-auto rounded px-4 py-2 text-center text-sm font-medium text-accent-ink transition-colors hover:opacity-90"
           style={{ backgroundColor: 'var(--color-accent)' }}
@@ -403,6 +403,16 @@ export default function RolesPage() {
                 rows={3}
               />
             </div>
+            <div className="flex items-center gap-2">
+              <input
+                id="edit-role-isDefault"
+                type="checkbox"
+                checked={editForm.isDefault}
+                onChange={(e) => setEditForm((f) => ({ ...f, isDefault: e.target.checked }))}
+                className="h-4 w-4 rounded"
+              />
+              <label htmlFor="edit-role-isDefault" className="text-sm font-medium" style={{ color: 'var(--color-slate-500)' }}>Default</label>
+            </div>
             <div className="flex justify-end gap-3">
               <button
                 onClick={() => setEditModalOpen(false)}
@@ -466,6 +476,16 @@ export default function RolesPage() {
               placeholder="Role description"
               rows={3}
             />
+          </div>
+          <div className="flex items-center gap-2">
+            <input
+              id="role-isDefault"
+              type="checkbox"
+              checked={createForm.isDefault}
+              onChange={(e) => setCreateForm((f) => ({ ...f, isDefault: e.target.checked }))}
+              className="h-4 w-4 rounded"
+            />
+            <label htmlFor="role-isDefault" className="text-sm font-medium" style={{ color: 'var(--color-slate-500)' }}>Default</label>
           </div>
           <div className="flex justify-end gap-3">
             <button

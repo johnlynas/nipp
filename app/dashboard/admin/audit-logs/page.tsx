@@ -47,7 +47,7 @@ export default function AuditLogsPage() {
 
   return (
     <div>
-      <PageHeader title="Security Audit Logs" description="Security-relevant admin actions across all organizations" />
+      <PageHeader title="" description="Security-relevant actions across all organizations" />
 
       {error && (
         <div className="mb-4 rounded-lg border border-danger-border bg-danger-tint p-3 text-sm text-danger-ink" role="alert">

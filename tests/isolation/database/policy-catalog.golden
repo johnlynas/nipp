@@ -20,6 +20,7 @@ Organization | rls_organization_insert | INSERT |
 Organization | rls_organization_select | SELECT | ((id = current_setting('app.current_org_id'::text, true)) OR ((NULLIF(current_setting('app.is_platform_admin'::text, true), ''::text))::integer = 1))
 Organization | rls_organization_update | UPDATE | ((id = current_setting('app.current_org_id'::text, true)) AND ((NULLIF(current_setting('app.is_platform_admin'::text, true), ''::text))::integer = 1))
 Permission | rls_permission_platform_delete | DELETE | ((NULLIF(current_setting('app.is_platform_admin'::text, true), ''::text))::integer = 1)
+Permission | rls_permission_platform_insert | INSERT | 
 Permission | rls_permission_platform_update | UPDATE | ((NULLIF(current_setting('app.is_platform_admin'::text, true), ''::text))::integer = 1)
 Permission | rls_permission_select | SELECT | (((NULLIF(current_setting('app.is_platform_admin'::text, true), ''::text))::integer = 1) OR (EXISTS ( SELECT 1
    FROM "RolePermission" rp
