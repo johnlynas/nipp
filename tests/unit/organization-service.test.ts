@@ -25,7 +25,9 @@ vi.mock('@/lib/tenant-db', () => ({
     member: { create: vi.fn() },
     team: { create: vi.fn() },
     calendar: { create: vi.fn() },
-    $transaction: vi.fn(async (fn: (tx: unknown) => Promise<unknown>) => fn(null)),
+    $transaction: vi.fn(async (fn: (tx: unknown) => Promise<unknown>) =>
+      fn({ $executeRawUnsafe: vi.fn().mockResolvedValue(0) }),
+    ),
   },
 }));
 
@@ -296,6 +298,7 @@ describe('OrganizationService', () => {
           calendar: globalDb.calendar,
           user: globalDb.user,
           member: globalDb.member,
+          $executeRawUnsafe: vi.fn().mockResolvedValue(0),
         };
         return fn(tx as never);
       });
@@ -317,6 +320,7 @@ describe('OrganizationService', () => {
       vi.mocked(globalDb.team.create).mockResolvedValue({ id: 'team-1' } as never);
       vi.mocked(globalDb.calendar.create).mockResolvedValue({ id: 'cal-1' } as never);
 
+      const rebind = vi.fn().mockResolvedValue(0);
       vi.mocked(globalDb.$transaction).mockImplementation(async (fn) => {
         const tx = {
           organization: globalDb.organization,
@@ -324,11 +328,17 @@ describe('OrganizationService', () => {
           calendar: globalDb.calendar,
           user: globalDb.user,
           member: globalDb.member,
+          $executeRawUnsafe: rebind,
         };
         return fn(tx as never);
       });
 
       await OrganizationService.createOrganization({ name: 'Test Org' }, mockCtx('PLATFORM_ADMIN'));
+
+      // RLS WITH CHECK on Team/Calendar/Member binds to app.current_org_id — the
+      // service must rebind it to the NEW org id (transaction-local) before those INSERTs.
+      expect(rebind).toHaveBeenCalledTimes(1);
+      expect(String(rebind.mock.calls[0][0])).toContain("set_config('app.current_org_id', 'new-org', true)");
 
       expect(globalDb.team.create).toHaveBeenCalledWith(
         expect.objectContaining({
@@ -358,6 +368,7 @@ describe('OrganizationService', () => {
           calendar: globalDb.calendar,
           user: globalDb.user,
           member: globalDb.member,
+          $executeRawUnsafe: vi.fn().mockResolvedValue(0),
         };
         return fn(tx as never);
       });
@@ -396,6 +407,7 @@ describe('OrganizationService', () => {
           calendar: globalDb.calendar,
           user: globalDb.user,
           member: globalDb.member,
+          $executeRawUnsafe: vi.fn().mockResolvedValue(0),
         };
         return fn(tx as never);
       });
@@ -427,6 +439,7 @@ describe('OrganizationService', () => {
           calendar: globalDb.calendar,
           user: globalDb.user,
           member: globalDb.member,
+          $executeRawUnsafe: vi.fn().mockResolvedValue(0),
         };
         return fn(tx as never);
       });

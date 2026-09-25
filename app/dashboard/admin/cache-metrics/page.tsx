@@ -109,7 +109,7 @@ export default function CacheMetricsPage() {
         <div className="flex justify-between items-center">
           <div>
             <h1 className="text-xl font-semibold tracking-tight text-slate-900">Cache Metrics</h1>
-            <p className="mt-1 text-sm text-slate-500">Real-time cache performance monitoring</p>
+            <p className="mt-1 text-sm text-slate-500"></p>
           </div>
         </div>
         <div className="bg-danger-tint border border-danger-border p-6 rounded-lg">
@@ -124,7 +124,7 @@ export default function CacheMetricsPage() {
       {/* Page Header */}
       <div className="flex justify-between items-center">
         <div>
-          <h1 className="text-xl font-semibold tracking-tight text-slate-900">Cache Metrics</h1>
+          <h1 className="text-xl font-semibold tracking-tight text-slate-900"></h1>
           <p className="mt-1 text-sm text-slate-500">Real-time cache performance monitoring</p>
         </div>
         <div className="text-sm text-slate-500">

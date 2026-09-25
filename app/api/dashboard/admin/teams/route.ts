@@ -2,9 +2,12 @@ import { NextRequest, NextResponse } from 'next/server';
 import { requireSuperAdmin } from '@/lib/require-super-admin';
 import { checkAdminRateLimit } from '@/lib/rate-limiter';
 
-// RLS Phase 3: team listing/creation run under verified platform contexts.
+// RLS Phase 3: team list runs under a verified platform context (cross-org);
+// the create TARGETS ONE specific org, so it runs under a verified tenant-admin
+// context bound to that org — the Team policy's INSERT WITH CHECK binds writes
+// to app.current_org_id, which must equal the target org (42501 otherwise).
 import tenantDb from '@/lib/tenant-db';
-import { withPlatformContext } from '@/lib/platform-db';
+import { withPlatformContext, withTenantAdminContext } from '@/lib/platform-db';
 import { TeamService } from '@/services/team-service';
 import { notifyTeamOperation } from '@/lib/notification-push';
 
@@ -122,11 +125,12 @@ export async function POST(request: NextRequest) {
     }
 
     try {
-      // RLS: verified platform context on the create target org (WITH CHECK binds the write).
       // Capture to consts so narrowing survives into the closure.
       const teamName = body.name;
       const targetOrgId = body.organizationId;
-      const result = await withPlatformContext(auth.session!.user.id, () =>
+      // RLS: binding must carry the TARGET org (Team INSERT's WITH CHECK binds
+      // the row to app.current_org_id). Platform-org context 42501s here.
+      const result = await withTenantAdminContext(auth.session!.user.id, targetOrgId, () =>
         TeamService.createTeam(
           { name: teamName, slug: body.slug, description: body.description ?? undefined },
           targetOrgId,

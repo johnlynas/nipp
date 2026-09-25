@@ -2,6 +2,7 @@ import { Prisma } from '@prisma/client';
 // RLS plan Phase 3: Organization/User are not in tenantDb's scoped model list —
 // pass-through swap; cross-org listing is platform-admin-only by product model.
 import tenantDb from '@/lib/tenant-db';
+import { rebindTxCtxOrg } from '@/lib/rls-transaction';
 import { logger } from '@/lib/logger';
 import { env } from '@/lib/env';
 import { ServiceContext, ValidationError, NotFoundError, ConflictError, ForbiddenError } from '@/lib/services/types';
@@ -194,6 +195,12 @@ export const OrganizationService = {
         { orgId: organization.id, method: 'Service.createOrganization' },
         'Organization created in transaction',
       );
+
+      // 2b. Bind the new tenant into the RLS context for the rest of this txn.
+      // The pinned tx carries app.current_org_id = platform org (route-boundary
+      // context), so org-scoped WITH CHECK policies (Team/Calendar/Member) would
+      // 42501 on rows for this NOT-YET-BOUNDED org until we rebind it here.
+      await rebindTxCtxOrg(tx as unknown as { $executeRawUnsafe(q: string): Promise<unknown> }, organization.id);
 
       // 3. Create default "Members" team for the organization
       await tx.team.create({

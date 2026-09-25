@@ -122,3 +122,35 @@ describe('platform admin: writes stay bound to context org (WITH CHECK)', () => 
     expect(foreign.rowCount).toBe(0);
   });
 });
+
+describe('Permission catalog: platform-admin-only writes (policy rls_permission_platform_*)', () => {
+  // The global Permission catalog has NO org column — its write policies gate
+  // purely on the verified is_platform_admin flag (admin dashboard create/
+  // update/delete), symmetric for INSERT/UPDATE/DELETE.
+  it('flag=1 CAN insert a new permission', async () => {
+    const res = await probeWrite(
+      c, CTX.platformAtB,
+      `INSERT INTO "Permission" (id, key, resource, action, "updatedAt")
+       VALUES ('x-admin-perm', 'admin:probe', 'admin', 'probe', now())`,
+    );
+    expect(res.error).toBeNull();
+    expect(res.rowCount).toBe(1); // txn rolled back — fixture intact
+  });
+
+  it('flag=0 CANNOT insert a permission (tenant has no write path)', async () => {
+    const res = await probeWrite(
+      c, CTX.tenantA,
+      `INSERT INTO "Permission" (id, key, resource, action, "updatedAt")
+       VALUES ('x-tenant-perm', 'tenant:probe', 'tenant', 'probe', now())`,
+    );
+    expect(res.error).toMatch(/row-level security policy|violates row/i);
+  });
+
+  it('flag=1 CAN update a permission; flag=0 cannot (platform-only UPDATE)', async () => {
+    const admin = await probeWrite(c, CTX.platformAtB, `UPDATE "Permission" SET description='x' WHERE id='perm_view'`);
+    expect(admin.rowCount).toBe(1);
+
+    const tenant = await probeWrite(c, CTX.tenantA, `UPDATE "Permission" SET description='x' WHERE id='perm_view'`);
+    expect(tenant.rowCount).toBe(0); // UPDATE has no tenant branch → silent 0 rows
+  });
+});

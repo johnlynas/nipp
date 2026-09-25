@@ -28,7 +28,7 @@ export interface RLSContext {
   platformOrgId?: string;
 }
 
-function escapeSingleQuotes(s: string): string {
+export function escapeSingleQuotes(s: string): string {
   return s.replace(/'/g, "''");
 }
 
@@ -50,4 +50,17 @@ export function buildRLSContextQueries(c: RLSContext): string {
     exprs.push(`set_config('app.platform_org_id', '${escapeSingleQuotes(c.platformOrgId)}', true)`);
   }
   return `SELECT ${exprs.join(',\n       ')}`;
+}
+
+/**
+ * Build a transaction-local rebind of app.current_org_id to a NEW org id.
+ * Used by platform bootstrap flows (e.g. OrganizationService.createOrganization)
+ * that create a tenant and its child rows in one operation: after the
+ * Organization INSERT, the pinned connection's context org must become the new
+ * tenant so the org-scoped WITH CHECK policies accept the Team/Calendar/Member
+ * bootstraps. Executed on the same interactive tx as the guarded queries —
+ * local=true keeps the rebind inside the transaction only.
+ */
+export function buildOrgRebindQuery(orgId: string): string {
+  return `SELECT set_config('app.current_org_id', '${escapeSingleQuotes(orgId)}', true)`;
 }

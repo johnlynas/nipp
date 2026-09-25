@@ -2,10 +2,23 @@ import { NextRequest, NextResponse } from 'next/server';
 import { requireSuperAdmin } from '@/lib/require-super-admin';
 import { checkAdminRateLimit } from '@/lib/rate-limiter';
 
+import tenantDb from '@/lib/tenant-db';
+import { withPlatformContext, withTenantAdminContext } from '@/lib/platform-db';
 import { TeamService } from '@/services/team-service';
-import { withPlatformContext } from '@/lib/platform-db';
 
 export const runtime = 'nodejs';
+
+/** Best effort: resolve a team's org for a write context (verified platform read). */
+async function resolveTeamOrg(sessionUserId: string, id: string): Promise<string | null> {
+  try {
+    const team = await withPlatformContext(sessionUserId, () =>
+      tenantDb.team.findUnique({ where: { id }, select: { organizationId: true } }),
+    );
+    return team?.organizationId ?? null;
+  } catch {
+    return null;
+  }
+}
 
 /**
  * GET /api/dashboard/admin/teams/[id]/roles
@@ -62,8 +75,15 @@ export async function POST(
       return NextResponse.json({ error: 'Role ID is required' }, { status: 400 });
     }
 
-    // Verified platform context for the team-role assignment.
-    const result = await withPlatformContext(auth.session!.user.id, () =>
+    // RLS: TeamRole INSERT's WITH CHECK binds to app.current_org_id — bind the
+    // team's org (platform context 42501s on non-platform-org rows).
+    const orgId = await resolveTeamOrg(auth.session!.user.id, id);
+    if (!orgId) {
+      console.error(`Failed to assign team role: team not found ${id}`);
+      return NextResponse.json({ error: 'Team not found' }, { status: 404 });
+    }
+
+    const result = await withTenantAdminContext(auth.session!.user.id, orgId, () =>
       TeamService.assignTeamRole(id, { roleId: body.roleId }, {
         userId: auth.session!.user.id,
         role: 'PLATFORM_ADMIN',

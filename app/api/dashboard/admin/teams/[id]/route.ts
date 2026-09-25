@@ -1,9 +1,11 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { requireSuperAdmin } from '@/lib/require-super-admin';
 import { checkAdminRateLimit } from '@/lib/rate-limiter';
-// RLS Phase 3: team ops run under verified platform contexts.
+// RLS Phase 3: team reads run under verified platform contexts; writes UPDATE
+// an org-scoped row, which the policy's WITH CHECK binds to app.current_org_id —
+// so they run under a verified target-org (tenant-admin) context instead.
 import tenantDb from '@/lib/tenant-db';
-import { withPlatformContext } from '@/lib/platform-db';
+import { withPlatformContext, withTenantAdminContext } from '@/lib/platform-db';
 import { TeamService } from '@/services/team-service';
 import { notifyTeamOperation } from '@/lib/notification-push';
 
@@ -96,15 +98,22 @@ export async function PATCH(
     getTeamOrgId(auth.session!.user.id, id),
   ]);
 
+  let result;
   try {
-    // RLS: verified platform context wraps the team update.
-    const result = await withPlatformContext(auth.session!.user.id, () =>
+    const doUpdate = () =>
       TeamService.updateTeam(
         id,
         { name: body.name, description: body.description ?? undefined },
         { userId: auth.session!.user.id, role: 'PLATFORM_ADMIN' }
-      )
-    );
+      );
+    // RLS: UPDATE's WITH CHECK binds to app.current_org_id — bind the team's org.
+    // If the pre-update lookup failed (orgId null), fall back to platform context
+    // (the service then reports NotFound; a successful update is impossible without it).
+    if (orgId) {
+      result = await withTenantAdminContext(auth.session!.user.id, orgId, doUpdate);
+    } else {
+      result = await withPlatformContext(auth.session!.user.id, doUpdate);
+    }
 
     await notifyTeamOperation('update', targetLabel, true, undefined, orgId);
 
