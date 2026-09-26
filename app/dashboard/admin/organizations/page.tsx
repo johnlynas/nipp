@@ -10,6 +10,7 @@ import { PageHeader } from '@/components/dashboard/PageHeader';
 import { StatCard } from '@/components/dashboard/StatCard';
 import { Modal } from '@/components/dashboard/Modal';
 import { ConfirmDialog } from '@/components/dashboard/ConfirmDialog';
+import { OrganizationEditModal } from '@/components/dashboard/OrganizationEditModal';
 import { PaginationControls } from '@/components/admin/PaginationControls';
 
 interface Organization {
@@ -47,9 +48,8 @@ export default function OrganizationsPage() {
   const [createModalOpen, setCreateModalOpen] = useState(false);
   const [createForm, setCreateForm] = useState({ name: '', description: '' });
 
-  // Edit modal states
+  // Edit modal states (form lives inside OrganizationEditModal)
   const [editModalOpen, setEditModalOpen] = useState(false);
-  const [editForm, setEditForm] = useState({ name: '', description: '', status: '' });
 
   // Reset to page 1 when filters change
   useEffect(() => {
@@ -171,61 +171,9 @@ export default function OrganizationsPage() {
     }
   };
 
-  // Handle edit org — delegate status changes to the /status endpoint so ban/unban logic fires.
-  const handleEdit = async () => {
-    if (!selectedOrg) return;
-
-    try {
-      // If status changed, use the /status endpoint (has ban/unban logic)
-      if (editForm.status && editForm.status !== selectedOrg.status) {
-        const res = await fetch(`/api/dashboard/admin/organizations/${selectedOrg.id}/status`, {
-          method: 'PATCH',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ status: editForm.status }),
-        });
-
-        if (!res.ok) {
-          const data = await res.json().catch(() => ({}));
-          throw new Error(data.error || 'Failed to update organization status');
-        }
-
-        // Also update name/description via the generic endpoint if they changed
-        const nameChanged = editForm.name !== selectedOrg.name;
-        const descChanged = (editForm.description || '') !== (selectedOrg.description || '');
-        if (nameChanged || descChanged) {
-          const nameRes = await fetch(`/api/dashboard/admin/organizations/${selectedOrg.id}`, {
-            method: 'PATCH',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ name: editForm.name, description: editForm.description }),
-          });
-          if (!nameRes.ok) {
-            const data = await nameRes.json().catch(() => ({}));
-            throw new Error(data.error || 'Failed to update organization details');
-          }
-        }
-      } else {
-        // Only name/description changed — use generic update
-        const res = await fetch(`/api/dashboard/admin/organizations/${selectedOrg.id}`, {
-          method: 'PATCH',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ name: editForm.name, description: editForm.description }),
-        });
-
-        if (!res.ok) {
-          const data = await res.json().catch(() => ({}));
-          throw new Error(data.error || 'Failed to update organization');
-        }
-      }
-
-      setEditModalOpen(false);
-      fetchData();
-    } catch (err) {
-      const message = err instanceof Error ? err.message : 'Failed to update organization';
-      console.error('Failed to update org:', err);
-      logClientError(message, 'organizations', 'update');
-      setError(message);
-    }
-  };
+  // Handle edit org — the form + save live in OrganizationEditModal; it calls
+  // onSaved after a successful update so we refresh the table (including any
+  // status-ban side effects fired by the /status endpoint).
 
   const columns = [
     { key: 'name', label: 'Name', render: (o: Organization) => (
@@ -248,7 +196,7 @@ export default function OrganizationsPage() {
         </button>
         {o.status !== 'ARCHIVED' && (
           <button
-            onClick={() => { setSelectedOrg(o); setEditForm({ name: o.name, description: o.description || '', status: o.status }); setEditModalOpen(true); }}
+            onClick={() => { setSelectedOrg(o); setEditModalOpen(true); }}
             title={`Edit ${o.name}`}
             className="rounded p-1.5 text-slate-400 hover:bg-slate-100 hover:text-navy-850 transition-colors"
             aria-label={`Edit ${o.name}`}
@@ -420,67 +368,12 @@ export default function OrganizationsPage() {
       </Modal>
 
       {/* Edit Organization Modal */}
-      <Modal isOpen={editModalOpen} onClose={() => setEditModalOpen(false)} title="Edit Organization" size="md">
-        {selectedOrg && (
-          <div className="space-y-4">
-            <div>
-              <label htmlFor="edit-org-name" className="mb-1 block text-sm font-medium" style={{ color: 'var(--color-slate-500)' }}>Name</label>
-              <input
-                id="edit-org-name"
-                type="text"
-                value={editForm.name}
-                onChange={(e) => setEditForm((f) => ({ ...f, name: e.target.value }))}
-                className="w-full rounded border px-3 py-2 text-sm focus:outline-none"
-                style={{ borderColor: 'var(--color-slate-200)', color: 'var(--color-navy-850)' }}
-              />
-            </div>
-            <div>
-              <label htmlFor="edit-org-description" className="mb-1 block text-sm font-medium" style={{ color: 'var(--color-slate-500)' }}>Description</label>
-              <textarea
-                id="edit-org-description"
-                value={editForm.description}
-                onChange={(e) => setEditForm((f) => ({ ...f, description: e.target.value }))}
-                className="w-full rounded border px-3 py-2 text-sm focus:outline-none resize-y"
-                style={{ borderColor: 'var(--color-slate-200)', color: 'var(--color-navy-850)' }}
-                rows={3}
-                placeholder="Organization description"
-              />
-            </div>
-            <div>
-              <label htmlFor="edit-org-status" className="mb-1 block text-sm font-medium" style={{ color: 'var(--color-slate-500)' }}>Status</label>
-              <select
-                id="edit-org-status"
-                value={editForm.status}
-                onChange={(e) => setEditForm((f) => ({ ...f, status: e.target.value }))}
-                className="w-full rounded border px-3 py-2 text-sm focus:outline-none"
-                style={{ borderColor: 'var(--color-slate-200)', color: 'var(--color-navy-850)' }}
-              >
-                <option value="PENDING">Pending</option>
-                <option value="ACTIVE">Active</option>
-                <option value="SUSPENDED">Suspended</option>
-                <option value="ARCHIVED">Archived</option>
-              </select>
-            </div>
-            <div className="flex justify-end gap-3">
-              <button
-                onClick={() => setEditModalOpen(false)}
-                className="rounded border px-4 py-2 text-sm font-medium transition-colors hover:bg-slate-50"
-                style={{ borderColor: 'var(--color-slate-200)', color: 'var(--color-navy-850)' }}
-              >
-                Cancel
-              </button>
-              <button
-                onClick={handleEdit}
-                disabled={!editForm.name.trim()}
-                className="rounded px-4 py-2 text-sm font-medium text-accent-ink transition-colors hover:opacity-90 disabled:opacity-50"
-                style={{ backgroundColor: 'var(--color-accent)' }}
-              >
-                Save Changes
-              </button>
-            </div>
-          </div>
-        )}
-      </Modal>
+      <OrganizationEditModal
+        isOpen={editModalOpen}
+        org={selectedOrg}
+        onClose={() => setEditModalOpen(false)}
+        onSaved={fetchData}
+      />
     </div>
   );
 }

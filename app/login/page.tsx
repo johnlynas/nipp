@@ -350,13 +350,13 @@ function LoginForm() {
           <Wordmark onDark />
 
           <div className="mt-16 w-full max-w-[400px] login-rise-delayed">
-            <h1 className="text-[24px] leading-[1.25] font-semibold tracking-tight text-white">
-              Multi-tenant property management, built for Northern Ireland
+            {/* <h1 className="text-[24px] leading-[1.25] font-semibold tracking-tight text-white">
+               Multi-tenant property management, built for Northern Ireland
+            </h1> */}
+            <span className="mt-4 block h-[2px] w-full bg-accent" aria-hidden="true" />
+            <h1 className="mt-5 text-[17px] leading-relaxed text-white/65">
+              A Multi-tenant property management portal for directors, management agents, tenants and Contractors
             </h1>
-            <span className="mt-4 block h-[3px] w-full bg-accent" aria-hidden="true" />
-            <p className="mt-5 text-[17px] leading-relaxed text-white/65">
-              Management companies, Agents, Tenants and Contractors - one portal to cover them all
-            </p>
           </div>
         </div>
       </aside>

@@ -27,7 +27,7 @@ const roleAgent: ChartRole = {
 
 function makeInput(overrides: Partial<BuildOrgChartInput> = {}): BuildOrgChartInput {
   return {
-    organization: { id: 'org-1', name: 'Dev Tenant Ltd', description: 'A test tenant' },
+    organization: { id: 'org-1', name: 'Dev Tenant Ltd', description: 'A test tenant', status: 'ACTIVE' },
     teams: [
       { id: 'team-z', slug: 'zulu', name: 'Zulu', description: null },
       { id: 'team-a', slug: 'alpha', name: 'Alpha', description: 'First team' },
@@ -73,7 +73,7 @@ function makeInput(overrides: Partial<BuildOrgChartInput> = {}): BuildOrgChartIn
 describe('buildOrgChart', () => {
   it('returns the organization and viewerCanEdit flag unchanged', () => {
     const tree = buildOrgChart(makeInput());
-    expect(tree.organization).toEqual({ id: 'org-1', name: 'Dev Tenant Ltd', description: 'A test tenant' });
+    expect(tree.organization).toEqual({ id: 'org-1', name: 'Dev Tenant Ltd', description: 'A test tenant', status: 'ACTIVE' });
     expect(tree.viewerCanEdit).toBe(true);
   });
 
