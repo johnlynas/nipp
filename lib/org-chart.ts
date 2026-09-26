@@ -51,6 +51,7 @@ export interface ChartOrganization {
   id: string;
   name: string;
   description: string | null;
+  status: 'PENDING' | 'ACTIVE' | 'SUSPENDED' | 'ARCHIVED';
 }
 
 export interface ChartTree {

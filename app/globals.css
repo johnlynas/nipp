@@ -138,6 +138,50 @@ footer::-webkit-scrollbar-thumb {
   border-radius: 4px;
 }
 
+/* Inner scroll areas on dark chrome (nav rules target only the box that scrolls).
+   Track carries the chrome surface (navy-850) so it disappears into the panel. */
+.scroll-dark {
+  scrollbar-width: thin;
+  scrollbar-color: var(--color-navy-700) var(--color-navy-850);
+}
+.scroll-dark::-webkit-scrollbar {
+  width: 8px;
+}
+.scroll-dark::-webkit-scrollbar-track {
+  background: var(--color-navy-850);
+}
+.scroll-dark::-webkit-scrollbar-thumb {
+  background: var(--color-navy-700);
+  border-radius: 4px;
+}
+
+/* One authored entrance for the login page's form panel (exponential ease-out). */
+@keyframes login-rise {
+  from {
+    opacity: 0;
+    transform: translateY(14px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.login-rise {
+  animation: login-rise 0.5s cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+
+.login-rise-delayed {
+  animation: login-rise 0.6s cubic-bezier(0.16, 1, 0.3, 1) 0.08s both;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .login-rise,
+  .login-rise-delayed {
+    animation: none;
+  }
+}
+
 /* Focus ring utility for keyboard navigation (kept for legacy consumers) */
 .focus-ring {
   outline: none;

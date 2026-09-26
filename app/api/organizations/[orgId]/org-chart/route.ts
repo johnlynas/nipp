@@ -141,6 +141,7 @@ return withRLSContext(toTenantContext(access, session.user.id), async () => {
         id: org.id,
         name: org.name,
         description: org.description,
+        status: org.status,
       },
       teams: org.teams.map((team) => ({
         id: team.id,

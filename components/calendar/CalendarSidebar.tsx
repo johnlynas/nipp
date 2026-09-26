@@ -262,7 +262,7 @@ export default function CalendarSidebar({
           {/* Upcoming Events List - scrollable container (min-h-0 lets the
               flex child shrink so a scrollbar appears instead of the list
               overflowing the sidebar page) */}
-          <div className="flex-1 min-h-0 overflow-y-auto px-4 pb-4">
+          <div className="flex-1 min-h-0 overflow-y-auto px-4 pb-4 scroll-dark">
             {upcomingEvents.length === 0 ? (
               <p className="text-sm text-slate-400">No upcoming events</p>
             ) : filteredUpcomingEvents.length === 0 ? (

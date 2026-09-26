@@ -7,6 +7,7 @@ import { logger } from '@/lib/logger';
 import { env } from '@/lib/env';
 import { ServiceContext, ValidationError, NotFoundError, ConflictError, ForbiddenError } from '@/lib/services/types';
 import { requirePlatformAdmin, requireAnyAdmin, logFailedAuth } from '@/lib/services/base-service';
+import { enrollInDefaultMembersTeam } from '@/lib/org-default-team';
 
 // ---------------------------------------------------------------------------
 // Input / Output Types (preserved from original)
@@ -251,6 +252,11 @@ export const OrganizationService = {
             role: 'admin',
           },
         });
+
+        // Auto-enroll the bootstrap admin in the default Members team (the team
+        // was created two steps above; the helper is idempotent either way).
+        await enrollInDefaultMembersTeam(tx, organization.id, user.id);
+
         logger.debug(
           { userId: user.id, orgId: organization.id, method: 'Service.createOrganization' },
           'Member relationship created in transaction',

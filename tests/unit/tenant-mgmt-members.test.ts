@@ -14,9 +14,17 @@ vi.mock('@/lib/tenant-db', () => ({
   default: {
     organization: { findUnique: vi.fn(), update: vi.fn(), delete: vi.fn() },
     user: { findUnique: vi.fn(), create: vi.fn() },
-    member: { findFirst: vi.fn(), findMany: vi.fn(), create: vi.fn(), update: vi.fn(), delete: vi.fn() },
+    member: { findFirst: vi.fn().mockResolvedValue(null), findMany: vi.fn(), create: vi.fn(), update: vi.fn(), delete: vi.fn() },
     rolePermission: { findFirst: vi.fn(), create: vi.fn() },
     role: { findMany: vi.fn() },
+    // Default "Members" team auto-enrollment (lib/org-default-team)
+    team: {
+      findFirst: vi.fn().mockResolvedValue({ id: 'members-team', slug: 'members' }),
+      create: vi.fn(),
+    },
+    teamMember: { findFirst: vi.fn().mockResolvedValue(null), create: vi.fn() },
+    teamRole: { findMany: vi.fn().mockResolvedValue([]) },
+    memberRole: { findFirst: vi.fn().mockResolvedValue(null), create: vi.fn() },
   },
 }));
 
@@ -186,6 +194,65 @@ describe('POST /api/admin/organizations/[orgId]/members', () => {
     expect(response.status).toBe(201);
     const json = await response.json();
     expect(json.message).toBe('Member added successfully');
+  });
+
+  it('should auto-enroll the new member in the org default Members team', async () => {
+    vi.mocked(requireSuperAdmin).mockResolvedValue({
+      authorized: true,
+      session: mockSession,
+    } as any);
+
+    vi.mocked(globalDb.organization.findUnique).mockResolvedValue({ id: 'org-1' } as any);
+    vi.mocked(globalDb.user.findUnique).mockResolvedValue({ id: 'user-1' } as any);
+    vi.mocked(globalDb.member.findFirst).mockResolvedValue(null);
+    vi.mocked(tenantDb.member.create).mockResolvedValue({
+      id: 'member-1',
+      userId: 'user-1',
+      orgId: 'org-1',
+      role: 'member',
+    } as any);
+
+    const response = await POST(
+      createRequest({ email: 'test@example.com', role: 'member' })
+    );
+
+    expect(response.status).toBe(201);
+    expect(tenantDb.teamMember.create).toHaveBeenCalledWith({
+      data: { userId: 'user-1', teamId: 'members-team', organizationId: 'org-1' },
+    });
+  });
+
+  it('should heal a legacy org without a Members team before enrolling', async () => {
+    vi.mocked(requireSuperAdmin).mockResolvedValue({
+      authorized: true,
+      session: mockSession,
+    } as any);
+
+    vi.mocked(globalDb.organization.findUnique).mockResolvedValue({ id: 'org-1' } as any);
+    vi.mocked(globalDb.user.findUnique).mockResolvedValue({ id: 'user-1' } as any);
+    vi.mocked(globalDb.member.findFirst).mockResolvedValue(null);
+    vi.mocked(tenantDb.member.create).mockResolvedValue({
+      id: 'member-1',
+      userId: 'user-1',
+      orgId: 'org-1',
+      role: 'member',
+    } as any);
+
+    // Legacy org: no Members team row exists yet
+    vi.mocked(globalDb.team.findFirst).mockResolvedValue(null);
+    vi.mocked(globalDb.team.create).mockResolvedValue({ id: 'healed-team', slug: 'members' } as never);
+
+    const response = await POST(
+      createRequest({ email: 'test@example.com' })
+    );
+
+    expect(response.status).toBe(201);
+    expect(globalDb.team.create).toHaveBeenCalledWith({
+      data: { name: 'Members', slug: 'members', organizationId: 'org-1' },
+    });
+    expect(tenantDb.teamMember.create).toHaveBeenCalledWith({
+      data: { userId: 'user-1', teamId: 'healed-team', organizationId: 'org-1' },
+    });
   });
 
   it('should create a new user if email does not exist', async () => {

@@ -14,6 +14,9 @@ export default function OrgChartPage() {
   const [sidebarOpen, setSidebarOpen] = useState(true);
   const [organizations, setOrganizations] = useState<{ id: string; name: string }[]>([]);
   const [focusTeamId, setFocusTeamId] = useState<string | null>(null);
+  // Expanded team ids on the canvas — observed (not controlled) so the
+  // sidebar can mirror expansion state without a feedback loop.
+  const [openTeamIds, setOpenTeamIds] = useState<Set<string>>(new Set());
 
   // Track latest orgId for the async init closure below.
   const orgIdRef = useRef<string | null>(null);
@@ -70,6 +73,10 @@ export default function OrgChartPage() {
   // -----------------------------------------------------------------------
   // Tree fetch — refetch whenever the displayed org changes.
   // -----------------------------------------------------------------------
+  const handleOpenTeamsChange = useCallback((ids: Set<string>) => {
+    setOpenTeamIds(ids);
+  }, []);
+
   const fetchTree = useCallback(async (targetOrgId: string) => {
     setError(null);
     try {
@@ -139,6 +146,7 @@ export default function OrgChartPage() {
         organizationId={orgId}
         focusTeamId={focusTeamId}
         onFocusTeamHandled={() => setFocusTeamId(null)}
+        onOpenTeamsChange={handleOpenTeamsChange}
       />
 
       {/* Right slide-in panel (calendar-sidebar pattern) */}
@@ -156,6 +164,7 @@ export default function OrgChartPage() {
         onMemberClick={(userId) => {
           window.location.href = `/admin/users/${userId}/view`;
         }}
+        openTeamIds={openTeamIds}
       />
     </div>
   );

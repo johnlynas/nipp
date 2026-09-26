@@ -19,6 +19,7 @@ import { env } from '@/lib/env';
 import { requireAnyAdmin, logFailedAuth } from '@/lib/services/base-service';
 import { normalizePagination, PaginatedResult, UserFilters } from '@/lib/services/types';
 import { hashPassword } from 'better-auth/crypto';
+import { enrollInDefaultMembersTeam } from '@/lib/org-default-team';
 
 // ---------------------------------------------------------------------------
 // Input Types
@@ -87,22 +88,30 @@ export const UserService = {
       });
     }
 
-    // Tenant Admin creates a Member relationship for their own org
+    // Tenant Admin creates a Member relationship for their own org, and the
+    // user is auto-enrolled in that org's default "Members" team.
     if (ctx.role === 'TENANT_ADMIN' && ctx.organizationId) {
-      await runWithTenant(ctx.organizationId, () =>
-        tenantDb.member.create({
+      await runWithTenant(ctx.organizationId, async () => {
+        await tenantDb.member.create({
           data: { userId: user.id, orgId: ctx.organizationId!, role: 'member' },
-        }),
-      );
+        });
+
+        // Default "Members" team auto-enrollment (idempotent)
+        await enrollInDefaultMembersTeam(tenantDb, ctx.organizationId!, user.id);
+      });
     }
 
-    // Platform Admin can optionally assign the user to a specific org
+    // Platform Admin can optionally assign the user to a specific org; same
+    // default "Members" team enrollment applies.
     if (ctx.role === 'PLATFORM_ADMIN' && data.organizationId) {
-      await runWithTenant(data.organizationId, () =>
-        tenantDb.member.create({
+      await runWithTenant(data.organizationId, async () => {
+        await tenantDb.member.create({
           data: { userId: user.id, orgId: data.organizationId!, role: 'member' },
-        }),
-      );
+        });
+
+        // Default "Members" team auto-enrollment (idempotent)
+        await enrollInDefaultMembersTeam(tenantDb, data.organizationId!, user.id);
+      });
     }
 
     logger.info(

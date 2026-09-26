@@ -13,6 +13,8 @@ interface OrgChartProps {
   /** Team id requested for expansion by the sidebar (cleared after apply). */
   focusTeamId: string | null;
   onFocusTeamHandled: () => void;
+  /** Observation-only sink: current set of expanded team ids on the canvas. */
+  onOpenTeamsChange?: (ids: Set<string>) => void;
 }
 
 // Layout constants (px) before zoom/pan.
@@ -40,7 +42,7 @@ const MAX_ZOOM = 2;
  * Mobile (<768px): vertical accordion layout (org header, team sections,
  * member lists) instead of a tiny zoomable canvas.
  */
-export default function OrgChart({ tree, canEdit, organizationId, focusTeamId, onFocusTeamHandled }: OrgChartProps) {
+export default function OrgChart({ tree, canEdit, organizationId, focusTeamId, onFocusTeamHandled, onOpenTeamsChange }: OrgChartProps) {
   const [openTeamIds, setOpenTeamIds] = useState<Set<string>>(() => new Set());
   // Org node collapse state — defaults to teams visible.
   const [orgOpen, setOrgOpen] = useState(true);
@@ -69,6 +71,12 @@ export default function OrgChart({ tree, canEdit, organizationId, focusTeamId, o
       onFocusTeamHandled();
     }
   }, [focusTeamId, onFocusTeamHandled]);
+
+  // Mirror the expanded ids to the parent (sidebar open-state indicator).
+  // Observation-only: the canvas remains the control owner of this Set.
+  useEffect(() => {
+    onOpenTeamsChange?.(openTeamIds);
+  }, [openTeamIds, onOpenTeamsChange]);
 
   const toggleTeam = useCallback((teamId: string) => {
     setOpenTeamIds((prev) => {
