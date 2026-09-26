@@ -427,10 +427,11 @@ function LoginForm() {
                   aria-pressed={showPassword}
                   className="absolute inset-y-0 right-1 my-auto flex h-10 w-9 items-center justify-center rounded-md text-slate-500 transition-colors hover:text-slate-800 cursor-pointer"
                 >
+                  {/* Open eye = plain text visible; closed eye = masked (default) */}
                   {showPassword ? (
-                    <EyeOff className="h-[18px] w-[18px]" aria-hidden="true" />
-                  ) : (
                     <Eye className="h-[18px] w-[18px]" aria-hidden="true" />
+                  ) : (
+                    <EyeOff className="h-[18px] w-[18px]" aria-hidden="true" />
                   )}
                 </button>
               </div>
