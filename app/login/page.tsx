@@ -4,11 +4,13 @@
  * Login page — Property NI Multi-Tenant Portal.
  *
  * Split-screen layout:
- *   Left  — Branding panel: author-drawn waterfront skyline at dusk
- *           (navy chrome palette, amber window light = the live-status accent)
+ *   Left  — Conceptual branding panel: abstract dusk skyline field
+ *           (two depth layers over a working waterway, sparse amber
+ *           beacons = the live-status accent). Straight edge with a
+ *           soft rounded corner into the canvas.
  *   Right — Sign-in form: email/password (functional), Google & Apple
- *           providers shown for presentation only. Squared (rounded-lg) controls,
- *           no pills.
+ *           providers shown for presentation only. Squared (rounded-lg)
+ *           controls, no pills.
  */
 
 import { Suspense, useEffect, useState, type FormEvent } from 'react';
@@ -81,7 +83,11 @@ function Wordmark({ onDark }: { onDark?: boolean }) {
   );
 }
 
-/* ── Waterfront scene (author SVG, deterministic — SSR-safe) ───── */
+/* ── Abstract skyline field (author SVG, deterministic — SSR-safe) ─
+   Conceptual take on the brand subject: distant city columns over a
+   working waterway at dusk. Two depth layers, one amber horizon line,
+   a pale reflection — drawn entirely in the standard navy palette,
+   amber reserved for the live-status accents. */
 
 function hash(n: number): number {
   let x = (n ^ 61) ^ (n >>> 16);
@@ -95,88 +101,45 @@ function hash(n: number): number {
 const SCENE_W = 640;
 const QUAY_Y = 636;
 
-interface Building {
+interface Column {
   x: number;
   w: number;
   h: number;
   tone: number;
 }
 
-const FRONT_BUILDINGS: Building[] = [
-  { x: 14,  w: 72, h: 208, tone: 0 },
-  { x: 96,  w: 56, h: 284, tone: 1 },
-  { x: 162, w: 88, h: 196, tone: 0 },
-  { x: 260, w: 64, h: 330, tone: 1 },
-  { x: 334, w: 98, h: 250, tone: 0 },
-  { x: 442, w: 72, h: 176, tone: 1 },
-  { x: 524, w: 58, h: 300, tone: 0 },
-  { x: 590, w: 38, h: 206, tone: 1 },
-];
+/** Deterministic row of variable-width columns rising from the horizon. */
+function makeColumns(seed: number, minH: number, spanH: number): Column[] {
+  const cols: Column[] = [];
+  let x = -4;
+  for (let i = 0; i < 60 && x < SCENE_W; i++) {
+    const w = 7 + Math.floor(hash(seed * 131 + i) * 21);        // 7–27px column
+    const h = minH + hash(seed * 97 + i * 7 + 3) * spanH;       // seeded height
+    cols.push({ x: Math.round(x), w, h: Math.round(h), tone: (i + seed) % 2 });
+    x += w + 5 + Math.floor(hash(seed * 53 + i * 11) * 9);      // 5–13px gap
+  }
+  return cols;
+}
 
-const BACK_BUILDINGS: Building[] = [
-  { x: -8,  w: 70,  h: 148, tone: 1 },
-  { x: 72,  w: 84,  h: 118, tone: 0 },
-  { x: 184, w: 66,  h: 92,  tone: 1 },
-  { x: 356, w: 84,  h: 128, tone: 0 },
-  { x: 448, w: 104, h: 142, tone: 1 },
-  { x: 572, w: 76,  h: 104, tone: 0 },
-];
+const BACK_COLUMNS = makeColumns(3, 88, 224);   // far layer — dimmer atmosphere
+const FRONT_COLUMNS = makeColumns(7, 44, 248);  // near layer — crisp chrome tones
 
 const TONES = ['#2B3E66', '#24355C'];
 
-function windowTier(id: number): number {
-  const r = hash(id);
-  if (r > 0.88) return 0.6;   // lit rooms — the amber accent, softly
-  if (r > 0.78) return 0.38;
-  if (r > 0.52) return 0.16;  // dim
-  return 0.05;                // dark glass
-}
-
-function SceneWindows({ b, bi }: { b: Building; bi: number }) {
-  const WIN_W = 11;
-  const WIN_H = 13;
-  const GX = 9;
-  const GY = 11;
-  const topPad = 16;
-  const bottomPad = 12;
-  const cols = Math.floor((b.w - 14 + GX) / (WIN_W + GX));
-  const rows = Math.max(1, Math.floor((b.h - topPad - bottomPad + GY) / (WIN_H + GY)));
-  const gridW = cols * (WIN_W + GX) - GX;
-  const x0 = b.x + (b.w - gridW) / 2;
-  const yTop = QUAY_Y - b.h;
-
-  const wins: { x: number; y: number; o: number }[] = [];
-  for (let r = 0; r < rows; r++) {
-    for (let c = 0; c < cols; c++) {
-      wins.push({
-        x: x0 + c * (WIN_W + GX),
-        y: yTop + topPad + r * (WIN_H + GY),
-        o: windowTier(bi * 431 + r * 37 + c),
-      });
-    }
-  }
-  return (
-    <>
-      {wins.map((w, i) => (
-        <rect key={i} x={w.x} y={w.y} width={WIN_W} height={WIN_H} rx={2.5} fill="#F5A623" opacity={w.o} />
-      ))}
-    </>
-  );
-}
-
-function WaterfrontScene() {
-  const stars = Array.from({ length: 22 }, (_, i) => ({
+function SkylineField() {
+  const stars = Array.from({ length: 18 }, (_, i) => ({
     x: 8 + hash(i * 7 + 1) * (SCENE_W - 16),
-    y: 10 + hash(i * 13 + 5) * 420,
-    r: 0.7 + hash(i * 31 + 9) * 0.9,
-    o: 0.15 + hash(i * 19 + 3) * 0.25,
+    y: 8 + hash(i * 13 + 5) * 400,
+    r: 0.6 + hash(i * 31 + 9) * 0.9,
+    o: 0.12 + hash(i * 19 + 3) * 0.2,
   }));
-  const glints = Array.from({ length: 14 }, (_, i) => ({
-    x: 16 + hash(i * 17 + 2) * (SCENE_W - 90),
-    y: QUAY_Y + 22 + i * ((900 - QUAY_Y - 40) / 14) + hash(i * 29) * 8,
-    w: 26 + hash(i * 3 + 8) * 44,
-    o: 0.05 + hash(i * 5 + 4) * 0.09,
+  const glints = Array.from({ length: 9 }, (_, i) => ({
+    x: 18 + hash(i * 17 + 4) * (SCENE_W - 80),
+    y: QUAY_Y + 18 + i * ((900 - QUAY_Y - 30) / 9) + hash(i * 29 + 6) * 6,
+    w: 24 + hash(i * 3 + 8) * 40,
+    o: 0.04 + hash(i * 5 + 4) * 0.07,
   }));
+  const beaconIdx = [3, 10, 17].filter((i) => i < FRONT_COLUMNS.length);
 
   return (
     <svg
@@ -192,19 +155,10 @@ function WaterfrontScene() {
           <stop offset="1" stopColor="#1B2A4A" />
         </linearGradient>
         <linearGradient id="login-water" x1="0" y1="0" x2="0" y2="1">
-          <stop offset="0" stopColor="#121C30" />
-          <stop offset="1" stopColor="#0B1322" />
+          <stop offset="0" stopColor="#0E1830" />
+          <stop offset="1" stopColor="#0A1120" />
         </linearGradient>
-        <radialGradient id="login-moon-halo">
-          <stop offset="0" stopColor="#F8FAFC" stopOpacity="0.2" />
-          <stop offset="0.55" stopColor="#F8FAFC" stopOpacity="0.06" />
-          <stop offset="1" stopColor="#F8FAFC" stopOpacity="0" />
-        </radialGradient>
-        <linearGradient id="login-glint" x1="0" y1="0" x2="0" y2="1">
-          <stop offset="0" stopColor="#F5A623" stopOpacity="0.16" />
-          <stop offset="1" stopColor="#F5A623" stopOpacity="0" />
-        </linearGradient>
-        {/* Horizon haze — dissolves the skyline into the sky */}
+        {/* Horizon haze — dissolves the far layer into the sky */}
         <linearGradient id="login-haze" x1="0" y1="0" x2="0" y2="1">
           <stop offset="0" stopColor="#1B2A4A" stopOpacity="0" />
           <stop offset="1" stopColor="#1B2A4A" stopOpacity="0.85" />
@@ -223,55 +177,50 @@ function WaterfrontScene() {
         <circle key={i} cx={s.x} cy={s.y} r={s.r} fill="#F8FAFC" opacity={s.o} filter="url(#login-blur-sm)" />
       ))}
 
-      {/* Moon — diffused disc and broad halo */}
-      <circle cx={506} cy={142} r={110} fill="url(#login-moon-halo)" />
-      <circle cx={506} cy={142} r={34} fill="#F8FAFC" opacity={0.85} filter="url(#login-blur-sm)" />
-
-      {/* Distant birds */}
-      <g stroke="#F8FAFC" strokeWidth="1.4" fill="none" strokeLinecap="round" opacity={0.3} filter="url(#login-blur-sm)">
-        <path d="M118 168q7-6 14 0q7-6 14 0" />
-        <path d="M172 196q6-5 12 0q6-5 12 0" />
-        <path d="M84 236q5-4 10 0q5-4 10 0" />
-      </g>
-
-      {/* Back skyline (silhouette, softened) */}
-      <g filter="url(#login-blur-lg)">
-        {BACK_BUILDINGS.map((b, i) => (
-          <rect key={i} x={b.x} y={QUAY_Y - b.h} width={b.w} height={b.h} fill="#1A2743" rx={6} />
+      {/* Far columns — atmospheric depth layer */}
+      <g filter="url(#login-blur-lg)" opacity={0.55}>
+        {BACK_COLUMNS.map((c, i) => (
+          <rect key={i} x={c.x} y={QUAY_Y - c.h} width={c.w} height={c.h} fill="#24355C" rx={2} />
         ))}
       </g>
 
-      {/* Front buildings + window light */}
+      {/* Horizon haze over the far layer */}
+      <rect x={0} y={QUAY_Y - 110} width={SCENE_W} height={110} fill="url(#login-haze)" />
+
+      {/* Near columns — crisp, alternating chrome tones */}
       <g filter="url(#login-blur-sm)">
-        {FRONT_BUILDINGS.map((b, i) => (
-          <rect key={i} x={b.x} y={QUAY_Y - b.h} width={b.w} height={b.h} fill={TONES[b.tone]} rx={4} />
+        {FRONT_COLUMNS.map((c, i) => (
+          <rect key={i} x={c.x} y={QUAY_Y - c.h} width={c.w} height={c.h} fill={TONES[c.tone]} rx={2} />
         ))}
       </g>
 
-      {/* Horizon haze over the skyline — atmospheric depth */}
-      <rect x={0} y={QUAY_Y - 120} width={SCENE_W} height={120} fill="url(#login-haze)" />
-
-      {/* Window light (kept above the haze, blurred once as a group — soft bokeh) */}
+      {/* Beacon lights — the city is occupied */}
       <g filter="url(#login-blur-sm)">
-        {FRONT_BUILDINGS.map((b, i) => <SceneWindows key={i} b={b} bi={i + 1} />)}
+        {beaconIdx.map((i) => {
+          const c = FRONT_COLUMNS[i];
+          return (
+            <circle key={i} cx={c.x + c.w / 2} cy={QUAY_Y - c.h - 3} r={1.7} fill="#F5A623" opacity={0.45} />
+          );
+        })}
       </g>
-      <g filter="url(#login-blur-sm)" opacity={0.75}>
-        {FRONT_BUILDINGS.map((b, i) => (
-          <rect key={i} x={b.x} y={QUAY_Y - b.h} width={b.w} height={14} fill="#F5A623" opacity={0.08} />
-        ))}
-      </g>
-
-      {/* Quay edge — the accent line marking the working waterway */}
-      <rect x={0} y={QUAY_Y - 4} width={SCENE_W} height={8} fill="#121C30" opacity={0.9} />
-      <line x1={0} y1={QUAY_Y + 4} x2={SCENE_W} y2={QUAY_Y + 4} stroke="#F5A623" strokeWidth={1} opacity={0.3} />
 
       {/* Water */}
       <rect x={0} y={QUAY_Y + 4} width={SCENE_W} height={900 - QUAY_Y - 4} fill="url(#login-water)" />
+
+      {/* Reflection — near columns mirrored, compressed and dimmed */}
+      <g transform={`translate(0 ${2 * QUAY_Y}) scale(1 -0.5)`} filter="url(#login-blur-lg)" opacity={0.4}>
+        {FRONT_COLUMNS.map((c, i) => (
+          <rect key={i} x={c.x} y={QUAY_Y - c.h} width={c.w} height={c.h} fill={TONES[c.tone]} rx={2} />
+        ))}
+      </g>
+
+      {/* Amber horizon — the working waterway, a live-status line */}
+      <line x1={0} y1={QUAY_Y + 4.5} x2={SCENE_W} y2={QUAY_Y + 4.5} stroke="#F5A623" strokeWidth={1.2} opacity={0.4} />
+
+      {/* Quiet amber glints on the water */}
       {glints.map((g, i) => (
-        <rect key={i} x={g.x} y={g.y} width={g.w} height={2.5} rx={1.25} fill="#F5A623" opacity={g.o * 0.8} filter="url(#login-blur-sm)" />
+        <rect key={i} x={g.x} y={g.y} width={g.w} height={2} rx={1} fill="#F5A623" opacity={g.o * 0.9} filter="url(#login-blur-sm)" />
       ))}
-      {/* Moon glint column */}
-      <rect x={470} y={QUAY_Y + 8} width={72} height={900 - QUAY_Y - 16} fill="url(#login-glint)" opacity={0.5} filter="url(#login-blur-lg)" />
     </svg>
   );
 }
@@ -339,23 +288,21 @@ function LoginForm() {
 
   return (
     <div className="min-h-screen flex bg-canvas-subtle">
-      {/* ── Left panel: Branding + waterfront scene ─────────────── */}
-      <aside className="relative hidden lg:flex lg:w-[46%] overflow-hidden bg-navy-950">
-        <WaterfrontScene />
+      {/* ── Left panel: Branding + skyline field ───────────────── */}
+      <aside className="relative hidden lg:flex lg:w-[46%] overflow-hidden rounded-r-[28px] bg-navy-950">
+        <SkylineField />
 
         {/* Readability fade behind the heading block */}
         <div className="absolute inset-x-0 bottom-0 h-72 bg-gradient-to-t from-navy-950 via-navy-950/60 to-transparent" />
 
-        <div className="relative z-10 flex h-full w-full flex-col justify-between p-12">
+        <div className="relative z-10 flex h-full w-full flex-col justify-between px-12 pt-12 pb-[clamp(88px,14vh,176px)]">
           <Wordmark onDark />
 
-          <div className="mt-16 w-full max-w-[400px] login-rise-delayed">
-            {/* <h1 className="text-[24px] leading-[1.25] font-semibold tracking-tight text-white">
-               Multi-tenant property management, built for Northern Ireland
-            </h1> */}
-            <span className="mt-4 block h-[2px] w-full bg-accent" aria-hidden="true" />
-            <h1 className="mt-5 text-[17px] leading-relaxed text-white/65">
-              A Multi-tenant property management portal for directors, management agents, tenants and Contractors
+          {/* Statement block — anchored over the quiet water below the horizon */}
+          <div className="w-full max-w-[400px] login-rise-delayed">
+            <span className="block h-[2px] w-16 bg-accent" aria-hidden="true" />
+            <h1 className="mt-5 text-[17px] leading-relaxed text-white/70">
+              A Multi-tenant property management portal for directors, management agents, tenants and contractors
             </h1>
           </div>
         </div>
@@ -402,7 +349,7 @@ function LoginForm() {
             {/* User ID (email) input */}
             <div className="mb-5">
               <label htmlFor="email" className="block text-sm font-medium text-slate-900 mb-2">
-                User ID (Email)
+                User ID
               </label>
               <input
                 id="email"
@@ -411,7 +358,7 @@ function LoginForm() {
                 required
                 value={email}
                 onChange={(e) => setEmail(e.target.value)}
-                placeholder="you@organisation.gov.uk"
+                placeholder="Enter your email address"
                 className="w-full h-12 px-4 rounded-lg border border-slate-300 bg-white text-slate-900 text-base outline-none box-border focus:border-navy-700 focus:ring-[3px] focus:ring-accent/25 transition-shadow"
               />
             </div>
