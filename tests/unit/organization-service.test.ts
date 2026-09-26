@@ -22,8 +22,13 @@ vi.mock('@/lib/tenant-db', () => ({
       groupBy: vi.fn().mockResolvedValue([]),
     },
     user: { findUnique: vi.fn(), create: vi.fn() },
-    member: { create: vi.fn() },
-    team: { create: vi.fn() },
+    member: { create: vi.fn(), findFirst: vi.fn().mockResolvedValue(null) },
+    team: {
+      // Default "Members" team exists, so enrollment paths run harmlessly in
+      // legacy tests; per-test overrides assert the specifics.
+      findFirst: vi.fn().mockResolvedValue({ id: 'default-members-team', slug: 'members' }),
+      create: vi.fn(),
+    },
     calendar: { create: vi.fn() },
     $transaction: vi.fn(async (fn: (tx: unknown) => Promise<unknown>) =>
       fn({ $executeRawUnsafe: vi.fn().mockResolvedValue(0) }),
@@ -368,6 +373,10 @@ describe('OrganizationService', () => {
           calendar: globalDb.calendar,
           user: globalDb.user,
           member: globalDb.member,
+          // Default-Members-team auto-enrollment models
+          teamMember: { findFirst: vi.fn(), create: vi.fn() },
+          teamRole: { findMany: vi.fn().mockResolvedValue([]) },
+          memberRole: { findFirst: vi.fn().mockResolvedValue(null), create: vi.fn() },
           $executeRawUnsafe: vi.fn().mockResolvedValue(0),
         };
         return fn(tx as never);
@@ -384,6 +393,50 @@ describe('OrganizationService', () => {
           data: expect.objectContaining({ userId: 'admin-user-1', orgId: 'new-org', role: 'admin' }),
         }),
       );
+    });
+
+    it('auto-enrolls the bootstrap admin in the default Members team', async () => {
+      vi.mocked(globalDb.organization.findFirst).mockResolvedValue(null);
+      vi.mocked(globalDb.organization.create).mockResolvedValue(mockOrg({ id: 'new-org' }) as never);
+      vi.mocked(globalDb.calendar.create).mockResolvedValue({ id: 'cal-1' } as never);
+      const existingUser = { id: 'admin-user-1', email: 'admin@test.com', name: 'admin' };
+      vi.mocked(globalDb.user.findUnique).mockResolvedValue(existingUser as never);
+      vi.mocked(globalDb.member.create).mockResolvedValue({ id: 'm-1' } as never);
+
+      // Default Members team does not exist yet → helper must create it first
+      const txTeamFindFirst = vi.fn().mockResolvedValue(null);
+      const txTeamCreate = vi.fn().mockResolvedValue({ id: 'members-team', slug: 'members' });
+      const txTeamMemberFindFirst = vi.fn().mockResolvedValue(null);
+      const txTeamMemberCreate = vi.fn().mockResolvedValue({ id: 'tm-1' });
+
+      vi.mocked(globalDb.$transaction).mockImplementation(async (fn) => {
+        const tx = {
+          organization: globalDb.organization,
+          team: { findFirst: txTeamFindFirst, create: txTeamCreate },
+          calendar: globalDb.calendar,
+          user: globalDb.user,
+          member: globalDb.member,
+          teamMember: { findFirst: txTeamMemberFindFirst, create: txTeamMemberCreate },
+          teamRole: { findMany: vi.fn().mockResolvedValue([]) },
+          memberRole: { findFirst: vi.fn().mockResolvedValue(null), create: vi.fn() },
+          $executeRawUnsafe: vi.fn().mockResolvedValue(0),
+        };
+        return fn(tx as never);
+      });
+
+      await OrganizationService.createOrganization(
+        { name: 'Test Org', adminEmail: 'admin@test.com' },
+        mockCtx('PLATFORM_ADMIN'),
+      );
+
+      // Legacy/missing-team healing: the Members team is created in-txn…
+      expect(txTeamCreate).toHaveBeenCalledWith({
+        data: { name: 'Members', slug: 'members', organizationId: 'new-org' },
+      });
+      // …and the bootstrap admin is enrolled in it
+      expect(txTeamMemberCreate).toHaveBeenCalledWith({
+        data: { userId: 'admin-user-1', teamId: 'members-team', organizationId: 'new-org' },
+      });
     });
 
     it('retries with a numeric slug suffix on P2002 collision, then succeeds', async () => {

@@ -1,5 +1,6 @@
 import tenantDb from './tenant-db';
 import { getRedis } from '@/lib/redis';
+import { enrollInDefaultMembersTeam } from '@/lib/org-default-team';
 
 /**
  * Bootstraps default roles and permissions for a newly created organization.
@@ -140,6 +141,9 @@ export async function bootstrapOrganizationRoles(organizationId: string, creator
           },
         });
       }
+
+      // Auto-enroll the creator in the default "Members" team (idempotent)
+      await enrollInDefaultMembersTeam(tenantDb, organizationId, creatorUserId);
 
       // Create member-role association
       await tenantDb.memberRole.create({

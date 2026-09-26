@@ -21,7 +21,15 @@ vi.mock('@/lib/tenant-db', () => ({
     },
     member: { findFirst: vi.fn(), findMany: vi.fn(), create: vi.fn(), deleteMany: vi.fn() },
     account: { create: vi.fn() },
-    teamMember: { findMany: vi.fn() },
+    teamMember: { findMany: vi.fn(), findFirst: vi.fn().mockResolvedValue(null), create: vi.fn() },
+    // lib/org-default-team (default Members team auto-enrollment) — defaults keep
+    // legacy creation tests passing; per-test overrides assert the specifics.
+    team: {
+      findFirst: vi.fn().mockResolvedValue({ id: 'default-members-team', slug: 'members' }),
+      create: vi.fn(),
+    },
+    teamRole: { findMany: vi.fn().mockResolvedValue([]) },
+    memberRole: { findFirst: vi.fn().mockResolvedValue(null), create: vi.fn() },
   },
 }));
 
@@ -115,6 +123,74 @@ describe('UserService', () => {
       await expect(
         UserService.create({ email: 'test@example.com', name: 'X' }, mockCtx('PLATFORM_ADMIN'))
       ).rejects.toThrow(/already exists/i);
+    });
+
+    it('auto-enrolls the user in the org default Members team for TENANT_ADMIN', async () => {
+      vi.mocked(globalDb.user.findUnique).mockResolvedValue(null);
+      vi.mocked(globalDb.user.create).mockResolvedValue(castUser(mockUser({ id: 'new-user' })) as never);
+      vi.mocked(globalDb.member.create).mockResolvedValue({ id: 'm-1' } as never);
+      // Default Members team exists; user not enrolled yet
+      vi.mocked(globalDb.team.findFirst).mockResolvedValue({ id: 'members-team', slug: 'members' } as never);
+      vi.mocked(globalDb.teamMember.findFirst).mockResolvedValue(null as never);
+      vi.mocked(globalDb.teamMember.create).mockResolvedValue({ id: 'tm-1' } as never);
+      vi.mocked(globalDb.memberRole.findFirst).mockResolvedValue(null as never);
+
+      await UserService.create(
+        { email: 'new@example.com', name: 'New User' },
+        mockCtx('TENANT_ADMIN', 'org-1'),
+      );
+
+      expect(globalDb.teamMember.create).toHaveBeenCalledWith({
+        data: { userId: 'new-user', teamId: 'members-team', organizationId: 'org-1' },
+      });
+    });
+
+    it('auto-enrolls the user in the org default Members team for PLATFORM_ADMIN with target org', async () => {
+      vi.mocked(globalDb.user.findUnique).mockResolvedValue(null);
+      vi.mocked(globalDb.user.create).mockResolvedValue(castUser(mockUser({ id: 'new-user' })) as never);
+      vi.mocked(globalDb.member.create).mockResolvedValue({ id: 'm-1' } as never);
+      vi.mocked(globalDb.team.findFirst).mockResolvedValue({ id: 'members-team', slug: 'members' } as never);
+      vi.mocked(globalDb.teamMember.findFirst).mockResolvedValue(null as never);
+      vi.mocked(globalDb.teamMember.create).mockResolvedValue({ id: 'tm-1' } as never);
+      vi.mocked(globalDb.memberRole.findFirst).mockResolvedValue(null as never);
+
+      await UserService.create(
+        { email: 'new@example.com', name: 'New User', organizationId: 'target-org' },
+        mockCtx('PLATFORM_ADMIN'),
+      );
+
+      expect(globalDb.teamMember.create).toHaveBeenCalledWith({
+        data: { userId: 'new-user', teamId: 'members-team', organizationId: 'target-org' },
+      });
+    });
+
+    it('skips enrollment when the user stays unaffiliated (no org context)', async () => {
+      vi.mocked(globalDb.user.findUnique).mockResolvedValue(null);
+      vi.mocked(globalDb.user.create).mockResolvedValue(castUser(mockUser({ id: 'new-user' })) as never);
+
+      await UserService.create(
+        { email: 'new@example.com', name: 'New User' },
+        mockCtx('PLATFORM_ADMIN'),
+      );
+
+      expect(globalDb.team.findFirst).not.toHaveBeenCalled();
+      expect(globalDb.teamMember.create).not.toHaveBeenCalled();
+    });
+
+    it('is idempotent: does not re-create the team membership when already enrolled', async () => {
+      vi.mocked(globalDb.user.findUnique).mockResolvedValue(null);
+      vi.mocked(globalDb.user.create).mockResolvedValue(castUser(mockUser({ id: 'new-user' })) as never);
+      vi.mocked(globalDb.member.create).mockResolvedValue({ id: 'm-1' } as never);
+      vi.mocked(globalDb.team.findFirst).mockResolvedValue({ id: 'members-team', slug: 'members' } as never);
+      // Already a team member → enrollment short-circuits before creating
+      vi.mocked(globalDb.teamMember.findFirst).mockResolvedValue({ id: 'tm-existing' } as never);
+
+      await UserService.create(
+        { email: 'new@example.com', name: 'New User' },
+        mockCtx('TENANT_ADMIN', 'org-1'),
+      );
+
+      expect(globalDb.teamMember.create).not.toHaveBeenCalled();
     });
   });
 

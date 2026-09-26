@@ -15,6 +15,7 @@ import { recordAuditLog } from '@/lib/audit-log';
 import { logger } from '@/lib/logger';
 import { wrapPiiRoute, PiiRouteParams } from '@/lib/payload-middleware';
 import { checkAdminRateLimit } from '@/lib/rate-limiter';
+import { enrollInDefaultMembersTeam } from '@/lib/org-default-team';
 
 export const runtime = 'nodejs';
 
@@ -155,6 +156,10 @@ export const POST = wrapPiiRoute(async (request, decryptedBody, params) => {
         data: { userId: user.id, orgId: urlOrgId, role: role || 'member' },
         include: { user: { select: { name: true, email: true } } },
       });
+
+      // Auto-enroll the new member in the org's default "Members" team
+      // (idempotent; also self-heals legacy orgs missing the team).
+      await enrollInDefaultMembersTeam(tenantDb, urlOrgId, user.id);
 
       // Audit log
       await recordAuditLog({
