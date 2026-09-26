@@ -26,6 +26,18 @@ vi.mock('@/lib/db', () => {
     },
     memberRole: {
       create: vi.fn(),
+      findFirst: vi.fn(),
+    },
+    team: {
+      findFirst: vi.fn(),
+      create: vi.fn(),
+    },
+    teamMember: {
+      findFirst: vi.fn(),
+      create: vi.fn(),
+    },
+    teamRole: {
+      findMany: vi.fn(),
     },
   };
   return { default: mockPrisma, prisma: mockPrisma };
@@ -36,10 +48,17 @@ vi.mock('@/lib/redis', () => ({
   getRedis: vi.fn(() => mockRedisClient),
 }));
 
+// Mock the default-Teams enrollment so bootstrap tests stay deterministic;
+// individual tests override to simulate failures.
+vi.mock('@/lib/org-default-team', () => ({
+  enrollInDefaultMembersTeam: vi.fn().mockResolvedValue(undefined),
+}));
+
 // Import AFTER mocks
 import { bootstrapOrganizationRoles } from '@/lib/org-bootstrap';
 import { prisma } from '@/lib/db';
 import { getRedis } from '@/lib/redis';
+import { enrollInDefaultMembersTeam } from '@/lib/org-default-team';
 
 describe('bootstrapOrganizationRoles', () => {
   beforeEach(() => {
@@ -94,6 +113,35 @@ describe('bootstrapOrganizationRoles', () => {
     vi.mocked(prisma.member.findFirst).mockResolvedValue(null as any);
     vi.mocked(prisma.member.create).mockResolvedValue({ id: 'member-1', createdAt: new Date(), updatedAt: new Date(), userId: 'user-1', orgId: 'org-1', role: 'admin' } as any);
     vi.mocked(prisma.memberRole.create).mockResolvedValue({ id: 'test-id', createdAt: new Date(), updatedAt: new Date(), organizationId: 'test-org-id', memberId: 'test-member-id', roleId: 'test-role-id' } as any);
+    vi.mocked(prisma.member.findMany).mockResolvedValue([] as any);
+
+    await bootstrapOrganizationRoles('org-1', 'user-1');
+
+    expect(prisma.memberRole.create).toHaveBeenCalledWith({
+      data: {
+        memberId: 'member-1',
+        organizationId: 'org-1',
+        roleId: 'admin-role-id',
+      },
+    });
+  });
+
+  it('still assigns Organization Admin when Members-team enrollment fails', async () => {
+    // Regression: a Teams-side failure (which is best-effort) must not stop
+    // the creator from receiving the role — enrollment runs before the
+    // memberRole.create and its error was previously swallowed, silently
+    // demoting brand-new org creators.
+    vi.mocked(enrollInDefaultMembersTeam).mockRejectedValue(new Error('Teams DB down'));
+
+    vi.mocked(prisma.role.createMany).mockResolvedValue({ count: 7 } as any);
+    vi.mocked(prisma.role.findMany).mockResolvedValue([
+      { id: 'admin-role-id', name: 'Organization Admin', createdAt: new Date(), updatedAt: new Date(), organizationId: 'org-1', description: null, isDefault: true } as any,
+    ]);
+    vi.mocked(prisma.permission.findMany).mockResolvedValue([] as any);
+    vi.mocked(prisma.rolePermission.createMany).mockResolvedValue({ count: 0 } as any);
+    vi.mocked(prisma.member.findFirst).mockResolvedValue(null as any);
+    vi.mocked(prisma.member.create).mockResolvedValue({ id: 'member-1', createdAt: new Date(), updatedAt: new Date(), userId: 'user-1', orgId: 'org-1', role: 'admin' } as any);
+    vi.mocked(prisma.memberRole.create).mockResolvedValue({ id: 'test-id', createdAt: new Date(), updatedAt: new Date(), organizationId: 'org-1', memberId: 'member-1', roleId: 'admin-role-id' } as any);
     vi.mocked(prisma.member.findMany).mockResolvedValue([] as any);
 
     await bootstrapOrganizationRoles('org-1', 'user-1');

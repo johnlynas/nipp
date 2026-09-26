@@ -142,8 +142,15 @@ export async function bootstrapOrganizationRoles(organizationId: string, creator
         });
       }
 
-      // Auto-enroll the creator in the default "Members" team (idempotent)
-      await enrollInDefaultMembersTeam(tenantDb, organizationId, creatorUserId);
+      // Auto-enroll the creator in the default "Members" team (idempotent).
+      // Best-effort: a Teams-side failure must NOT prevent the creator from
+      // being granted Organization Admin — that role assignment is the whole
+      // point of this bootstrap and runs after enrollment below.
+      try {
+        await enrollInDefaultMembersTeam(tenantDb, organizationId, creatorUserId);
+      } catch (error) {
+        console.error(`[Bootstrap] Failed to auto-enroll ${creatorUserId} in the Members team for organization ${organizationId}:`, error);
+      }
 
       // Create member-role association
       await tenantDb.memberRole.create({
