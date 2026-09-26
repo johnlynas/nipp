@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useRef, useEffect, useMemo } from 'react';
-import { UsersRound, Settings, Shield, ChevronDown, Building2, ExternalLink, X, ChevronLeft } from 'lucide-react';
+import { UsersRound, Settings, Shield, ChevronDown, Building2, ExternalLink, X, Menu } from 'lucide-react';
 import type { ChartTree } from './types';
 import { OrganizationEditModal } from '@/components/dashboard/OrganizationEditModal';
 import { initialsOf, slugLabel } from './panel-utils';
@@ -216,9 +216,7 @@ export default function OrgChartSidebar({
                 className="rounded p-1.5 text-slate-300 hover:text-white hover:bg-navy-800 transition-colors"
                 aria-label="Collapse sidebar"
               >
-                <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-                </svg>
+                <X className="h-5 w-5" />
               </button>
             </div>
           </div>
@@ -399,7 +397,7 @@ export default function OrgChartSidebar({
           </div>
         </>
       ) : (
-        /* Collapsed rail — single arrow distinct from the left nav's burger */
+        /* Collapsed rail — same hamburger as the main nav so both panels expand identically */
         <div className="flex flex-col items-center pt-3">
           <button
             onClick={onToggle}
@@ -407,7 +405,7 @@ export default function OrgChartSidebar({
             aria-label="Expand sidebar"
             className="rounded p-2 text-slate-400 hover:text-white hover:bg-navy-800 transition-colors"
           >
-            <ChevronLeft className="h-[30px] w-[30px]" />
+            <Menu className="h-5 w-5" />
           </button>
         </div>
       )}

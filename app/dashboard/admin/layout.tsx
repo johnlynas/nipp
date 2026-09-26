@@ -83,13 +83,26 @@ export default function AdminDashboardLayout({ children }: { children: React.Rea
 
   return (
     <RequireSuperAdmin>
-      <div className="h-screen bg-canvas-subtle flex overflow-hidden">
-        {/* Sidebar */}
-        <aside
+      <div className="h-screen bg-canvas-subtle flex flex-col overflow-hidden">
+        {/* Top Bar — full width, spans the left edge across the sidebar column. Identity chip + notification bell right on every page */}
+        <header className="w-full bg-white border-b px-6 py-2.5 flex items-center justify-between gap-4 shadow-sm" style={{ borderColor: 'var(--color-slate-200)' }}>
+          <p className="min-w-0 truncate text-xs font-medium uppercase tracking-widest text-slate-500">
+            {navItems.find((item) => item.href === pathname)?.label || 'Dashboard'}
+          </p>
+          <div className="flex items-center gap-1 pl-4" style={{ borderLeft: '1px solid var(--color-slate-200)' }}>
+            <TopBarUserIdentityChip />
+            <TopBarNotificationBell />
+          </div>
+        </header>
+
+        {/* Body — sidebar top aligns with the bottom of the full-width top bar */}
+        <div className="flex-1 flex min-h-0">
+          {/* Sidebar */}
+          <aside
           className={`flex-shrink-0 bg-navy-850 text-white flex flex-col transition-all duration-200 overflow-hidden ${
             sidebarOpen ? 'w-64' : 'w-16'
           }`}
-        >
+          >
           {/* Sidebar Header */}
           <div className="flex items-center justify-between px-4 py-4 border-b" style={{ borderColor: 'var(--color-navy-800)' }}>
             {sidebarOpen && <div className="flex-1" />}
@@ -98,7 +111,11 @@ export default function AdminDashboardLayout({ children }: { children: React.Rea
               className="rounded p-1.5 text-slate-300 hover:text-white hover:bg-navy-800 transition-colors"
               aria-label={sidebarOpen ? 'Collapse sidebar' : 'Expand sidebar'}
             >
-              {sidebarOpen ? <X className="h-[30px] w-[30px]" /> : <Menu className="h-[30px] w-[30px]" />}
+              {sidebarOpen ? (
+                <X className="h-5 w-5" />
+              ) : (
+                <Menu className="h-5 w-5" />
+              )}
             </button>
           </div>
 
@@ -148,21 +165,10 @@ export default function AdminDashboardLayout({ children }: { children: React.Rea
               {sidebarOpen && <span>Logout</span>}
             </button>
           </div>
-        </aside>
+          </aside>
 
-        {/* Main Content */}
-        <div className="flex-1 flex flex-col min-w-0">
-          {/* Top Bar — page title left; identity chip + notification bell right on every page */}
-          <header className="bg-white border-b px-6 py-2.5 flex items-center justify-between gap-4 shadow-sm" style={{ borderColor: 'var(--color-slate-200)' }}>
-            <p className="min-w-0 truncate text-xs font-medium uppercase tracking-widest text-slate-500">
-              {navItems.find((item) => item.href === pathname)?.label || 'Dashboard'}
-            </p>
-            <div className="flex items-center gap-1 pl-4" style={{ borderLeft: '1px solid var(--color-slate-200)' }}>
-              <TopBarUserIdentityChip />
-              <TopBarNotificationBell />
-            </div>
-          </header>
-
+          {/* Main Content */}
+          <div className="flex-1 flex flex-col min-w-0">
           {/* Page Content */}
           <main className={`flex-1 min-h-0 min-w-0 ${isFullScreenPage ? 'flex flex-col overflow-hidden' : 'p-6 pb-24 sm:pb-6 overflow-y-auto'}`}>
             {children}
@@ -216,8 +222,9 @@ export default function AdminDashboardLayout({ children }: { children: React.Rea
                 )}
               </div>
             </footer>
+          </div>
+          </div>
         </div>
-      </div>
     </RequireSuperAdmin>
   );
 }
