@@ -8,6 +8,8 @@
  *           (two depth layers over a working waterway, sparse amber
  *           beacons = the live-status accent). Straight edge with a
  *           soft rounded corner into the canvas.
+ *   Top (mobile) — the same field compressed to a 192px brand band
+ *           with the wordmark, so the dark world doesn't disappear below lg.
  *   Right — Sign-in form: email/password (functional), Google & Apple
  *           providers shown for presentation only. Squared (rounded-lg)
  *           controls, no pills.
@@ -15,7 +17,7 @@
 
 import { Suspense, useEffect, useState, type FormEvent } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
-import { Mail } from 'lucide-react';
+import { Eye, EyeOff, Mail } from 'lucide-react';
 import { signInEmail } from '@/lib/auth-client';
 
 /* ── Brand marks ────────────────────────────────────────────────── */
@@ -230,7 +232,17 @@ function SkylineField() {
 const SSO_NOTES: Record<string, string> = {
   google: 'Google sign-in isn’t connected to this portal yet. Ask an administrator to enable it.',
   apple: 'Apple Sign In isn’t connected to this portal yet. Ask an administrator to enable it.',
+  reset: 'Password resets are handled by your portal administrator. Contact them to have your password restored.',
 };
+
+// Set to the organisation's admin contact (e.g. 'admin@propertyni.gov.uk') once
+// decided — the "Contact your portal administrator" line becomes a mailto link
+// only when this is configured, so a placeholder address never ships.
+const ADMIN_CONTACT_EMAIL = '';
+
+// Sentinel for "the request never reached the server" — kept distinct from
+// server-returned messages so the banner can phrase each recovery accurately.
+const NETWORK_ERROR_KEY = 'login.network-error';
 
 function LoginForm() {
   const router = useRouter();
@@ -239,6 +251,7 @@ function LoginForm() {
   const [password, setPassword] = useState('');
   const [error, setError] = useState<string | null>(null);
   const [isBanned, setIsBanned] = useState(false);
+  const [showPassword, setShowPassword] = useState(false);
   const [loading, setLoading] = useState(false);
   const [ssoNote, setSsoNote] = useState<string | null>(null);
 
@@ -248,19 +261,21 @@ function LoginForm() {
     return () => clearTimeout(t);
   }, [ssoNote]);
 
-  // Auto-dismiss a sign-in error after 10 seconds so the form clears on its own
+  // Auto-dismiss a transient sign-in error after 10s; a banned-account message
+  // stays until the user acts on it — it's longer and they may be mid-read
   useEffect(() => {
-    if (!error) return;
+    if (!error || isBanned) return;
     const t = setTimeout(() => {
       setError(null);
       setIsBanned(false);
     }, 10000);
     return () => clearTimeout(t);
-  }, [error]);
+  }, [error, isBanned]);
 
   async function handleSubmit(e: FormEvent) {
     e.preventDefault();
     setError(null);
+    setIsBanned(false);
     setLoading(true);
 
     try {
@@ -277,7 +292,9 @@ function LoginForm() {
         router.push(callbackUrl);
       }
     } catch {
-      setError('Invalid credentials');
+      // Sign-in request never reached the server (offline, DNS, proxy block) —
+      // set a sentinel so the banner phrases the recovery, not raw text.
+      setError(NETWORK_ERROR_KEY);
     } finally {
       setLoading(false);
     }
@@ -287,8 +304,18 @@ function LoginForm() {
     'w-full h-12 inline-flex items-center justify-center gap-3 rounded-lg border bg-white text-slate-900 text-[15px] font-medium transition-colors cursor-pointer hover:border-navy-700 active:translate-y-px disabled:opacity-60 disabled:cursor-not-allowed';
 
   return (
-    <div className="min-h-screen flex bg-canvas-subtle">
-      {/* ── Left panel: Branding + skyline field ───────────────── */}
+    <div className="min-h-screen flex flex-col bg-canvas-subtle lg:flex-row">
+      {/* ── Mobile brand band: the same dusk waterway, compressed to a header (below lg) ── */}
+      <div className="relative h-48 overflow-hidden rounded-b-[24px] bg-navy-950 lg:hidden">
+        <SkylineField />
+        {/* Readability veil behind the wordmark */}
+        <div className="absolute inset-x-0 bottom-0 h-24 bg-gradient-to-t from-navy-950/80 to-transparent" aria-hidden="true" />
+        <div className="absolute inset-x-0 bottom-0 px-6 pb-5">
+          <Wordmark onDark />
+        </div>
+      </div>
+
+      {/* ── Left panel: Branding + skyline field (desktop) ─────── */}
       <aside className="relative hidden lg:flex lg:w-[46%] overflow-hidden rounded-r-[28px] bg-navy-950">
         <SkylineField />
 
@@ -311,11 +338,6 @@ function LoginForm() {
       {/* ── Right panel: Sign-in form ───────────────────────────── */}
       <main className="flex w-full flex-1 items-center justify-center px-6 py-14 sm:px-10">
         <div className="w-full max-w-[380px] login-rise">
-          {/* Mobile brand (left panel hidden below lg) */}
-          <div className="mb-10 lg:hidden">
-            <Wordmark />
-          </div>
-
           <h2 className="text-[28px] font-semibold tracking-tight text-slate-900">Welcome back</h2>
           <p className="mt-2 text-sm leading-relaxed text-slate-500">
             Sign in to your Property NI workspace.
@@ -332,13 +354,23 @@ function LoginForm() {
                   <div>
                     <p className="font-semibold mb-1">Account banned</p>
                     <p>{error}</p>
-                    <p className="mt-2 font-normal">Contact your administrator to restore access.</p>
+                    <p className="mt-2 font-normal">Contact your portal administrator to restore access.</p>
+                    {ADMIN_CONTACT_EMAIL && (
+                      <a
+                        href={`mailto:${ADMIN_CONTACT_EMAIL}?subject=Portal%20account%20access`}
+                        className="mt-2 inline-block text-sm font-semibold underline decoration-slate-400 underline-offset-2 hover:decoration-danger-ink"
+                      >
+                        Contact administrator
+                      </a>
+                    )}
                   </div>
                 ) : (
                   <span>
                     {error === 'Invalid credentials'
                       ? 'The email or password is incorrect. Check both and try again.'
-                      : error}
+                      : error === NETWORK_ERROR_KEY
+                        ? 'We couldn’t reach the sign-in service. Check your connection and try again.'
+                        : error}
                   </span>
                 )}
               </div>
@@ -365,19 +397,43 @@ function LoginForm() {
 
             {/* Password input */}
             <div className="mb-6">
-              <label htmlFor="password" className="block text-sm font-medium text-slate-900 mb-2">
-                Password
-              </label>
-              <input
-                id="password"
-                type="password"
-                autoComplete="current-password"
-                required
-                value={password}
-                onChange={(e) => setPassword(e.target.value)}
-                placeholder="Enter your password"
-                className="w-full h-12 px-4 rounded-lg border border-slate-300 bg-white text-slate-900 text-base outline-none box-border focus:border-navy-700 focus:ring-[3px] focus:ring-accent/25 transition-shadow"
-              />
+              <div className="mb-2 flex items-baseline justify-between">
+                <label htmlFor="password" className="block text-sm font-medium text-slate-900">
+                  Password
+                </label>
+                <button
+                  type="button"
+                  onClick={() => setSsoNote(SSO_NOTES.reset)}
+                  className="cursor-pointer rounded text-[13px] font-medium text-navy-700 transition-colors hover:text-navy-950"
+                >
+                  Forgot password?
+                </button>
+              </div>
+              <div className="relative">
+                <input
+                  id="password"
+                  type={showPassword ? 'text' : 'password'}
+                  autoComplete="current-password"
+                  required
+                  value={password}
+                  onChange={(e) => setPassword(e.target.value)}
+                  placeholder="Enter your password"
+                  className="w-full h-12 pl-4 pr-12 rounded-lg border border-slate-300 bg-white text-slate-900 text-base outline-none box-border focus:border-navy-700 focus:ring-[3px] focus:ring-accent/25 transition-shadow"
+                />
+                <button
+                  type="button"
+                  onClick={() => setShowPassword((v) => !v)}
+                  aria-label={showPassword ? 'Hide password' : 'Show password'}
+                  aria-pressed={showPassword}
+                  className="absolute inset-y-0 right-1 my-auto flex h-10 w-9 items-center justify-center rounded-md text-slate-500 transition-colors hover:text-slate-800 cursor-pointer"
+                >
+                  {showPassword ? (
+                    <EyeOff className="h-[18px] w-[18px]" aria-hidden="true" />
+                  ) : (
+                    <Eye className="h-[18px] w-[18px]" aria-hidden="true" />
+                  )}
+                </button>
+              </div>
             </div>
 
             {/* Primary: email/password sign-in (functional) */}
@@ -389,7 +445,7 @@ function LoginForm() {
               }`}
             >
               <Mail className="h-[18px] w-[18px]" strokeWidth={2} aria-hidden="true" />
-              {loading ? 'Signing in…' : 'Signin with email'}
+              {loading ? 'Signing in…' : 'Sign in with email'}
             </button>
 
             {/* Divider */}
@@ -424,7 +480,17 @@ function LoginForm() {
           </form>
 
           <p className="mt-8 text-xs text-slate-500">
-            Trouble signing in? Contact your portal administrator.
+            Trouble signing in?{' '}
+            {ADMIN_CONTACT_EMAIL ? (
+              <a
+                href={`mailto:${ADMIN_CONTACT_EMAIL}?subject=Portal%20sign-in%20help`}
+                className="font-medium underline decoration-slate-300 underline-offset-2 text-slate-700 transition-colors hover:text-slate-900 hover:decoration-navy-700"
+              >
+                Contact your portal administrator
+              </a>
+            ) : (
+              <span className="text-slate-600">Contact your portal administrator.</span>
+            )}
           </p>
         </div>
       </main>
