@@ -1,3 +1,9 @@
+/**
+ * GET /api/admin/system-logs
+ * System log access endpoint for super admins. Placeholder — the log source
+ * is not yet wired (returns an empty list).
+ */
+
 import { requireSuperAdmin } from '@/lib/require-super-admin';
 import { checkAdminRateLimit } from '@/lib/rate-limiter';
 import { NextResponse } from 'next/server';

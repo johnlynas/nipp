@@ -44,6 +44,7 @@ Self-service registration is not available (`/register` redirects to
   - [Caching](#10-caching)
   - [Background Job Scheduler](#11-background-job-scheduler)
   - [Data Protection & Security Hardening](#12-data-protection-security-hardening)
+  - [API Reference (OpenAPI + Swagger UI)](#13-api-reference-openapi--swagger-ui)
 - [Getting Started](#getting-started)
   - [Prerequisites](#prerequisites)
   - [Setup (step by step)](#setup-step-by-step)
@@ -641,6 +642,88 @@ lifecycle details, and the concurrency sizing live in
   staged files. `.env*` (except committed examples) and certificates are never
   committed.
 
+## 13. API Reference (OpenAPI + Swagger UI)
+
+A browsable, auto-generated OpenAPI reference for every `app/api/**` route is
+served at **`/api-docs`** (public — it contains no secrets, only paths, methods,
+and descriptions). The spec is generated from the JSDoc header blocks already in
+the route files, so documentation lives next to the code and regenerates in one
+command.
+
+**How it works.** `scripts/generate-openapi.mjs` scans every
+`app/api/**/route.ts`, parses the leading `/** */` headers (a `METHOD /path -- …`
+line becomes the operation; the rest of the block is the description), merges what
+it finds with the handlers the file actually exports, derives the path/tag and an
+auth note from the route shape, and writes
+`docs/openapi/generated/openapi.json`. It understands both export styles
+(`export function GET …` and `export const GET = …`, plus destructured/aliased
+exports) and the web `fetch` SSE catch-all, so it never undercounts. JSDoc path
+params (`[orgId]`, `[...all]`, `:roleId`) normalize to OpenAPI `{param}`; prose such
+as "DELETE removes the member" is *not* misread as an endpoint.
+
+**Viewing.** With the dev or production server running:
+
+```bash
+open http://localhost:3000/api-docs        # Swagger UI
+# raw spec (extensionless on purpose):
+curl -s http://localhost:3000/api-docs/openapi
+```
+
+The UI is wired to use the BetterAuth `better-auth.session_token` cookie for
+authenticated calls — set it via the **Authorize** button and "Try it out" works
+against protected routes.
+
+| Piece | Where | Purpose |
+|-------|-------|---------|
+| Generator | `scripts/generate-openapi.mjs` | JSDoc → OpenAPI 3 spec (pure Node, no deps) |
+| Generated spec | `docs/openapi/generated/openapi.json` | Committed artifact served by the app |
+| Swagger UI page | `app/api-docs/route.ts` | HTML shell + UI config |
+| Spec endpoint | `app/api-docs/openapi/route.ts` | Serves the JSON (extensionless) |
+| Asset router | `app/api-docs/assets/[file]/route.ts` | Serves swagger-ui-dist from node_modules (whitelisted, fs-based to avoid the bundle's `self` crash in Node) |
+
+### Rebuilding the documentation
+
+Rebuild the spec any time a route or its JSDoc header changes. Use the npm script
+or `npx`/`node` directly:
+
+```bash
+# preferred — registered in package.json:
+npm run docs:generate
+
+# equivalent via npx (runs the project script by name):
+npx --no-install npm run docs:generate
+
+# or invoke the scanner with plain node / npx node:
+node scripts/generate-openapi.mjs
+npx node scripts/generate-openapi.mjs
+```
+
+The command prints a coverage summary — `routes · operations · documented ·
+undocumented` — and lists any route that is missing a JSDoc header (those appear
+in the spec with a generated summary only). **Commit every regenerated
+`docs/openapi/generated/openapi.json`** so the docs always match the code you ship;
+the spec is checked in, not built at deploy time.
+
+> When adding a new route, give it a JSDoc header of the form shown below and run
+> `npm run docs:generate` before committing — the spec and the source stay in lockstep.
+
+Example JSDoc header (what the generator consumes):
+
+```ts
+/**
+ * GET /api/admin/roles          -- list the global role catalog
+ * POST /api/admin/roles         -- create a global role
+ *
+ * Super Admin only; writes are rate-limited per session and audit-logged.
+ */
+export async function GET() { /* … */ }
+```
+
+Request/response **schemas** are intentionally not modelled yet (operations carry
+a `default` response). Adding them is a separate pass — introduce zod schemas per
+route and fold them in with `zod-to-openapi`. See
+[Appendix F](#appendix-f-project-documentation-map).
+
 ---
 
 # Getting Started
@@ -752,6 +835,7 @@ npm run lint         # ESLint — zero warnings expected
 | `npm run test:isolation:app` | `vitest run tests/isolation/application/` | App-layer tenant-separation tests |
 | `npm run test:isolation:e2e` | Playwright | Browser E2E (cross-tenant UI isolation, calendar, payload encryption) |
 | `npm run build:cloud` / `deploy:cloud` | — | Placeholders for the cloud pipeline |
+| `npm run docs:generate` | `node scripts/generate-openapi.mjs` | Regenerate the OpenAPI spec from route JSDoc (served at `/api-docs`) |
 
 ## Quality gates (pre-commit & pre-push)
 
@@ -985,6 +1069,7 @@ own OpenSpec proposal (see SPECIFICATION_DESIGN_PROCESS.md).
 | [QUICK_START.md](./QUICK_START.md) | Minimal setup path |
 | [ISOLATION_TEST_STRATEGY.md](./ISOLATION_TEST_STRATEGY.md) | Tenant-isolation test design and troubleshooting |
 | [SPECIFICATION_DESIGN_PROCESS.md](./SPECIFICATION_DESIGN_PROCESS.md) | OpenSpec-driven feature lifecycle used across the project |
+| [`/api-docs` (Swagger UI)](#13-api-reference-openapi--swagger-ui) | Live OpenAPI reference, generated from route JSDoc via `npm run docs:generate` |
 | [scripts/README.md](./scripts/README.md) | Cache benchmark and script utilities |
 | `openspec/changes/` | One proposal per feature (calendar, isolation infra, payload encryption, CSP, …) |
 | `documents/` | Business research, feature planning, operations runbook |

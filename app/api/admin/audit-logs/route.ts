@@ -1,3 +1,9 @@
+/**
+ * GET /api/admin/audit-logs
+ * Cross-tenant audit trail (most recent first). Supports page, pageSize and
+ * resourceType filters. Super admin only; rate-limited per session.
+ */
+
 import { NextResponse } from 'next/server';
 // RLS Phase 3: cross-tenant audit reads run under the verified platform context.
 import tenantDb from '@/lib/tenant-db';
