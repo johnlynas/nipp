@@ -1,3 +1,9 @@
+/**
+ * GET /api/health          -- liveness/readiness probe (200 healthy, 503 unhealthy)
+ *
+ * Public — no authentication required; excluded from the auth middleware.
+ */
+
 import { NextResponse } from 'next/server';
 import { checkHealthStatus } from '@/lib/health-check';
 

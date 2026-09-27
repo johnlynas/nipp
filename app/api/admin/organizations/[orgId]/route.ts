@@ -1,3 +1,14 @@
+/**
+ * GET    /api/admin/organizations/[orgId]          -- organization details by ID (cached via tag `org`)
+ * PATCH  /api/admin/organizations/[orgId]          -- update name/slug/status (slug uniqueness enforced)
+ * DELETE /api/admin/organizations/[orgId]          -- archive; PENDING orgs are hard-deleted
+ *
+ * Super Admin only. Writes are rate-limited per session. Runs under a verified
+ * target-org context (RLS Phase 3); every mutation is audit-logged and
+ * invalidates the `org` cache tag. DELETE state machine: PENDING → deleted,
+ * ACTIVE/SUSPENDED → ARCHIVED (terminal), ARCHIVED → 400.
+ */
+
 import { NextRequest, NextResponse } from 'next/server';
 import { unstable_cache, revalidateTag } from 'next/cache';
 // RLS Phase 3: org CRUD runs under verified target-org contexts (flag=1); the

@@ -1,3 +1,12 @@
+/**
+ * GET  /api/auth/[...all]          -- BetterAuth public read endpoints (catch-all)
+ * POST /api/auth/[...all]          -- sign-in/sign-up, session management, org bootstrap
+ *
+ * BetterAuth integration surface (driven by the session cookie). Every POST is
+ * IP-rate-limited for brute-force protection; organization creation is
+ * intercepted to bootstrap default roles. All other requests fall through to
+ * BetterAuth's default handler.
+ */
 import { auth } from '@/lib/auth';
 import { toNextJsHandler } from 'better-auth/next-js';
 import { handleCreateOrganization } from '@/lib/org-bootstrap';

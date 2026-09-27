@@ -1,3 +1,12 @@
+/**
+ * GET /api/admin/organizations          -- paginated organization list (page, pageSize, status, search)
+ * POST /api/admin/organizations         -- create an organization (name, slug?, adminEmail?)
+ *
+ * Super Admin only. Writes are rate-limited per session. Cross-tenant reads
+ * and inserts run under a verified platform context (RLS Phase 3); creation
+ * is recorded in the audit log.
+ */
+
 import { NextRequest, NextResponse } from 'next/server';
 import { requireSuperAdmin } from '@/lib/require-super-admin';
 import { OrganizationService } from '@/services/organization-service';

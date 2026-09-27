@@ -1,3 +1,12 @@
+/**
+ * GET /api/auth/permissions          -- resolve the session user's permission context
+ *
+ * Returns userId, activeOrganizationId, platformOrgId, isSuperAdmin and the
+ * permission list. Requires an authenticated session (BetterAuth cookie).
+ * Not cached (dynamic per-user data); degrades to 503 with empty permissions
+ * when the database is unavailable.
+ */
+
 import { NextResponse } from 'next/server';
 import { auth } from '@/lib/auth';
 import { headers } from 'next/headers';
