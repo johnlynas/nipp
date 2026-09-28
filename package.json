@@ -31,7 +31,7 @@
     "test:isolation:e2e": "playwright test tests/isolation/e2e/ --config=tests/isolation/playwright.config.ts",
     "test:isolation:db": "vitest run tests/isolation/database/ --config vitest.db.config.ts",
     "db:gen-policy-golden": "tsx scripts/rls-gen-policy-golden.ts",
-    "docs:generate": "node scripts/generate-openapi.mjs",
+    "docs:generate": "tsx scripts/generate-openapi.mjs",
     "test:rls-perf": "bash -c 'npx tsx scripts/rls-perf-benchmark.ts'"
   },
   "dependencies": {

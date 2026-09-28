@@ -6,6 +6,7 @@ import {
   notificationPriority,
   notificationScope,
   orgStatus,
+  recurrenceFrequency,
   ts,
 } from './common';
 
@@ -152,7 +153,7 @@ export const teamMember = z
   })
   .meta({ id: 'TeamMember' });
 
-/** Team member row as emitted by getTeamById (user select folded in). */
+/** Team member row as emitted by getTeamById (user select folded in, roles on sibling array). */
 export const teamDetailMember = z
   .object({
     id: idField('TeamMember ID'),
@@ -161,6 +162,30 @@ export const teamDetailMember = z
     createdAt: ts,
   })
   .meta({ id: 'TeamDetailMember' });
+
+/** Compact role row used by getTeamById's separate role query (id is the ROLE id). */
+export const teamRoleRef = z
+  .object({
+    id: idField('Role ID'),
+    name: z.string(),
+    description: z.string().nullable(),
+  })
+  .meta({ id: 'TeamRoleRef' });
+
+/** Team-role assignment row as emitted by getTeamRoles (id is the junction row). */
+export const teamRoleAssignment = z
+  .object({
+    id: idField('TeamRole ID'),
+    roleId: idField('Role ID'),
+    name: z.string().describe('Assigned role name'),
+    description: z.string().nullable(),
+  })
+  .meta({ id: 'TeamRoleAssignment' });
+
+/** Roles array envelope as emitted by GET /api/organizations/{orgId}/teams/{teamId}/roles (flattened junction rows, unlike the bare-role TeamRolesList). */
+export const teamRoleAssignmentsList = z
+  .object({ roles: z.array(teamRoleAssignment) })
+  .meta({ id: 'TeamRoleAssignmentsList' });
 
 // ---------------------------------------------------------------------------
 // Roles / permissions (RBAC)
@@ -280,15 +305,30 @@ export const roleSearchResult = z
   })
   .meta({ id: 'RoleSearchResult' });
 
+/** User row as returned by UserService — memberships + team memberships included. */
+export const userDetailRow = user.extend({
+  members: z.array(
+    z.object({ id: idField('Membership ID'), orgId: idField('Organization ID'), organization: z.object({ id: idField('Organization ID'), name: z.string() }) }),
+  ).optional(),
+  teamMembers: z.array(teamMember.extend({ team: z.object({ id: idField('Team ID'), name: z.string() }).optional(), organization: z.object({ id: idField('Organization ID'), name: z.string() }).optional() })).optional(),
+}).meta({ id: 'UserDetailRow' });
+
 // ---------------------------------------------------------------------------
 // List envelopes (service PaginatedResult)
 // ---------------------------------------------------------------------------
 
+/** Platform-role row for the super-admin catalog (GET /api/admin/roles) — organization folded in. */
+const adminRoleListRow = roleListItem
+  .extend({ organization: z.object({ id: idField('Organization ID'), name: z.string() }) })
+  .meta({ id: 'AdminRoleListRow' });
+
 export const paginatedPlatformRoles = listEnvelope(platformRole, 'PlatformRoles');
 export const paginatedPermissions = listEnvelope(permission, 'Permissions');
+export const adminPlatformRolesList = listEnvelope(adminRoleListRow, 'AdminPlatformRoles');
 
-/** Users list rows carry the member count projection from UserService.list. */
-const userListRow = user.extend({ _count: z.object({ members: z.number() }) }).meta({ id: 'UserListRow' });
+/** Users list rows carry the member count projection from UserService.list (which also
+ * folds in membership + team-membership includes). */
+const userListRow = userDetailRow.extend({ _count: z.object({ members: z.number() }) }).meta({ id: 'UserListRow' });
 export const paginatedUsers = listEnvelope(userListRow, 'Users');
 
 /** Dashboard admin roles list — items + pagination + counts extras. */
@@ -348,9 +388,8 @@ export const notificationAdmin = notification
 export const sendNotificationResult = z
   .object({
     status: z.enum(['SENT', 'FAILED', 'RATE_LIMITED']),
-    recipientEmail: z.string().optional(),
-    eventId: z.string().optional(),
-    error: z.string().optional(),
+    email: z.string().describe('Recipient email (the service row field is "email")'),
+    error: z.string().optional().describe('Present on FAILED rows, e.g. "Email delivery failed"'),
   })
   .meta({ id: 'SendNotificationResult' });
 
@@ -365,18 +404,32 @@ export const sendTodayNotificationsResponse = z
 // Calendar (org-scoped)
 // ---------------------------------------------------------------------------
 
+/** CalendarService row shape — note: organizationId is deliberately NOT in the
+ * returned object, so the wire row omits it. */
 export const calendar = z
   .object({
     id: idField('Calendar ID (cuid)'),
     name: z.string(),
     description: z.string().nullable(),
-    color: z.string().describe('Color theme, e.g. #1B2A4A'),
+    color: z.string().describe('Auto-assigned palette color theme, e.g. "#1B2A4A"'),
     isDefault: z.boolean(),
-    organizationId: idField('Organization ID'),
     createdAt: ts,
     updatedAt: ts,
   })
   .meta({ id: 'Calendar' });
+
+/** Recurrence details mapped from the stored rrule (present when the event repeats). */
+export const eventRecurrenceDetails = z
+  .object({
+    frequency: recurrenceFrequency,
+    interval: z.number().int(),
+    endDate: ts.nullable().describe('Recurrence end (ISO), null when count-bounded or unlimited'),
+    count: z.number().int().nullable().describe('Occurrence cap, null when date-bounded or unlimited'),
+    byDay: z.string().nullable().describe('e.g. "MO,WE" — ISO day abbreviations'),
+    byMonthDay: z.number().int().min(1).max(31).nullable().describe('Day-of-month filter (single value)'),
+    excludedDates: z.array(z.string()).describe('Always [] — exdates live on the event row itself'),
+  })
+  .meta({ id: 'EventRecurrenceDetails' });
 
 const calendarEventBase = z
   .object({
@@ -388,10 +441,14 @@ const calendarEventBase = z
     eventType: calendarEventType,
     color: z.string().nullable(),
     calendarId: idField('Calendar ID'),
+    // Service-mapped rows carry the parsed rule; raw-Prisma findFirst responses
+    // (recurring PATCH with editScope) don't — hence optional.
+    recurrence: eventRecurrenceDetails.nullable().optional(),
     rrule: z.unknown().nullable().describe('RFC 5545 recurrence rule (JSON) for recurring events'),
-    exdates: z.array(z.string()).default([]).describe('Excluded occurrence dates (YYYY-MM-DD)'),
+    exdates: z.array(z.string()).nullable().optional().describe('Excluded occurrence dates (YYYY-MM-DD)'),
     propertyId: z.string().nullable(),
-    organizationId: idField('Organization ID'),
+    // Only on raw-Prisma findFirst responses (recurring PATCH with editScope).
+    organizationId: idField('Organization ID').optional(),
     createdAt: ts,
     updatedAt: ts,
   })
@@ -399,6 +456,15 @@ const calendarEventBase = z
 
 export const calendarEvent = calendarEventBase;
 export const calendarEventList = z.array(calendarEvent).meta({ id: 'CalendarEventList' });
+
+/** Recurring-edit envelope returned by PATCH /calendar-events/[id] — editScope is
+ * absent for non-recurring events (plain { event } payload). */
+export const calendarEventUpdateResult = z
+  .object({
+    event: calendarEvent,
+    editScope: z.enum(['this', 'following', 'all']).optional().describe('Recurring events only — which occurrences the update applied to'),
+  })
+  .meta({ id: 'CalendarEventUpdateResult' });
 
 /** Recurring-edit envelope returned by PATCH /calendar-events/[id]. */
 export const calendarEventWithEditScope = z
@@ -458,7 +524,8 @@ export const paginatedJobs = z
   })
   .meta({ id: 'PaginatedJobs' });
 
-/** Dashboard scripts list — paginated jobs + stat-card counts. */
+/** Dashboard scripts list — paginated jobs (listJobsPaginated) + stat-card counts.
+ * Note: pagination here is { page, pageSize, total } only — no totalPages (clients derive it). */
 export const dashboardScriptsList = z
   .object({
     items: z.array(jobDefinition),
@@ -706,6 +773,25 @@ export function searchEnvelope<T extends z.ZodType>(item: T, idSuffix: string) {
 export const searchOrganizationsResults = searchEnvelope(organization, 'Organizations');
 export const searchUsersResults = searchEnvelope(user, 'Users');
 export const searchPermissionsResults = searchEnvelope(permission, 'Permissions');
+
+/** Compact catalog entry from GET /api/roles/permissions (select: key/resource/action/description only). */
+const rolePermissionOption = z
+  .object({
+    key: z.string().describe('e.g. "properties:view"'),
+    resource: z.string().describe('Resource segment, e.g. "properties"'),
+    action: z.string().describe('Action segment, e.g. "view"'),
+    description: z.string().nullable(),
+  })
+  .meta({ id: 'RolePermissionOption' });
+
+export const rolePermissionsCatalog = z
+  .object({ permissions: z.array(rolePermissionOption).describe('Master catalog, sorted by resource') })
+  .meta({ id: 'RolePermissionsCatalog' });
+
+/** Distinct resource types from the permission catalog (GET /api/admin/permissions/resources). */
+export const permissionResourcesList = z
+  .object({ resources: z.array(z.string()).describe('Sorted unique resource segments, e.g. "properties"') })
+  .meta({ id: 'PermissionResourcesList' });
 export const searchRolesResults = searchEnvelope(roleSearchResult, 'Roles');
 
 // ---------------------------------------------------------------------------
@@ -751,6 +837,7 @@ export const singleRole = z.object({ role: role }).meta({ id: 'SingleRole' });
 export const singlePermission = z.object({ permission: permission }).meta({ id: 'SinglePermission' });
 export const singleTeam = z.object({ team: teamWithDetails }).meta({ id: 'SingleTeam' });
 export const singleCalendar = z.object({ calendar: calendar }).meta({ id: 'SingleCalendar' });
+export const singleCalendarEvent = z.object({ event: calendarEvent }).meta({ id: 'SingleCalendarEvent' });
 export const singleJob = z.object({ job: jobDefinition }).meta({ id: 'SingleJob' });
 export const singleResource = z.object({ resource: resourceRow }).meta({ id: 'SingleResource' });
 
@@ -758,11 +845,21 @@ export const singleResource = z.object({ resource: resourceRow }).meta({ id: 'Si
 // Org members (admin org-scoped)
 // ---------------------------------------------------------------------------
 
+/** Member row with folded-in user (admin org member endpoints). */
+export const memberWithUser = member.extend({
+  user: z.object({ name: z.string(), email: z.string().email() }),
+}).meta({ id: 'MemberWithUser' });
+
 /** Org member list (GET /api/admin/organizations/[orgId]/members). */
 export const orgMemberList = z.object({ members: z.array(member) }).meta({ id: 'OrgMemberList' });
 
-export const addedMember = z.object({ message: z.string(), member: member }).meta({ id: 'AddedMember' });
-export const updatedMember = z.object({ message: z.string(), member: member }).meta({ id: 'UpdatedMember' });
+export const addedMember = z.object({ message: z.string(), member: memberWithUser }).meta({ id: 'AddedMember' });
+export const updatedMember = z.object({ message: z.string(), member: memberWithUser }).meta({ id: 'UpdatedMember' });
+
+/** { success: true, message } — confirmation envelope (roles DELETE etc). */
+export const successAcknowledgement = z
+  .object({ success: z.literal(true), message: z.string() })
+  .meta({ id: 'SuccessAcknowledgement' });
 
 // ---------------------------------------------------------------------------
 // Message confirmations with resource payloads
@@ -777,6 +874,57 @@ export const createdRole = z
 
 /** Org-roles list — flat { roles } envelope (admin org-scoped GET). */
 export const orgRolesList = z.object({ roles: z.array(roleListItem) }).meta({ id: 'OrgRolesList' });
+
+/** DELETE /api/roles/{id} — success confirmation with message. */
+export const roleDeletedResponse = z
+  .object({
+    success: z.literal(true),
+    message: z.literal('Role deleted'),
+  })
+  .meta({ id: 'RoleDeletedResponse' });
+
+/** Role-update acknowledgement (PATCH /api/admin/organizations/[orgId]/roles/[roleId]). */
+export const updatedRole = z
+  .object({
+    message: z.string().describe('e.g. "Role updated"'),
+    role,
+  })
+  .meta({ id: 'UpdatedRole' });
+
+/** Organization update acknowledgement (PATCH /api/admin/organizations/[orgId] and [orgId]/settings). */
+export const organizationUpdated = z
+  .object({ message: z.literal('Organization updated'), organization })
+  .meta({ id: 'OrganizationUpdated' });
+
+/** Org status change response (PATCH .../{id}/status) — row limited to id/name/status. */
+export const orgStatusChangeResponse = z
+  .object({
+    organization: z.object({ id: idField('Organization ID'), name: z.string(), status: orgStatus }),
+  })
+  .meta({ id: 'OrgStatusChangeResponse' });
+
+/** Per-assignment outcome of a bulk permission assignment (PATCH [orgId]/permissions). */
+export const permissionAssignmentResult = z
+  .object({
+    roleId: idField('Role ID'),
+    permissionKey: z.string(),
+    action: z.enum(['assigned', 'revoked']),
+    success: z.boolean().describe('false when the role/permission does not exist in this org'),
+  })
+  .meta({ id: 'PermissionAssignmentResult' });
+
+/** Bulk permission-batch acknowledgement (PATCH /api/admin/organizations/[orgId]/permissions). */
+export const permissionsUpdateResponse = z
+  .object({
+    message: z.literal('Permissions updated'),
+    results: z.array(permissionAssignmentResult),
+  })
+  .meta({ id: 'PermissionsUpdateResponse' });
+
+/** Org switcher rows (GET /api/admin/organizations/list) — Platform entry first. */
+export const organizationSwitcherList = z
+  .object({ organizations: z.array(organizationOption) })
+  .meta({ id: 'OrganizationSwitcherList' });
 
 /** Team role list (GET /teams/[teamId]/roles). */
 export const teamRolesList = z
@@ -793,3 +941,252 @@ export const dashboardAdminStats = z
     permissions: z.object({ total: z.number() }),
   })
   .meta({ id: 'DashboardAdminStats' });
+
+// ---------------------------------------------------------------------------
+// Admin org detail — member rows as emitted by GET /api/admin/organizations/[orgId]
+// (the unstable_cache include) and the members sub-resource. The route handler
+// is responsible for the JSON serialisation of any non-serialisable values.
+// ---------------------------------------------------------------------------
+
+/** Member row inside admin org details (GET /api/admin/organizations/[orgId]). */
+export const orgDetailMemberRow = z
+  .object({
+    id: idField('Membership ID'),
+    userId: idField('User ID'),
+    role: z.string(),
+    user: z.object({ name: z.string(), email: z.string().email() }),
+  })
+  .meta({ id: 'OrgDetailMemberRow' });
+
+/** Member row as emitted by tenantDb.member.findMany with memberRoles included. */
+export const adminOrgMemberRow = memberWithUser.extend({
+  memberRoles: z.array(
+    z.object({
+      id: idField('MemberRole ID'),
+      roleId: idField('Role ID'),
+      role: z.object({ name: z.string(), isDefault: z.boolean() }),
+    }),
+  ),
+}).meta({ id: 'AdminOrgMemberRow' });
+
+/** Org member list (cross-tenant, admin) — { members } envelope. */
+export const adminOrgMemberList = z.object({ members: z.array(adminOrgMemberRow) }).meta({
+  id: 'AdminOrgMemberList',
+});
+
+// ---------------------------------------------------------------------------
+// Job scheduler extras
+// ---------------------------------------------------------------------------
+
+/** Platform jobs list (GET /api/admin/jobs) — { jobs } envelope, limit-bounded. */
+export const jobDefinitionList = z.object({ jobs: z.array(jobDefinition) }).meta({ id: 'JobDefinitionList' });
+
+/** Executions list for one job (GET /api/admin/jobs/{jobId}/history). */
+export const jobExecutionList = z.object({ executions: z.array(jobExecution) }).meta({
+  id: 'JobExecutionList',
+});
+
+/** RunResult — outcome of trigger/dry-run (job-scheduler-service.ts). */
+export const runJobResult = z
+  .object({
+    jobDefinitionId: idField('Job ID'),
+    executionId: z.string().optional(),
+    status: z.enum(['PENDING', 'RUNNING', 'SUCCEEDED', 'FAILED', 'CANCELLED', 'SKIPPED']),
+    claimed: z.boolean().describe('false → another tick already claimed this instant'),
+    error: z.string().optional().describe('Present when status is FAILED'),
+  })
+  .meta({ id: 'RunJobResult' });
+
+/** { result } wrapper returned by trigger/dry-run endpoints (HTTP 202). */
+export const runJobResponse = z.object({ result: runJobResult }).meta({ id: 'RunJobResponse' });
+
+/** approve/reject outcome (POST /api/admin/jobs/{jobId}/approvals). */
+export const jobApprovalResponse = z
+  .object({ job: jobDefinition, action: z.enum(['approve', 'reject']) })
+  .meta({ id: 'JobApprovalResponse' });
+
+/** disposeJob ack (DELETE /api/admin/jobs/{jobId}). */
+export const jobDisposedResponse = z
+  .object({ id: idField('Job ID'), deleted: z.literal(true) })
+  .meta({ id: 'JobDisposedResponse' });
+
+// ---------------------------------------------------------------------------
+// Logs / metrics extras
+// ---------------------------------------------------------------------------
+
+/** System log list — placeholder endpoint (logs not wired yet). */
+export const systemLogList = z.object({ logs: z.array(z.unknown()) }).meta({ id: 'SystemLogList' });
+
+/** Audit log listing as returned by GET /api/admin/audit-logs. */
+export const auditLogPage = z
+  .object({
+    auditLogs: z.array(auditLogRow),
+    pagination: z.object({ page: z.number(), pageSize: z.number(), total: z.number() }),
+  })
+  .meta({ id: 'AuditLogPage' });
+
+// ---------------------------------------------------------------------------
+// Single-resource wrappers — dashboard variants (bare rows, not enveloped)
+// ---------------------------------------------------------------------------
+
+/** Role row with permissions and member count (RoleService.getById). */
+export const roleDetail = z
+  .object({
+    id: idField('Role ID'),
+    name: z.string(),
+    description: z.string().nullable(),
+    isDefault: z.boolean(),
+    organizationId: idField('Organization ID'),
+    createdAt: ts,
+    updatedAt: ts,
+    permissions: z.array(
+      z.object({
+        id: idField('RolePermission ID'),
+        permission: permission,
+      }),
+    ),
+    _count: z.object({ memberRoles: z.number() }).optional(),
+  })
+  .meta({ id: 'RoleDetail' });
+
+/** Role list item with org + nested member count (GET /api/admin/roles). */
+export const platformRoleListItem = platformRole.extend({
+  organization: z.object({ id: idField('Organization ID'), name: z.string() }).optional(),
+  _count: z.object({ memberRoles: z.number() }).optional(),
+}).meta({ id: 'PlatformRoleListItem' });
+
+export const adminRolesPage = listEnvelope(platformRoleListItem, 'Roles');
+
+/** Admin user list row — _count only (admin/users and dashboard variants). */
+export const adminUserListRow = user.extend({ _count: z.object({ members: z.number() }) }).meta({
+  id: 'AdminUserListRow',
+});
+
+export const adminUsersPage = listEnvelope(adminUserListRow, 'AdminUsers');
+
+/** Resource row as returned by ResourceService list/getById — assigned roles included. */
+export const resourceWithRoles = resourceRow.extend({
+  resourceRoles: z.array(
+    z.object({ id: idField('ResourceRole ID'), roleId: idField('Role ID'), role: role.optional() }),
+  ),
+}).meta({ id: 'ResourceWithRoles' });
+
+/** Dashboard resource catalog list — items include assigned roles. */
+export const paginatedResourcesWithRoles = listEnvelope(resourceWithRoles, 'ResourcesWithRoles');
+
+/** Team member row as returned by TeamService.listTeamMembers — roles resolved separately. */
+export const teamMemberRow = z
+  .object({
+    id: idField('TeamMember ID'),
+    userId: idField('User ID'),
+    user: z.object({ name: z.string(), email: z.string().email() }),
+    createdAt: ts,
+    roles: z.array(z.object({ id: idField('Role ID'), name: z.string() })),
+  })
+  .meta({ id: 'TeamMemberRow' });
+
+export const teamMembersPage = z
+  .object({
+    members: z.array(teamMemberRow),
+    pagination: z.object({ page: z.number(), pageSize: z.number(), total: z.number(), totalPages: z.number() }),
+  })
+  .meta({ id: 'TeamMembersPage' });
+
+/** TeamRole row (team-role assignment junction). */
+export const teamRole = z
+  .object({
+    id: idField('TeamRole ID'),
+    teamId: idField('Team ID'),
+    roleId: idField('Role ID'),
+    organizationId: idField('Organization ID'),
+    role: role.optional(),
+    createdAt: ts,
+  })
+  .meta({ id: 'TeamRole' });
+
+/** TeamRole junction row as returned by assignTeamRole (no role include). */
+const createdTeamRole = z
+  .object({
+    id: idField('TeamRole ID'),
+    teamId: idField('Team ID'),
+    roleId: idField('Role ID'),
+    organizationId: idField('Organization ID'),
+    createdAt: ts,
+  })
+  .meta({ id: 'CreatedTeamRole' });
+
+/** Single-resource wrappers for the org-scoped team surface (this surface envelopes rows, unlike the dashboard one). */
+export const singleTeamMember = z.object({ teamMember: teamMember }).meta({ id: 'SingleTeamMember' });
+export const singleTeamRole = z.object({ teamRole: createdTeamRole }).meta({ id: 'SingleTeamRole' });
+
+/** Role member summary row (GET /api/dashboard/admin/roles/{id}/members). */
+export const roleMemberSummary = z
+  .object({
+    memberId: idField('Membership ID'),
+    userId: idField('User ID'),
+    userName: z.string(),
+    userEmail: z.string().email(),
+  })
+  .meta({ id: 'RoleMemberSummary' });
+
+/** Role permissions list — flat permission rows (dashboard role detail). */
+export const rolePermissionsFlat = z.object({ permissions: z.array(permission) }).meta({
+  id: 'RolePermissionsFlat',
+});
+
+/** Permissions assigned to a user (GET /api/roles/permissions). */
+export const permissionKeysList = z.object({ permissions: z.array(z.string()) }).meta({
+  id: 'PermissionKeysList',
+});
+
+// ---------------------------------------------------------------------------
+// Calendars — envelope wrappers
+// ---------------------------------------------------------------------------
+
+/** Calendar list endpoint returns a bare array (GET /…/calendar). */
+export const calendarListBare = z.array(calendar).meta({ id: 'CalendarListBare' });
+
+/** Calendar event list endpoints return a bare array (events / upcoming / today). */
+export const calendarEventsBare = z.array(calendarEvent).meta({ id: 'CalendarEventsBare' });
+
+/** Send today notification request body (calendar-notifications/send-today). */
+export const sendTodayNotificationBody = z
+  .object({
+    userId: z.string().optional().describe('Notify this single user; omit for organization-wide (all members)'),
+    eventIds: z.array(z.string()).optional(),
+    notifyType: z.literal('TODAY_EVENTS').optional().describe("Default when omitted"),
+  })
+  .meta({ id: 'SendTodayNotificationBody' });
+
+/** Today's-event row (calendar-notifications/today) — the notification-purposes subset. */
+export const todayCalendarEvent = z
+  .object({
+    id: idField('Event ID (cuid)'),
+    title: z.string(),
+    description: z.string().nullable(),
+    startDate: ts,
+    endDate: ts,
+    eventType: calendarEventType,
+    color: z.string().nullable(),
+  })
+  .meta({ id: 'TodayCalendarEvent' });
+
+export const todayCalendarEventsBare = z.array(todayCalendarEvent).meta({ id: 'TodayCalendarEventsBare' });
+
+// ---------------------------------------------------------------------------
+// Search results (bare row variants — the search endpoints emit { results, total })
+// ---------------------------------------------------------------------------
+
+/** Org search result row (id + name + slug only). */
+export const orgSearchRow = z
+  .object({ id: idField('Organization ID'), name: z.string(), slug: z.string().nullable() })
+  .meta({ id: 'OrgSearchRow' });
+
+export const orgSearchResults = searchEnvelope(orgSearchRow, 'OrganizationRows');
+
+/** User search result row (id + name + email only). */
+export const userSearchRow = z
+  .object({ id: idField('User ID'), name: z.string(), email: z.string().email() })
+  .meta({ id: 'UserSearchRow' });
+
+export const userSearchResults = searchEnvelope(userSearchRow, 'UserRows');

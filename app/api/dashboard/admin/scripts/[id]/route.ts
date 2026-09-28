@@ -4,6 +4,7 @@ import { checkAdminRateLimit } from '@/lib/rate-limiter';
 
 import { JobSchedulerService } from '@/services/job-scheduler-service';
 import { NotificationPriority, NotificationScope } from '@prisma/client';
+import { NotFoundError, ForbiddenError, ValidationError } from '@/lib/services/types';
 import { withPlatformContext } from '@/lib/platform-db';
 
 export const runtime = 'nodejs';
@@ -37,7 +38,7 @@ export async function GET(
 
     return NextResponse.json({ job, executions: history });
   } catch (error) {
-    if (error instanceof Error && error.message === 'Job not found in platform org') {
+    if (error instanceof NotFoundError) {
       return NextResponse.json({ error: 'Script not found' }, { status: 404 });
     }
     console.error('Failed to fetch script:', error);
@@ -104,11 +105,14 @@ export async function PATCH(
 
     return NextResponse.json(result);
   } catch (error) {
-    if (error instanceof Error && error.message === 'Job not found in platform org') {
+    if (error instanceof NotFoundError) {
       return NextResponse.json({ error: 'Script not found' }, { status: 404 });
     }
-    if (error instanceof Error && error.message === 'Job is not approved — approve it before enabling') {
+    if (error instanceof ForbiddenError) {
       return NextResponse.json({ error: error.message }, { status: 403 });
+    }
+    if (error instanceof ValidationError) {
+      return NextResponse.json({ error: error.message }, { status: 400 });
     }
     console.error('Failed to update script:', error);
     const message = error instanceof Error && error.message ? error.message : 'Failed to update script';
@@ -146,7 +150,7 @@ export async function DELETE(
 
     return NextResponse.json({ success: true });
   } catch (error) {
-    if (error instanceof Error && error.message === 'Job not found in platform org') {
+    if (error instanceof NotFoundError) {
       return NextResponse.json({ error: 'Script not found' }, { status: 404 });
     }
     console.error('Failed to delete script:', error);

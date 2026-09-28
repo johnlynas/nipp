@@ -3,7 +3,7 @@
 // Scans app/api/**/route.ts, parses JSDoc header blocks ("METHOD /path" lines
 // + description prose) and emits docs/openapi/generated/openapi.json.
 //
-// Usage: npm run docs:generate  (node scripts/generate-openapi.mjs)
+// Usage: npm run docs:generate  (tsx scripts/generate-openapi.mjs)
 //
 // Header formats supported (any subset):
 //   /**
@@ -29,10 +29,16 @@
 //
 // Path params: [orgId] and :orgId both map to {orgId}.
 // Catch-alls: [...slug] map to {slug} (documented as a single path param).
+//
+// Request/response schemas are folded in from lib/schemas/api/registry.ts via
+// zod-openapi's createSchema() — see the "Registry fold-in" section below.
 
 import { readdirSync, readFileSync, writeFileSync, mkdirSync, statSync } from 'node:fs';
 import { join, relative } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { createSchema } from 'zod-openapi';
+// Registry is TypeScript — this script must run under tsx (npm run docs:generate).
+import { registry } from '../lib/schemas/api/registry';
 
 const ROOT = join(fileURLToPath(import.meta.url), '..', '..');
 const API_DIR = join(ROOT, 'app', 'api');
@@ -277,6 +283,73 @@ function authNote(apiPath) {
 }
 
 // ---------------------------------------------------------------------------
+// Registry fold-in (request/response schemas via zod-openapi)
+// ---------------------------------------------------------------------------
+// lib/schemas/api/registry.ts maps "METHOD /path" (OpenAPI path form) to
+// { parameters?, requestBody?, responses }. Entry omitted = endpoint stays on
+// the spec's default response. An entry with an EMPTY responses record is a
+// deliberate 204 No Content (no body).
+
+// Each createSchema() call returns the named components it registered; merge
+// them into one map so $refs stay valid across operations.
+function toOpenApi(schema) {
+  const { schema: openSchema, components } = createSchema(schema);
+  Object.assign(sharedComponents, components);
+  // zod-openapi (via z.toJSONSchema) renders JSON-Schema/3.1 constructs such as
+  // type: ["string", "null"]; the spec is OpenAPI 3.0 and Swagger UI 5.x's
+  // 3.0 renderer crashes on those. Downgrade nullable types to 3.0 form.
+  for (const name of Object.keys(components)) downgradeToOpenApi30(components[name]);
+  if (!(openSchema && '$ref' in openSchema)) downgradeToOpenApi30(openSchema);
+  return openSchema;
+}
+
+function downgradeToOpenApi30(node) {
+  if (node === null || typeof node !== 'object') return;
+  const t = node.type;
+  if (Array.isArray(t) && t.includes('null')) {
+    node.type = t.filter((x) => x !== 'null')[0] ?? 'object';
+    node.nullable = true;
+  }
+  for (const [k, v] of Object.entries(node)) {
+    if (k === '$ref') continue;
+    if (v && typeof v === 'object') downgradeToOpenApi30(v);
+  }
+}
+const sharedComponents = {}; // accumulated by createSchema across calls
+const foldedOps = new Map(); // "METHOD /path" -> { parameters?, requestBody?, responses? }
+for (const [key, entry] of Object.entries(registry)) {
+  const op = {};
+  if (entry.parameters && Object.keys(entry.parameters).length) {
+    op.parameters = Object.entries(entry.parameters).map(([name, schema]) => ({
+      name,
+      in: 'query',
+      required: false,
+      schema: toOpenApi(schema),
+    }));
+  }
+  if (entry.requestBody) {
+    op.requestBody = {
+      required: true,
+      content: { 'application/json': { schema: toOpenApi(entry.requestBody) } },
+    };
+  }
+  if (Object.keys(entry.responses).length === 0) {
+    // Deliberate No Content endpoint — emit a canonical 204 with no body.
+    op.responses = { 204: { description: 'No Content' } };
+  } else {
+    op.responses = Object.fromEntries(
+      Object.entries(entry.responses).map(([status, schema]) => [
+        status,
+        schema
+          ? { description: String(status), content: { 'application/json': { schema: toOpenApi(schema) } } }
+          : { description: 'No Content' },
+      ]),
+    );
+  }
+  foldedOps.set(key, op);
+}
+
+// ---------------------------------------------------------------------------
 // Spec assembly
 // ---------------------------------------------------------------------------
 
@@ -335,12 +408,6 @@ for (const file of routes) {
         ? []
         : [{ cookieAuth: [] }],
       parameters: [],
-      responses: {
-        default: {
-          description:
-            'Unspecified — response schema not yet documented (add a zod schema + JSDoc header to fill this in).',
-        },
-      },
     };
 
     for (const param of [...pathName.matchAll(/\{([A-Za-z0-9_]+)\}/g)]) {
@@ -350,6 +417,22 @@ for (const file of routes) {
         required: true,
         schema: { type: 'string' },
       });
+    }
+
+    // Registry fold-in: registered ops get real parameters/requestBody/responses;
+    // unregistered ones stay on the default response.
+    const folded = !isFetch ? foldedOps.get(`${method} ${pathName}`) : undefined;
+    if (folded) {
+      for (const param of folded.parameters ?? []) operation.parameters.push(param);
+      if (folded.requestBody) operation.requestBody = folded.requestBody;
+      operation.responses = folded.responses;
+    } else {
+      operation.responses = {
+        default: {
+          description:
+            'Unspecified — response schema not yet documented (add a registry entry in lib/schemas/api/ to fill this in).',
+        },
+      };
     }
 
     (paths[pathName] ||= {})[opKey] = operation;
@@ -370,12 +453,14 @@ const spec = {
     version: pkg.version,
     description: [
       'Generated by `npm run docs:generate` from JSDoc headers in app/api/ (see scripts/generate-openapi.mjs).',
-      'Request/response schemas are not yet modelled — they will appear as zod-to-openapi definitions are added.',
+      'Request/response schemas come from the documentation registry in lib/schemas/api/registry.ts via zod-openapi;',
+      'operations without a registry entry fall back to an unspecified default response.',
     ].join(' '),
   },
   servers: [{ url: '/', description: 'Same origin' }],
   tags,
   components: {
+    ...(Object.keys(sharedComponents).length ? { schemas: sharedComponents } : {}),
     securitySchemes: {
       cookieAuth: {
         type: 'apiKey',
@@ -393,7 +478,7 @@ writeFileSync(OUT_FILE, JSON.stringify(spec, null, 2) + '\n');
 
 const opCount = Object.values(paths).reduce((n, m) => n + Object.keys(m).length, 0);
 console.log(`Wrote ${relative(ROOT, OUT_FILE)}`);
-console.log(`routes: ${routes.length} | operations: ${opCount} | documented: ${documented} | undocumented: ${undocumented}`);
+console.log(`routes: ${routes.length} | operations: ${opCount} | documented: ${documented} | undocumented: ${undocumented} | schema-registered: ${foldedOps.size}`);
 if (undocumented > 0) {
   console.log('\nRoutes missing JSDoc headers (summary-only in spec):');
   for (const file of routes) {

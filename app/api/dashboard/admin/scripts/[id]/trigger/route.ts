@@ -4,6 +4,7 @@ import { checkAdminRateLimit } from '@/lib/rate-limiter';
 
 import { JobSchedulerService } from '@/services/job-scheduler-service';
 import { withPlatformContext } from '@/lib/platform-db';
+import { NotFoundError, ForbiddenError } from '@/lib/services/types';
 
 export const runtime = 'nodejs';
 
@@ -45,10 +46,11 @@ export async function POST(
 
     return NextResponse.json(result);
   } catch (error) {
-    if (error instanceof Error && error.message === 'Job not found in platform org') {
+    if (error instanceof NotFoundError) {
       return NextResponse.json({ error: 'Script not found' }, { status: 404 });
     }
-    if (error instanceof Error && error.message === 'Job is disabled — enable it before triggering') {
+    if (error instanceof ForbiddenError) {
+      // Covers both "disabled" and "not approved" preconditions.
       return NextResponse.json({ error: error.message }, { status: 403 });
     }
     console.error('Failed to trigger script:', error);

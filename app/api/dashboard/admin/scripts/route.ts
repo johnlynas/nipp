@@ -4,6 +4,7 @@ import { checkAdminRateLimit } from '@/lib/rate-limiter';
 
 import { JobSchedulerService, type Schedule } from '@/services/job-scheduler-service';
 import { withPlatformContext } from '@/lib/platform-db';
+import { ConflictError, ValidationError } from '@/lib/services/types';
 import { NotificationPriority, NotificationScope } from '@prisma/client';
 
 export const runtime = 'nodejs';
@@ -105,6 +106,14 @@ export async function POST(request: NextRequest) {
 
     return NextResponse.json(result, { status: 201 });
   } catch (error) {
+    if (error instanceof ConflictError) {
+      console.error('Failed to create script:', error);
+      return NextResponse.json({ error: error.message }, { status: 409 });
+    }
+    if (error instanceof ValidationError) {
+      console.error('Failed to create script:', error);
+      return NextResponse.json({ error: error.message }, { status: 400 });
+    }
     console.error('Failed to create script:', error);
     const message = error instanceof Error && error.message ? error.message : 'Failed to create script';
     return NextResponse.json({ error: message }, { status: 500 });

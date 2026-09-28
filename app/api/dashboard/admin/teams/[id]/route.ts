@@ -8,6 +8,7 @@ import tenantDb from '@/lib/tenant-db';
 import { withPlatformContext, withTenantAdminContext } from '@/lib/platform-db';
 import { TeamService } from '@/services/team-service';
 import { notifyTeamOperation } from '@/lib/notification-push';
+import { NotFoundError, ForbiddenError, ValidationError, ConflictError } from '@/lib/services/types';
 
 export const runtime = 'nodejs';
 
@@ -119,13 +120,19 @@ export async function PATCH(
 
     return NextResponse.json(result);
   } catch (error) {
-    if (error instanceof Error && error.message === 'Team not found') {
+    if (error instanceof NotFoundError) {
       await notifyTeamOperation('update', id, false, 'Team not found');
       return NextResponse.json({ error: 'Team not found' }, { status: 404 });
     }
     console.error('Failed to update team:', error);
     const message = error instanceof Error && error.message ? error.message : 'Failed to update team';
     await notifyTeamOperation('update', targetLabel, false, message, orgId);
+    if (error instanceof ForbiddenError) {
+      return NextResponse.json({ error: message }, { status: 403 });
+    }
+    if (error instanceof ValidationError) {
+      return NextResponse.json({ error: message }, { status: 400 });
+    }
     return NextResponse.json({ error: 'Failed to update team' }, { status: 500 });
   }
 }
@@ -161,13 +168,19 @@ export async function DELETE(
 
     return NextResponse.json({ success: true });
   } catch (error) {
-    if (error instanceof Error && error.message === 'Team not found') {
+    if (error instanceof NotFoundError) {
       await notifyTeamOperation('delete', id, false, 'Team not found', orgId);
       return NextResponse.json({ error: 'Team not found' }, { status: 404 });
     }
     console.error('Failed to delete team:', error);
     const message = error instanceof Error && error.message ? error.message : 'Failed to delete team';
     await notifyTeamOperation('delete', targetLabel, false, message, orgId);
+    if (error instanceof ForbiddenError) {
+      return NextResponse.json({ error: message }, { status: 403 });
+    }
+    if (error instanceof ConflictError) {
+      return NextResponse.json({ error: message }, { status: 409 });
+    }
     return NextResponse.json({ error: 'Failed to delete team' }, { status: 500 });
   }
 }

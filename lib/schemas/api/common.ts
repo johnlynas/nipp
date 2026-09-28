@@ -79,6 +79,11 @@ export const calendarEventType = z
   .enum(['VIEWING', 'INSPECTION', 'MAINTENANCE', 'LEASE_SIGNING', 'LEASE_RENEWAL', 'KEY_EXCHANGE', 'OTHER'])
   .meta({ id: 'CalendarEventType' });
 
+/** Recurrence frequency (lib/recurrence.ts RecurrenceFrequency). */
+export const recurrenceFrequency = z
+  .enum(['DAILY', 'WEEKLY', 'MONTHLY', 'QUARTERLY', 'SEMI_ANNUALLY', 'ANNUALLY'])
+  .meta({ id: 'RecurrenceFrequency' });
+
 /** JobExecution.status — SUCCEEDED | FAILED | CANCELLED (+ PENDING/RUNNING states). */
 export const jobRunStatus = z.enum(['PENDING', 'RUNNING', 'SUCCEEDED', 'FAILED', 'CANCELLED']).meta({
   id: 'JobRunStatus',

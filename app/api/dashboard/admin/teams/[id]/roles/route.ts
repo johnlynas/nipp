@@ -5,6 +5,7 @@ import { checkAdminRateLimit } from '@/lib/rate-limiter';
 import tenantDb from '@/lib/tenant-db';
 import { withPlatformContext, withTenantAdminContext } from '@/lib/platform-db';
 import { TeamService } from '@/services/team-service';
+import { NotFoundError, ValidationError, ConflictError, ForbiddenError } from '@/lib/services/types';
 
 export const runtime = 'nodejs';
 
@@ -45,6 +46,9 @@ export async function GET(
 
     return NextResponse.json(result);
   } catch (error) {
+    if (error instanceof NotFoundError) {
+      return NextResponse.json({ error: 'Team not found' }, { status: 404 });
+    }
     console.error('Failed to list team roles:', error);
     return NextResponse.json({ error: 'Failed to fetch team roles' }, { status: 500 });
   }
@@ -92,6 +96,20 @@ export async function POST(
 
     return NextResponse.json(result, { status: 201 });
   } catch (error) {
+    if (error instanceof ConflictError) {
+      console.error('Failed to assign team role:', error);
+      return NextResponse.json({ error: error.message }, { status: 409 });
+    }
+    if (error instanceof ValidationError) {
+      // Role exists in a different organization than the team.
+      console.error('Failed to assign team role:', error);
+      return NextResponse.json({ error: error.message }, { status: 400 });
+    }
+    if (error instanceof NotFoundError) {
+      // Team or role missing.
+      console.error('Failed to assign team role:', error);
+      return NextResponse.json({ error: error.message }, { status: 404 });
+    }
     console.error('Failed to assign team role:', error);
     return NextResponse.json({ error: 'Failed to assign team role' }, { status: 500 });
   }
@@ -132,6 +150,22 @@ export async function DELETE(
 
     return NextResponse.json({ success: true });
   } catch (error) {
+    if (
+      error instanceof NotFoundError &&
+      error.message === 'Role is not assigned to this team'
+    ) {
+      console.error('Failed to revoke team role:', error);
+      return NextResponse.json({ error: error.message }, { status: 400 });
+    }
+    if (error instanceof ForbiddenError) {
+      console.error('Failed to revoke team role:', error);
+      return NextResponse.json({ error: error.message }, { status: 403 });
+    }
+    if (error instanceof NotFoundError) {
+      // Team or role missing.
+      console.error('Failed to revoke team role:', error);
+      return NextResponse.json({ error: error.message }, { status: 404 });
+    }
     console.error('Failed to revoke team role:', error);
     return NextResponse.json({ error: 'Failed to revoke team role' }, { status: 500 });
   }

@@ -129,16 +129,15 @@ export async function DELETE(
     return NextResponse.json({ error: auth.error }, { status: auth.status });
   }
 
+  const id = (await params).id;
   try {
-    const id = (await params).id;
-
     // Capture a label for the notification before the permission disappears.
     const targetLabel = await getPermissionLabel(auth.session!.user.id, id);
 
-    let result;
     try {
-      // RLS: verified platform context wraps the delete.
-      result = await withPlatformContext(
+      // RLS: verified platform context wraps the delete. In-use / default
+      // permissions surface as ConflictError (caught below → 409).
+      await withPlatformContext(
         auth.session!.user.id,
         () => PermissionService.delete(id, { userId: auth.session!.user.id, role: 'PLATFORM_ADMIN' })
       );
@@ -147,17 +146,16 @@ export async function DELETE(
       throw error;
     }
 
-    if (result === null) {
-      await notifyPermissionOperation('delete', targetLabel, false, 'Cannot delete permission — it is either assigned to roles or is a default (bootstrapped) permission');
-      return NextResponse.json({ error: 'Cannot delete permission — it is either assigned to roles or is a default (bootstrapped) permission' }, { status: 409 });
-    }
-
     await notifyPermissionOperation('delete', targetLabel, true);
 
     return NextResponse.json({ success: true });
   } catch (error) {
     if (error instanceof Error && error.message === 'Permission not found') {
       return NextResponse.json({ error: 'Permission not found' }, { status: 404 });
+    }
+    if (error instanceof Error && error.name === 'ConflictError') {
+      await notifyPermissionOperation('delete', id, false, error.message);
+      return NextResponse.json({ error: error.message }, { status: 409 });
     }
     console.error('Failed to delete permission:', error);
     return NextResponse.json({ error: 'Failed to delete permission' }, { status: 500 });

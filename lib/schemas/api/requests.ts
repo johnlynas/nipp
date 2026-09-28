@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { calendarEventType, notificationPriority, orgStatus } from './common';
+import { calendarEventType, notificationPriority, orgStatus, recurrenceFrequency } from './common';
 
 /**
  * Request body schemas for API docs — mirror what each route actually
@@ -23,6 +23,19 @@ export const createOrganizationBody = z
   })
   .meta({ id: 'CreateOrganizationBody' });
 
+/** Dashboard org create — no adminEmail (the route only forwards name/slug/description). */
+export const dashboardCreateOrganizationBody = z
+  .object({
+    name: z.string().min(1).describe('Organization name (required)'),
+    slug: z
+      .string()
+      .regex(/^[a-z0-9]+(?:-[a-z0-9]+)*$/)
+      .optional()
+      .describe('URL slug (auto-generated, with collision suffix, when omitted)'),
+    description: z.string().nullable().optional(),
+  })
+  .meta({ id: 'DashboardCreateOrganizationBody' });
+
 export const updateOrganizationBody = z
   .object({
     name: z.string().min(1).optional(),
@@ -30,6 +43,7 @@ export const updateOrganizationBody = z
       .string()
       .regex(/^[a-z0-9]+(?:-[a-z0-9]+)*$/)
       .optional(),
+    description: z.string().nullable().optional(),
     status: orgStatus.optional(),
   })
   .meta({ id: 'UpdateOrganizationBody' });
@@ -65,6 +79,7 @@ export const createRoleBody = z
   .object({
     name: z.string().min(1),
     description: z.string().optional(),
+    isDefault: z.boolean().optional(),
     organizationId: z.string().optional().describe('Target org (required when creating a tenant role)'),
   })
   .meta({ id: 'CreateRoleBody' });
@@ -73,8 +88,69 @@ export const updateRoleBody = z
   .object({
     name: z.string().min(1).optional(),
     description: z.string().optional(),
+    isDefault: z.boolean().optional(),
+    // Admin role PATCH also accepts the target org from the body (platform admins targeting tenant orgs).
+    organizationId: z.string().optional().describe('Target org when updating a tenant role'),
   })
   .meta({ id: 'UpdateRoleBody' });
+
+/** Dashboard role create — target org is mandatory in the body (400 when missing). */
+export const dashboardCreateRoleBody = z
+  .object({
+    name: z.string().min(1).describe('Role name (unique within the organization)'),
+    description: z.string().optional(),
+    isDefault: z.boolean().optional().default(false),
+    organizationId: z.string().describe('Target org (required on this surface — no platform fallback)'),
+  })
+  .meta({ id: 'DashboardCreateRoleBody' });
+
+/** Dashboard role update — the target org comes from ?organizationId, not the body. */
+export const updateDashboardRoleBody = z
+  .object({
+    name: z.string().min(1).optional(),
+    description: z.string().optional(),
+    isDefault: z.boolean().optional(),
+  })
+  .meta({ id: 'UpdateDashboardRoleBody' });
+
+/** Org-scoped tenant role endpoints — target org is in the path, body has no orgId. */
+export const orgCreateRoleBody = z
+  .object({
+    name: z.string().min(1).describe('Role name (unique within the organization)'),
+    description: z.string().optional(),
+  })
+  .meta({ id: 'OrgCreateRoleBody' });
+
+export const orgUpdateRoleBody = z
+  .object({
+    name: z.string().min(1).optional(),
+    description: z.string().nullable().optional(),
+  })
+  .meta({ id: 'OrgUpdateRoleBody' });
+
+/** POST /api/roles — top-level tenant role create; organizationId is mandatory (no platform fallback). */
+export const createTopLevelRoleBody = z
+  .object({
+    name: z.string().min(1),
+    description: z.string().optional(),
+    organizationId: z.string().describe('Organization to create the role in (required)'),
+  })
+  .meta({ id: 'CreateTopLevelRoleBody' });
+
+/** PATCH /api/admin/organizations/[orgId] and [orgId]/settings — accepts name/slug/status (state machine enforced). */
+export const orgUpdateOrganizationBody = z
+  .object({
+    name: z.string().min(1).optional(),
+    slug: z
+      .string()
+      .regex(/^[a-z0-9]+(?:-[a-z0-9]+)*$/)
+      .optional()
+      .describe('New URL slug (409 when already in use)'),
+    status: orgStatus.optional().describe(
+      'State machine transitions enforced server-side (ARCHIVED is terminal)',
+    ),
+  })
+  .meta({ id: 'OrgUpdateOrganizationBody' });
 
 export const createPermissionBody = z
   .object({
@@ -96,9 +172,32 @@ export const updatePermissionBody = z
   })
   .meta({ id: 'UpdatePermissionBody' });
 
+/** POST /api/dashboard/admin/resources — create a platform resource; roles may be assigned in the same call. */
+export const createResourceBody = z
+  .object({
+    name: z.string().min(1).describe('Resource name (unique, case-insensitive)'),
+    description: z.string().optional(),
+    roleIds: z.array(z.string()).optional().describe('Role IDs to assign to the resource at creation'),
+  })
+  .meta({ id: 'CreateResourceBody' });
+
+/** PATCH /api/dashboard/admin/resources/{id} — name/description update; providing roleIds REPLACES all assignments. */
+export const updateResourceBody = z
+  .object({
+    name: z.string().min(1).optional(),
+    description: z.string().optional(),
+    roleIds: z.array(z.string()).optional().describe('Full replacement of role assignments (empty array clears them)'),
+  })
+  .meta({ id: 'UpdateResourceBody' });
+
 export const assignRolePermissionBody = z
   .object({ permissionId: z.string() })
   .meta({ id: 'AssignRolePermissionBody' });
+
+/** POST /api/roles/{roleId}/permissions — bulk key assignment for a role. */
+export const assignRolePermissionsBody = z
+  .object({ permissionKeys: z.array(z.string()).describe('Permission keys, e.g. ["properties:view"]') })
+  .meta({ id: 'AssignRolePermissionsBody' });
 
 export const batchAssignPermissionsBody = z
   .object({
@@ -136,8 +235,19 @@ export const banUserBody = z
   .object({
     banned: z.boolean().optional().describe('Defaults to the opposite of the current state'),
     banReason: z.string().nullable().optional(),
+    banExpires: z.string().nullable().optional().describe('ISO-8601 expiry; null = permanent (default when banning)'),
   })
   .meta({ id: 'BanUserBody' });
+
+/** POST /api/dashboard/admin/users — organizationId is required here (400 when absent), unlike the admin surface. */
+export const dashboardCreateUserBody = z
+  .object({
+    name: z.string().min(1).describe('User display name (required)'),
+    email: z.string().email().describe('Required; must be globally unique (409 on clash)'),
+    password: z.string().optional().describe('When given, a BetterAuth credential account is created alongside the user'),
+    organizationId: z.string().describe('Target org — membership + Members-team enrollment happen in this org'),
+  })
+  .meta({ id: 'DashboardCreateUserBody' });
 
 // ---------------------------------------------------------------------------
 // Notifications (admin)
@@ -165,6 +275,11 @@ export const createTeamBody = z
   })
   .meta({ id: 'CreateTeamBody' });
 
+/** Dashboard team create — adds the target organization (org is in the body, not the path). */
+export const dashboardCreateTeamBody = createTeamBody
+  .extend({ organizationId: z.string().describe('Organization to create the team in') })
+  .meta({ id: 'DashboardCreateTeamBody' });
+
 export const updateTeamBody = z
   .object({
     name: z.string().min(1).optional(),
@@ -173,7 +288,20 @@ export const updateTeamBody = z
   })
   .meta({ id: 'UpdateTeamBody' });
 
+/** PATCH /api/dashboard/admin/teams/{id} — handler reads only name/description (slug is NOT consumed here, unlike the org-scoped sibling). */
+export const dashboardUpdateTeamBody = z
+  .object({
+    name: z.string().min(1).max(100).optional(),
+    description: z.string().nullable().optional(),
+  })
+  .meta({ id: 'DashboardUpdateTeamBody' });
+
 export const addTeamMemberBody = z.object({ userId: z.string() }).meta({ id: 'AddTeamMemberBody' });
+
+/** POST /api/roles/{roleId}/members — assign a user to a role. */
+export const addRoleMemberBody = z.object({ userId: z.string().describe('User to attach to the role') }).meta({
+  id: 'AddRoleMemberBody',
+});
 export const assignTeamRoleBody = z.object({ roleId: z.string() }).meta({ id: 'AssignTeamRoleBody' });
 
 // ---------------------------------------------------------------------------
@@ -184,21 +312,27 @@ export const createCalendarBody = z
   .object({
     name: z.string().min(1),
     description: z.string().optional(),
-    color: z.string().optional().describe('Color theme, e.g. "#1B2A4A"'),
-    isDefault: z.boolean().optional(),
+    // Handler only reads name/description — color is auto-assigned from a palette,
+    // isDefault is hardcoded false on create.
   })
   .meta({ id: 'CreateCalendarBody' });
 
-export const updateCalendarBody = createCalendarBody.partial().meta({ id: 'UpdateCalendarBody' });
+export const updateCalendarBody = createCalendarBody
+  .partial()
+  .extend({
+    color: z.string().optional().describe('Color theme, e.g. "#1B2A4A"'),
+  })
+  .meta({ id: 'UpdateCalendarBody' });
 
 const eventRecurrence = z
   .object({
-    frequency: z.enum(['DAILY', 'WEEKLY', 'MONTHLY', 'QUARTERLY', 'SEMI_ANNUALLY', 'ANNUALLY']),
+    frequency: recurrenceFrequency,
     interval: z.number().int().positive().optional(),
     endDate: z.string().optional().describe('Recurrence end (YYYY-MM-DD)'),
     count: z.number().int().positive().optional(),
     byDay: z.string().nullable().optional().describe('e.g. "MO,WE"'),
     byMonthDay: z.number().int().min(1).max(31).nullable().optional(),
+    excludedDates: z.array(z.string()).optional().describe('Occurrence dates to exclude (YYYY-MM-DD)'),
   })
   .meta({ id: 'EventRecurrence' });
 
@@ -275,12 +409,11 @@ export const cspViolationReportBody = z
   })
   .meta({ id: 'CspViolationReportBody' });
 
-/** Dashboard client-side error reporter. */
+/** Dashboard client-side error reporter (POST /api/dashboard/admin/errors). */
 export const logErrorBody = z
   .object({
     message: z.string(),
-    name: z.string().optional(),
-    stack: z.string().nullable().optional(),
-    url: z.string().nullable().optional(),
+    page: z.string().optional().describe('Page/component where the error occurred'),
+    action: z.string().nullable().optional().describe('User action in progress'),
   })
   .meta({ id: 'LogErrorBody' });
