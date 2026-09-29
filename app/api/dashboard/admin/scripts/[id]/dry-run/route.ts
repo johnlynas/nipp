@@ -4,6 +4,7 @@ import { checkAdminRateLimit } from '@/lib/rate-limiter';
 
 import { JobSchedulerService } from '@/services/job-scheduler-service';
 import { withPlatformContext } from '@/lib/platform-db';
+import { NotFoundError, ValidationError } from '@/lib/services/types';
 
 export const runtime = 'nodejs';
 
@@ -45,8 +46,12 @@ export async function POST(
 
     return NextResponse.json(result);
   } catch (error) {
-    if (error instanceof Error && error.message === 'Job not found in platform org') {
+    if (error instanceof NotFoundError) {
       return NextResponse.json({ error: 'Script not found' }, { status: 404 });
+    }
+    // Dry-run only applies to jobs with operator-authored code — missing code → 400.
+    if (error instanceof ValidationError) {
+      return NextResponse.json({ error: error.message }, { status: 400 });
     }
     console.error('Failed to dry-run script:', error);
     const message = error instanceof Error && error.message ? error.message : 'Failed to dry-run script';

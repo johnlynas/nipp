@@ -203,7 +203,7 @@ export const PermissionService = {
         { userId: ctx.userId, permissionId: id, rolePermissionCount, method: 'PermissionService.delete' },
         'Cannot delete permission assigned to roles',
       );
-      return null;
+      throw new ConflictError('Cannot delete permission assigned to roles — remove the assignments first');
     }
 
     // Safety check: cannot delete default (bootstrapped) permissions
@@ -212,7 +212,7 @@ export const PermissionService = {
         { userId: ctx.userId, permissionId: id, method: 'PermissionService.delete' },
         'Cannot delete default permission',
       );
-      return null;
+      throw new ConflictError('Cannot delete a default (bootstrapped) permission');
     }
 
     await tenantDb.permission.delete({ where: { id } });

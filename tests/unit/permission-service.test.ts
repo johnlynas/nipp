@@ -292,22 +292,22 @@ describe('PermissionService', () => {
       expect(result?.success).toBe(true);
     });
 
-    it('returns null when permission is assigned to roles', async () => {
+    it('throws ConflictError when permission is assigned to roles', async () => {
       vi.mocked(globalDb.permission.findUnique).mockResolvedValue(mockPermission() as never);
       vi.mocked(globalDb.rolePermission.count).mockResolvedValue(2);
 
-      const result = await PermissionService.delete('perm-1', mockCtx('PLATFORM_ADMIN'));
-
-      expect(result).toBeNull();
+      await expect(
+        PermissionService.delete('perm-1', mockCtx('PLATFORM_ADMIN'))
+      ).rejects.toThrow(ConflictError);
     });
 
-    it('returns null when permission is a default (bootstrapped) permission', async () => {
+    it('throws ConflictError when permission is a default (bootstrapped) permission', async () => {
       vi.mocked(globalDb.permission.findUnique).mockResolvedValue(mockPermission({ isDefault: true }) as never);
       vi.mocked(globalDb.rolePermission.count).mockResolvedValue(0);
 
-      const result = await PermissionService.delete('perm-1', mockCtx('PLATFORM_ADMIN'));
-
-      expect(result).toBeNull();
+      await expect(
+        PermissionService.delete('perm-1', mockCtx('PLATFORM_ADMIN'))
+      ).rejects.toThrow(ConflictError);
     });
 
     it('throws ForbiddenError for TENANT_ADMIN', async () => {

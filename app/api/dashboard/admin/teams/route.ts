@@ -10,6 +10,7 @@ import tenantDb from '@/lib/tenant-db';
 import { withPlatformContext, withTenantAdminContext } from '@/lib/platform-db';
 import { TeamService } from '@/services/team-service';
 import { notifyTeamOperation } from '@/lib/notification-push';
+import { ValidationError, ForbiddenError } from '@/lib/services/types';
 
 export const runtime = 'nodejs';
 
@@ -143,6 +144,10 @@ export async function POST(request: NextRequest) {
       return NextResponse.json(result, { status: 201 });
     } catch (error) {
       console.error('Failed to create team:', error);
+      if (error instanceof ValidationError || error instanceof ForbiddenError) {
+        await notifyTeamOperation('create', targetLabel, false, error.message, body.organizationId!);
+        return NextResponse.json({ error: error.message }, { status: error instanceof ForbiddenError ? 403 : 400 });
+      }
       const message = error instanceof Error && error.message ? error.message : 'Failed to create team';
       await notifyTeamOperation('create', targetLabel, false, message, body.organizationId!);
       return NextResponse.json({ error: 'Failed to create team' }, { status: 500 });

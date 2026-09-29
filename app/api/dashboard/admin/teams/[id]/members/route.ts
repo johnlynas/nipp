@@ -5,6 +5,7 @@ import { checkAdminRateLimit } from '@/lib/rate-limiter';
 import tenantDb from '@/lib/tenant-db';
 import { withPlatformContext, withTenantAdminContext } from '@/lib/platform-db';
 import { TeamService } from '@/services/team-service';
+import { NotFoundError, ValidationError, ConflictError, ForbiddenError } from '@/lib/services/types';
 
 export const runtime = 'nodejs';
 
@@ -45,6 +46,9 @@ export async function GET(
 
     return NextResponse.json(result);
   } catch (error) {
+    if (error instanceof NotFoundError) {
+      return NextResponse.json({ error: 'Team not found' }, { status: 404 });
+    }
     console.error('Failed to list team members:', error);
     return NextResponse.json({ error: 'Failed to fetch team members' }, { status: 500 });
   }
@@ -94,6 +98,18 @@ export async function POST(
 
     return NextResponse.json(result, { status: 201 });
   } catch (error) {
+    if (error instanceof ConflictError) {
+      console.error('Failed to add team member:', error);
+      return NextResponse.json({ error: error.message }, { status: 409 });
+    }
+    if (error instanceof ValidationError || error instanceof ForbiddenError) {
+      // E.g. "User is not a member of this organization".
+      console.error('Failed to add team member:', error);
+      return NextResponse.json({ error: error.message }, { status: 400 });
+    }
+    if (error instanceof NotFoundError) {
+      return NextResponse.json({ error: 'Team not found' }, { status: 404 });
+    }
     console.error('Failed to add team member:', error);
     return NextResponse.json({ error: 'Failed to add team member' }, { status: 500 });
   }
@@ -134,6 +150,13 @@ export async function DELETE(
 
     return NextResponse.json({ success: true });
   } catch (error) {
+    if (error instanceof NotFoundError && error.message === 'Team not found') {
+      return NextResponse.json({ error: 'Team not found' }, { status: 404 });
+    }
+    // Otherwise: "User is not a member of this team" / cross-org write — both 4xx.
+    if (error instanceof NotFoundError || error instanceof ForbiddenError) {
+      return NextResponse.json({ error: error.message }, { status: 400 });
+    }
     console.error('Failed to remove team member:', error);
     return NextResponse.json({ error: 'Failed to remove team member' }, { status: 500 });
   }
