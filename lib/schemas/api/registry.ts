@@ -934,6 +934,15 @@ export const registry: Record<string, ApiEntry> = {
   },
 
   // ---------------------------------------------------------------------------
+  // Org roles — membership-scoped read-only rolename list for the tenant
+  // dashboard (the full CRUD surface stays under /api/admin/organizations).
+  // Membership OR super admin via resolveTenantAccess.
+  // ---------------------------------------------------------------------------
+  'GET /api/organizations/{orgId}/roles': {
+    responses: { '200': M.orgRolesList, '401': E, '403': E, '500': E },
+  },
+
+  // ---------------------------------------------------------------------------
   // Payload encryption keys — authenticated session issues short-lived AES-256-GCM key material
   // (base64url) + metadata; responses carry Cache-Control: no-store. Trust check on the raw
   // { error } literal bodies of this surface.

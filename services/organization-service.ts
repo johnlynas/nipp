@@ -205,7 +205,12 @@ export const OrganizationService = {
 
       // 3. Create default "Members" team for the organization
       await tx.team.create({
-        data: { name: 'Members', slug: 'members', organizationId: organization.id },
+        data: {
+          name: 'Members',
+          slug: 'members',
+          description: `All members of organization ${organization.name}`,
+          organizationId: organization.id,
+        },
       });
       logger.debug(
         { orgId: organization.id, method: 'Service.createOrganization' },

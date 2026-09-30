@@ -228,7 +228,8 @@ describe('POST /api/admin/organizations/[orgId]/members', () => {
       session: mockSession,
     } as any);
 
-    vi.mocked(globalDb.organization.findUnique).mockResolvedValue({ id: 'org-1' } as any);
+    // Org name is part of the default Members team description
+    vi.mocked(globalDb.organization.findUnique).mockResolvedValue({ id: 'org-1', name: 'Test Org' } as any);
     vi.mocked(globalDb.user.findUnique).mockResolvedValue({ id: 'user-1' } as any);
     vi.mocked(globalDb.member.findFirst).mockResolvedValue(null);
     vi.mocked(tenantDb.member.create).mockResolvedValue({
@@ -247,8 +248,9 @@ describe('POST /api/admin/organizations/[orgId]/members', () => {
     );
 
     expect(response.status).toBe(201);
+    // The heal path reads the org name (from the findUnique mock above) for the description.
     expect(globalDb.team.create).toHaveBeenCalledWith({
-      data: { name: 'Members', slug: 'members', organizationId: 'org-1' },
+      data: { name: 'Members', slug: 'members', description: 'All members of organization Test Org', organizationId: 'org-1' },
     });
     expect(tenantDb.teamMember.create).toHaveBeenCalledWith({
       data: { userId: 'user-1', teamId: 'healed-team', organizationId: 'org-1' },

@@ -2,11 +2,14 @@ import { auth } from '@/lib/auth';
 import { headers } from 'next/headers';
 import { redirect } from 'next/navigation';
 import tenantDb from '@/lib/tenant-db';
-import { LogoutButton } from '@/components/auth/LogoutButton'; // ✅ Import the new button
 
 /**
  * Root Page Server Component.
  * Acts as a secure gatekeeper. Runs on the server BEFORE any UI is rendered.
+ *
+ * Post-login landing: platform admins go to the admin dashboard; every other
+ * role lands directly on their tenant calendar page (the default page of the
+ * /dashboard/tenant workspace — mapping lives in lib/dashboard-router.ts).
  */
 export default async function HomePage() {
   // 1. SECURELY fetch the session to get the user ID and validate the cookie.
@@ -25,25 +28,14 @@ export default async function HomePage() {
     select: { role: true },
   });
 
-  // 4. If Super Admin, redirect immediately via HTTP 307/308.
-  if (user?.role === 'super_admin') {
+  // 4. Platform administrators land in the admin dashboard (users page —
+  // its own default view, same target /dashboard/admin/page.tsx bounces to).
+  if (user?.role === 'super_admin' || user?.role === 'admin') {
     redirect('/dashboard/admin/users');
   }
 
-  // 5. If we reach here, the user is a standard Tenant User.
-  // Render the tenant dashboard securely.
-  return (
-    <div className="p-8">
-      <h1 className="text-2xl font-semibold tracking-tight text-slate-900">
-        Welcome to your Tenant Dashboard
-      </h1>
-      <p className="mt-2 text-slate-600">
-        You are logged in as a tenant user.
-      </p>
-      
-      {/* ✅ Render the Client Component here */}
-      <LogoutButton />
-      
-    </div>
-  );
+  // 5. Every other role lands on the tenant workspace calendar — the
+  // default page of the /dashboard/tenant section (calendar, org chart,
+  // members, roles, organization setup).
+  redirect('/dashboard/tenant/calendar');
 }

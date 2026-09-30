@@ -241,6 +241,11 @@ export default function TeamsPage() {
     { key: 'name', label: 'Team Name', render: (t: Team) => (
       <div className="font-medium" style={{ color: 'var(--color-navy-850)' }}>{t.name}</div>
     )},
+    { key: 'description', label: 'Description', render: (t: Team) => (
+      <span style={{ color: t.description ? 'var(--color-navy-850)' : 'var(--color-slate-400)' }}>
+        {t.description || '—'}
+      </span>
+    )},
     { key: '_count', label: 'Members', render: (t: Team) => t._count?.members ?? 0 },
     { key: 'organization', label: 'Organization', render: (t: Team) => {
       const org = organizations.find((o) => o.id === t.organizationId);

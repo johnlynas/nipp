@@ -65,8 +65,18 @@ export const UserService = {
       throw new Error('A user with this email already exists');
     }
 
+    // The organization the user is being created for. TENANT_ADMIN always
+    // knows it from ctx; PLATFORM_ADMIN passes it explicitly. Without one the
+    // user has no workspace and every tenant dashboard page shows "No
+    // organization selected" — so pin activeOrganizationId at create time
+    // (the session hook in lib/auth.ts only backfills on first sign-in).
+    const orgForUser =
+      ctx.role === 'TENANT_ADMIN'
+        ? ctx.organizationId
+        : data.organizationId ?? null;
+
     // Build user data — include passwordHash if provided
-    const userData: { email: string; name: string; passwordHash?: string } = {
+    const userData: { email: string; name: string; passwordHash?: string; activeOrganizationId?: string | null } = {
       email,
       name,
     };
@@ -75,6 +85,10 @@ export const UserService = {
     if (password) {
       passwordHash = await hashPassword(password);
       userData.passwordHash = passwordHash;
+    }
+
+    if (orgForUser) {
+      userData.activeOrganizationId = orgForUser;
     }
 
     const user = await tenantDb.user.create({
