@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect, useRef } from 'react';
+import { Eye, Pencil, Plus, X } from 'lucide-react';
 import type { ContextMenuPosition, ContextMenuDateCell, ContextMenuEventCell } from './types';
 
 // ---------------------------------------------------------------------------
@@ -12,6 +13,8 @@ interface CalendarContextMenuProps {
   dateCell: ContextMenuDateCell | null;
   eventCell: ContextMenuEventCell | null;
   onClose: () => void;
+  /** View-only viewers see a reduced menu: view events only, no add/edit/delete. */
+  readOnly?: boolean;
   onAddEvent?: (date: Date) => void;
   onViewEvent?: (event: ContextMenuEventCell['event']) => void;
   onEditEvent?: (event: ContextMenuEventCell['event']) => void;
@@ -27,6 +30,7 @@ export default function CalendarContextMenu({
   dateCell,
   eventCell,
   onClose,
+  readOnly = false,
   onAddEvent,
   onViewEvent,
   onEditEvent,
@@ -58,6 +62,8 @@ export default function CalendarContextMenu({
   }, [position, onClose]);
 
   if (!position) return null;
+  // Blank-slot context actions exist to create events — an admin affordance.
+  if (readOnly && dateCell && !eventCell) return null;
 
   const handleAddEvent = () => {
     onAddEvent?.(dateCell!.date);
@@ -92,12 +98,12 @@ export default function CalendarContextMenu({
               className="w-full px-4 py-2 text-left text-sm hover:bg-slate-50 transition-colors flex items-center gap-2"
               style={{ color: 'var(--color-slate-800)' }}
             >
-              <span>👁</span> View Event
+              <Eye className="h-4 w-4 shrink-0" /> View Event
             </button>
           )}
 
           {/* Edit option */}
-          {onEditEvent && (
+          {!readOnly && onEditEvent && (
             <button
               onClick={() => {
                 onEditEvent(eventCell.event);
@@ -106,18 +112,20 @@ export default function CalendarContextMenu({
               className="w-full px-4 py-2 text-left text-sm hover:bg-slate-50 transition-colors flex items-center gap-2"
               style={{ color: 'var(--color-slate-800)' }}
             >
-              <span>✏️</span> Edit Event
+              <Pencil className="h-4 w-4 shrink-0" /> Edit Event
             </button>
           )}
 
           {/* Delete option */}
+          {!readOnly && (
           <button
             onClick={handleDeleteEvent}
             className="w-full px-4 py-2 text-left text-sm hover:bg-slate-50 transition-colors flex items-center gap-2"
             style={{ color: '#E76F51' }}
           >
-            <span>🗑</span> Delete Event
+            <X className="h-4 w-4 shrink-0" /> Delete Event
           </button>
+          )}
         </>
       ) : (
         /* Date context menu — Add Event only */
@@ -129,7 +137,7 @@ export default function CalendarContextMenu({
               className="w-full px-4 py-2 text-left text-sm hover:bg-slate-50 transition-colors flex items-center gap-2"
               style={{ color: 'var(--color-slate-800)' }}
             >
-              <span>+</span> Add Event
+              <Plus className="h-4 w-4 shrink-0" /> Add Event
             </button>
           )}
         </>

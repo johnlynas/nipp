@@ -431,7 +431,12 @@ describe('OrganizationService', () => {
 
       // Legacy/missing-team healing: the Members team is created in-txn…
       expect(txTeamCreate).toHaveBeenCalledWith({
-        data: { name: 'Members', slug: 'members', organizationId: 'new-org' },
+        data: {
+          name: 'Members',
+          slug: 'members',
+          description: 'All members of organization Test Org',
+          organizationId: 'new-org',
+        },
       });
       // …and the bootstrap admin is enrolled in it
       expect(txTeamMemberCreate).toHaveBeenCalledWith({

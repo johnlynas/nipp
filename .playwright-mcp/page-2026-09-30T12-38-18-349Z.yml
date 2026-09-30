@@ -1,0 +1,28 @@
+- generic [active] [ref=e1]:
+  - region "Notifications alt+T"
+  - generic [ref=e2]:
+    - generic [ref=e3]: Property NI
+    - main [ref=e123]:
+      - generic [ref=e124]:
+        - heading "Welcome back" [level=2] [ref=e125]
+        - paragraph [ref=e126]: Sign in to your Property NI workspace.
+        - generic [ref=e127]:
+          - generic [ref=e128]:
+            - generic [ref=e129]: User ID
+            - textbox "User ID" [ref=e130]:
+              - /placeholder: Enter your email address
+          - generic [ref=e131]:
+            - generic [ref=e132]:
+              - generic [ref=e133]: Password
+              - button "Forgot password?" [ref=e134] [cursor=pointer]
+            - generic [ref=e135]:
+              - textbox "Password" [ref=e136]:
+                - /placeholder: Enter your password
+              - button "Show password" [ref=e137] [cursor=pointer]
+          - button "Sign in with email" [ref=e143] [cursor=pointer]
+          - generic [ref=e147]: or continue with
+          - generic [ref=e151]:
+            - button "Sign in with Google" [ref=e152] [cursor=pointer]
+            - button "Sign in with Apple" [ref=e155] [cursor=pointer]
+        - paragraph [ref=e158]: Trouble signing in? Contact your portal administrator.
+  - alert [ref=e159]

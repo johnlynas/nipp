@@ -20,16 +20,16 @@ export type UserRole =
  * Mapping of user roles to their dashboard paths.
  */
 const ROLE_DASHBOARD_MAP: Record<UserRole, string> = {
-  super_admin: '/admin',
-  admin: '/admin',
-  owner: '/dashboard/owner',
-  manager: '/dashboard/manager',
-  agent: '/dashboard/agent',
-  maintenance: '/dashboard/maintenance',
+  super_admin: '/dashboard/admin',
+  admin: '/dashboard/admin',
+  owner: '/dashboard/tenant',
+  manager: '/dashboard/tenant',
+  agent: '/dashboard/tenant',
+  maintenance: '/dashboard/tenant',
   tenant: '/dashboard/tenant',
-  accountant: '/dashboard/accountant',
+  accountant: '/dashboard/tenant',
   contractor: '/dashboard/contractor', // Placeholder — full implementation deferred to future OpenSpec proposal
-  member: '/dashboard/owner', // Default fallback
+  member: '/dashboard/tenant',
 };
 
 /**

@@ -17,6 +17,7 @@ vi.mock('@/lib/tenant-db', () => ({
     teamRole: { findMany: vi.fn() },
     memberRole: { findFirst: vi.fn(), create: vi.fn() },
     member: { findFirst: vi.fn() },
+    organization: { findUnique: vi.fn() },
   },
 }));
 
@@ -41,13 +42,19 @@ describe('org-default-team', () => {
 
     it('creates the default Members team for a legacy org when missing', async () => {
       vi.mocked(globalDb.team.findFirst).mockResolvedValue(null as never);
+      vi.mocked(globalDb.organization.findUnique).mockResolvedValue({ name: 'Legacy Org' } as never);
       vi.mocked(globalDb.team.create).mockResolvedValue({ id: 'new-team', slug: 'members' } as never);
 
       const team = await ensureDefaultMembersTeam(globalDb, 'legacy-org');
 
       expect(team.id).toBe('new-team');
       expect(globalDb.team.create).toHaveBeenCalledWith({
-        data: { name: 'Members', slug: DEFAULT_MEMBERS_TEAM_SLUG, organizationId: 'legacy-org' },
+        data: {
+          name: 'Members',
+          slug: DEFAULT_MEMBERS_TEAM_SLUG,
+          description: 'All members of organization Legacy Org',
+          organizationId: 'legacy-org',
+        },
       });
     });
   });
@@ -69,6 +76,7 @@ describe('org-default-team', () => {
 
     it('heals a missing Members team and then enrolls the user', async () => {
       vi.mocked(globalDb.team.findFirst).mockResolvedValue(null as never);
+      vi.mocked(globalDb.organization.findUnique).mockResolvedValue({ name: 'Legacy Org' } as never);
       vi.mocked(globalDb.team.create).mockResolvedValue({ id: 'healed-team', slug: 'members' } as never);
       vi.mocked(globalDb.teamMember.findFirst).mockResolvedValue(null as never);
       vi.mocked(globalDb.teamMember.create).mockResolvedValue({ id: 'tm-1' } as never);
@@ -77,7 +85,12 @@ describe('org-default-team', () => {
       await enrollInDefaultMembersTeam(globalDb, 'legacy-org', 'user-9');
 
       expect(globalDb.team.create).toHaveBeenCalledWith({
-        data: { name: 'Members', slug: 'members', organizationId: 'legacy-org' },
+        data: {
+          name: 'Members',
+          slug: 'members',
+          description: 'All members of organization Legacy Org',
+          organizationId: 'legacy-org',
+        },
       });
       expect(globalDb.teamMember.create).toHaveBeenCalledWith({
         data: { userId: 'user-9', teamId: 'healed-team', organizationId: 'legacy-org' },

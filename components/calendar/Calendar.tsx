@@ -25,6 +25,13 @@ interface CalendarProps {
   className?: string;
   /** Display name of the organisation whose calendar is shown (header title). */
   organizationName?: string;
+  /**
+   * View-only mode for tenant users: no organization switcher, no event
+   * create/edit/delete/drag, and event clicks open in read-only view.
+   * The server enforces write access independently — this only removes the
+   * affordances.
+   */
+  readOnly?: boolean;
   /** Fired when the super admin org switcher picks a different tenant org. */
   onOrganizationSelected?: (orgId: string, orgName: string) => void;
 }
@@ -38,6 +45,7 @@ export default function Calendar({
   initialView = 'month',
   className,
   organizationName,
+  readOnly = false,
   onOrganizationSelected,
 }: CalendarProps) {
   // View state
@@ -197,6 +205,10 @@ export default function Calendar({
   useEffect(() => {
     let cancelled = false;
     const loadOrgs = async () => {
+      // Read-only viewers see only their own organization — the platform
+      // org list is a super-admin resource (403 for them) and the switcher
+      // it feeds is hidden from them, so skip the fetch entirely.
+      if (readOnly) return;
       try {
         const res = await fetch('/api/admin/organizations/list');
         if (!res.ok) return;
@@ -215,7 +227,7 @@ export default function Calendar({
     };
     loadOrgs();
     return () => { cancelled = true; };
-  }, []);
+  }, [readOnly]);
 
   const handleOrgChange = useCallback((orgId: string) => {
     setSelectedOrgId(orgId);
@@ -343,8 +355,10 @@ export default function Calendar({
 
   const handleEventClick = useCallback((event: CalendarEvent) => {
     setSelectedEvent(event);
+    // Read-only viewers always open in view mode — the edit form is an admin affordance.
+    if (readOnly) setViewMode(true);
     setModalOpen(true);
-  }, []);
+  }, [readOnly]);
 
   const handleViewEvent = useCallback((event: CalendarEvent) => {
     setSelectedEvent(event);
@@ -357,9 +371,10 @@ export default function Calendar({
   }, []);
 
   const handleDateRightClick = useCallback((date: Date, e: React.MouseEvent) => {
+    if (readOnly) return; // creating from a blank slot is an admin affordance
     setContextMenuPos({ x: e.clientX, y: e.clientY });
     setContextMenuDate(date);
-  }, []);
+  }, [readOnly]);
 
   const handleEventDragStart = useCallback((event: CalendarEvent, e: React.DragEvent) => {
     setDraggingEventId(event.id);
@@ -853,6 +868,9 @@ export default function Calendar({
   // ---------------------------------------------------------------------------
 
   const renderCalendarGrid = () => {
+    // Read-only viewers: no drag-to-move (the views keep their drop targets
+    // inert because no drag can start) and the right-click menu degrades to
+    // "View Event" only via CalendarContextMenu's readOnly prop.
     if (view === 'month') {
       return (
         <CalendarMonthView
@@ -861,11 +879,11 @@ export default function Calendar({
           events={events}
           onDateClick={handleDateClick}
           onEventClick={handleEventClick}
-          onDateRightClick={handleDateRightClick}
+          onDateRightClick={readOnly ? undefined : handleDateRightClick}
           onEventRightClick={handleEventRightClick}
-          onEventDragStart={handleEventDragStart}
+          onEventDragStart={readOnly ? undefined : handleEventDragStart}
           onDragEnd={handleDragEnd}
-          onDrop={handleDrop}
+          onDrop={readOnly ? undefined : handleDrop}
           draggingEventId={draggingEventId}
         />
       );
@@ -878,11 +896,11 @@ export default function Calendar({
           events={events}
           onDateClick={handleDateClick}
           onEventClick={handleEventClick}
-          onDateRightClick={handleDateRightClick}
+          onDateRightClick={readOnly ? undefined : handleDateRightClick}
           onEventRightClick={handleEventRightClick}
-          onEventDragStart={handleEventDragStart}
+          onEventDragStart={readOnly ? undefined : handleEventDragStart}
           onDragEnd={handleDragEnd}
-          onDrop={handleDrop}
+          onDrop={readOnly ? undefined : handleDrop}
           draggingEventId={draggingEventId}
         />
       );
@@ -904,11 +922,11 @@ export default function Calendar({
         events={events}
         onDateClick={handleDateClick}
         _onEventClick={handleEventClick}
-        onDateRightClick={handleDateRightClick}
+        onDateRightClick={readOnly ? undefined : handleDateRightClick}
         onEventRightClick={handleEventRightClick}
-        onEventDragStart={handleEventDragStart}
+        onEventDragStart={readOnly ? undefined : handleEventDragStart}
         onDragEnd={handleDragEnd}
-        onDrop={handleDrop}
+        onDrop={readOnly ? undefined : handleDrop}
         draggingEventId={draggingEventId}
       />
     );
@@ -960,7 +978,8 @@ export default function Calendar({
           </div>
           <div className="flex-1" />
 
-          {/* Create Event */}
+          {/* Create Event — admin affordance; hidden in view-only mode */}
+          {!readOnly && (
           <button
             onClick={handleCreateNewEvent}
             className="px-3 py-1.5 rounded text-sm font-medium transition-colors hover:opacity-90"
@@ -968,6 +987,7 @@ export default function Calendar({
           >
             + Create Event
           </button>
+          )}
           <div className="flex-1" />
 
           {/* Navigation */}
@@ -1033,6 +1053,7 @@ export default function Calendar({
         dateCell={contextMenuDate ? { date: contextMenuDate, isCurrentMonth: true } : null}
         eventCell={contextMenuEvent ? { event: contextMenuEvent } : null}
         onClose={handleContextMenuClose}
+        readOnly={readOnly}
         onAddEvent={handleAddEventFromContext}
         onViewEvent={handleViewEvent}
         onEditEvent={handleEditEventFromContext}

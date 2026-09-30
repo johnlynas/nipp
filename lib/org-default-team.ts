@@ -51,10 +51,13 @@ export async function ensureDefaultMembersTeam(
   }
 
   // Unique per org ([organizationId, slug]) and we just proved no row exists.
+  const org = await db.organization.findUnique({ where: { id: organizationId }, select: { name: true } });
+
   const created = await db.team.create({
     data: {
       name: DEFAULT_MEMBERS_TEAM_NAME,
       slug: DEFAULT_MEMBERS_TEAM_SLUG,
+      description: org ? `All members of organization ${org.name}` : null,
       organizationId,
     },
   });
