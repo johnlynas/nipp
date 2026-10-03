@@ -1,5 +1,6 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, afterAll } from 'vitest';
 import { auth } from '@/lib/auth';
+import { prisma } from '@/lib/db';
 
 /**
  * Google OIDC — server-side provider wiring (Phase 1).
@@ -52,5 +53,63 @@ describe('Google OIDC — callback reachability', () => {
     } else {
       await response.body?.cancel();
     }
+  });
+});
+
+describe('Google OIDC — ban enforcement on social sign-in', () => {
+  // Per the design doc (§5.1), ban enforcement for social sign-in lives in
+  // databaseHooks.session.create.before, fed by the shared enforceBanStatus
+  // helper (lib/auth). The email-side route hook shares the same helper, so a
+  // banned user is rejected at session creation on BOTH doors with one code path.
+
+  const userId = 'clx_banned_google_1';
+
+  afterAll(async () => {
+    await prisma.account.deleteMany({ where: { id: `${userId}-acc` } });
+    await prisma.user.deleteMany({ where: { id: userId } });
+  });
+
+  it('rejects a banned user on google sign-in', async () => {
+    await prisma.user.upsert({
+      where: { id: userId },
+      create: { id: userId, name: 'B', email: 'banned.google@example.com' },
+      update: {},
+    });
+    await prisma.account.create({
+      data: {
+        id: `${userId}-acc`,
+        accountId: `${userId}-acc`,
+        providerId: 'google',
+        providerAccountId: 'g-sub-banned',
+        userId,
+      },
+    });
+    await prisma.user.update({
+      where: { id: userId },
+      data: { banned: true, banReason: 'Fraud', banExpires: new Date(Date.now() + 86400_000) },
+    });
+
+    const { enforceBanStatus } = await import('@/lib/auth');
+    // The session.create.before hook calls this per sign-in; it must throw with
+    // the exact APIError shape the login page's banned-banner detection expects.
+    await expect(enforceBanStatus('banned.google@example.com')).rejects.toThrow(/Access denied/);
+
+    const user = await prisma.user.findUnique({ where: { id: userId } });
+    expect(user?.banned).toBe(true); // flag untouched for an active ban
+  });
+
+  it('clears the flag when a ban has expired', async () => {
+    await prisma.user.update({
+      where: { id: userId },
+      data: { banned: true, banReason: 'Fraud', banExpires: new Date(Date.now() - 1000) },
+    });
+
+    const { enforceBanStatus } = await import('@/lib/auth');
+    await expect(enforceBanStatus('banned.google@example.com')).resolves.toEqual(undefined);
+
+    const user = await prisma.user.findUnique({ where: { id: userId } });
+    expect(user?.banned).toBeFalsy();
+    expect(user?.banReason).toBeNull();
+    expect(user?.banExpires).toBeNull();
   });
 });

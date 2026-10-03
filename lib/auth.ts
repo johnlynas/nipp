@@ -17,6 +17,47 @@ interface ExtendedSession {
   activeOrganizationId: string | null;
 }
 
+/**
+ * Enforce the ban flag for the user with the given email.
+ *
+ * Single source of truth for ban behaviour, shared by BOTH sign-in doors so
+ * no method can bypass it (design doc §5.1):
+ *  - email sign-in: called from the `hooks.before` route middleware (pre-session,
+ *    keeps today's fast 401 on the login form)
+ *  - Google OIDC sign-in: called from `databaseHooks.session.create.before`,
+ *    the single point where every successful sign-in funnels with `session.userId`
+ *    known. A banned user cannot be banned before their first session exists, so
+ *    there is no bypass at creation time.
+ *
+ * Expired bans are lifted in place (flag cleared, login proceeds). An active ban
+ * throws APIError('UNAUTHORIZED') with the message the login page's banned banner
+ * already recognises.
+ */
+export async function enforceBanStatus(email: string): Promise<void> {
+  const user = await prisma.user.findUnique({ where: { email } });
+
+  if (user?.banned) {
+    const now = new Date();
+    // If ban has expired, allow login (ban is lifted)
+    if (user.banExpires && user.banExpires < now) {
+      await prisma.user.update({
+        where: { id: user.id },
+        data: { banned: false, banReason: null, banExpires: null },
+      });
+    } else {
+      const reason = user.banReason || 'Your account has been banned.';
+      logger.warn(
+        { userId: user.id, email },
+        `Banned user login attempt: ${reason}`,
+      );
+      throw new APIError('UNAUTHORIZED', {
+        message: `Access denied. ${reason}`,
+      });
+    }
+  }
+}
+
+
 export const auth = betterAuth({
   database: prismaAdapter(prisma, {
     provider: 'postgresql',
@@ -151,6 +192,20 @@ export const auth = betterAuth({
   databaseHooks: {
     session: {
       create: {
+        // Ban enforcement for EVERY sign-in method (design doc §5.1). Session
+        // creation is the single point where every successful sign-in funnels
+        // with userId known — email, Google OIDC (returning user and any future
+        // re-login), and methods added later. Throwing APIError here makes
+        // BetterAuth reply 401 with the exact 'Access denied. …' message the
+        // login page's banned banner already recognises; no session is issued.
+        before: async (session) => {
+          const user = await prisma.user.findUnique({
+            where: { id: session.userId },
+            select: { email: true },
+          });
+          if (!user) return; // BetterAuth guarantees the row exists; be defensive
+          await enforceBanStatus(user.email);
+        },
         after: async (session) => {
           logger.info(
             { userId: session.userId, sessionId: session.id },
@@ -203,32 +258,10 @@ export const auth = betterAuth({
 
   hooks: {
     before: createAuthMiddleware(async (ctx) => {
-      // Check banned status during email sign-in
+      // Check banned status during email sign-in (keeps a fast 401 on the login
+      // form; social sign-in is enforced at session creation — see below).
       if (ctx.path === '/sign-in/email' && ctx.body?.email) {
-        const user = await prisma.user.findUnique({
-          where: { email: ctx.body.email },
-        });
-
-        if (user?.banned) {
-          const now = new Date();
-          // If ban has expired, allow login (ban is lifted)
-          if (user.banExpires && user.banExpires < now) {
-            // Ban expired — clear the ban flag
-            await prisma.user.update({
-              where: { id: user.id },
-              data: { banned: false, banReason: null, banExpires: null },
-            });
-          } else {
-            const reason = user.banReason || 'Your account has been banned.';
-            logger.warn(
-              { userId: user.id, email: ctx.body.email },
-              `Banned user login attempt: ${reason}`,
-            );
-            throw new APIError('UNAUTHORIZED', {
-              message: `Access denied. ${reason}`,
-            });
-          }
-        }
+        await enforceBanStatus(ctx.body.email);
       }
     }),
   },
