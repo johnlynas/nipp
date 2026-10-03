@@ -72,7 +72,7 @@ Self-service registration is not available (`/register` redirects to
 | Area | What it does |
 |------|--------------|
 | **Multi-tenant isolation** | Two independent layers: Prisma query interception + PostgreSQL Row Level Security |
-| **Authentication** | BetterAuth with email/password and Google OIDC, 1-hour session cap, inactivity auto-logout |
+| **Authentication** | BetterAuth with email/password; Google OIDC plus magic-link verification for new Google users is in development (branch `google-oidc`, see §1) — 1-hour session cap, inactivity auto-logout |
 | **RBAC** | Organization-scoped roles, a catalog of ~50 atomic permissions, feature-level access via Resources |
 | **Teams** | Sub-organizational groupings with role inheritance |
 | **Super Admin console** | Manage organizations, users, roles, permissions, audit logs, cache metrics, system health/logs |
@@ -114,8 +114,10 @@ documents/            Business research, feature planning, operations runbooks
 Authentication is handled by [BetterAuth](https://www.better-auth.com/)
 (configured in `lib/auth.ts`):
 
-- **Providers:** email/password and Google OIDC (optional — configure via
-  `GOOGLE_CLIENT_ID` / `GOOGLE_CLIENT_SECRET`).
+- **Providers:** email/password is the live sign-in method. Google OIDC is
+  in development (branch `google-oidc`, currently a presentation-only button
+  that shows a notice) — see below and
+  [documents/feature-planning-and-development/google-oidc-design.md](./documents/feature-planning-and-development/google-oidc-design.md).
 - **Sessions:** secure, HTTP-only cookies; `expiresIn` of **1 hour** is the
   absolute maximum lifetime, with renewal on any server request once remaining
   time drops below 15 minutes (`updateAge`). Active users who make at least one
@@ -146,6 +148,32 @@ server-side 1-hour expiry is the backstop if client-side detection is bypassed
 (JScript disabled, browser crash). Configuration flows to the client through a
 React context (`components/providers/InactivityTimeoutConfig.tsx`) — no
 `NEXT_PUBLIC_` duplication.
+
+### Google OIDC sign-in & magic-link verification (in development)
+
+The login page's "Sign in with Google" button becomes functional on branch
+`google-oidc` (status: **proposed / in build**) via BetterAuth's built-in
+`google` provider — the same session machinery as email/password, so both sign-in
+methods share cookies, the 1-hour expiry, ban enforcement, and org bootstrap.
+
+Account semantics are one account per person: a Google identity that matches an
+existing password-only user by email is **linked** to that user (no shadow
+accounts), returning identities sign in as their linked user, and brand-new
+identities create `User` + `Account` rows.
+
+New Google users are verified by **magic link before any session exists**: the
+first "Sign in with Google" creates their rows but is rejected at session
+creation, a one-time email is sent to their (Google-asserted) address, and
+`GET /auth/magic-link/verify?token=…` consumes the token and marks the user
+verified **without minting a session** — sign-in completes on a second Google
+click. Passwordless admin-created users get the same emailed link from the
+create-user modal; local email/password logins are untouched by design.
+
+Configuration: `GOOGLE_CLIENT_ID` / `GOOGLE_CLIENT_SECRET` (already required by
+the env schema) plus a Google Cloud Console OAuth client whose redirect URI
+exactly matches `FRONTEND_URL/api/auth/callback/google`. Full flow diagrams, the
+threat table, phased delivery plan, and test strategy live in the design doc:
+[documents/feature-planning-and-development/google-oidc-design.md](./documents/feature-planning-and-development/google-oidc-design.md).
 
 ## 2. Multi-Tenant Isolation
 
@@ -907,7 +935,7 @@ Start from `.env.example` (committed, placeholders only).
 |----------|----------|---------|
 | `BETTER_AUTH_SECRET` | yes (≥ 32 chars) | Session encryption key |
 | `BETTER_AUTH_URL` | no | BetterAuth base URL |
-| `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET` | no (for Google login) | Google OIDC credentials |
+| `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET` | required by the env schema; consumed once Google OIDC sign-in lands (branch `google-oidc`) | Google credentials — additionally register the OAuth client's redirect URI as `FRONTEND_URL/api/auth/callback/google` in Google Cloud Console |
 | `INACTIVITY_TIMEOUT_MINS` | no (default `15`) | Auto-logout after this idle time; digits only |
 | `SUPER_ADMIN_EMAIL` | no | Optional super-admin email hint |
 
@@ -1026,7 +1054,7 @@ Prisma models (`prisma/schema.prisma`), grouped by domain:
 
 | Group | Models |
 |-------|--------|
-| Identity & auth | `User`, `Session`, `Account` |
+| Identity & auth | `User`, `Session`, `Account` (+ planned `Verification` model and `User.oidcVerified` for the magic-link flow, branch `google-oidc`) |
 | Organizations & membership | `Organization`, `Member`, `Invitation`, `SentInvitation` |
 | Teams | `Team`, `TeamMember`, `TeamRole` (also the source of the [org chart](#7-interactive-organization-chart)) |
 | RBAC | `Permission`, `Role`, `RolePermission`, `MemberRole`, `Resource`, `ResourceRole` |
@@ -1064,7 +1092,7 @@ own OpenSpec proposal (see SPECIFICATION_DESIGN_PROCESS.md).
 | Document | What it covers |
 |----------|----------------|
 | [ARCHITECTURE.md](./ARCHITECTURE.md) | System architecture, component diagram, teams API reference |
-| [SECURITY.md](./SECURITY.md) | Multi-tenancy layers, auth/session model, auto-logout, CSP directives |
+| [SECURITY.md](./SECURITY.md) | Multi-tenancy layers, auth/session model (incl. Google OIDC + magic-link gating), auto-logout, CSP directives |
 | [CACHING_ARCHITECTURE.md](./CACHING_ARCHITECTURE.md) | L1/L2/ISR caching design, stampede protection, tuning |
 | [QUICK_START.md](./QUICK_START.md) | Minimal setup path |
 | [ISOLATION_TEST_STRATEGY.md](./ISOLATION_TEST_STRATEGY.md) | Tenant-isolation test design and troubleshooting |
