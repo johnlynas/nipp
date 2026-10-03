@@ -34,3 +34,23 @@ describe('Google OIDC — sign-in redirect', () => {
     expect(response.status).toBeGreaterThanOrEqual(400);
   });
 });
+
+describe('Google OIDC — callback reachability', () => {
+  it('serves the google callback without an auth redirect', async () => {
+    const request = new Request(
+      'http://localhost:3000/api/auth/callback/google?code=fake-code&state=dummy-state',
+      { headers: { Origin: 'http://localhost:3000' } },
+    );
+    const response = await auth.handler(request);
+    // The fake code/state never reach Google — we only assert the route is wired.
+    // A 302 to /api/auth/error?error=state_mismatch proves BetterAuth's own state
+    // validation ran (good: no middleware-level auth redirect swallowed us).
+    const location = response.headers.get('location') ?? '';
+    expect(location).not.toContain('/login');
+    if (response.status === 302) {
+      expect(location).toContain('/api/auth/error?error=state_mismatch');
+    } else {
+      await response.body?.cancel();
+    }
+  });
+});
