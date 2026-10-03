@@ -74,11 +74,11 @@ Tasks 4–5 completed as commits `acef129` / `3e27369` on branch `google-oidc`; 
 3. **Task 5: the YAGNI condition was met — the `callbackUrl` round-trip is native; the Step 3 sessionStorage fallback was skipped.** Verified in installed code, not assumed: server-side `sign-in.mjs:129` stores `callbackURL` into BetterAuth's OAuth state via `generateState`, and `callback.mjs:170` redirects there as the final hop after token exchange (new users → `newUserCallbackURL || callbackURL`). An integration test (`3e27369`) pins that `callbackURL` + `errorCallbackURL` are accepted and a Google redirect is emitted, so any future change breaking this round-trip fails CI. (The test asserts 2xx/3xx + `accounts.google.com` Location per Phase 1 note #2, not the literal 302 the plan's Step 1 pinned.)
 4. **Same-origin guard on `callbackUrl` — extra security item from design doc §5.2 that this plan did not call out for Phase 2.** The param ends up in a full URL BetterAuth navigates to after auth, so it is validated against `window.location.origin` before shipping; cross-origin or unparseable values fall back to `/`. Closes the open-redirect threat row flagged in design/SECURITY.md.
 
-**Note for Phase 3 / Task 8:** live E2E needs real `GOOGLE_CLIENT_ID` / `GOOGLE_CLIENT_SECRET` with redirect URI `http://localhost:3000/api/auth/callback/google` registered in Google Cloud Console. If the developer supplies those, Task 8 can run; otherwise it stays manual QA as the plan allows.
+**Note for Phase 3 / Task 8 (satisfied):** live E2E needs real `GOOGLE_CLIENT_ID` / `GOOGLE_CLIENT_SECRET` with redirect URI `http://localhost:3000/api/auth/callback/google` registered in Google Cloud Console. Creds were supplied and the URI registered on 2026-10-04 — **Task 8 has since completed** (see Phase 3 implementation note #8).
 
 ### Phase 3 implementation notes — deviations from this plan (recorded 2026-10-03, verified against installed better-auth@1.6.23 + live Prisma/Postgres)
 
-Tasks 6–7 complete; Task 8 remains manual QA (needs real Google creds). Validation gate green: lint clean, `tsc --noEmit` clean, unit suite ~1909 passed, integration+isolation suite **349 passed** (was 344 — new specs), production build succeeds. Where the plan's assumptions resolved differently:
+Tasks 6–7 complete; **Task 8 complete (live E2E verified against real Google, 2026-10-04)**. Validation gate green: lint clean, `tsc --noEmit` clean, unit suite ~1909 passed, integration+isolation suite **349 passed** (was 344 — new specs), production build succeeds. Where the plan's assumptions resolved differently:
 
 1. **The Prisma `Account` model was NOT compatible with BetterAuth's field mapping — a schema migration WAS required (plan line "satisfies BetterAuth's social account schema / No migration needed" was WRONG).** This is the Phase-3 analogue of Phase 1 note #3 (`Verification`). The prisma adapter passes BetterAuth's internal account fields straight through to Prisma (`node_modules/@better-auth/core/dist/db/schema/account.mjs` + `@better-auth/prisma-adapter`), and it:
    - uses its own field **`accountId` as the provider-specific identity (the Google `sub`)** — *not* a separate `providerAccountId`;
@@ -102,6 +102,14 @@ Tasks 6–7 complete; Task 8 remains manual QA (needs real Google creds). Valida
 6. **Task 7 rate-limit spec added (plan's "spec pending" now written).** Two new specs in `tests/integration/rate-limiting.test.ts` drive the *real* `app/api/auth/[...all]/route.ts` `POST` for `/sign-in/social`: allow up to `AUTH_RATE_LIMIT_MAX`, then **429** `Too many requests`; and a per-IP independent counter (exhausted IP throttled, fresh IP not). Proves Google sign-in is bounded by the same `checkAuthRateLimit` as password logins. 42/42 pass in that file.
 
 7. **`tests/unit/auth-config.test.ts` mock Prisma gained an `account` model** (`account: { findFirst }`) — the Task 7 hook in `session.create.after` now queries it; without it those 4 hook unit tests threw `Cannot read properties of undefined`.
+
+8. **Task 8 live E2E — verified against real Google (2026-10-04).** One-time blocker was an unregistered redirect URI: the earlier 400 was because the Cloud Console client had no authorized URIs, and a user suggestion to register `http://78.145.141.208/...` (the machine's public IP) is invalid — Google enforces HTTPS on every non-loopback redirect URI, so plain-HTTP localhost remains the only valid local value. Registered verbatim `http://localhost:3000/api/auth/callback/google` (byte-for-byte match of the `redirect_uri` observed in the live `/api/auth/sign-in/social` Location header), then all four Task 8 steps passed:
+   - **Step 1–2:** browser clicked through `/login?callbackUrl=/dashboard` → Google account chooser/consent → callback → landed signed in; `GET /api/auth/get-session` returned the live user.
+   - **Step 3:** two *different* real Google accounts (johnlynasdev@gmail.com, johnlynas666@gmail.com) each created a `User` + exactly one `Account` row with `providerId:'google'` and `accountId` = the real Google subject (e.g. `117667878182014512381`) — confirms the Phase 3 schema mapping works against live tokens, not just the mocked id_token in Task 6.
+   - **Step 4:** `POST /api/auth/sign-out` → 200; subsequent `get-session` returns null (session fully cleared).
+   - "No organization selected" banner after sign-in is correct behavior: the dev DB has zero `Organization` rows, so no user (email or Google) can have `activeOrganizationId`. Not a defect — provisioning an org + membership resolves it on next login.
+
+**All 8 tasks complete — Phase 3 exit criterion met. The Google OIDC integration plan is done.**
 
 ---
 
