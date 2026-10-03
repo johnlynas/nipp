@@ -169,6 +169,19 @@ model Account {
   @@index([userId])
 }
 
+// BetterAuth verification records (email verifications, OAuth state storage).
+// Required by the social-provider sign-in flow (OAuth PKCE state + nonce).
+model Verification {
+  id         String   @id @default(cuid())
+  identifier String
+  value      String
+  expiresAt  DateTime
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  @@index([identifier])
+}
+
 // ============================================================
 // Multi-Tenancy Models (BetterAuth Organization Plugin)
 // These are global — not org-scoped.

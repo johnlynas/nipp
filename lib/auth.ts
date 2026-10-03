@@ -52,6 +52,14 @@ export const auth = betterAuth({
     disableSignUp: true, // Block public registration
   },
 
+  // Google OIDC sign-in. Default scopes (openid email profile); no offline access.
+  socialProviders: {
+    google: {
+      clientId: env.GOOGLE_CLIENT_ID,
+      clientSecret: env.GOOGLE_CLIENT_SECRET,
+    },
+  },
+
   plugins: [
     organization({
       // Enable Teams mode — sub-organizational groupings with role inheritance
