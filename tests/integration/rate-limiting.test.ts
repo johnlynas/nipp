@@ -830,3 +830,58 @@ describe('Calendar Event Endpoints — Rate Limiting (integration)', () => {
     resetCalendarRateLimitStore();
   });
 });
+// ---------------------------------------------------------------------------
+// Auth catch-all route — social sign-in rate limiting (google-oidc Task 7)
+// ---------------------------------------------------------------------------
+// POST /api/auth/sign-in/social enters through the SAME IP rate limiter as
+// password logins: app/api/auth/[...all]/route applies checkAuthRateLimit to
+// every auth POST before handing it to BetterAuth. This spec drives the real
+// route export so a removal of that guard fails CI.
+
+describe('Auth catch-all — social sign-in is IP-rate-limited (integration)', () => {
+  beforeEach(() => {
+    resetAuthRateLimitStore();
+  });
+
+  const socialPost = (ip: string) =>
+    new Request('http://localhost:3000/api/auth/sign-in/social', {
+      method: 'POST',
+      headers: {
+        Origin: 'http://localhost:3000',
+        'Content-Type': 'application/json',
+        'x-forwarded-for': ip,
+      },
+      body: JSON.stringify({ provider: 'google' }),
+    });
+
+  it('allows social sign-in up to AUTH_RATE_LIMIT_MAX, then 429s the next', async () => {
+    const { POST } = await import('@/app/api/auth/[...all]/route');
+    const ip = '198.51.100.7';
+
+    for (let i = 0; i < AUTH_RATE_LIMIT_MAX; i++) {
+      const res = await POST(socialPost(ip));
+      expect(res.status).not.toBe(429); // limiter passes: BetterAuth answers (2xx redirect to Google)
+      await res.body?.cancel();
+    }
+
+    const blocked = await POST(socialPost(ip));
+    expect(blocked.status).toBe(429);
+    const body = (await blocked.json()) as { error?: string };
+    expect(body.error ?? '').toContain('Too many requests');
+  });
+
+  it('uses a separate counter per client IP — only the exhausted IP is throttled', async () => {
+    const { POST } = await import('@/app/api/auth/[...all]/route');
+    const ipA = '198.51.100.20';
+    const ipB = '198.51.100.21';
+
+    for (let i = 0; i < AUTH_RATE_LIMIT_MAX; i++) {
+      await POST(socialPost(ipA)).then((r) => r.body?.cancel());
+    }
+
+    expect((await POST(socialPost(ipA))).status).toBe(429);
+    const fresh = await POST(socialPost(ipB));
+    expect(fresh.status).not.toBe(429);
+    await fresh.body?.cancel();
+  });
+});

@@ -207,6 +207,21 @@ export const auth = betterAuth({
           await enforceBanStatus(user.email);
         },
         after: async (session) => {
+          // Observability (Task 7): GoogleOptions has no onSuccess/onError hooks in
+          // better-auth@1.6.x, so mark social sign-ins here — the single point every
+          // successful sign-in funnels through. One extra lookup, only when a google
+          // Account row exists for the user.
+          const hasGoogleAccount = await prisma.account.findFirst({
+            where: { userId: session.userId, providerId: 'google' },
+            select: { id: true },
+          });
+          if (hasGoogleAccount) {
+            logger.info(
+              { userId: session.userId, sessionId: session.id, provider: 'google' },
+              '[Auth] Google sign-in succeeded',
+            );
+          }
+
           logger.info(
             { userId: session.userId, sessionId: session.id },
             '[Auth] Session created — checking for activeOrganizationId',

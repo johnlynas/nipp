@@ -9,7 +9,6 @@ export interface UserFactoryOptions {
 export interface AccountFactoryOptions {
   userId: string;
   providerId?: string;
-  providerAccountId?: string;
   password?: string;
 }
 
@@ -39,9 +38,8 @@ export async function createCredentialAccount(options: AccountFactoryOptions) {
   return await prisma.account.create({
     data: {
       userId: options.userId,
-      accountId: options.userId, // Using userId as accountId for simplicity in credential flows
+      accountId: options.userId, // BetterAuth identity: accountId = provider sub (user's own id for credentials)
       providerId: options.providerId ?? 'credential',
-      providerAccountId: options.providerAccountId ?? options.userId,
       password: passwordHash,
     },
   });

@@ -148,24 +148,28 @@ model Session {
 
 model Account {
   id                String    @id @default(cuid())
+  // NOTE: field names MUST match BetterAuth's canonical account schema — the
+  // prisma adapter passes them through verbatim (providerId + accountId where
+  // accountId = provider-specific sub, accessToken/idToken/… camelCase). Do not
+  // rename without re-pointing better-auth/adapters/prisma.
   accountId         String
   providerId        String
-  providerAccountId String?
   password          String?
-  refresh_token     String?
-  access_token      String?
-  expires_at        Int?
-  token_type        String?
+  refreshTokenExpiresAt DateTime?
+  idToken           String?
   scope             String?
-  id_token          String?
-  session_state      String?
+  tokenType         String?
+  sessionState      String?
+  accessToken     String?
+  accessTokenExpiresAt DateTime?
+  refreshToken    String?
   createdAt         DateTime  @default(now())
   updatedAt         DateTime  @updatedAt
 
   userId   String
   user     User    @relation(fields: [userId], references: [id], onDelete: Cascade)
 
-  @@unique([providerId, providerAccountId])
+  @@unique([providerId, accountId])
   @@index([userId])
 }
 

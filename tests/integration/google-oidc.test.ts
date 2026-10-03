@@ -97,9 +97,8 @@ describe('Google OIDC — ban enforcement on social sign-in', () => {
     await prisma.account.create({
       data: {
         id: `${userId}-acc`,
-        accountId: `${userId}-acc`,
+        accountId: 'g-sub-banned', // BetterAuth identity: accountId = provider sub
         providerId: 'google',
-        providerAccountId: 'g-sub-banned',
         userId,
       },
     });
