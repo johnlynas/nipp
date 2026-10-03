@@ -205,7 +205,7 @@ flowchart TB
 
 ### Auth Flow
 
-Authentication is provided by **BetterAuth v1.6**. Email/password is the live sign-in method; Google OIDC sign-in is in development (branch `google-oidc` — see the dedicated subsection below).
+Authentication is provided by **BetterAuth v1.6**. Email/password is the live sign-in method; Google OIDC sign-in is in development on branch `google-oidc` with its **server-side provider wiring implemented** (see the dedicated subsection below).
 
 1. User submits credentials to `/api/auth/sign-in/email`
 2. BetterAuth validates the password hash, creates a `Session` record
@@ -234,7 +234,7 @@ The following routes bypass session validation: `/login`, `/register`, `/api/aut
 
 ### Google OIDC Sign-In & Magic-Link Verification (in development)
 
-Status: **proposed / in build** on branch `google-oidc`. Full design — flow diagrams, account-linking decision matrix, threat table, phased delivery, test strategy: [documents/feature-planning-and-development/google-oidc-design.md](./documents/feature-planning-and-development/google-oidc-design.md). This subsection covers the architectural shape only.
+Status on branch `google-oidc`: **server-side Phase 1 implemented** (provider registration, PKCE/state storage, all-methods ban enforcement at session creation — see "Phase 1 deviations" below); login UI, magic-link verification gate, and hardening phases remain in build. Full design — flow diagrams, account-linking decision matrix, threat table, phased delivery, test strategy: [documents/feature-planning-and-development/google-oidc-design.md](./documents/feature-planning-and-development/google-oidc-design.md). This subsection covers the architectural shape only.
 
 **Integration point.** The login page's "Sign in with Google" button calls `authClient.signIn.social({ provider: 'google', errorCallbackURL: '/login?oidc=inbox-check' })` against the existing `/api/auth/[...all]` catch-all — no new server entry points beyond the one verify route. BetterAuth's built-in `google` provider factory handles the OAuth leg: a signed per-flow `state` nonce guards the callback, and the token exchange plus ID-token verification (signature, audience, expiry, issuer) happen **server-to-server** — the auth code never returns to the browser.
 
@@ -253,11 +253,11 @@ flowchart TB
     end
 
     GOO[("Google Identity Platform<br/>consent screen - code exchange - ID token verification")]
-    DB[("PostgreSQL<br/>User - Account - Session - Verification (planned model)")]
+    DB[("PostgreSQL<br/>User - Account - Session - Verification (implemented model)")]
 
-    LP -- "POST /api/auth/sign-in/social?provider=google" --> RT
+    LP -- "POST /api/auth/sign-in/social, body { provider: 'google', callbackURL }" --> RT
     RT --> BA
-    BA <-->|"state nonce, 302 round-trip with auth code"| GOO
+    BA <-->|"state nonce, redirect round-trip with auth code"| GOO
     BA -- "ID token verified: resolve, link, or upsert identity" --> DB
     BA --> GATE
     GATE -- "verified user: create session + cookie -> callbackUrl" --> LP
@@ -274,20 +274,31 @@ flowchart TB
 
 **Component inventory (new/changed by this feature):**
 
-| Piece | Where | Role |
-|-------|-------|------|
-| Google provider registration | `lib/auth.ts` (`socialProviders.google`) | OAuth leg for the Social door; reuses existing session, cookie, and org-bootstrap hooks — one code path for both sign-in methods |
-| Session-creation gate | `lib/auth.ts` `databaseHooks.session.create.before` (new hook) | Single enforcement point all sign-ins funnel through: shared ban helper (`enforceBanStatus`, extracted from the email route hook) plus the `oidcVerified` check — rejects session creation for brand-new Google-only identities before any session exists |
-| Magic-link helper | `lib/oidc-magic-link.ts` (new module, not the BetterAuth plugin's public endpoints) | Replicates the plugin's token plumbing: `generateRandomString(32)` → `Verification` row (`identifier=token`, 5-min expiry) → `${FRONTEND_URL}/auth/magic-link/verify?token=…` via the existing nodemailer path. Invoked from exactly two account-creation events (new Google identity; admin create-user without password) — no public self-service endpoint |
-| Verify route | `GET /auth/magic-link/verify` (public in `middleware.ts`) | Rate-limited, session-less: looks up + deletes the `Verification` row atomically (single-use by construction), sets `User.oidcVerified = true`, redirects to `/login?oidc=link-verified`. Deliberately does **not** mint a session — sign-in completes only via the second Google click |
-| Login UI | `app/login/page.tsx` | Button handler switch; two one-shot `?oidc=` banners (`inbox-check`, `link-verified`) consumed on mount and stripped from the URL; same-origin `callbackUrl` guard. Google icon stays an inline SVG (CSP `img-src 'self'` unaffected). Banned feedback reuses the existing message-keyed banner |
-| Admin create-user | `app/api/admin/users/route.ts` + users modal | Passwordless submission calls the shared `issueMagicLink(email)` helper and confirms "a sign-in email has been sent" |
+| Piece | Where | Role | Status |
+|-------|-------|------|--------|
+| Google provider registration | `lib/auth.ts` (`socialProviders.google`) | OAuth leg for the Social door; reuses existing session, cookie, and org-bootstrap hooks — one code path for both sign-in methods. Registered as a plain options object `{ clientId, clientSecret }` (see deviations below) | ✅ implemented |
+| PKCE/state storage | `Verification` model in `prisma/schema.prisma` | BetterAuth stores the signed per-flow state nonce here at `/sign-in/social` time; required for the social flow to work at all — the repo did not have this table before Phase 1 (applied via `prisma db push`) | ✅ implemented |
+| Session-creation gate | `lib/auth.ts` `databaseHooks.session.create.before` (new hook) | Single enforcement point all sign-ins funnel through: shared ban helper (`enforceBanStatus`, extracted from the email route hook) plus the planned `oidcVerified` check — rejects session creation for brand-new Google-only identities before any session exists. Ban part is live; verification-gate part lands with the magic-link phase | ✅ ban / 🔨 gate |
+| Magic-link helper | `lib/oidc-magic-link.ts` (new module, not the BetterAuth plugin's public endpoints) | Replicates the plugin's token plumbing: `generateRandomString(32)` → `Verification` row (`identifier=token`, 5-min expiry) → `${FRONTEND_URL}/auth/magic-link/verify?token=…` via the existing nodemailer path. Invoked from exactly two account-creation events (new Google identity; admin create-user without password) — no public self-service endpoint | 🔨 in build |
+| Verify route | `GET /auth/magic-link/verify` (public in `middleware.ts`) | Rate-limited, session-less: looks up + deletes the `Verification` row atomically (single-use by construction), sets `User.oidcVerified = true`, redirects to `/login?oidc=link-verified`. Deliberately does **not** mint a session — sign-in completes only via the second Google click | 🔨 in build |
+| Login UI | `app/login/page.tsx` | Button handler switch; two one-shot `?oidc=` banners (`inbox-check`, `link-verified`) consumed on mount and stripped from the URL; same-origin `callbackUrl` guard. Google icon stays an inline SVG (CSP `img-src 'self'` unaffected). Banned feedback reuses the existing message-keyed banner | 🔨 in build |
+| Admin create-user | `app/api/admin/users/route.ts` + users modal | Passwordless submission calls the shared `issueMagicLink(email)` helper and confirms "a sign-in email has been sent" | 🔨 in build |
 
 **Account semantics (one account, two doors).** Identity resolution on Google sign-in: an existing `Account(google, sub)` signs in as that linked user; a Google email matching an existing password-only `User` **links** a new `Account` row to it (no shadow users — org membership and history survive); otherwise a fresh `User` + `Account` is created. Ban status applies to both doors identically because enforcement lives at session creation.
 
-**Data model additions:** a `Verification` model (`id`, `identifier`, `value` JSON, `expiresAt`) and `User.oidcVerified Boolean @default(false)` — one migration. `emailVerified` is *not* the marker: Google's token asserts it on sign-up by construction; only the user's own magic-link click (or an admin) flips `oidcVerified`.
+**Data model additions:** the `Verification` model (`id`, `identifier`, `value`, `expiresAt`) is implemented in `prisma/schema.prisma`; `User.oidcVerified Boolean @default(false)` remains planned for the magic-link phase. `emailVerified` is *not* the marker: Google's token asserts it on sign-up by construction; only the user's own magic-link click (or an admin) flips `oidcVerified`.
 
 **Invariant preserved:** email/password sign-in keeps its exact code path (local users are never gated — the hook blocks only pure-Google unverified identities), verified by the existing integration suite.
+
+**Phase 1 deviations from the original implementation plan** (recorded 2026-10-03; full detail in `.hermes/plans/20261002_204440-google-oidc-integration.md`, "Phase 1 implementation notes"):
+
+| Plan assumption | Reality (installed better-auth@1.6.23) | Mitigation taken |
+|---|---|---|
+| Register google via the `google({…})` factory call from `better-auth/social-providers` | `socialProviders.<id>` values are typed as plain options objects; the factory result fails type-checking (TS2322) | Registered with a plain object `{ clientId: env.GOOGLE_CLIENT_ID, clientSecret: env.GOOGLE_CLIENT_SECRET }` — matches BetterAuth's official Google docs |
+| `/api/auth/sign-in/social?provider=google&callbackURL=…` returns 302 to accounts.google.com | Provider id is read from the **JSON body**; this `better-auth/minimal` build answers **200** with a `Location` header + `{ url, redirect: true }` body (full build answers 30x) | Tests target the canonical body form and accept any 2xx/3xx carrying an `accounts.google.com` Location — wiring is verified without pinning a build-specific status |
+| "No migration needed" for social auth | Social sign-in 500'd: BetterAuth needs a Prisma `Verification` table for PKCE state, which the repo lacked | Added the model + index; applied to dev DB with `prisma db push` per repo convention (no `_prisma_migrations` history tracked). Same table later serves magic-link tokens |
+| Ban hook on the `/sign-in/social` route path (plan Task 3 step 3) | That route only sees the provider id, not Google's user `sub` — returning users could never be pre-checked there (bypass open) | Moved enforcement to `databaseHooks.session.create.before`, fed by the exported shared helper `enforceBanStatus(email)`; email path now reuses the same helper via its existing route hook. Behavior-pinning tests in `tests/integration/google-oidc.test.ts` |
+| Callback with fake code returns 4xx (route-wired proof) | Returns **302 → `/api/auth/error?error=state_mismatch`** — BetterAuth's own state validation, proving the route is wired and public | Test asserts Location never targets `/login`; `PUBLIC_PATTERNS` (`middleware.ts`) already covers `/api/auth/*`, unchanged as predicted |
 
 ---
 

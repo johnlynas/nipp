@@ -152,9 +152,11 @@ React context (`components/providers/InactivityTimeoutConfig.tsx`) — no
 ### Google OIDC sign-in & magic-link verification (in development)
 
 The login page's "Sign in with Google" button becomes functional on branch
-`google-oidc` (status: **proposed / in build**) via BetterAuth's built-in
-`google` provider — the same session machinery as email/password, so both sign-in
-methods share cookies, the 1-hour expiry, ban enforcement, and org bootstrap.
+`google-oidc`. **Server-side provider wiring is complete** (BetterAuth `socialProviders.google`,
+PKCE/state storage, ban enforcement at session creation — details below); the UI,
+magic-link gate, and hardening phases are still in build. All sign-in methods share
+the same session machinery as email/password: cookies, 1-hour expiry, ban
+enforcement, and org bootstrap.
 
 Account semantics are one account per person: a Google identity that matches an
 existing password-only user by email is **linked** to that user (no shadow
@@ -174,6 +176,20 @@ the env schema) plus a Google Cloud Console OAuth client whose redirect URI
 exactly matches `FRONTEND_URL/api/auth/callback/google`. Full flow diagrams, the
 threat table, phased delivery plan, and test strategy live in the design doc:
 [documents/feature-planning-and-development/google-oidc-design.md](./documents/feature-planning-and-development/google-oidc-design.md).
+
+**What's actually wired today (server side, Phase 1):** `lib/auth.ts` registers
+`socialProviders.google` as a **plain options object** (`{ clientId, clientSecret }`) —
+in BetterAuth 1.6.x the older `google({…})` factory call no longer type-checks and
+must not be used. The provider endpoints reply with a `Location` header (200 +
+`{ url, redirect: true }` in this minimal build) carrying the accounts.google.com
+authorization URL; `/api/auth/callback/google` is public via `PUBLIC_PATTERNS`
+(`middleware.ts`). Google's PKCE state/nonce storage needs a Prisma **`Verification`
+table**, which the repo did not have — it was added to `prisma/schema.prisma` and applied
+via `prisma db push` (this table also serves the magic-link flow below). Ban
+enforcement now runs for **every** sign-in method from one shared helper
+(`enforceBanStatus`) at `databaseHooks.session.create.before`, because the
+`/sign-in/social` route itself only sees the provider id — never Google's user `sub`.
+Tests: `tests/integration/google-oidc.test.ts`.
 
 ## 2. Multi-Tenant Isolation
 
@@ -1054,7 +1070,7 @@ Prisma models (`prisma/schema.prisma`), grouped by domain:
 
 | Group | Models |
 |-------|--------|
-| Identity & auth | `User`, `Session`, `Account` (+ planned `Verification` model and `User.oidcVerified` for the magic-link flow, branch `google-oidc`) |
+| Identity & auth | `User`, `Session`, `Account` (+ implemented `Verification` model for OAuth state / magic-link tokens, and planned `User.oidcVerified` — branch `google-oidc`) |
 | Organizations & membership | `Organization`, `Member`, `Invitation`, `SentInvitation` |
 | Teams | `Team`, `TeamMember`, `TeamRole` (also the source of the [org chart](#7-interactive-organization-chart)) |
 | RBAC | `Permission`, `Role`, `RolePermission`, `MemberRole`, `Resource`, `ResourceRole` |

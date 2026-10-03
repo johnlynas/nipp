@@ -45,6 +45,26 @@ Social sign-in must honor the same ban rules as email sign-in. BetterAuth expose
 - **Phase 2 — Login UI + client flow** (Tasks 4–5)
 - **Phase 3 — Integration tests & hardening** (Tasks 6–8)
 
+### Phase 1 implementation notes — deviations from this plan (recorded 2026-10-03, verified against installed better-auth@1.6.23)
+
+Phase 1 completed as tasks e4bc1ba / edd44ae / 6213262 on branch `google-oidc`; full validation gate (lint, tsc, unit + integration suites, build) green in each commit. Where the plan's assumptions proved wrong, implement accordingly — these notes replace the affected step text:
+
+1. **Provider registration uses a plain options object, not the `google()` factory call.** In 1.6.x, `socialProviders` values are typed as `GoogleOptions & { enabled?: boolean }`; calling `google({...})` (as in this plan's Task 1 Step 3) fails type-checking with TS2322. Registered as:
+   ```ts
+   socialProviders: { google: { clientId: env.GOOGLE_CLIENT_ID, clientSecret: env.GOOGLE_CLIENT_SECRET } },
+   ```
+   Mitigation: matches the official BetterAuth Google docs exactly; verified against `@better-auth/core` type defs in node_modules.
+
+2. **Request shape and response status differ from the plan's test.** `/api/auth/sign-in/social?provider=google&callbackURL=…` (provider in query, no body) returns **400** — BetterAuth reads `provider` from the JSON body. The canonical request is `POST /sign-in/social` with body `{ provider: 'google', callbackURL }`, and this `better-auth/minimal` build answers **200 + `Location` header → accounts.google.com** plus body `{ url, redirect: true }` (the full non-minimal build answers 30x). Mitigation: tests accept any 2xx/3xx with an `accounts.google.com` Location and assert the JSON mirror too — provider wiring is provably verified without pinning a status that varies between auth builds.
+
+3. **A Prisma `Verification` model WAS required (plan said "no migration needed").** The social route 500'd with `Model verification does not exist in the database` — BetterAuth's OAuth PKCE state/nonce storage writes to a `verification` table the repo never had (it was only reachable once a social provider existed). Mitigation: added the model to `prisma/schema.prisma` (`id`, `identifier`, `value`, `expiresAt`, timestamps, index on `identifier`) and applied it to the dev DB with `prisma db push` per repo convention (README line 813 — this repo tracks no `_prisma_migrations` history). Note: design doc §4.3 also depends on this table for magic-link tokens — one model serves both flows.
+
+4. **Ban enforcement location: `session.create.before`, not the `/sign-in/social` route hook (plan's Task 3 Step 3, corrected per design doc §5.1).** At `/sign-in/social` time BetterAuth only knows the provider id — Google's `sub` is only known after the callback, so the plan's sub-lookup branch can never fire for returning users (the bypass the hook was meant to close). Mitigation: extracted the inline email ban logic into exported `enforceBanStatus(email)` in `lib/auth.ts`, called from (a) the unchanged email route hook (fast 401 on the login form — behavior preserved, covered by `auth.test.ts`) and (b) the new `databaseHooks.session.create.before` — the single point every successful sign-in funnels through with a resolved `userId`. New Google users cannot be banned before their first session exists, so no creation-time bypass remains. Tests pin both behaviors (active ban rejected via the same helper the hook calls; expired ban clears flags).
+
+5. **Callback reachability test assertion adjusted.** A GET of `/api/auth/callback/google?code=fake-code&state=dummy-state` answered **302 → `/api/auth/error?error=state_mismatch`** — that is BetterAuth's own state validation proving the route is wired and public (no middleware auth redirect), not a failure. `PUBLIC_PATTERNS` in `middleware.ts:7` already covers it via `/api/auth`; no middleware change was needed, as the plan predicted. Test asserts Location never targets `/login`.
+
+6. **`onSuccess` hook for the Google provider does not exist** in 1.6.23 (see Task 7 note above) — affects only Phase 3; recorded here for completeness.
+
 ---
 
 ### Task 1: Enable the Google social provider in `lib/auth.ts`
@@ -436,6 +456,12 @@ google: google({
   },
 }),
 ```
+
+> **Verified deviation (2026-10-03):** installed better-auth@1.6.23's `GoogleOptions`
+> (`node_modules/@better-auth/core/dist/social-providers/google.d.mts`) has **no
+> `onSuccess`/`onError` hooks** — the plan's sample code will not type-check.
+> Place the success log in `databaseHooks.session.create.after` (fires for every
+> sign-in method) instead, filtered by provider if needed.
 
 Adjust the `onSuccess` signature to what installed types require (check `node_modules/better-auth/dist/types/plugins/...social*.d.*`).
 
