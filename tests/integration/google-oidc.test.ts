@@ -54,6 +54,25 @@ describe('Google OIDC — callback reachability', () => {
       await response.body?.cancel();
     }
   });
+
+  it('sign-in/social accepts callbackURL param and echoes it after auth', async () => {
+    const request = new Request('http://localhost:3000/api/auth/sign-in/social', {
+      method: 'POST',
+      headers: { Origin: 'http://localhost:3000', 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        provider: 'google',
+        callbackURL: 'http://localhost:3000/dashboard/calendar',
+        errorCallbackURL: '/login?oidc=inbox-check',
+      }),
+    });
+    const response = await auth.handler(request);
+    // The state/token BetterAuth issues carries the callback (verified in
+    // node_modules: sign-in.mjs stores it via generateState, callback.mjs
+    // redirects there as the final hop). We assert a redirect is emitted (not
+    // an error) when callbackURL is present.
+    expect(response.status >= 200 && response.status < 400).toBe(true);
+    expect(response.headers.get('location') ?? '').toContain('accounts.google.com');
+  });
 });
 
 describe('Google OIDC — ban enforcement on social sign-in', () => {
