@@ -65,6 +65,44 @@ Phase 1 completed as tasks e4bc1ba / edd44ae / 6213262 on branch `google-oidc`; 
 
 6. **`onSuccess` hook for the Google provider does not exist** in 1.6.23 (see Task 7 note above) — affects only Phase 3; recorded here for completeness.
 
+### Phase 2 implementation notes — deviations from this plan (recorded 2026-10-03, verified against installed better-auth@1.6.23 client + server code in node_modules)
+
+Tasks 4–5 completed as commits `acef129` / `3e27369` on branch `google-oidc`; validation gate green after both tasks (lint clean, tsc clean, unit suite 1909 passed, integration suite 344 passed, production build succeeds). Where the plan's assumptions resolved differently:
+
+1. **The client is driven by `data.url`, not an HTTP status.** Task 4 wires the button to `authClient.signIn.social({ provider: 'google', callbackURL, errorCallbackURL })`. Per Phase 1 note #2, this `better-auth/minimal` build answers sign-in/social with **200 + JSON `{ url }`** (not a 3xx), so the browser handoff depends on the BetterAuth *client* following `data.url` — verified in the installed client code that it does, landing on `accounts.google.com`. No extra plumbing was needed.
+2. **Ban banner reuses existing detection.** Server 401s from the social flow (e.g. an active ban via Phase 1's `enforceBanStatus`) map onto the login page's existing `isBanned` banner logic, so ban enforcement surfaces identically to email sign-in — no new UI state.
+3. **Task 5: the YAGNI condition was met — the `callbackUrl` round-trip is native; the Step 3 sessionStorage fallback was skipped.** Verified in installed code, not assumed: server-side `sign-in.mjs:129` stores `callbackURL` into BetterAuth's OAuth state via `generateState`, and `callback.mjs:170` redirects there as the final hop after token exchange (new users → `newUserCallbackURL || callbackURL`). An integration test (`3e27369`) pins that `callbackURL` + `errorCallbackURL` are accepted and a Google redirect is emitted, so any future change breaking this round-trip fails CI. (The test asserts 2xx/3xx + `accounts.google.com` Location per Phase 1 note #2, not the literal 302 the plan's Step 1 pinned.)
+4. **Same-origin guard on `callbackUrl` — extra security item from design doc §5.2 that this plan did not call out for Phase 2.** The param ends up in a full URL BetterAuth navigates to after auth, so it is validated against `window.location.origin` before shipping; cross-origin or unparseable values fall back to `/`. Closes the open-redirect threat row flagged in design/SECURITY.md.
+
+**Note for Phase 3 / Task 8:** live E2E needs real `GOOGLE_CLIENT_ID` / `GOOGLE_CLIENT_SECRET` with redirect URI `http://localhost:3000/api/auth/callback/google` registered in Google Cloud Console. If the developer supplies those, Task 8 can run; otherwise it stays manual QA as the plan allows.
+
+### Phase 3 implementation notes — deviations from this plan (recorded 2026-10-03, verified against installed better-auth@1.6.23 + live Prisma/Postgres)
+
+Tasks 6–7 complete; Task 8 remains manual QA (needs real Google creds). Validation gate green: lint clean, `tsc --noEmit` clean, unit suite ~1909 passed, integration+isolation suite **349 passed** (was 344 — new specs), production build succeeds. Where the plan's assumptions resolved differently:
+
+1. **The Prisma `Account` model was NOT compatible with BetterAuth's field mapping — a schema migration WAS required (plan line "satisfies BetterAuth's social account schema / No migration needed" was WRONG).** This is the Phase-3 analogue of Phase 1 note #3 (`Verification`). The prisma adapter passes BetterAuth's internal account fields straight through to Prisma (`node_modules/@better-auth/core/dist/db/schema/account.mjs` + `@better-auth/prisma-adapter`), and it:
+   - uses its own field **`accountId` as the provider-specific identity (the Google `sub`)** — *not* a separate `providerAccountId`;
+   - writes camelCase token columns: `accessToken`, `idToken`, `refreshToken`, `tokenType`, `sessionState`, plus `accessTokenExpiresAt`/`refreshTokenExpiresAt` as **Date** (not the old `expires_at Int?` seconds).
+
+   The prior schema had a separate `providerAccountId` column + snake_case token cols. Result: `findOAuthUser` looked up `Account.accountId` (= our stale/unset column) while BetterAuth wrote the sub into its own field, so new identities failed with `PrismaClientValidationError: Unknown argument 'accessToken'` → `unable_to_create_user`, and re-logins returned `unable_to_link_account`. Fix applied to `prisma/schema.prisma`:
+   - renamed snake_case token cols → camelCase (`access_token`→`accessToken`, `id_token`→`idToken`, `refresh_token`→`refreshToken`, `token_type`→`tokenType`, `session_state`→`sessionState`);
+   - replaced `expires_at Int?` with `accessTokenExpiresAt DateTime?` + `refreshTokenExpiresAt DateTime?`;
+   - **dropped `providerAccountId`**; unique constraint moved from `(providerId, providerAccountId)` to `(providerId, accountId)`.
+
+   Applied to the dev DB via `prisma db push --accept-data-loss` per repo convention. **Zero data loss verified**: pre-push there were exactly 3 `Account` rows (all `credential` provider, whose `accountId` already equals `userId`), no duplicate `(providerId, accountId)` groups — so identity is preserved and the dropped column carried nothing beyond a mirrored value. No code read the old snake_case columns (grep clean across `lib/app/components/scripts/prisma`). Test factories (`tests/utils/factories.ts`, `tests/utils/auth.ts`) updated to the canonical mapping. RLS: `Account` is an exempt global model with no policy touching these columns, so no policy-catalog drift. ⚠️ **Backward-incompatible if any production `google` Account rows ever existed** — none do (Task 6 is the first time social sign-in works end-to-end), but record this before shipping to any env that may have partially-linked accounts.
+
+2. **Task 6 full-flow test uses a hand-rolled mock, not `@better-auth/test-utils`/`mockSocialClient`.** The plan's Step 1 suggested BetterAuth's test-utils; the installed 1.6.23 surface did not expose a usable social-client mock for this minimal build. Instead the test drives the **real `auth.handler`** end-to-end: (a) `vi.spyOn(globalThis,'fetch')` stubs the *only* outbound call — the OAuth token exchange to `oauth2.googleapis.com/token`; (b) an `id_token` is built locally as an `alg:none` JWT — verified in `node_modules` that this code path (`validate-authorization-code.mjs`) derives the user from a plain `decodeJwt(id_token)` and does **not** signature-verify on this path, so it needs no keypair; (c) the flow `state` is read back from the `Verification` table via a unique `additionalData` marker, and the signed `.state` cookie is round-tripped. All 3 cases green: new identity → user + Account row + session; re-login → single User, no duplicate Account; banned returning user → 401 `Access denied`, **no session row**.
+
+3. **Ban rejection surfaces as a plain 401, not an `?error=unauthorized` redirect.** Throwing `APIError('UNAUTHORIZED')` in `databaseHooks.session.create.before` (Phase 1's location) makes BetterAuth answer the OAuth callback with **401 + the exact `Access denied. …` message** the login page's banned banner already recognises — not a 302 to `errorCallbackURL`. The Task 6 test pins that contract (401, message present, no session cookie, no `Session` row).
+
+4. **Session verification uses `auth.api.getSession({ headers })` with the real cookie name.** This build names cookies `__Secure-better-auth.*` (the Secure prefix applies even on localhost — verified via trace), so the test resolves the issued `__Secure-better-auth.session_token` back through BetterAuth's own session machinery rather than hitting an HTTP `/api/auth/session` route.
+
+5. **Task 7 success log lives in `databaseHooks.session.create.after` (no `onSuccess` on `GoogleOptions` — Phase 1 note #6).** One extra `Account.findFirst(userId, providerId:'google')`, only logging when a google row exists. Verified end-to-end by the Task 6 test asserting the `logger.info('[Auth] Google sign-in succeeded')` call fires.
+
+6. **Task 7 rate-limit spec added (plan's "spec pending" now written).** Two new specs in `tests/integration/rate-limiting.test.ts` drive the *real* `app/api/auth/[...all]/route.ts` `POST` for `/sign-in/social`: allow up to `AUTH_RATE_LIMIT_MAX`, then **429** `Too many requests`; and a per-IP independent counter (exhausted IP throttled, fresh IP not). Proves Google sign-in is bounded by the same `checkAuthRateLimit` as password logins. 42/42 pass in that file.
+
+7. **`tests/unit/auth-config.test.ts` mock Prisma gained an `account` model** (`account: { findFirst }`) — the Task 7 hook in `session.create.after` now queries it; without it those 4 hook unit tests threw `Cannot read properties of undefined`.
+
 ---
 
 ### Task 1: Enable the Google social provider in `lib/auth.ts`
