@@ -10,15 +10,15 @@
  *           soft rounded corner into the canvas.
  *   Top (mobile) — the same field compressed to a 192px brand band
  *           with the wordmark, so the dark world doesn't disappear below lg.
- *   Right — Sign-in form: email/password (functional), Google & Apple
- *           providers shown for presentation only. Squared (rounded-lg)
- *           controls, no pills.
+ *   Right — Sign-in form: email/password (functional), Google sign-in
+ *           (functional via BetterAuth social flow) and Apple shown for
+ *           presentation only. Squared (rounded-lg) controls, no pills.
  */
 
 import { Suspense, useEffect, useState, type FormEvent } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { Eye, EyeOff, Mail } from 'lucide-react';
-import { signInEmail } from '@/lib/auth-client';
+import { authClient, signInEmail } from '@/lib/auth-client';
 
 /* ── Brand marks ────────────────────────────────────────────────── */
 
@@ -230,7 +230,6 @@ function SkylineField() {
 /* ── Form ───────────────────────────────────────────────────────── */
 
 const SSO_NOTES: Record<string, string> = {
-  google: 'Google sign-in isn’t connected to this portal yet. Ask an administrator to enable it.',
   apple: 'Apple Sign In isn’t connected to this portal yet. Ask an administrator to enable it.',
   reset: 'Password resets are handled by your portal administrator. Contact them to have your password restored.',
 };
@@ -295,6 +294,50 @@ function LoginForm() {
       // Sign-in request never reached the server (offline, DNS, proxy block) —
       // set a sentinel so the banner phrases the recovery, not raw text.
       setError(NETWORK_ERROR_KEY);
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  /**
+   * Google sign-in (BetterAuth social flow). POSTs to /api/auth/sign-in/social,
+   * which replies with an accounts.google.com authorization URL; the client
+   * navigates there, Google bounces back through /api/auth/callback/google, and
+   * BetterAuth redirects the browser to `callbackURL` — so the user's target is
+   * passed straight through the OAuth round-trip (no sessionStorage needed).
+   * The target is validated same-origin first: the value ends up in a full URL
+   * we will navigate to, so a crafted cross-origin callbackUrl must not ship.
+   */
+  async function handleGoogleSignIn() {
+    setError(null);
+    setIsBanned(false);
+    setLoading(true);
+    const rawTarget = searchParams.get('callbackUrl') || '/';
+    let target = '/';
+    try {
+      const candidate = new URL(rawTarget, window.location.origin);
+      if (candidate.origin === window.location.origin) {
+        target = rawTarget;
+      }
+    } catch {
+      // Unparseable target — fall back to home.
+    }
+
+    try {
+      await authClient.signIn.social({
+        provider: 'google',
+        callbackURL: `${window.location.origin}${target}`,
+        errorCallbackURL: '/login?oidc=inbox-check',
+      });
+      // On success the BetterAuth client navigates away to Google; we don't
+      // run again. Any error (unknown provider, server down) surfaces here.
+    } catch (err) {
+      const msg =
+        err && typeof err === 'object' && 'message' in err && typeof (err as { message?: unknown }).message === 'string'
+          ? (err as { message: string }).message
+          : 'Google sign-in failed. Try again or use your password.';
+      if (/banned|access denied/i.test(msg)) setIsBanned(true);
+      setError(msg);
     } finally {
       setLoading(false);
     }
@@ -458,9 +501,9 @@ function LoginForm() {
               <span className="h-px flex-1 bg-slate-200" />
             </div>
 
-            {/* Social providers — presentation only until wired up */}
+            {/* Social providers — Google functional; Apple presentation only */}
             <div className="mt-5 space-y-3">
-              <button type="button" disabled={loading} onClick={() => setSsoNote(SSO_NOTES.google)} className={socialButtonCls}>
+              <button type="button" disabled={loading} onClick={handleGoogleSignIn} className={socialButtonCls}>
                 <GoogleIcon className="h-[18px] w-[18px] text-slate-900" />
                 Sign in with Google
               </button>
