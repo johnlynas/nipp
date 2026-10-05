@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useEffect, useCallback, useRef } from 'react';
-import { Eye, Pencil, ShieldBan, ShieldCheck, Ban, Trash2 } from 'lucide-react';
+import { Eye, Pencil, ShieldBan, ShieldCheck, Ban, Trash2, Mail } from 'lucide-react';
 import { logClientError } from '@/lib/client-error-logger';
 import { SearchBar } from '@/components/dashboard/SearchBar';
 import { StatusBadge } from '@/components/dashboard/StatusBadge';
@@ -17,6 +17,10 @@ interface User {
   name?: string | null;
   email: string;
   emailVerified: boolean;
+  /** Design §4.3 — true only after the user clicks the emailed magic link. */
+  oidcVerified?: boolean;
+  /** Derived on the server (passwordHash is never shipped to the client). */
+  passwordHashPresent?: boolean;
   banned?: boolean | null;
   createdAt: string;
   _count?: { members: number };
@@ -57,6 +61,8 @@ export default function UsersPage() {
   const [counts, setCounts] = useState<{ emailVerifiedCount: number; bannedCount: number; activeCount: number }>({ emailVerifiedCount: 0, bannedCount: 0, activeCount: 0 });
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  // Success banner (invite flow feedback — auto-dismisses like the error one)
+  const [notice, setNotice] = useState<string | null>(null);
 
   // Modal states
   const [detailModalOpen, setDetailModalOpen] = useState(false);
@@ -70,6 +76,8 @@ export default function UsersPage() {
   const [createModalOpen, setCreateModalOpen] = useState(false);
   const [createForm, setCreateForm] = useState({ name: '', email: '', password: '' });
   const [createOrgId, setCreateOrgId] = useState('');
+  // Team selection for the invite (reuses the page-level `teams` fetch — reset when org changes)
+  const [createTeamId, setCreateTeamId] = useState('');
 
   // Edit modal states
   const [editModalOpen, setEditModalOpen] = useState(false);
@@ -130,8 +138,14 @@ export default function UsersPage() {
     if (!createModalOpen) {
       setCreateForm({ name: '', email: '', password: '' });
       setCreateOrgId('');
+      setCreateTeamId('');
     }
   }, [createModalOpen]);
+
+  // Reset create team when the target org changes (teams are scoped to orgs)
+  useEffect(() => {
+    setCreateTeamId('');
+  }, [createOrgId]);
 
   // Fetch users
   const fetchData = useCallback(async () => {
@@ -189,12 +203,21 @@ export default function UsersPage() {
     fetchData();
   }, [fetchData]);
 
-  // Auto-dismiss error banners after 6 seconds
+  // Auto-dismiss error banners after 6 seconds (success notices too)
   useEffect(() => {
     if (!error) return;
     const timer = setTimeout(() => setError(null), 6000);
     return () => clearTimeout(timer);
   }, [error]);
+
+  useEffect(() => {
+    if (!notice) return;
+    const timer = setTimeout(() => setNotice(null), 8000);
+    return () => clearTimeout(timer);
+  }, [notice]);
+
+  // Is a user waiting for their magic link to activate Google sign-in?
+  const isInvitePending = (u: User) => !u.passwordHashPresent && u.oidcVerified === false;
 
   // Handle ban/unban
   const handleBanToggle = async () => {
@@ -260,7 +283,7 @@ export default function UsersPage() {
     }
 
     try {
-      const body: { name: string; email: string; password?: string; organizationId: string } = {
+      const body: { name: string; email: string; password?: string; organizationId: string; teamId?: string } = {
         name: createForm.name.trim(),
         email: createForm.email.trim(),
         organizationId: createOrgId,
@@ -268,6 +291,9 @@ export default function UsersPage() {
 
       if (createForm.password) {
         body.password = createForm.password;
+      }
+      if (createTeamId) {
+        body.teamId = createTeamId;
       }
 
       const res = await fetch('/api/dashboard/admin/users', {
@@ -281,12 +307,54 @@ export default function UsersPage() {
         throw new Error(data.error || 'Failed to create user');
       }
 
+      // 202 = passwordless invite with a delivered activation email.
+      const createdBody: { magicLinkSent?: boolean; user?: { email?: string } } | null =
+        res.status === 202 ? await res.json() : null;
+      if (createdBody?.magicLinkSent) {
+        setNotice(
+          `A sign-in email has been sent to ${createdBody.user?.email ?? body.email} — they can now activate Google sign-in.` +
+            ' If nothing arrives within a few minutes, check that email forwarding is set up for their address.',
+        );
+      }
+
       setCreateModalOpen(false);
       fetchData();
     } catch (err) {
       const message = err instanceof Error ? err.message : 'Failed to create user';
       console.error('Failed to create user:', err);
       logClientError(message, 'users', 'create');
+      setError(message);
+    }
+  };
+
+  // Handle resend invite link (magic link re-issue for a pending invite)
+  const handleResendInvite = async () => {
+    if (!selectedUser) return;
+
+    try {
+      const res = await fetch(`/api/dashboard/admin/users/${selectedUser.id}/invite`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({}),
+      });
+
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}));
+        throw new Error(data.error || 'Failed to resend invitation');
+      }
+
+      const data: { alreadyVerified?: boolean } | null = await res.json();
+      if (data?.alreadyVerified) {
+        // The chip should clear itself once the list refetches.
+        setNotice('That account has already been verified.');
+      } else {
+        setNotice(`A fresh activation link has been sent to ${selectedUser.email}.`);
+      }
+      fetchData();
+    } catch (err) {
+      const message = err instanceof Error ? err.message : 'Failed to resend invitation';
+      console.error('Failed to resend invite:', err);
+      logClientError(message, 'users', 'resend-invite');
       setError(message);
     }
   };
@@ -343,7 +411,21 @@ export default function UsersPage() {
         </div>
       );
     }},
-    { key: 'banned', label: 'Status', render: (u: User) => <StatusBadge status={u.banned ? 'Banned' : 'Active'} /> },
+    { key: 'banned', label: 'Status', render: (u: User) => (
+      <div className="flex items-center gap-2">
+        <StatusBadge status={u.banned ? 'Banned' : 'Active'} />
+        {isInvitePending(u) && (
+          // No password + magic link not clicked — Google sign-in stays gated.
+          <span
+            className="rounded-full px-2 py-0.5 text-[11px] font-medium"
+            style={{ backgroundColor: 'var(--color-slate-100)', color: 'var(--color-navy-850)' }}
+            title="Google-only account — waiting for the user to click the emailed activation link"
+          >
+            Invite pending
+          </span>
+        )}
+      </div>
+    )},
     { key: 'actions', label: 'Actions', render: (u: User) => (
       <div className="flex items-center gap-1">
         <button
@@ -381,6 +463,16 @@ export default function UsersPage() {
             <ShieldBan className="h-4 w-4" />
           </button>
         )}
+        {isInvitePending(u) && (
+          <button
+            onClick={() => { setSelectedUser(u); handleResendInvite(); }}
+            title={`Resend activation link to ${u.name || u.email}`}
+            className="rounded p-1.5 text-slate-400 hover:bg-success-tint hover:text-success transition-colors"
+            aria-label={`Resend activation link to ${u.name || u.email}`}
+          >
+            <Mail className="h-4 w-4" />
+          </button>
+        )}
         <button
           onClick={() => { setSelectedUser(u); setDeleteModalOpen(true); }}
           title={`Delete ${u.name || u.email}`}
@@ -399,6 +491,13 @@ export default function UsersPage() {
       {error && (
         <div className="mb-4 rounded border bg-danger-tint border-danger-border p-3 text-sm text-danger-ink" role="alert">
           {error}
+        </div>
+      )}
+
+      {/* Success Notice (invite flow) */}
+      {notice && (
+        <div className="mb-4 rounded border border-success-border bg-success-tint p-3 text-sm text-success" role="status" aria-live="polite">
+          {notice}
         </div>
       )}
 
@@ -606,19 +705,42 @@ export default function UsersPage() {
             />
           </div>
           <div>
-            <label htmlFor="create-org" className="mb-1 block text-sm font-medium" style={{ color: 'var(--color-slate-500)' }}>Organization <span className="text-danger">*</span></label>
+            <label htmlFor="create-org" className="mb-1 block text-sm font-medium" style={{ color: 'var(--color-slate-500)' }}>Organization {(!createForm.password.trim() ? <span className="text-danger">*</span> : '')}</label>
             <select
               id="create-org"
               value={createOrgId}
               onChange={(e) => { setCreateOrgId(e.target.value); }}
               className="w-full rounded border px-3 py-2 text-sm bg-white focus:outline-none"
               style={{ borderColor: 'var(--color-slate-200)', color: 'var(--color-navy-850)' }}
-              required
+              required={!createForm.password.trim()}
             >
               <option value="">Select organization</option>
               {organizations.map((org) => (
                 <option key={org.id} value={org.id}>{org.name}</option>
               ))}
+            </select>
+            {!createForm.password.trim() && !createOrgId && (
+              <p className="mt-1 text-xs" style={{ color: 'var(--color-danger)' }}>
+                An organization is required when no password is set — the user can only sign in with Google, and the pre-registration gate needs an org membership.
+              </p>
+            )}
+          </div>
+          <div>
+            <label htmlFor="create-team" className="mb-1 block text-sm font-medium" style={{ color: 'var(--color-slate-500)' }}>Team (optional)</label>
+            <select
+              id="create-team"
+              value={createTeamId}
+              onChange={(e) => setCreateTeamId(e.target.value)}
+              disabled={!createOrgId}
+              className="w-full rounded border px-3 py-2 text-sm bg-white focus:outline-none disabled:opacity-50"
+              style={{ borderColor: 'var(--color-slate-200)', color: createOrgId ? 'var(--color-navy-850)' : 'var(--color-slate-500)' }}
+            >
+              <option value="">Default "Members" team</option>
+              {teams
+                .filter((team) => !createOrgId || team.organizationId === createOrgId)
+                .map((team) => (
+                  <option key={team.id} value={team.id}>{team.name}</option>
+                ))}
             </select>
           </div>
 

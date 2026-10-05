@@ -9,6 +9,7 @@ import { withPlatformContext, withTenantAdminContext } from '@/lib/platform-db';
 import type { Prisma } from '@prisma/client';
 import { issueInviteLink } from '@/lib/oidc-magic-link';
 import { recordAuditLog } from '@/lib/audit-log';
+import { notifyUserOperation } from '@/lib/notification-push';
 
 export const runtime = 'nodejs';
 
@@ -96,8 +97,17 @@ export async function GET(request: NextRequest) {
         tenantDb.user.count({ where: { ...where, banned: true } }),
       ]);
 
+      // Never ship passwordHash to the client — replace it with a derived
+      // boolean so the UI can tell invite-pending (passwordless, unverified)
+      // users from regular ones.
+      const safeItems = result.items.map((u) => {
+        const { passwordHash, ...rest } = u;
+        return { ...rest, passwordHashPresent: Boolean(passwordHash) };
+      });
+
       return NextResponse.json({
         ...result,
+        items: safeItems,
         counts: {
           emailVerifiedCount,
           bannedCount,
@@ -147,6 +157,7 @@ export async function POST(request: NextRequest) {
   // Capture narrowed values (const) so the async closure below keeps their types.
   const name = body.name;
   const email = body.email;
+  const targetLabel = `${name} (${email})`;
 
   try {
     // RLS: verified target-org context — user creation + team enrollment bind to it.
@@ -183,20 +194,31 @@ export async function POST(request: NextRequest) {
         resourceType: 'User',
         resourceId: created.id,
         organizationId,
-        success: issueResult.ok,
+        success: magicLinkSent,
       }).catch((err) => console.error('Failed to record audit log for invite issuance:', err));
     }
+
+    await notifyUserOperation(
+      'create',
+      targetLabel,
+      true,
+      undefined,
+      organizationId,
+    );
 
     return NextResponse.json({ user: created, magicLinkSent }, { status: magicLinkSent ? 202 : 201 });
   } catch (error) {
     if (error instanceof Error && error.message === 'A user with this email already exists') {
+      await notifyUserOperation('create', targetLabel, false, error.message, organizationId);
       return NextResponse.json({ error: error.message }, { status: 409 });
     }
     // Service-layer invite validation (org required for passwordless, team/org mismatch).
     if (error instanceof Error && error.name === 'ValidationError') {
+      await notifyUserOperation('create', targetLabel, false, error.message, organizationId);
       return NextResponse.json({ error: error.message }, { status: 400 });
     }
     console.error('Failed to create user:', error);
+    await notifyUserOperation('create', targetLabel, false, 'Failed to create user', organizationId);
     return NextResponse.json({ error: 'Failed to create user' }, { status: 500 });
   }
 }

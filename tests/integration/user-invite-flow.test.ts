@@ -55,6 +55,9 @@ vi.mock('@/lib/platform-db', () => ({
   withTenantAdminContext: (_u: string, _o: string, op: () => Promise<unknown>) => op(),
 }));
 vi.mock('@/lib/rate-limiter', () => ({ checkAdminRateLimit: vi.fn().mockReturnValue(true) }));
+// SSE push — no Redis/stream needed in this spec.
+const mockNotifyUserOperation = vi.hoisted(() => vi.fn().mockResolvedValue(undefined));
+vi.mock('@/lib/notification-push', () => ({ notifyUserOperation: mockNotifyUserOperation }));
 
 // Super-admin boundary — every spec controls the session identity.
 const mockSession = { user: { id: 'super-admin-1', email: 'admin@propni.example.com', name: 'Super Admin' }, session: {} };
@@ -148,6 +151,15 @@ describe('POST /api/dashboard/admin/users (create)', () => {
     const auditActions = mockDb.auditLog.create.mock.calls.map((c) => c[0].data.action);
     expect(auditActions).toContain('user.created');
     expect(auditActions).toContain('user.invite-issued');
+
+    // SSE push to other admins (restored behavior, must not regress).
+    expect(mockNotifyUserOperation).toHaveBeenCalledWith(
+      'create',
+      expect.stringContaining('@'),
+      true,
+      undefined,
+      orgId,
+    );
   });
 
   it('passwordless + valid org + teamId in that org → 202, enrollment into THAT team', async () => {
