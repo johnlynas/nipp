@@ -148,8 +148,13 @@ export const UserService = {
 
       if (targetTeam) {
         // A specific team REPLACES the default enrollment path; addTeamMember
-        // re-verifies the Member row plus applies TeamRole inheritance.
-        await TeamService.addTeamMember(targetTeam.id, { userId: user.id }, ctx);
+        // re-verifies the Member row plus applies TeamRole inheritance. Pin the
+        // (already cross-checked) org on the ctx so its internal contextOrgId
+        // fallback never reaches for an unset platform-org env in edge cases.
+        await TeamService.addTeamMember(targetTeam.id, { userId: user.id }, {
+          ...ctx,
+          organizationId: targetTeam.organizationId,
+        });
       } else {
         // Default "Members" team auto-enrollment (idempotent)
         await runWithTenant(organizationId, () =>

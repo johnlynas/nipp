@@ -32,8 +32,17 @@ export interface InviteUser {
 }
 
 export type IssueInviteResult =
-  | { ok: true; token: string; url: string }
+  | { ok: true; token: string; url: string; emailSent: boolean }
   | { ok: false; error: string };
+
+export interface IssueInviteOptions {
+  /**
+   * Injectable send seam — defaults to the real sendEmail. Call sites that
+   * need to know whether delivery succeeded (the create/resend routes, which
+   * report magicLinkSent) pass their own wrapper; tests inject a recorder.
+   */
+  sendFn?: (to: string, subject: string, message: string, headerTitle?: string) => Promise<{ success: boolean; error?: unknown }>;
+}
 
 /**
  * Issue a magic link for an invited user: insert a Verification row and send
@@ -43,7 +52,13 @@ export type IssueInviteResult =
  * SMTP failures are logged, NOT thrown — the token stays in the database so
  * the link (if it arrives late) and admin resend both work.
  */
-export async function issueInviteLink(user: InviteUser): Promise<IssueInviteResult> {
+export async function issueInviteLink(
+  user: InviteUser,
+  options: IssueInviteOptions = {},
+): Promise<IssueInviteResult> {
+  const sendFn = options.sendFn ?? ((to: string, subject: string, message: string, headerTitle?: string) =>
+    sendEmail(to, subject, message, headerTitle));
+
   const token = generateRandomString(32);
   const url = `${env.FRONTEND_URL}${VERIFY_PATH}?token=${token}`;
 
@@ -84,8 +99,9 @@ export async function issueInviteLink(user: InviteUser): Promise<IssueInviteResu
     <p>This link expires in ${Math.round(TOKEN_TTL_MS / 60000)} minutes. Afterwards,
     sign in at the portal with your Google account as usual.</p>`;
 
+  let emailSent = false;
   try {
-    const result = await sendEmail(
+    const result = await sendFn(
       user.email,
       'Activate your Property NI account',
       htmlMessage,
@@ -94,13 +110,14 @@ export async function issueInviteLink(user: InviteUser): Promise<IssueInviteResu
     if (!result.success) {
       logger.error({ err: result.error, userId: user.id }, '[OidcInvite] Invite email failed (token remains valid for resend window)');
     } else {
+      emailSent = true;
       logger.info({ userId: user.id, tokenExpiry: TOKEN_TTL_MS / 60000 + 'm' }, '[OidcInvite] Invitation link issued');
     }
   } catch (err) {
     logger.error({ err, userId: user.id }, '[OidcInvite] Invite email raised (token remains valid)');
   }
 
-  return { ok: true, token, url };
+  return { ok: true, token, url, emailSent };
 }
 
 export type ConsumeInviteResult =

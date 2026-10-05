@@ -174,7 +174,9 @@ export async function POST(request: NextRequest) {
     let magicLinkSent = false;
     if (!password) {
       const issueResult = await issueInviteLink(created);
-      magicLinkSent = issueResult.ok;
+      // emailSent distinguishes "token in DB, no email" (SMTP blip — admin
+      // resends from the user row) from a real delivery.
+      magicLinkSent = issueResult.ok && issueResult.emailSent;
       await recordAuditLog({
         userId: auth.session!.user.id,
         action: 'user.invite-issued',

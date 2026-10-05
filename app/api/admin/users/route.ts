@@ -146,14 +146,16 @@ export const POST = wrapPiiRoute(async (request, decryptedBody) => {
     let magicLinkSent = false;
     if (!body.password) {
       const issueResult = await issueInviteLink(user);
-      magicLinkSent = issueResult.ok;
+      // emailSent distinguishes "token in DB, no email" (SMTP blip — admin
+      // resends from the user row) from a real delivery.
+      magicLinkSent = issueResult.ok && issueResult.emailSent;
       await recordAuditLog({
         userId: session.user.id,
         userName: (session.user as { name?: string }).name ?? undefined,
         action: 'user.invite-issued',
         resourceType: 'User',
         resourceId: user.id,
-        success: issueResult.ok,
+        success: magicLinkSent,
       }).catch((err) => logger.error({ err }, 'Failed to record audit log for invite issuance'));
     }
 
