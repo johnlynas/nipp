@@ -12,7 +12,8 @@ import { env } from '@/lib/env';
  */
 function createEmailTemplate(
   subject: string,
-  message: string
+  message: string,
+  headerTitle = 'Property NI — Security Alert'
 ): { html: string; text: string } {
   const html = `
 <!DOCTYPE html>
@@ -26,7 +27,7 @@ function createEmailTemplate(
     <!-- Header: Property NI Navy -->
     <tr>
       <td style="background-color: #1B2A4A; padding: 24px 32px;">
-        <h1 style="margin: 0; color: #ffffff; font-size: 20px;">Property NI — Security Alert</h1>
+        <h1 style="margin: 0; color: #ffffff; font-size: 20px;">${headerTitle}</h1>
       </td>
     </tr>
     <!-- Body -->
@@ -60,7 +61,8 @@ function createEmailTemplate(
 export async function sendEmail(
   to: string,
   subject: string,
-  message: string
+  message: string,
+  headerTitle?: string
 ): Promise<{ success: boolean; error?: string }> {
   const smtpHost = env.SMTP_HOST;
   const smtpPort = env.SMTP_PORT;
