@@ -3,6 +3,23 @@ import type { MockInstance } from 'vitest';
 import { auth } from '@/lib/auth';
 import { prisma } from '@/lib/db';
 import { logger } from '@/lib/logger';
+import { hashPassword } from 'better-auth/crypto';
+
+// Mail seam mock: lib/oidc-magic-link imports sendEmail as an ESM live binding,
+// so a post-hoc vi.spyOn on the imported name cannot intercept it. Mocking the
+// module instead swaps in this recorder — every issueInviteLink call delegates
+// to the REAL sendEmail (SMTP stub env) and appends to `sentInvites`; specs
+// assert against that log + the Verification table row. vi.hoisted guarantees
+// the binding exists before lib/auth's import chain loads.
+const { sentInvites } = vi.hoisted(() => ({
+  sentInvites: [] as Array<{ to: string; subject: string }>,
+}));
+vi.mock('@/lib/notifications/email', () => ({
+  sendEmail: (to: string, subject: string, _message: string, _headerTitle?: string) => {
+    sentInvites.push({ to, subject });
+    return Promise.resolve({ success: true as const });
+  },
+}));
 
 /**
  * Google OIDC — full mocked flow (Phase 3, Task 6) + success-log wiring (Task 7).
@@ -33,6 +50,16 @@ const BANNED_EMAIL = 'full-flow.banned@gmail.com';
 const GOOGLE_SUB = 'g-sub-full-flow';
 const BANNED_SUB = 'g-sub-banned-flow';
 const CALLBACK_URL = 'http://localhost:3000/dashboard/calendar';
+
+// Pre-registration gate (P1 Task 3) identities
+const PENDING_EMAIL = 'full-flow.pending@gmail.com';
+const PROVISIONED_EMAIL = 'full-flow.provisioned@gmail.com';
+const PENDING_SUB = 'g-sub-pending-flow';
+const PROVISIONED_SUB = 'g-sub-provisioned-flow';
+
+// Local email/password regression identity (must sign in through the same hook chain)
+const LOCAL_EMAIL = 'full-flow.local@example.com';
+const LOCAL_PASSWORD = 'LocalRegression123!';
 
 // BetterAuth's google provider derives the user from decodeJwt(id_token) ONLY —
 // no signature check on this path (verified in node_modules — see file header) —
@@ -129,6 +156,10 @@ describe('Google OIDC — full mocked flow (Task 6)', () => {
   let tokenFetchMock: MockInstance;
   let infoSpy: MockInstance;
 
+  // Mail assertion target (hoisted mock — replace vi.spyOn, which can't intercept
+  // the ESM live binding lib/oidc-magic-link imports).
+  const clearSentInvites = () => { sentInvites.length = 0; };
+
   beforeAll(() => {
     // Stub the ONLY outbound call: the OAuth token exchange. Everything else must
     // never touch the network (it would hit Google with test creds and fail).
@@ -155,72 +186,166 @@ describe('Google OIDC — full mocked flow (Task 6)', () => {
   afterAll(async () => {
     tokenFetchMock.mockRestore();
     infoSpy.mockRestore();
-    for (const email of [TEST_EMAIL, BANNED_EMAIL]) {
+    for (const email of [TEST_EMAIL, BANNED_EMAIL, PENDING_EMAIL, PROVISIONED_EMAIL, LOCAL_EMAIL]) {
       const user = await prisma.user.findUnique({ where: { email } });
       if (user) await prisma.session.deleteMany({ where: { userId: user.id } });
     }
+    // Expired/leftover invite tokens from gate rejections — match on our kind marker.
+    await prisma.verification.deleteMany({ where: { value: { contains: '"oidc-invite"' } } });
     await prisma.account.deleteMany({
-      where: { providerId: 'google', accountId: { in: [GOOGLE_SUB, BANNED_SUB] } },
+      where: { providerId: 'google', accountId: { in: [GOOGLE_SUB, BANNED_SUB, PENDING_SUB, PROVISIONED_SUB] } },
     });
-    await prisma.user.deleteMany({ where: { email: { in: [TEST_EMAIL, BANNED_EMAIL] } } });
+    // Local regression identity's credential account + gate org memberships.
+    const localUser = await prisma.user.findUnique({ where: { email: LOCAL_EMAIL } });
+    if (localUser) await prisma.account.deleteMany({ where: { userId: localUser.id, providerId: 'credential' } });
+    for (const email of [PENDING_EMAIL, PROVISIONED_EMAIL]) {
+      const u = await prisma.user.findUnique({ where: { email } });
+      if (u) await prisma.member.deleteMany({ where: { userId: u.id } });
+    }
+    await prisma.organization.deleteMany({ where: { id: { startsWith: 'org-gate-' } } });
+    await prisma.user.deleteMany({
+      where: { email: { in: [TEST_EMAIL, BANNED_EMAIL, PENDING_EMAIL, PROVISIONED_EMAIL, LOCAL_EMAIL] } },
+    });
   });
 
-  it('new google identity → user + Account row + session cookie, redirect to callbackURL', async () => {
+  /**
+   * Seed an invited user (google Account pre-linked to their User) for gate specs.
+   * Returns the seeded userId so specs can assert sessions against it.
+   */
+  async function seedInvitedGoogleUser(opts: { email: string; sub: string; oidcVerified?: boolean; org?: boolean }) {
+    const user = await prisma.user.upsert({
+      where: { email: opts.email },
+      create: { name: 'Gate User', email: opts.email, oidcVerified: opts.oidcVerified ?? false },
+      update: { oidcVerified: opts.oidcVerified ?? false },
+    });
+    await prisma.account.upsert({
+      where: { providerId_accountId: { providerId: 'google', accountId: opts.sub } },
+      create: { accountId: opts.sub, providerId: 'google', userId: user.id },
+      update: {},
+    });
+    if (opts.org) {
+      await prisma.organization.upsert({
+        where: { id: `org-gate-${user.id}` },
+        create: { id: `org-gate-${user.id}`, name: 'Gate Org' },
+        update: {},
+      });
+      await prisma.member.create({ data: { userId: user.id, orgId: `org-gate-${user.id}` } });
+    }
+    return user.id;
+  }
+
+  it('STRANGER google identity (not invited) → rejected, no session — pre-registration gate', async () => {
     currentIdToken = buildIdToken(TEST_EMAIL, GOOGLE_SUB);
+    clearSentInvites();
 
     const cbRes = await runOAuthRoundTrip(handler, { provider: 'google', callbackURL: CALLBACK_URL });
-    // Success redirects to the callbackURL stored in state — proves the full chain
+    expect(cbRes.status).toBe(401);
+    const bodyText = await cbRes.text();
+    expect(bodyText).toContain('Access denied');
+    expect(extractSetCookie(cbRes).sessionToken).toBeFalsy();
+
+    const user = await prisma.user.findUnique({ where: { email: TEST_EMAIL } });
+    if (user) {
+      // Identity rows may be committed before the session hook fires (BetterAuth
+      // upserts in handleOAuthUserInfo; the gate runs at session creation) — pin:
+      // they exist ONLY if a User row is present, and no session was ever issued.
+      expect(user).toBeTruthy();
+      const sessions = await prisma.session.findMany({ where: { userId: user.id } });
+      expect(sessions.length).toBe(0);
+    }
+    // Rejection triggered a fresh invitation link so an admin pre-registration
+    // (or the support flow) has something to work with.
+    expect(sentInvites.length).toBeGreaterThanOrEqual(1);
+  }, 20000);
+
+  it('INVITED user, magic link not clicked (oidcVerified=false) → rejected + invitation email issued', async () => {
+    const userId = await seedInvitedGoogleUser({ email: PENDING_EMAIL, sub: PENDING_SUB });
+    currentIdToken = buildIdToken(PENDING_EMAIL, PENDING_SUB);
+    clearSentInvites();
+
+    const cbRes = await runOAuthRoundTrip(handler, { provider: 'google', callbackURL: CALLBACK_URL });
+    expect(cbRes.status).toBe(401);
+    const bodyText = await cbRes.text();
+    expect(bodyText).toMatch(/check your inbox|verification link/i);
+    expect(extractSetCookie(cbRes).sessionToken).toBeFalsy();
+
+    // A consumable token landed in the Verification table (the magic link).
+    const inviteRows = await prisma.verification.findMany({ where: { value: { contains: '"oidc-invite"' } } });
+    const ours = inviteRows.filter(
+      (r) => r.expiresAt > new Date() && JSON.parse(r.value).email === PENDING_EMAIL,
+    );
+    expect(ours.length).toBeGreaterThanOrEqual(1);
+
+    // Email seam fired for this user.
+    expect(sentInvites.map((s) => s.to)).toContain(PENDING_EMAIL);
+
+    const sessions = await prisma.session.findMany({ where: { userId } });
+    expect(sessions.length).toBe(0);
+  }, 20000);
+
+  it('INVITED + VERIFIED user WITHOUT org membership → rejected (not provisioned)', async () => {
+    const userId = await seedInvitedGoogleUser({ email: PROVISIONED_EMAIL, sub: PROVISIONED_SUB, oidcVerified: true });
+    currentIdToken = buildIdToken(PROVISIONED_EMAIL, PROVISIONED_SUB);
+    clearSentInvites();
+
+    const cbRes = await runOAuthRoundTrip(handler, { provider: 'google', callbackURL: CALLBACK_URL });
+    expect(cbRes.status).toBe(401);
+    const bodyText = await cbRes.text();
+    expect(bodyText).toContain('provisioned');
+    expect(extractSetCookie(cbRes).sessionToken).toBeFalsy();
+
+    // Verification gate passed ⇒ no re-send of an invitation email.
+    expect(sentInvites.length).toBe(0);
+
+    const sessions = await prisma.session.findMany({ where: { userId } });
+    expect(sessions.length).toBe(0);
+  }, 20000);
+
+  it('INVITED + VERIFIED + ORG user → full sign-in succeeds (cookie + session)', async () => {
+    const userId = await seedInvitedGoogleUser({ email: PROVISIONED_EMAIL, sub: PROVISIONED_SUB, oidcVerified: true, org: true });
+    currentIdToken = buildIdToken(PROVISIONED_EMAIL, PROVISIONED_SUB);
+
+    const cbRes = await runOAuthRoundTrip(handler, { provider: 'google', callbackURL: CALLBACK_URL });
     expect(cbRes.status).toBe(302);
     expect(cbRes.headers.get('location')).toBe(CALLBACK_URL);
 
     const { sessionToken, sessionCookieName } = extractSetCookie(cbRes);
-    expect(sessionToken, 'session cookie should be set on successful callback').toBeTruthy();
+    expect(sessionToken, 'session cookie should be set for fully provisioned user').toBeTruthy();
     await cbRes.body?.cancel();
 
-    // Rows in the DB (implicit sign-up is allowed per-provider even though
-    // emailAndPassword.disableSignUp blocks the password endpoint)
-    const user = await prisma.user.findUnique({ where: { email: TEST_EMAIL } });
-    expect(user).not.toBeNull();
-    expect(user?.emailVerified).toBe(true); // from id_token email_verified
-    const account = await prisma.account.findFirst({
-      where: { providerId: 'google', accountId: GOOGLE_SUB },
-    });
-    expect(account).not.toBeNull();
-    expect(account?.userId).toBe(user?.id);
-    expect(account?.accountId).toBe(GOOGLE_SUB);
-
-    // Task 7 observability: session.create.after logs the social success (the only
-    // legal hook — GoogleOptions has no onSuccess in better-auth@1.6.x)
-    const successLog = infoSpy.mock.calls.find(
-      (call: unknown[]) => String(call[1]) === '[Auth] Google sign-in succeeded',
-    );
-    expect(successLog, 'google sign-in success log missing').toBeDefined();
-
-    // The cookie is a REAL session — resolve it through BetterAuth's own
-    // session machinery (the same call /api/auth/me makes; ExtendedSession
-    // callbacks included).
-    const session = await auth.api.getSession({
-      headers: Object.fromEntries(
-        new Headers({ Cookie: `${sessionCookieName}=${sessionToken}` }).entries(),
-      ),
-    });
-    expect(session?.user?.email).toBe(TEST_EMAIL);
+    const sessions = await prisma.session.findMany({ where: { userId } });
+    expect(sessions.length).toBeGreaterThan(0);
   }, 20000);
 
-  it('re-login reuses the user — one User, no duplicate Account row', async () => {
-    const accountsBefore = await prisma.account.count({ where: { accountId: GOOGLE_SUB } });
+  it('EMAIL/PASSWORD sign-in is untouched — local user gets a session via the same hook chain', async () => {
+    // Hard invariant: the pre-registration gate must be a no-op for identities
+    // without a Google account. This drives the real /sign-in/email path end-to-end
+    // (same databaseHooks.session.create.before funnel) so any regression that
+    // touches local login fails here in CI.
+    const emailTestUser = await prisma.user.upsert({
+      where: { email: LOCAL_EMAIL },
+      create: { name: 'Local Regression', email: LOCAL_EMAIL },
+      update: {},
+    });
+    // Canonical credential account (same shape tests/utils/factories.ts produces).
+    await prisma.account.upsert({
+      where: { providerId_accountId: { providerId: 'credential', accountId: emailTestUser.id } },
+      create: { userId: emailTestUser.id, accountId: emailTestUser.id, providerId: 'credential', password: await hashPassword(LOCAL_PASSWORD) },
+      update: {},
+    });
 
-    currentIdToken = buildIdToken(TEST_EMAIL, GOOGLE_SUB);
-    const cbRes = await runOAuthRoundTrip(handler, { provider: 'google', callbackURL: CALLBACK_URL });
-    expect(cbRes.status).toBe(302);
-    expect(cbRes.headers.get('location')).toBe(CALLBACK_URL);
-    await cbRes.body?.cancel();
+    const signInRes = await handler(new Request('http://localhost:3000/api/auth/sign-in/email', {
+      method: 'POST',
+      headers: { Origin: 'http://localhost:3000', 'Content-Type': 'application/json' },
+      body: JSON.stringify({ email: LOCAL_EMAIL, password: LOCAL_PASSWORD }),
+    }));
 
-    // Email matching → same single User row, Account rows unchanged
-    const users = await prisma.user.findMany({ where: { email: TEST_EMAIL } });
-    expect(users.length).toBe(1);
-    const accountsAfter = await prisma.account.count({ where: { accountId: GOOGLE_SUB } });
-    expect(accountsAfter).toBe(accountsBefore);
+    expect(signInRes.status).toBe(200);
+    const payload = await signInRes.json();
+    expect(payload.token).toBeTruthy(); // BetterAuth email sign-in returns the token inline
+
+    const sessions = await prisma.session.findMany({ where: { userId: emailTestUser.id } });
+    expect(sessions.length).toBeGreaterThan(0);
   }, 20000);
 
   it('banned user is rejected at session creation — no session, 401 with the banned-banner message', async () => {

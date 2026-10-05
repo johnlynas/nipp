@@ -70,7 +70,7 @@ export async function sendEmail(
   const smtpPass = env.SMTP_PASS || '';
   const smtpFrom = env.SMTP_FROM;
 
-  const template = createEmailTemplate(subject, message);
+  const template = createEmailTemplate(subject, message, headerTitle);
 
   let transporter: Transporter;
 

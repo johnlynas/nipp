@@ -6,6 +6,7 @@ import { organization } from 'better-auth/plugins';
 import { env } from './env';
 import { createAuthMiddleware, APIError } from 'better-auth/api';
 import { logger } from './logger';
+import { issueInviteLink } from './oidc-magic-link';
 
 interface ExtendedUser {
   permissions: string[];
@@ -54,6 +55,66 @@ export async function enforceBanStatus(email: string): Promise<void> {
         message: `Access denied. ${reason}`,
       });
     }
+  }
+}
+
+/**
+ * Enforce the pre-registration gate for Google OIDC sign-in (design §4.3 +
+ * product decision: invite-only access).
+ *
+ * Single rule: EVERY session whose user has a Google `Account` row must belong
+ * to a user who (a) completed magic-link verification (`oidcVerified === true`)
+ * and (b) belongs to at least one organization (`Member` row). Rejections throw
+ * APIError('UNAUTHORIZED') — BetterAuth surfaces them as 401 on the OAuth
+ * callback with no session issued. The unverified branch issues a fresh magic
+ * link on every attempt (each issue is a new token; old ones die on consume/
+ * expiry), so a missed email self-heals by retrying the Google sign-in.
+ *
+ * INARIANT — local email/password login: the gate returns immediately for any
+ * user WITHOUT a Google account, so the `/sign-in/email` path is byte-for-byte
+ * unchanged; only the shared ban check (above) runs for them, exactly as before.
+ */
+export async function enforceOidcProvisioning(userId: string): Promise<void> {
+  const user = await prisma.user.findUnique({
+    where: { id: userId },
+    select: {
+      id: true,
+      name: true,
+      email: true,
+      oidcVerified: true,
+      accounts: { select: { providerId: true } },
+      members: { select: { orgId: true } },
+    },
+  });
+  if (!user) return; // defensive; BetterAuth guarantees the row exists
+
+  const hasGoogle = user.accounts.some((a) => a.providerId === 'google');
+  if (!hasGoogle) return; // email/password door — this gate is a no-op here
+
+  if (user.oidcVerified === false) {
+    logger.warn(
+      { userId: user.id, email: user.email },
+      '[Auth] Google sign-in blocked: magic-link verification pending — invitation link issued',
+    );
+    // issueInviteLink logs and swallows SMTP failures by contract (T2), so this
+    // cannot take the auth pipeline down; the token lands in Verification when
+    // the insert succeeds.
+    await issueInviteLink(user);
+    throw new APIError('UNAUTHORIZED', {
+      message:
+        'Access denied. We need to confirm your email first — check your inbox for a verification link, then try signing in with Google again.',
+    });
+  }
+
+  if (user.members.length === 0) {
+    logger.warn(
+      { userId: user.id, email: user.email },
+      '[Auth] Google sign-in blocked: verified but no organization membership (not provisioned)',
+    );
+    throw new APIError('UNAUTHORIZED', {
+      message:
+        'Access denied. This account has not been provisioned by an administrator yet. Contact your portal administrator.',
+    });
   }
 }
 
@@ -205,6 +266,9 @@ export const auth = betterAuth({
           });
           if (!user) return; // BetterAuth guarantees the row exists; be defensive
           await enforceBanStatus(user.email);
+          // Pre-registration gate (Google OIDC only — a no-op for users without
+          // a google Account row, so email/password login is untouched).
+          await enforceOidcProvisioning(session.userId);
         },
         after: async (session) => {
           // Observability (Task 7): GoogleOptions has no onSuccess/onError hooks in
