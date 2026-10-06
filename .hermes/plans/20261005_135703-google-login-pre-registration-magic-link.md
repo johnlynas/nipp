@@ -324,6 +324,22 @@ Note: `issueInviteLink` send must never throw into the auth pipeline beyond the 
 
 ---
 
+## Phase 4 implementation notes — deviations from this plan (recorded 2026-10-06)
+
+19. **Rate-limit spec lives route-level, not auth-handler-level.** Task 9 step 1 said "mirror the social sign-in ones" — those drive the REAL `app/api/auth/[...all]` POST through the real limiter (no mocks). The verify route is a standalone Next.js route, so its spec drives the REAL `GET` handler + real `checkAuthRateLimit`/store with an unknown token: N requests pass (miss path → `link-expired` redirect), N+1th → 429 JSON with `Retry-After: 60`, zero Set-Cookie. Per-IP isolation pinned too. No DB state is written by the miss path, so cleanup is a non-issue.
+20. **Matrix arcs added (step 2) — three new specs in `google-oidc-full-flow.test.ts`:**
+    - *consume → re-sign-in:* the product arc end-to-end — seed invited+org user, `issueInviteLink` (real module, mocked SMTP), assert 401 pre-consume, consume through the REAL verify route (`env.FRONTEND_URL`-based NextRequest), then a second round-trip succeeds with a session row. One regression in consume/markVerified/gate breaks it.
+    - *returning verified user:* clean re-login (sessions wiped first) → 302 + session, `sentInvites.length === 0` (no re-email — gate idempotence).
+    - *banned + unverified invited user:* ban wins ordering check — 401 with the seeded banReason in the body, NOT the magic-link variant, zero emails. Pins Phase 1 note #3's order decision against a live identity.
+    All five matrix states of Task 9 step 2 are now covered (stranger ✓ pre-existing, invited-unverified ✓ consume-arc spec #1, post-consume success ✓ same spec #3, ban-before-email ✓ new spec, returning verified no-re-email ✓ new spec).
+21. **`seedInvitedGoogleUser` member row is now an upsert.** The re-seed-across-specs pattern (PENDING identity seeded unverified in spec 1, then org-attached in the consume arc) hit the `(userId, orgId)` unique constraint; upsert makes seeding state-independent.
+22. **Live checklist (step 4) deferred to the user** — it requires a real Google account at the consent screen + the external mail forwarder for a test address; nothing in CI can substitute. The design doc now carries the 6-step table with "(manual)" result cells (google-oidc-design.md §8); steps 1–6 are pinned in CI except the real-consent/forwarder hop, so the live run is a confirmation pass, not gate-critical.
+23. **Docs pass done per step 5:** this plan file carries the notes above; `google-oidc-design.md` updated — §4.1 case B row → "blocked for v1 pre-registration (superseded by this plan)" + Case-B paragraph reconciled, risk #1 disposition flipped to Decided, §8 phase-status + live checklist table added, new §11 implementation cross-reference pointing at this plan.
+
+**Exit gate (2026-10-06, Phase 4):** `npm run lint` ✔ · `npx tsc --noEmit` ✔ · full suite `npx vitest run` — **2311/2311 across 117 files** ✔ (new: 2 verify-route rate-limit specs in `rate-limiting.test.ts`, 3 matrix-arc specs in `google-oidc-full-flow.test.ts`) · `npm run build` ✔. Live checklist pending user confirmation (note #22).
+
+---
+
 ## Risks & open questions
 
 | # | Risk / note | Severity | Mitigation |

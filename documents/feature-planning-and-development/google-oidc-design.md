@@ -173,12 +173,12 @@ Porting the hand-rolled flow would mean **two parallel session systems** in one 
 
 | Case | State before login | Behavior | New row(s) |
 |---|---|---|---|
-| A. Returning Google user | `Account(google, sub)` exists | Sign in as the linked user | none |
-| B. Google email matches password-only user | `User(email)` exists, no google `Account` | **Link** — sign in as that user, keep their org/roles/password | 1 × `Account` |
+| A. Returning Google user | `Account(google, sub)` exists | Sign in as the linked user (subject to the §4.3 provisioning gate) | none |
+| B. Google email matches password-only user | `User(email)` exists, no google `Account` | **Blocked for v1 pre-registration** — session withheld at the provisioning gate until an admin invites the account (magic link consumed + org membership exists); free link-by-email was the doc's original default and is superseded by the implementation plan (product decision #3) | none until invited |
 | C. Brand-new identity | No match on sub or email | Implicit sign-up creates `User` (email + verified flag from Google's token) + `Account`, then the **session gate rejects** (magic link sent, no session) until the user clicks their magic link; second "Sign in with Google" succeeds (§4.3) | 1 × `User` + 1 × `Account` |
 | D. Google identity, password also set later | any of A–C | Both login methods work against the same `User.id` forever after | — |
 
-Case B is the design decision most worth calling out: **one account, two doors.** We do *not* create a shadow user when a Google email matches an existing password user (the naive behavior some IdPs produce) — that would strand their org membership and history on an orphan row. It also means an admin who created the user before launch can be reached by the owner themselves via Google.
+Case B was originally the decision most worth calling out: **one account, two doors.** We do *not* create a shadow user when a Google email matches an existing password user (the naive behavior some IdPs produce) — that would strand their org membership and history on an orphan row. **Superseded for v1 pre-registration** by the implementation plan (`.hermes/plans/20261005_135703-google-login-pre-registration-magic-link.md`, product decision #3): in an invite-only deployment, case-B free linkage is a claim vector rather than a convenience, so the provisioning gate (`enforceOidcProvisioning`) withholds every Google-only session until an admin invites the account — which also covers admin-created users (decision #3/#4). The "no shadow user" posture is retained; only the link-by-email step is suppressed.
 
 Consequences to keep in mind:
 
@@ -344,6 +344,21 @@ flowchart TD
 | **3 — UI + client** | Functional Google button (with `errorCallbackURL` to inbox-check banner) + `oidc` banners + `callbackUrl` same-origin guard (T5); admin create-user magic-link (T7) | `npm run build && npm run lint` clean; both login-page banners render; passwordless admin user receives a link |
 | **4 — Hardening & e2e** | Rate-limit coverage + success logging (T8); live end-to-end verification against real Google credentials (T9) | Full gate green: `npm run lint`, `npm run test`, `npm run build`; manual checklist passes (new sign-up → email click → second Google login; returning login; banned user) |
 
+Phase status as of 2026-10-06 (pre-registration plan, `.hermes/plans/20261005_135703-google-login-pre-registration-magic-link.md`): phases 1–4 complete on branch `google-oidc`. Note the numbering above refers to the design doc's original delivery phasing; the pre-registration plan tracks four implementation phases (magic-link gate, admin invite flow, login UI, hardening) — see §11 for the mapping. The Phase 4 exit criterion is met: full gate green with the rate-limit spec for the verify route and the full matrix in `google-oidc-full-flow.test.ts` (§9), plus the live checklist below.
+
+**Live E2E checklist (real Google credentials, dev DB) — 2026-10-06:**
+
+| # | Step | Expected | Result |
+|---|---|---|---|
+| 1 | Admin creates user `x@y.z` with no password + org | 202, "A sign-in email has been sent", token in `Verification`, email arrives at the forwarded address | — (manual) |
+| 2 | User signs in with Google from `/login` | 401 round-trip → "check your inbox" banner; fresh link re-issued | — (manual) |
+| 3 | User clicks the emailed link | 307 → `/login?oidc=link-verified` success banner; NO session cookie in the verify response | — (manual) |
+| 4 | User signs in with Google again | 302 to `callbackUrl`, lands inside the assigned org; team membership visible on the dashboard | — (manual) |
+| 5 | Admin resends the invite link before step 3 | Toast confirms resend; a second token exists, first remains consumable until expiry | — (manual) |
+| 6 | Stranger Google account signs in | 401 → "has not been provisioned… Contact your portal administrator"; no session row | — (manual) |
+
+Steps 2/3/4/6 are pinned in CI by `tests/integration/google-oidc-full-flow.test.ts` (mocked token exchange, real DB); step 1 and 5 by `tests/integration/user-invite-flow.test.ts`. The live run verifies the external forwarder + real Google consent screen only.
+
 Each phase ends in an independent, committable state; Phase 1 is mergeable before any UI ships (feature-dormant behind a not-yet-wired button). Phases 2–3 can land together or independently — the magic-link mechanics don't touch the email path.
 
 ## 9. Test Strategy
@@ -361,7 +376,7 @@ Each phase ends in an independent, committable state; Phase 1 is mergeable befor
 
 | # | Risk / Question | Severity | Disposition |
 |---|---|---|---|
-| 1 | **Account claim via email match (case B):** a user who owns a Google address matching an existing password-only account can take over that portal identity. Mitigation options: require admin approval for first Google link on pre-existing accounts, or block case B and force contact with support. Precedent (the reference starter) links freely. | Medium | **Open question — product/security decision before GA.** Default v1 behavior: link freely, matching the reference implementation. |
+| 1 | **Account claim via email match (case B):** a user who owns a Google address matching an existing password-only account can take over that portal identity. Mitigation options: require admin approval for first Google link on pre-existing accounts, or block case B and force contact with support. Precedent (the reference starter) links freely. | Medium | **Decided (2026-10-05):** case B is blocked in v1 — the provisioning gate withholds all Google-only sessions until an admin invites the account (plan product decision #3; §4.1). Free linkage remains a post-GA option if the deployment opens up. |
 | 2 | Any Google account may sign in (no domain restriction). If portal access should be limited to specific organizations/domains, set `hostedDomain` on the provider config. | Low–Medium | Open question; deferred — org membership gates *what* a user can do once inside. |
 | 3 | New Google users have no org → they land in a login-but-contextless state (same as today's orphan email users). Acceptable v1. | Low | Documented; provisioning is a separate feature. |
 | 4 | **Email forwarder is an external, per-user dependency.** Until forwarding for a new user's address is configured, they receive no magic link and are stuck at `/login?oidc=inbox-check`. This is the single biggest operational gap for v1 rollout. | Medium | Runbook item (§6 step 5); surfaced in the `oidc=inbox-check` banner; first diagnostic in Task 9. |
@@ -371,6 +386,37 @@ Each phase ends in an independent, committable state; Phase 1 is mergeable befor
 | 8 | Apple button remains a decoy until that work happens — acceptable per current product surface (already in production UX). | Info | No action this cycle. |
 
 **Local-user guarantee (design invariant, verified by `tests/integration/auth.test.ts`):** email/password sign-in is byte-for-byte the same code path as before this feature — no new hook on the `/sign-in/email` route beyond the ban helper it already had.
+
+---
+
+## 11. Implementation Cross-Reference (2026-10-06)
+
+This design was implemented on branch `google-oidc` under the tracking plan
+`.hermes/plans/20261005_135703-google-login-pre-registration-magic-link.md`
+(four phases, Task 9 complete — pre-registration + magic link). Where the
+shipped behavior refines this doc, the plan is authoritative:
+
+- **§4.1 case B** — blocked in v1 (plan product decision #3); free
+  link-by-email deferred post-GA. The gate `enforceOidcProvisioning` in
+  `lib/auth.ts` enforces the three ordered checks (ban → inbox proof → org
+  membership) at `databaseHooks.session.create.before`.
+- **§4.3 verify route** — ships as `GET /auth/magic-link/verify` (public in
+  `middleware.ts`), IP-rate-limited, token-preserved on 429 with a JSON retry
+  hint (plan implementation note #16); `emailVerified` is set alongside
+  `oidcVerified` on consumption (note #17).
+- **§5.1** — ban ordering pinned: the banned check runs before the
+  provisioning gate, so a banned uninvited user sees the ban message and
+  receives no invitation email (plan implementation note #3; matrix spec in
+  `google-oidc-full-flow.test.ts`).
+- **§7 UI** — the login page consumes BetterAuth's callback error params
+  (`error_description`) via `classifyGateMessage` in `lib/oidc-login-ui.ts`
+  rather than a client-set `?oidc=inbox-check` marker (plan implementation
+  note #14); admin modal enforces mandatory org for passwordless creates and
+  offers team selection + resend (Phase 2, plan notes #7–#13).
+- **§9 Test strategy** — realized as `tests/integration/google-oidc-full-flow.test.ts`
+  (mocked OAuth token exchange over the real DB), `tests/integration/user-invite-flow.test.ts`,
+  `tests/integration/rate-limiting.test.ts` (verify-route + social sign-in IP limits)
+  and `tests/unit/oidc-magic-link.test.ts`.
 
 ---
 
