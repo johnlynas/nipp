@@ -11,6 +11,7 @@
  */
 
 import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { NextRequest } from 'next/server';
 
 // ---------------------------------------------------------------------------
 // Shared rate-limiter imports (extracted so route files only export HTTP handlers)
@@ -882,6 +883,71 @@ describe('Auth catch-all — social sign-in is IP-rate-limited (integration)', (
     expect((await POST(socialPost(ipA))).status).toBe(429);
     const fresh = await POST(socialPost(ipB));
     expect(fresh.status).not.toBe(429);
+    await fresh.body?.cancel();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Magic-link verify route — IP rate limiting (google-oidc pre-registration, Phase 4 Task 9)
+// ---------------------------------------------------------------------------
+// GET /auth/magic-link/verify is the one public auth-domain endpoint besides
+// sign-in that a stranger can hit repeatedly (spammy/broken mail clients, token
+// replay attempts). It shares checkAuthRateLimit with sign-in on purpose: the
+// limiter is per-source (IP via x-forwarded-for), so this spec pins that the
+// guard exists at all and that an N+1th request 429s WITHOUT consuming the
+// token (the user can retry after the window). The route runs against the real
+// DB with a never-minted token — the miss path touches no writes, so nothing
+// to clean up; live-DB consume semantics live in google-oidc-full-flow.
+
+describe('Magic-link verify route — IP rate limiting (integration)', () => {
+  beforeEach(() => {
+    resetAuthRateLimitStore();
+  });
+
+  const verifyGet = (token: string, ip: string) =>
+    new NextRequest(`http://localhost:3000/auth/magic-link/verify?token=${token}`, {
+      headers: { 'x-forwarded-for': ip },
+    });
+
+  it('allows AUTH_RATE_LIMIT_MAX verifies per IP, then 429s with Retry-After — token never consumed', async () => {
+    const { GET } = await import('@/app/auth/magic-link/verify/route');
+    const ip = '198.51.100.30';
+    const unknownToken = `rl-unknown-${Date.now()}`;
+
+    for (let i = 0; i < AUTH_RATE_LIMIT_MAX; i++) {
+      const res = await GET(verifyGet(unknownToken, ip));
+      // Limiter passes: the miss path redirects to the recovery screen.
+      expect(res.status).not.toBe(429);
+      expect(res.headers.get('location')).toContain('/login?oidc=link-expired');
+      await res.body?.cancel();
+    }
+
+    const blocked = await GET(verifyGet(unknownToken, ip));
+    expect(blocked.status).toBe(429);
+    // No redirect on throttle (implementation note #16: 429 is a JSON retry hint).
+    expect(blocked.headers.get('retry-after')).toBe('60');
+    const body = (await blocked.json()) as { error?: string };
+    expect(body.error ?? '').toContain('Too many requests');
+    // The 429 reply never mints a session.
+    expect(blocked.headers.getSetCookie?.().length).toBe(0);
+  });
+
+  it('uses a separate counter per client IP — throttling one IP preserves the other', async () => {
+    const { GET } = await import('@/app/auth/magic-link/verify/route');
+    const ipA = '198.51.100.31';
+    const ipB = '198.51.100.32';
+    const token = `rl-shared-${Date.now()}`;
+
+    for (let i = 0; i < AUTH_RATE_LIMIT_MAX; i++) {
+      await GET(verifyGet(token, ipA)).then((r) => r.body?.cancel());
+    }
+
+    expect((await GET(verifyGet(token, ipA))).status).toBe(429);
+
+    const fresh = await GET(verifyGet(token, ipB));
+    expect(fresh.status).not.toBe(429);
+    // Same token stays fully reachable from the unthrottled IP (consumable or not).
+    expect(fresh.headers.get('location')).toContain('/login?oidc=link-expired');
     await fresh.body?.cancel();
   });
 });

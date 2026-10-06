@@ -1,8 +1,11 @@
 import { describe, it, expect, vi, beforeAll, afterAll } from 'vitest';
 import type { MockInstance } from 'vitest';
+import { NextRequest } from 'next/server';
 import { auth } from '@/lib/auth';
 import { prisma } from '@/lib/db';
 import { logger } from '@/lib/logger';
+import { env } from '@/lib/env';
+import { issueInviteLink } from '@/lib/oidc-magic-link';
 import { hashPassword } from 'better-auth/crypto';
 
 // Mail seam mock: lib/oidc-magic-link imports sendEmail as an ESM live binding,
@@ -47,8 +50,10 @@ vi.mock('@/lib/notifications/email', () => ({
 
 const TEST_EMAIL = 'full-flow.google@example.com';
 const BANNED_EMAIL = 'full-flow.banned@gmail.com';
+const BANNED_INVITED_EMAIL = 'full-flow.banned-invited@gmail.com';
 const GOOGLE_SUB = 'g-sub-full-flow';
 const BANNED_SUB = 'g-sub-banned-flow';
+const BANNED_INVITED_SUB = 'g-sub-banned-invited';
 const CALLBACK_URL = 'http://localhost:3000/dashboard/calendar';
 
 // Pre-registration gate (P1 Task 3) identities
@@ -186,14 +191,14 @@ describe('Google OIDC — full mocked flow (Task 6)', () => {
   afterAll(async () => {
     tokenFetchMock.mockRestore();
     infoSpy.mockRestore();
-    for (const email of [TEST_EMAIL, BANNED_EMAIL, PENDING_EMAIL, PROVISIONED_EMAIL, LOCAL_EMAIL]) {
+    for (const email of [TEST_EMAIL, BANNED_EMAIL, BANNED_INVITED_EMAIL, PENDING_EMAIL, PROVISIONED_EMAIL, LOCAL_EMAIL]) {
       const user = await prisma.user.findUnique({ where: { email } });
       if (user) await prisma.session.deleteMany({ where: { userId: user.id } });
     }
     // Expired/leftover invite tokens from gate rejections — match on our kind marker.
     await prisma.verification.deleteMany({ where: { value: { contains: '"oidc-invite"' } } });
     await prisma.account.deleteMany({
-      where: { providerId: 'google', accountId: { in: [GOOGLE_SUB, BANNED_SUB, PENDING_SUB, PROVISIONED_SUB] } },
+      where: { providerId: 'google', accountId: { in: [GOOGLE_SUB, BANNED_SUB, BANNED_INVITED_SUB, PENDING_SUB, PROVISIONED_SUB] } },
     });
     // Local regression identity's credential account + gate org memberships.
     const localUser = await prisma.user.findUnique({ where: { email: LOCAL_EMAIL } });
@@ -204,7 +209,7 @@ describe('Google OIDC — full mocked flow (Task 6)', () => {
     }
     await prisma.organization.deleteMany({ where: { id: { startsWith: 'org-gate-' } } });
     await prisma.user.deleteMany({
-      where: { email: { in: [TEST_EMAIL, BANNED_EMAIL, PENDING_EMAIL, PROVISIONED_EMAIL, LOCAL_EMAIL] } },
+      where: { email: { in: [TEST_EMAIL, BANNED_EMAIL, BANNED_INVITED_EMAIL, PENDING_EMAIL, PROVISIONED_EMAIL, LOCAL_EMAIL] } },
     });
   });
 
@@ -229,7 +234,13 @@ describe('Google OIDC — full mocked flow (Task 6)', () => {
         create: { id: `org-gate-${user.id}`, name: 'Gate Org' },
         update: {},
       });
-      await prisma.member.create({ data: { userId: user.id, orgId: `org-gate-${user.id}` } });
+      // upsert (not create): specs in this file re-seed the same identities in
+      // different states, so a member row may legitimately pre-exist.
+      await prisma.member.upsert({
+        where: { userId_orgId: { userId: user.id, orgId: `org-gate-${user.id}` } },
+        create: { userId: user.id, orgId: `org-gate-${user.id}` },
+        update: {},
+      });
     }
     return user.id;
   }
@@ -317,6 +328,59 @@ describe('Google OIDC — full mocked flow (Task 6)', () => {
     expect(sessions.length).toBeGreaterThan(0);
   }, 20000);
 
+  it('CONSUME → RE-SIGN-IN arc: link consumption flips the gate, second sign-in succeeds end-to-end', async () => {
+    // The product contract in one spec: an invited-but-unverified Google user
+    // is blocked (the prior spec), and the SAME identity passes once its magic
+    // link has been consumed. Drives the real verify route to flip the flag —
+    // no manual DB writes — so a regression in consume/markVerified/or the
+    // gate would each break this arc.
+    const userId = await seedInvitedGoogleUser({ email: PENDING_EMAIL, sub: PENDING_SUB, org: true });
+    currentIdToken = buildIdToken(PENDING_EMAIL, PENDING_SUB);
+
+    const issued = await issueInviteLink({ id: userId, name: 'Pending Flow', email: PENDING_EMAIL });
+    if (!issued.ok) throw new Error(`invite link should issue in test env: ${issued.error}`);
+
+    // 1. Blocked before consumption (gate #2: unverified).
+    clearSentInvites();
+    const blockedRes = await runOAuthRoundTrip(handler, { provider: 'google', callbackURL: CALLBACK_URL });
+    expect(blockedRes.status).toBe(401);
+    expect(await blockedRes.text()).toMatch(/check your inbox|verification link/i);
+
+    // 2. Consume OUR issued token through the real verify route — it flips
+    //    oidcVerified for the identity (the gate's own re-issued links don't
+    //    matter; any consumed link marks the user verified).
+    const { GET } = await import('@/app/auth/magic-link/verify/route');
+    const verifyRes = await GET(new NextRequest(`${env.FRONTEND_URL}/auth/magic-link/verify?token=${issued.token}`));
+    expect(verifyRes.status).toBe(307);
+    expect(verifyRes.headers.get('location')).toContain('/login?oidc=link-verified');
+
+    // 3. Same identity, second Google sign-in — the gate now passes.
+    const cbRes = await runOAuthRoundTrip(handler, { provider: 'google', callbackURL: CALLBACK_URL });
+    expect(cbRes.status).toBe(302);
+    expect(cbRes.headers.get('location')).toBe(CALLBACK_URL);
+    expect(extractSetCookie(cbRes).sessionToken, 'consumed link must unblock the second sign-in').toBeTruthy();
+    await cbRes.body?.cancel();
+
+    const sessions = await prisma.session.findMany({ where: { userId } });
+    expect(sessions.length).toBeGreaterThan(0);
+  }, 30000);
+
+  it('returning verified user → session again, NO invitation email re-sent (idempotent gate)', async () => {
+    const userId = await seedInvitedGoogleUser({ email: PROVISIONED_EMAIL, sub: PROVISIONED_SUB, oidcVerified: true, org: true });
+    // Wipe sessions from the happy-path spec so this is a clean re-login.
+    await prisma.session.deleteMany({ where: { userId } });
+    currentIdToken = buildIdToken(PROVISIONED_EMAIL, PROVISIONED_SUB);
+    clearSentInvites();
+
+    const cbRes = await runOAuthRoundTrip(handler, { provider: 'google', callbackURL: CALLBACK_URL });
+    expect(cbRes.status).toBe(302);
+    expect(extractSetCookie(cbRes).sessionToken).toBeTruthy();
+    await cbRes.body?.cancel();
+
+    // A verified+provisioned identity never re-enters the email path.
+    expect(sentInvites.length).toBe(0);
+  }, 30000);
+
   it('EMAIL/PASSWORD sign-in is untouched — local user gets a session via the same hook chain', async () => {
     // Hard invariant: the pre-registration gate must be a no-op for identities
     // without a Google account. This drives the real /sign-in/email path end-to-end
@@ -382,6 +446,34 @@ describe('Google OIDC — full mocked flow (Task 6)', () => {
 
     // No session was issued for the banned user.
     const sessions = await prisma.session.findMany({ where: { userId: seeded!.id } });
+    expect(sessions.length).toBe(0);
+  }, 20000);
+
+  it('banned + unverified invited user → ban wins (no invitation email — gate ordering)', async () => {
+    // Order inside session.create.before is a product decision (Phase 1 note #3):
+    // the ban check MUST run before the provisioning gate, so a banned identity
+    // sees the ban message and no pointless activation email.
+    const userId = await seedInvitedGoogleUser({ email: BANNED_INVITED_EMAIL, sub: BANNED_INVITED_SUB });
+    await prisma.user.update({
+      where: { id: userId },
+      data: { banned: true, banReason: 'Fraud', banExpires: new Date(Date.now() + 86400_000) },
+    });
+    currentIdToken = buildIdToken(BANNED_INVITED_EMAIL, BANNED_INVITED_SUB);
+    clearSentInvites();
+
+    const cbRes = await runOAuthRoundTrip(handler, { provider: 'google', callbackURL: CALLBACK_URL });
+    expect(cbRes.status).toBe(401);
+    const bodyText = await cbRes.text();
+    // Ban message (the seeded banReason), NOT the magic-link / provisioned variants.
+    expect(bodyText).toContain('Access denied');
+    expect(bodyText).toContain('Fraud');
+    expect(bodyText).not.toMatch(/check your inbox|verification link/i);
+    expect(extractSetCookie(cbRes).sessionToken).toBeFalsy();
+
+    // No invitation email went out for a banned identity.
+    expect(sentInvites.length).toBe(0);
+
+    const sessions = await prisma.session.findMany({ where: { userId } });
     expect(sessions.length).toBe(0);
   }, 20000);
 });
