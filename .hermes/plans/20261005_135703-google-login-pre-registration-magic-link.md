@@ -312,6 +312,18 @@ Note: `issueInviteLink` send must never throw into the auth pipeline beyond the 
 
 ---
 
+## Phase 3 implementation notes — deviations from this plan (recorded 2026-10-05)
+
+14. **Gate 401s arrive as BetterAuth callback search params, not `?oidc=…`.** Verified in `better-auth/dist/api/routes/callback.mjs`: a hook rejection during the social flow goes through `redirectOnError(c, errorURL, e.body.code, e.body.message)`, which appends `?error=<code>&error_description=<message>` to `errorCallbackURL`. So `handleGoogleSignIn` sets `errorCallbackURL: '/login'` (dropping the old `?oidc=inbox-check` marker — it was dead UX; the round-trip carries the server's message itself) and the login mount-effect classifies that `error_description` via `classifyGateMessage`.
+15. **New pure helper `lib/oidc-login-ui.ts`, unit-pinned in `tests/unit/login-messages.test.ts`.** Classification ORDER is the security property: the two gate messages (`check your inbox` / `provisioned`) must match BEFORE the banned detector (both start with "Access denied."), while genuine ban messages never contain the gate substrings — so the email path's banned banner is untouched. Task 7 step 2's "pin with a unit spec if testable as pure functions" → extracted, pinned. `resolveSameOriginTarget` additionally REJECTS absolute-form same-origin URLs (the plan required starts-with-`/`; deviating stricter: an absolute URL string is never what the middleware sets in `callbackUrl`).
+16. **Verify route 429 shape.** Plan step 1 said "IP-rate-limited → 429, token preserved" — implemented as a JSON 429 with `Retry-After: 60` (no redirect): a browser following email links renders the body; steering to /login would imply a state that isn't real. Token stays consumable (the spec's core requirement, pinned in the test).
+17. **`markOidcVerified` lives in `lib/oidc-magic-link.ts`, not the route.** ESLint bans `@/lib/db` from app routes (RLS-scoping guardrule; the magic-link module is already on the allowlist as auth-domain plumbing). The plan's Task 8 step 2 sequential-update design is preserved verbatim inside the helper: findUnique by email → idempotent update (`oidcVerified: true, emailVerified: true`) only when not already set. `emailVerified` is set alongside (Google asserted it at sign-up; flag kept truthful).
+18. **Verify route has no session-context wrapper** — User and Verification have no RLS, so the global client (via the helper) needs no tenant/verified context. Audit: none written on self-service activation (the login itself is the audited event via BetterAuth's success funnel).
+
+**Exit gate (2026-10-05, Phase 3):** `npm run lint` ✔ · `npx tsc --noEmit` ✔ · `npm test` — 1938/1938 across 91 files ✔ (verify-route: 5 new integration specs; banner classifier: 12 new unit specs) · `npm run build` ✔. Commits: `defe431` (Task 7), `3c9103b` (Task 8). Manual dev-server click-through of the three banner states remains part of Phase 4's live checklist (step 4).
+
+---
+
 ## Risks & open questions
 
 | # | Risk / note | Severity | Mitigation |
