@@ -155,6 +155,27 @@ export async function consumeInviteToken(token: string): Promise<ConsumeInviteRe
   return { ok: true, email: parsedEmail };
 }
 
+/**
+ * Mark a user as OIDC-verified after their activation token is consumed. Runs
+ * in this module (not the route) because it touches the global prisma client —
+ * `@/lib/db` is lint-restricted out of app routes for RLS scoping, and User has
+ * no RLS, so operating here matches issueInviteLink/consumeInviteToken. Idempotent:
+ * a concurrent race that already set the flag issues no second update. Returns
+ * the user id (null if the account was deleted after invite).
+ */
+export async function markOidcVerified(email: string): Promise<{ userId: string | null }> {
+  const user = await prisma.user.findUnique({ where: { email } });
+  if (!user) return { userId: null };
+
+  if (!user.oidcVerified) {
+    await prisma.user.update({
+      where: { id: user.id },
+      data: { oidcVerified: true, emailVerified: true },
+    });
+  }
+  return { userId: user.id };
+}
+
 function escapeHtml(s: string): string {
   return s
     .replace(/&/g, '&amp;')

@@ -43,10 +43,19 @@ const mockDb = vi.hoisted(() => ({
 
 vi.mock('@/lib/tenant-db', () => ({ default: mockDb }));
 // lib/oidc-magic-link imports its own prisma from @/lib/db — stub the token
-// table so no real database is touched by issue/consume.
+// table so no real database is touched by issue/consume. The verify route
+// (Phase 3, Task 8) also uses this client for the User update after a
+// successful consume.
 const mockVerificationCreate = vi.hoisted(() => vi.fn().mockResolvedValue({ id: 'v-1' }));
+const mockVerificationFindFirst = vi.hoisted(() => vi.fn());
+const mockVerificationDeleteMany = vi.hoisted(() => vi.fn());
+const mockVerifyUserFindUnique = vi.hoisted(() => vi.fn());
+const mockVerifyUserUpdate = vi.hoisted(() => vi.fn().mockResolvedValue({}));
 vi.mock('@/lib/db', () => ({
-  prisma: { verification: { create: mockVerificationCreate } },
+  prisma: {
+    verification: { create: mockVerificationCreate, findFirst: mockVerificationFindFirst, deleteMany: mockVerificationDeleteMany },
+    user: { findUnique: mockVerifyUserFindUnique, update: mockVerifyUserUpdate },
+  },
 }));
 vi.mock('@/lib/logger', () => ({ logger: { info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn() } }));
 // RLS wrappers — pass the op straight through (mocked DB, no real context needed).
@@ -54,7 +63,13 @@ vi.mock('@/lib/platform-db', () => ({
   withPlatformContext: (_u: string, op: () => Promise<unknown>) => op(),
   withTenantAdminContext: (_u: string, _o: string, op: () => Promise<unknown>) => op(),
 }));
-vi.mock('@/lib/rate-limiter', () => ({ checkAdminRateLimit: vi.fn().mockReturnValue(true) }));
+// The verify route rate-limits by IP — hoisted so specs can flip it to false.
+const mockAuthRateCheck = vi.hoisted(() => vi.fn().mockReturnValue(true));
+vi.mock('@/lib/rate-limiter', () => ({
+  checkAdminRateLimit: vi.fn().mockReturnValue(true),
+  checkAuthRateLimit: mockAuthRateCheck,
+  getClientIp: vi.fn(() => '203.0.113.7'),
+}));
 // SSE push — no Redis/stream needed in this spec.
 const mockNotifyUserOperation = vi.hoisted(() => vi.fn().mockResolvedValue(undefined));
 vi.mock('@/lib/notification-push', () => ({ notifyUserOperation: mockNotifyUserOperation }));
@@ -68,6 +83,7 @@ vi.mock('@/lib/require-super-admin', () => ({
 const { POST: createRoute } = await import('@/app/api/dashboard/admin/users/route');
 const { POST: adminCreateRoute } = await import('@/app/api/admin/users/route');
 const { POST: invitePost } = await import('@/app/api/dashboard/admin/users/[id]/invite/route');
+const { GET: verifyGet } = await import('@/app/auth/magic-link/verify/route');
 
 function toNextRequest(request: Request): NextRequest {
   // Carry the body through (Request bodies are consumed once). Cast — Next's
@@ -344,5 +360,102 @@ describe('POST /api/dashboard/admin/users/[id]/invite (resend)', () => {
 
     expect(res.status).toBe(404);
     expect(sentInvites).toHaveLength(0);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// GET /auth/magic-link/verify — the emailed link destination (Phase 3, Task 8)
+// ---------------------------------------------------------------------------
+
+describe('GET /auth/magic-link/verify', () => {
+  const token = 'vrfy' + 'token-abc123';
+  const email = `verified.${Date.now()}@propni.example.com`;
+
+  function verifyRequest(query: string) {
+    return new NextRequest(`http://localhost:3000/auth/magic-link/verify?${query}`, {
+      headers: { 'x-forwarded-for': '203.0.113.7' },
+    });
+  }
+
+  it('valid token → 307 to /login?oidc=link-verified, user marked oidcVerified, NO session cookie', async () => {
+    mockVerificationFindFirst.mockResolvedValue({
+      identifier: token,
+      value: JSON.stringify({ email, kind: 'oidc-invite' }),
+      expiresAt: new Date(Date.now() + 120_000),
+    });
+    mockVerificationDeleteMany.mockResolvedValue({ count: 1 });
+    mockVerifyUserFindUnique.mockResolvedValue({
+      id: 'u-verify-1',
+      email,
+      name: 'Verified Person',
+      oidcVerified: false,
+      emailVerified: false,
+    });
+
+    const res = await verifyGet(verifyRequest(`token=${token}`));
+
+    expect(res.status).toBe(307);
+    const location = res.headers.get('location');
+    expect(location).toContain('/login?oidc=link-verified');
+
+    // Atomic claim fired, then exactly one idempotent flag update.
+    expect(mockVerificationDeleteMany).toHaveBeenCalledWith(
+      expect.objectContaining({ where: expect.objectContaining({ identifier: token }) }),
+    );
+    expect(mockVerifyUserUpdate).toHaveBeenCalledTimes(1);
+    expect(mockVerifyUserUpdate.mock.calls[0][0]).toEqual({
+      where: { id: 'u-verify-1' },
+      data: { oidcVerified: true, emailVerified: true },
+    });
+
+    // Contract of design §4.3: the verify route NEVER mints a session — no
+    // better-auth cookie may be set anywhere in the response.
+    expect(res.headers.get('set-cookie')).toBeNull();
+  });
+
+  it('replaying a consumed token → link-expired (no update, no email)', async () => {
+    mockVerificationFindFirst.mockResolvedValue(null); // row already deleted by the first consume
+
+    const res = await verifyGet(verifyRequest(`token=${token}`));
+
+    expect(res.status).toBe(307);
+    expect(res.headers.get('location')).toContain('/login?oidc=link-expired');
+    expect(mockVerificationDeleteMany).not.toHaveBeenCalled();
+    expect(mockVerifyUserUpdate).not.toHaveBeenCalled();
+    expect(sentInvites).toHaveLength(0);
+  });
+
+  it('expired token → link-expired, distinct from invalid', async () => {
+    mockVerificationFindFirst.mockResolvedValue({
+      identifier: token,
+      value: JSON.stringify({ email, kind: 'oidc-invite' }),
+      expiresAt: new Date(Date.now() - 1000), // past TTL
+    });
+
+    const res = await verifyGet(verifyRequest(`token=${token}`));
+
+    expect(res.status).toBe(307);
+    expect(res.headers.get('location')).toContain('/login?oidc=link-expired');
+    expect(mockVerificationDeleteMany).not.toHaveBeenCalled();
+    expect(mockVerifyUserUpdate).not.toHaveBeenCalled();
+  });
+
+  it('IP-rate-limited → 429 with the token preserved (no consume)', async () => {
+    mockAuthRateCheck.mockReturnValueOnce(false);
+
+    const res = await verifyGet(verifyRequest(`token=${token}`));
+
+    expect(res.status).toBe(429);
+    expect(mockVerificationFindFirst).not.toHaveBeenCalled();
+    expect(mockVerificationDeleteMany).not.toHaveBeenCalled();
+    expect(mockVerifyUserUpdate).not.toHaveBeenCalled();
+  });
+
+  it('missing token → link-expired, no DB reads', async () => {
+    const res = await verifyGet(verifyRequest(''));
+
+    expect(res.status).toBe(307);
+    expect(res.headers.get('location')).toContain('/login?oidc=link-expired');
+    expect(mockVerificationFindFirst).not.toHaveBeenCalled();
   });
 });

@@ -8,6 +8,7 @@ const PUBLIC_PATTERNS = [
   '/api/health',
   '/api/notifications/stream', // SSE stream — handles its own auth
   '/api-docs',
+  '/auth/magic-link/verify', // OIDC invite link destination — rate-limited in-route, never sets a session
 ];
 
 function isPublicRoute(pathname: string): boolean {
