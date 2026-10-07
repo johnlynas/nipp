@@ -117,7 +117,7 @@ export async function POST(req: NextRequest) {
   });
 
   // P7: Invalidate cached org details (roles are part of org data)
-  revalidateTag('org');
+  revalidateTag('org', { expire: 0 });
 
   return NextResponse.json({ role }, { status: 201 });
 }

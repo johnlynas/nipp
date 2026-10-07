@@ -100,7 +100,7 @@ export async function POST(
   await invalidateUserCache(userId);
 
   // P7: Invalidate cached org details (member roles changed)
-  revalidateTag('org');
+  revalidateTag('org', { expire: 0 });
 
   return NextResponse.json({ success: true });
 }

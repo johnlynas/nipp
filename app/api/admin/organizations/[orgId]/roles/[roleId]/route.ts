@@ -86,7 +86,7 @@ export async function PATCH(
       });
 
       // Invalidate cache
-      revalidateTag('org');
+      revalidateTag('org', { expire: 0 });
 
       logger.info({ userId: session.user.id, orgId, roleId }, 'Updated role in tenant organization');
       return NextResponse.json({ message: 'Role updated', role: updatedRole });
@@ -160,7 +160,7 @@ export async function DELETE(
       });
 
       // Invalidate cache
-      revalidateTag('org');
+      revalidateTag('org', { expire: 0 });
 
       logger.info({ userId: session.user.id, orgId, roleId }, 'Deleted role from tenant organization');
       return NextResponse.json({ message: 'Role deleted successfully' });
