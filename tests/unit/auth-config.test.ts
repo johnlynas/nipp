@@ -31,6 +31,7 @@ const {
   const mockPrisma = {
     user: { findUnique: vi.fn(), update: vi.fn() },
     member: { findFirst: vi.fn() },
+    account: { findFirst: vi.fn() },
     organization: { findUnique: vi.fn() },
     role: { findMany: vi.fn() },
     permission: { findMany: vi.fn() },

@@ -27,9 +27,9 @@ export async function createTestUser(email: string, password: string) {
 
   await prisma.account.upsert({
     where: {
-      providerId_providerAccountId: {
+      providerId_accountId: {
         providerId: 'credential',
-        providerAccountId: user.id,
+        accountId: user.id, // BetterAuth identity: accountId = provider sub (user's own id for credentials)
       },
     },
     update: {},
@@ -37,7 +37,6 @@ export async function createTestUser(email: string, password: string) {
       userId: user.id,
       accountId: user.id,
       providerId: 'credential',
-      providerAccountId: user.id,
       password: passwordHash,
     },
   });

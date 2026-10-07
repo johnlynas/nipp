@@ -15,6 +15,7 @@ import { recordAuditLog } from '@/lib/audit-log';
 import { logger } from '@/lib/logger';
 import { wrapPiiRoute } from '@/lib/payload-middleware';
 import { checkAdminRateLimit } from '@/lib/rate-limiter';
+import { issueInviteLink } from '@/lib/oidc-magic-link';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -106,6 +107,16 @@ export const POST = wrapPiiRoute(async (request, decryptedBody) => {
     // Accept optional organizationId from body for platform admins to target specific orgs.
     const targetOrgId = body.organizationId;
 
+    // Invite-only Google login: passwordless users must be invited into an org
+    // (the pre-registration gate makes org membership a hard requirement at
+    // sign-in). Enforced in the service too — this keeps the 400 message crisp.
+    if (!body.password && !targetOrgId) {
+      return NextResponse.json(
+        { error: 'organizationId is required for users without a password' },
+        { status: 400 },
+      );
+    }
+
     const ctx: ServiceContext = {
       userId: session.user.id,
       role: 'PLATFORM_ADMIN',
@@ -128,7 +139,30 @@ export const POST = wrapPiiRoute(async (request, decryptedBody) => {
       success: true,
     }).catch((err) => logger.error({ err }, 'Failed to record audit log for user creation'));
 
-    return NextResponse.json({ user }, { status: 201 });
+    // Passwordless create = Google-only invite: issue the activation magic link
+    // so the user can prove inbox ownership before their first sign-in. SMTP
+    // failures never fail the create — the token stays in the DB and the admin
+    // can resend from the user row (POST /api/dashboard/admin/users/[id]/invite).
+    let magicLinkSent = false;
+    if (!body.password) {
+      const issueResult = await issueInviteLink(user);
+      // emailSent distinguishes "token in DB, no email" (SMTP blip — admin
+      // resends from the user row) from a real delivery.
+      magicLinkSent = issueResult.ok && issueResult.emailSent;
+      await recordAuditLog({
+        userId: session.user.id,
+        userName: (session.user as { name?: string }).name ?? undefined,
+        action: 'user.invite-issued',
+        resourceType: 'User',
+        resourceId: user.id,
+        success: magicLinkSent,
+      }).catch((err) => logger.error({ err }, 'Failed to record audit log for invite issuance'));
+    }
+
+    return NextResponse.json(
+      { user, magicLinkSent },
+      { status: magicLinkSent ? 202 : 201 },
+    );
   } catch (error) {
     if (error instanceof Error && error.name === 'ValidationError') {
       return NextResponse.json({ error: error.message }, { status: 400 });

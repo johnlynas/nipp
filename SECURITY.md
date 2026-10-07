@@ -22,6 +22,7 @@ The design follows three core principles:
   - [Cross-Tab Session Invalidation](#cross-tab-session-invalidation)
   - [Auto-Logout on Inactivity](#auto-logout-on-inactivity)
   - [User Ban System](#user-ban-system)
+  - [Google OIDC Sign-In & Magic-Link Verification (in development)](#google-oidc-sign-in--magic-link-verification-in-development)
 - [3. Authorization & Access Control](#3-authorization--access-control)
   - [Dual-Authorization Model](#dual-authorization-model)
   - [Permission Resolution Flow](#permission-resolution-flow)
@@ -138,7 +139,7 @@ Exempt tables (no policy, documented): User / Session / Account (BetterAuth auth
 
 Authentication is handled by [BetterAuth](https://www.better-auth.com/), configured in `lib/auth.ts`. Key configuration:
 
-- **Providers**: Email/password authentication is the primary method. Additional providers (Google, GitHub) are configurable via environment variables.
+- **Providers**: Email/password is the only fully *user-facing live* sign-in method today. Google OIDC sign-in behind the "Sign in with Google" button is in development on branch `google-oidc` — its **server-side provider wiring is implemented** (see [below](#google-oidc-sign-in--magic-link-verification-in-development)); only the login UI, magic-link verification gate, and hardening remain. Its credentials (`GOOGLE_CLIENT_ID` / `GOOGLE_CLIENT_SECRET`) are already required by the env schema (`lib/env-schema.ts`). No other providers are configured.
 - **Cookie settings**: The session cookie uses `Secure` flag (HTTPS only) and `SameSite=Lax` to prevent CSRF via cross-site navigation.
 - **Rate limiting**: Request rate limits are enforced:
   - General requests: 10 requests per 15 minutes
@@ -180,6 +181,29 @@ Users can be banned at any time. The `User` model includes three ban-related fie
 | `banExpires` | DateTime (nullable) | Optional expiry date; if set, the ban is temporary and auto-expires |
 
 Ban enforcement happens in the authentication callback: when a user attempts to sign in or refresh their session, the system checks `banned` and `banExpires`. If a temporary ban has expired (`banExpires < now`), the ban is automatically cleared.
+
+**All-methods enforcement (implemented on branch `google-oidc`):** this check previously ran on the email sign-in path only (`lib/auth.ts` route hook). Branch `google-oidc` consolidates it into `databaseHooks.session.create.before` via one shared exported helper (`enforceBanStatus(email)`) — the single point every successful sign-in funnels through with a resolved user id — so a banned user cannot bypass the ban by using Google (or any future method). The email route hook now calls the *same* helper (fast 401 on the login form, behavior unchanged). Expired-ban auto-clear happens in the same place for all doors. Behavior is pinned by `tests/integration/google-oidc.test.ts` (active ban rejected; expired ban lifts the flag).
+
+### Google OIDC Sign-In & Magic-Link Verification (in development)
+
+Google sign-in behind the login page's "Sign in with Google" button is being built on branch `google-oidc`. **Phase 1 (server-side) is implemented:** provider registration, PKCE state/nonce storage in a new Prisma `Verification` table, all-methods ban enforcement at session creation, and callback public-route verification. The login UI, magic-link gate, and hardening phases are still in build. Full design: [documents/feature-planning-and-development/google-oidc-design.md](./documents/feature-planning-and-development/google-oidc-design.md).
+
+One security-relevant implementation note from Phase 1: the signed `state` nonce for each OAuth flow is **persisted in the Prisma `Verification` table** (BetterAuth's DB-backed state storage) and validated at callback time — a callback with an unknown/mismatched state is rejected with a redirect to BetterAuth's own error page (`/api/auth/error?error=state_mismatch`). The original plan assumed no schema change was needed; it was not — the table is mandatory for the CSRF control to work.
+
+- **Flow.** Standard OAuth 2.0 authorization-code flow through BetterAuth's built-in `google` provider (`socialProviders.google`). The auth code never returns to the browser; BetterAuth performs a server-to-server token exchange and verifies the ID token (signature, audience, expiry, issuer) before any user row is touched. A signed per-flow `state` nonce guards the callback against CSRF injection.
+- **Account linking.** One `User` row per person: returning Google identities sign in as their linked account; a Google email matching an existing password-only user **links** a new `Account(google, sub)` to that user (no shadow users); brand-new identities create a fresh `User` + `Account`.
+- **Magic-link verification gate.** A brand-new Google identity's rows are created on first sign-in, but **no session is issued**: `databaseHooks.session.create.before` rejects session creation when the user has only a Google account and `oidcVerified = false`, and sends a one-time magic link to the (Google-asserted) email. The verify endpoint (`GET /auth/magic-link/verify?token=…`) consumes the token atomically from a `Verification` row, sets `User.oidcVerified = true`, and redirects — it **deliberately does not mint a session**. Sign-in completes on the user's second "Sign in with Google" click. Passwordless admin-created users follow the same emailed-link path; local (password) logins are untouched by design invariant.
+- **Threat controls** (full table in the design doc):
+
+| Threat | Control |
+|--------|---------|
+| CSRF on OAuth callback | signed `state` nonce per flow (BetterAuth) |
+| Magic-link interception / replay | 32-char random token; stored in `Verification`, consumed atomically on verify; 5-minute expiry; verify route IP-rate-limited and session-less |
+| Token enumeration | 192-bit random tokens, not enumerable |
+| Open redirect via `callbackUrl` | same-origin guard on post-login navigation (login page); server callback URLs are hardcoded constants |
+| Post-verification abuse | ban enforcement at session creation applies to both doors (above) |
+
+- **Operational dependency.** Portal outbound mail delivers as its own mailbox, so per-user email forwarding must be configured for new OIDC users — a runbook item in the design doc (§6), and the first e2e diagnostic.
 
 ---
 
@@ -485,6 +509,8 @@ The following environment variables control security-relevant behavior:
 | `TRUSTED_ORIGINS` | Comma-separated list of trusted domains for CSRF validation | Yes |
 | `TRUSTED_PROXY_CIDRS` | CIDR ranges of trusted reverse proxies for real client IP extraction | No (defaults to localhost) |
 | `SESSION_SECRET` | Secret used for signing session cookies | Yes |
+| `GOOGLE_CLIENT_ID` | Google OIDC client id (required by `lib/env-schema.ts`; consumed by the in-development sign-in) | Yes |
+| `GOOGLE_CLIENT_SECRET` | Google OIDC client secret (as above); magic-link emails additionally use the existing `SMTP_*` vars and `FRONTEND_URL` as the link host | Yes |
 | `DATABASE_URL` | PostgreSQL connection string (includes credentials) | Yes |
 | `REDIS_URL` | Redis connection string for caching and replay cache (optional) | No |
 | `NODE_ENV` | Environment mode (`development`, `production`) — affects CSP strictness and CSRF relaxation | Yes |
@@ -526,7 +552,7 @@ BetterAuth provides built-in rate limiting for authentication endpoints:
 | General requests | 10 requests | 15 minutes |
 | Sign-in attempts | 5 requests | 15 minutes |
 
-These limits are enforced per-IP address. The stricter limit on sign-in attempts is designed to prevent brute-force password attacks.
+These limits are enforced per-IP address. The stricter limit on sign-in attempts is designed to prevent brute-force password attacks. In addition, every POST under `/api/auth/*` passes through the route-level IP rate limit (`checkAuthRateLimit`) in `app/api/auth/[...all]/route.ts`, so social sign-in (`/api/auth/sign-in/social`) inherits the same per-IP window as email login — and the planned magic-link verify endpoint will do the same.
 
 #### Rate Limiting Across API Routes
 
@@ -605,8 +631,9 @@ This document covers security-specific details. For broader architectural contex
 | [ARCHITECTURE.md](./ARCHITECTURE.md) | Overall system architecture, data flow, and component interactions |
 | [CACHING_ARCHITECTURE.md](./CACHING_ARCHITECTURE.md) | Caching strategy, Redis usage, and cache invalidation patterns |
 | [QUICK_START.md](./QUICK_START.md) | Getting started guide for developers |
+| [Google OIDC design doc](./documents/feature-planning-and-development/google-oidc-design.md) | Google sign-in flow, account-linking semantics, magic-link verification and its threat table (in development) |
 
 ---
 
-*Last updated: 2026-09-21*
+*Last updated: 2026-10-03*
 *Document owner: Engineering Team*

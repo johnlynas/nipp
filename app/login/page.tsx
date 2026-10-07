@@ -10,15 +10,20 @@
  *           soft rounded corner into the canvas.
  *   Top (mobile) — the same field compressed to a 192px brand band
  *           with the wordmark, so the dark world doesn't disappear below lg.
- *   Right — Sign-in form: email/password (functional), Google & Apple
- *           providers shown for presentation only. Squared (rounded-lg)
- *           controls, no pills.
+ *   Right — Sign-in form: email/password (functional), Google sign-in
+ *           (functional via BetterAuth social flow) and Apple shown for
+ *           presentation only. Squared (rounded-lg) controls, no pills.
  */
 
 import { Suspense, useEffect, useState, type FormEvent } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { Eye, EyeOff, Mail } from 'lucide-react';
-import { signInEmail } from '@/lib/auth-client';
+import { authClient, signInEmail } from '@/lib/auth-client';
+import {
+  classifyGateMessage,
+  oidcParamBanner,
+  resolveSameOriginTarget,
+} from '@/lib/oidc-login-ui';
 
 /* ── Brand marks ────────────────────────────────────────────────── */
 
@@ -230,7 +235,6 @@ function SkylineField() {
 /* ── Form ───────────────────────────────────────────────────────── */
 
 const SSO_NOTES: Record<string, string> = {
-  google: 'Google sign-in isn’t connected to this portal yet. Ask an administrator to enable it.',
   apple: 'Apple Sign In isn’t connected to this portal yet. Ask an administrator to enable it.',
   reset: 'Password resets are handled by your portal administrator. Contact them to have your password restored.',
 };
@@ -251,9 +255,64 @@ function LoginForm() {
   const [password, setPassword] = useState('');
   const [error, setError] = useState<string | null>(null);
   const [isBanned, setIsBanned] = useState(false);
+  // Provisioning-gate classification for gate rejections (needs-inbox-check /
+  // not-provisioned) — rendered as a distinct warning banner, never swallowed
+  // into the "banned" state (lib/oidc-login-ui pins this ordering).
+  const [gateKind, setGateKind] = useState<'needs-inbox-check' | 'not-provisioned' | null>(null);
   const [showPassword, setShowPassword] = useState(false);
   const [loading, setLoading] = useState(false);
   const [ssoNote, setSsoNote] = useState<string | null>(null);
+  // One-shot banner from the magic-link verify route (?oidc=… on /login).
+  const [oidcBanner, setOidcBanner] = useState<{ tone: 'success' | 'info'; text: string } | null>(null);
+
+  // One-shot consumption of the ?oidc=… / OAuth-error search params. Both are
+  // set as plain query params on /login by the magic-link verify route (?oidc=<kind>)
+  // and BetterAuth's social-callback round-trip (?error=&error_description=), then
+  // stripped so a refresh doesn't re-announce them. Runs after mount, when
+  // searchParams are settled.
+  useEffect(() => {
+    const oidc = searchParams.get('oidc');
+    const oauthError = searchParams.get('error');
+    const description = searchParams.get('error_description');
+
+    // OAuth gate rejections (from the callback round-trip) win over the oidc
+    // marker: surface the real server message, classified so a banned banner
+    // never swallows the two provisioning-gate messages.
+    if (oauthError || description) {
+      const msg =
+        description && description.trim()
+          ? description
+          : 'Sign-in did not complete — try again.';
+      const kind = classifyGateMessage(msg);
+      if (kind === 'needs-inbox-check' || kind === 'not-provisioned') {
+        setGateKind(kind);
+      } else if (kind === 'banned') {
+        setIsBanned(true);
+      } else {
+        // Unknown OAuth failure code — plain rejection.
+        setIsBanned(false);
+      }
+      setError(msg);
+    } else if (oidc) {
+      const banner = oidcParamBanner(oidc);
+      if (banner) setOidcBanner(banner);
+    }
+
+    // Strip the one-shot params in a single navigation.
+    const params = new URLSearchParams(searchParams.toString());
+    params.delete('oidc');
+    params.delete('error');
+    params.delete('error_description');
+    router.replace(params.toString() ? `?${params}` : window.location.pathname, { scroll: false });
+  }, [searchParams, router]);
+
+  // Auto-dismiss the oidc marker banner (success/info) — gate rejection banners
+  // above persist until the user acts, per the existing dismiss policy.
+  useEffect(() => {
+    if (!oidcBanner) return;
+    const t = setTimeout(() => setOidcBanner(null), 10000);
+    return () => clearTimeout(t);
+  }, [oidcBanner]);
 
   useEffect(() => {
     if (!ssoNote) return;
@@ -261,29 +320,37 @@ function LoginForm() {
     return () => clearTimeout(t);
   }, [ssoNote]);
 
-  // Auto-dismiss a transient sign-in error after 10s; a banned-account message
-  // stays until the user acts on it — it's longer and they may be mid-read
+  // Auto-dismiss a transient sign-in error after 10s; a banned-account or
+  // provisioning-gate message stays until the user acts on it — it's longer
+  // and they may be mid-read.
   useEffect(() => {
-    if (!error || isBanned) return;
+    if (!error || isBanned || gateKind) return;
     const t = setTimeout(() => {
       setError(null);
       setIsBanned(false);
+      setGateKind(null);
     }, 10000);
     return () => clearTimeout(t);
-  }, [error, isBanned]);
+  }, [error, isBanned, gateKind]);
 
   async function handleSubmit(e: FormEvent) {
     e.preventDefault();
     setError(null);
     setIsBanned(false);
+    setGateKind(null);
     setLoading(true);
 
     try {
       const result = await signInEmail(email, password);
       if (result.error) {
         const errorMsg = result.error;
-        // Detect banned user error
-        if (errorMsg.toLowerCase().includes('banned') || errorMsg.toLowerCase().includes('access denied')) {
+        // Classify gate rejections first (they start with "Access denied." too)
+        // so a banned banner can't swallow them — the email path only ever
+        // returns ban rejections, so this is order-safe for it.
+        const kind = classifyGateMessage(errorMsg);
+        if (kind === 'needs-inbox-check' || kind === 'not-provisioned') {
+          setGateKind(kind);
+        } else if (kind === 'banned') {
           setIsBanned(true);
         }
         setError(errorMsg);
@@ -295,6 +362,48 @@ function LoginForm() {
       // Sign-in request never reached the server (offline, DNS, proxy block) —
       // set a sentinel so the banner phrases the recovery, not raw text.
       setError(NETWORK_ERROR_KEY);
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  /**
+   * Google sign-in (BetterAuth social flow). POSTs to /api/auth/sign-in/social,
+   * which replies with an accounts.google.com authorization URL; the client
+   * navigates there, Google bounces back through /api/auth/callback/google, and
+   * BetterAuth redirects the browser to `callbackURL` — so the user's target is
+   * passed straight through the OAuth round-trip (no sessionStorage needed).
+   * The target is validated same-origin first: the value ends up in a full URL
+   * we will navigate to, so a crafted cross-origin callbackUrl must not ship.
+   */
+  async function handleGoogleSignIn() {
+    setError(null);
+    setIsBanned(false);
+    setGateKind(null);
+    setLoading(true);
+    const rawTarget = searchParams.get('callbackUrl') || '/';
+    const target = resolveSameOriginTarget(rawTarget, window.location.origin);
+
+    try {
+      await authClient.signIn.social({
+        provider: 'google',
+        callbackURL: `${window.location.origin}${target}`,
+        // Gate rejections surface here as ?error=&error_description= on the
+        // login page (the mount effect classifies and renders them). No marker
+        // param needed — the round-trip carries the message itself.
+        errorCallbackURL: '/login',
+      });
+      // On success the BetterAuth client navigates away to Google; we don't
+      // run again. Any error (unknown provider, server down) surfaces here.
+    } catch (err) {
+      const msg =
+        err && typeof err === 'object' && 'message' in err && typeof (err as { message?: unknown }).message === 'string'
+          ? (err as { message: string }).message
+          : 'Google sign-in failed. Try again or use your password.';
+      const kind = classifyGateMessage(msg);
+      if (kind === 'needs-inbox-check' || kind === 'not-provisioned') setGateKind(kind);
+      else if (kind === 'banned') setIsBanned(true);
+      setError(msg);
     } finally {
       setLoading(false);
     }
@@ -343,12 +452,32 @@ function LoginForm() {
             Sign in to your Property NI workspace.
           </p>
 
-          {/* Error message */}
-          <div aria-live="assertive" className="mt-6 empty:mt-0">
+          {/* Sign-in rejection banners */}
+          <div aria-live="assertive" className="mt-6 space-y-3 empty:mt-0">
+            {oidcBanner && (
+              <div
+                role="status"
+                className={`rounded-lg border p-4 text-sm leading-relaxed ${
+                  oidcBanner.tone === 'success'
+                    ? 'border-success-border bg-success-tint text-success'
+                    : 'border-warning-border bg-warning-tint text-warning-ink'
+                }`}
+              >
+                {oidcBanner.text}
+              </div>
+            )}
             {error && (
               <div
                 role="alert"
-                className="rounded-lg border border-danger-border bg-danger-tint p-4 text-sm leading-relaxed text-danger-ink"
+                className={`rounded-lg border p-4 text-sm leading-relaxed ${
+                  isBanned
+                    ? 'border-danger-border bg-danger-tint text-danger-ink'
+                    : gateKind
+                      // Provisioning-gate rejections render verbatim as warnings —
+                      // distinct from "banned" (classifyGateMessage pins the split).
+                      ? 'border-warning-border bg-warning-tint text-warning-ink'
+                      : 'border-danger-border bg-danger-tint text-danger-ink'
+                }`}
               >
                 {isBanned ? (
                   <div>
@@ -458,9 +587,9 @@ function LoginForm() {
               <span className="h-px flex-1 bg-slate-200" />
             </div>
 
-            {/* Social providers — presentation only until wired up */}
+            {/* Social providers — Google functional; Apple presentation only */}
             <div className="mt-5 space-y-3">
-              <button type="button" disabled={loading} onClick={() => setSsoNote(SSO_NOTES.google)} className={socialButtonCls}>
+              <button type="button" disabled={loading} onClick={handleGoogleSignIn} className={socialButtonCls}>
                 <GoogleIcon className="h-[18px] w-[18px] text-slate-900" />
                 Sign in with Google
               </button>

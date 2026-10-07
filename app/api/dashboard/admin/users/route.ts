@@ -3,12 +3,13 @@ import { requireSuperAdmin } from '@/lib/require-super-admin';
 import { checkAdminRateLimit } from '@/lib/rate-limiter';
 
 import { UserService } from '@/services/user-service';
-import { TeamService } from '@/services/team-service';
-import { notifyUserOperation } from '@/lib/notification-push';
 // RLS Phase 3: dashboard user listing/creation run under verified contexts.
 import tenantDb from '@/lib/tenant-db';
 import { withPlatformContext, withTenantAdminContext } from '@/lib/platform-db';
 import type { Prisma } from '@prisma/client';
+import { issueInviteLink } from '@/lib/oidc-magic-link';
+import { recordAuditLog } from '@/lib/audit-log';
+import { notifyUserOperation } from '@/lib/notification-push';
 
 export const runtime = 'nodejs';
 
@@ -96,8 +97,17 @@ export async function GET(request: NextRequest) {
         tenantDb.user.count({ where: { ...where, banned: true } }),
       ]);
 
+      // Never ship passwordHash to the client — replace it with a derived
+      // boolean so the UI can tell invite-pending (passwordless, unverified)
+      // users from regular ones.
+      const safeItems = result.items.map((u) => {
+        const { passwordHash, ...rest } = u;
+        return { ...rest, passwordHashPresent: Boolean(passwordHash) };
+      });
+
       return NextResponse.json({
         ...result,
+        items: safeItems,
         counts: {
           emailVerifiedCount,
           bannedCount,
@@ -126,7 +136,7 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: 'rate_limited' }, { status: 429 });
   }
 
-  let body: { name?: string; email?: string; password?: string; organizationId?: string };
+  let body: { name?: string; email?: string; password?: string; organizationId?: string; teamId?: string };
   try {
     body = await request.json();
   } catch {
@@ -134,7 +144,7 @@ export async function POST(request: NextRequest) {
   }
 
   const organizationId = body.organizationId;
-  const targetLabel = body.email ? `${body.name ?? 'Unknown'} (${body.email})` : 'unknown user';
+  const password = body.password;
 
   if (!organizationId) {
     return NextResponse.json({ error: 'Organization is required' }, { status: 400 });
@@ -147,52 +157,68 @@ export async function POST(request: NextRequest) {
   // Capture narrowed values (const) so the async closure below keeps their types.
   const name = body.name;
   const email = body.email;
-  const password = body.password;
+  const targetLabel = `${name} (${email})`;
 
   try {
-    // RLS: verified target-org context — user creation + members-team auto-add bind to it.
-    const result = await withTenantAdminContext(auth.session!.user.id, organizationId, async () => {
-      const created = await UserService.create(
-        { name, email, password, organizationId },
-        {
-          userId: auth.session!.user.id,
-          role: 'PLATFORM_ADMIN',
-        }
-      );
+    // RLS: verified target-org context — user creation + team enrollment bind to it.
+    // UserService.create enforces the invite rules (passwordless ⇒ org, and a
+    // cross-org teamId is rejected before any rows are written).
+    const created = await withTenantAdminContext(auth.session!.user.id, organizationId, () =>
+      UserService.create(
+        { name, email, password, organizationId, teamId: body.teamId },
+        { userId: auth.session!.user.id, role: 'PLATFORM_ADMIN' },
+      )
+    );
 
-      // Auto-add user to the "Members" team in their organization
-      const membersTeam = await tenantDb.team.findFirst({
-        where: { organizationId, slug: 'members' },
-      });
+    await recordAuditLog({
+      userId: auth.session!.user.id,
+      action: 'user.created',
+      resourceType: 'User',
+      resourceId: created.id,
+      organizationId,
+      success: true,
+    }).catch((err) => console.error('Failed to record audit log for user creation:', err));
 
-      if (membersTeam) {
-        try {
-          await TeamService.addTeamMember(membersTeam.id, { userId: created.id }, {
-            userId: auth.session!.user.id,
-            role: 'PLATFORM_ADMIN',
-          });
-        } catch (err) {
-          // Ignore if user is already a member of this team
-          console.warn('User may already be a team member:', err);
-        }
-      } else {
-        console.warn('Members team not found for organization', organizationId);
-      }
+    // Passwordless create = Google-only invite: the activation email proves
+    // inbox ownership before the account's first sign-in. On failure the token
+    // stays in the DB (magicLinkSent: false) — the admin resends from the row.
+    let magicLinkSent = false;
+    if (!password) {
+      const issueResult = await issueInviteLink(created);
+      // emailSent distinguishes "token in DB, no email" (SMTP blip — admin
+      // resends from the user row) from a real delivery.
+      magicLinkSent = issueResult.ok && issueResult.emailSent;
+      await recordAuditLog({
+        userId: auth.session!.user.id,
+        action: 'user.invite-issued',
+        resourceType: 'User',
+        resourceId: created.id,
+        organizationId,
+        success: magicLinkSent,
+      }).catch((err) => console.error('Failed to record audit log for invite issuance:', err));
+    }
 
-      await notifyUserOperation('create', targetLabel, true, undefined, organizationId);
+    await notifyUserOperation(
+      'create',
+      targetLabel,
+      true,
+      undefined,
+      organizationId,
+    );
 
-      return created;
-    });
-
-    return NextResponse.json(result, { status: 201 });
+    return NextResponse.json({ user: created, magicLinkSent }, { status: magicLinkSent ? 202 : 201 });
   } catch (error) {
     if (error instanceof Error && error.message === 'A user with this email already exists') {
       await notifyUserOperation('create', targetLabel, false, error.message, organizationId);
       return NextResponse.json({ error: error.message }, { status: 409 });
     }
+    // Service-layer invite validation (org required for passwordless, team/org mismatch).
+    if (error instanceof Error && error.name === 'ValidationError') {
+      await notifyUserOperation('create', targetLabel, false, error.message, organizationId);
+      return NextResponse.json({ error: error.message }, { status: 400 });
+    }
     console.error('Failed to create user:', error);
-    const message = error instanceof Error && error.message ? error.message : 'Failed to create user';
-    await notifyUserOperation('create', targetLabel, false, message, organizationId);
+    await notifyUserOperation('create', targetLabel, false, 'Failed to create user', organizationId);
     return NextResponse.json({ error: 'Failed to create user' }, { status: 500 });
   }
 }

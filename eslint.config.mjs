@@ -55,6 +55,7 @@ export default tseslint.config(
     ignores: [
       'lib/tenant-db.ts',
       'lib/db.ts',
+      'lib/oidc-magic-link.ts', // auth-domain magic-link plumbing, not tenant-scoped data
       'lib/rls-transaction.ts', // legal GUC-builder consumer (binds inside pinned tx)
       'tests/**', // unit tests may import internals under test
     ],

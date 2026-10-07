@@ -27,9 +27,12 @@ vi.mock('@/lib/tenant-db', () => ({
     team: {
       findFirst: vi.fn().mockResolvedValue({ id: 'default-members-team', slug: 'members' }),
       create: vi.fn(),
+      findUnique: vi.fn(),
     },
     teamRole: { findMany: vi.fn().mockResolvedValue([]) },
     memberRole: { findFirst: vi.fn().mockResolvedValue(null), create: vi.fn() },
+    // TeamService.addTeamMember runs its membership write through one $transaction.
+    $transaction: vi.fn(),
   },
 }));
 
@@ -74,9 +77,10 @@ describe('UserService', () => {
     it('creates user for PLATFORM_ADMIN', async () => {
       vi.mocked(globalDb.user.findUnique).mockResolvedValue(null);
       vi.mocked(globalDb.user.create).mockResolvedValue(castUser(mockUser({ id: 'new-user' })) as never);
+      vi.mocked(globalDb.member.create).mockResolvedValue({ id: 'm-1' } as never);
 
       const result = await UserService.create(
-        { email: 'new@example.com', name: 'New User' },
+        { email: 'new@example.com', name: 'New User', organizationId: 'org-new' },
         mockCtx('PLATFORM_ADMIN'),
       );
 
@@ -164,12 +168,12 @@ describe('UserService', () => {
       });
     });
 
-    it('skips enrollment when the user stays unaffiliated (no org context)', async () => {
+    it('skips team enrollment when the user stays unaffiliated (org-less PASSWORD user keeps local sign-in)', async () => {
       vi.mocked(globalDb.user.findUnique).mockResolvedValue(null);
       vi.mocked(globalDb.user.create).mockResolvedValue(castUser(mockUser({ id: 'new-user' })) as never);
 
       await UserService.create(
-        { email: 'new@example.com', name: 'New User' },
+        { email: 'new@example.com', name: 'New User', password: 'LocalPwd123!' },
         mockCtx('PLATFORM_ADMIN'),
       );
 
@@ -191,6 +195,136 @@ describe('UserService', () => {
       );
 
       expect(globalDb.teamMember.create).not.toHaveBeenCalled();
+    });
+
+    it('requires an organization for passwordless creation (PLATFORM_ADMIN)', async () => {
+      await expect(
+        UserService.create({ email: 'invite@example.com', name: 'Invite' }, mockCtx('PLATFORM_ADMIN'))
+      ).rejects.toThrow(/organizationId is required/i);
+      // Nothing may be persisted before the validation fires.
+      expect(globalDb.user.create).not.toHaveBeenCalled();
+    });
+
+    it('requires an organization for passwordless creation (TENANT_ADMIN without org context)', async () => {
+      await expect(
+        UserService.create({ email: 'invite@example.com', name: 'Invite' }, mockCtx('TENANT_ADMIN'))
+      ).rejects.toThrow(/organizationId is required/i);
+    });
+
+    it('allows passwordless creation when an organization is present (invite path)', async () => {
+      vi.mocked(globalDb.user.findUnique).mockResolvedValue(null);
+      vi.mocked(globalDb.user.create).mockResolvedValue(castUser(mockUser({ id: 'invited-user' })) as never);
+      vi.mocked(globalDb.member.create).mockResolvedValue({ id: 'm-1' } as never);
+
+      const result = await UserService.create(
+        { email: 'invite@example.com', name: 'Invite', organizationId: 'org-invite' },
+        mockCtx('PLATFORM_ADMIN'),
+      );
+
+      expect(result.id).toBe('invited-user');
+      // Membership + default team enrollment happen for the invited user.
+      expect(globalDb.member.create).toHaveBeenCalledWith(
+        expect.objectContaining({ data: expect.objectContaining({ userId: 'invited-user', orgId: 'org-invite', role: 'member' }) }),
+      );
+    });
+
+    it('allows an org-less passworded creation (behavior unchanged)', async () => {
+      vi.mocked(globalDb.user.findUnique).mockResolvedValue(null);
+      vi.mocked(globalDb.user.create).mockResolvedValue(castUser(mockUser({ id: 'pw-norg' })) as never);
+
+      const result = await UserService.create(
+        { email: 'local@example.com', name: 'Local', password: 'LocalPass123!' },
+        mockCtx('PLATFORM_ADMIN'),
+      );
+
+      expect(result.id).toBe('pw-norg');
+      expect(globalDb.member.create).not.toHaveBeenCalled();
+    });
+
+    it('enrolls in the requested team INSTEAD of the default Members team', async () => {
+      vi.mocked(globalDb.user.findUnique).mockResolvedValue(null);
+      vi.mocked(globalDb.user.create).mockResolvedValue(castUser(mockUser({ id: 'tm-user' })) as never);
+      vi.mocked(globalDb.member.create).mockResolvedValue({ id: 'm-1' } as never);
+
+      // Target team exists and belongs to the target org.
+      vi.mocked(globalDb.team.findUnique).mockImplementation(((args: { where?: { id?: string } }) => {
+        if (args.where?.id === 'team-blue') return { id: 'team-blue', organizationId: 'org-t' };
+        return null;
+      }) as never);
+
+      // addTeamMember internals — all under the single org context with a
+      // matching team row, membership present, no prior team membership.
+      vi.mocked(globalDb.team.findFirst).mockResolvedValue({ id: 'team-blue', organizationId: 'org-t' } as never);
+      vi.mocked(globalDb.member.findFirst).mockResolvedValue({ id: 'm-1', userId: 'tm-user', orgId: 'org-t' } as never);
+      vi.mocked(globalDb.teamMember.findFirst).mockResolvedValue(null as never);
+      // $transaction(fn): run the callback against a tx-shaped copy of the mock.
+      vi.mocked(globalDb.$transaction).mockImplementation(async (fn) => {
+        const txClient = globalDb;
+        return fn(txClient as never);
+      });
+      vi.mocked(globalDb.teamMember.create).mockResolvedValue({ id: 'tm-1' } as never);
+
+      await UserService.create(
+        { email: 'team@example.com', name: 'Team User', organizationId: 'org-t', teamId: 'team-blue' },
+        mockCtx('PLATFORM_ADMIN'),
+      );
+
+      // Requested team enrollment ran with the user's id.
+      expect(globalDb.teamMember.create).toHaveBeenCalledWith(
+        { data: { userId: 'tm-user', teamId: 'team-blue', organizationId: 'org-t' } },
+      );
+    });
+
+    it('team assignment works for TENANT_ADMIN via the same shared membership path', async () => {
+      vi.mocked(globalDb.user.findUnique).mockResolvedValue(null);
+      vi.mocked(globalDb.user.create).mockResolvedValue(castUser(mockUser({ id: 'tm-user2' })) as never);
+      vi.mocked(globalDb.member.create).mockResolvedValue({ id: 'm-1' } as never);
+
+      // Exact-id lookup resolves the team inside the tenant org context.
+      vi.mocked(globalDb.team.findUnique).mockResolvedValue({ id: 'team-green', organizationId: 'org-g' } as never);
+      vi.mocked(globalDb.team.findFirst).mockResolvedValue({ id: 'team-green', organizationId: 'org-g' } as never);
+      vi.mocked(globalDb.member.findFirst).mockResolvedValue({ id: 'm-1', userId: 'tm-user2', orgId: 'org-g' } as never);
+      vi.mocked(globalDb.teamMember.findFirst).mockResolvedValue(null as never);
+      vi.mocked(globalDb.$transaction).mockImplementation(async (fn) => fn(globalDb as never));
+      vi.mocked(globalDb.teamMember.create).mockResolvedValue({ id: 'tm-2' } as never);
+
+      await UserService.create(
+        { email: 'team2@example.com', name: 'Team User 2', organizationId: 'org-g', teamId: 'team-green' },
+        mockCtx('TENANT_ADMIN', 'org-g'),
+      );
+
+      expect(globalDb.teamMember.create).toHaveBeenCalledWith(
+        { data: { userId: 'tm-user2', teamId: 'team-green', organizationId: 'org-g' } },
+      );
+    });
+
+    it('rejects a team from a DIFFERENT organization (cross-org teamId) and persists nothing', async () => {
+      vi.mocked(globalDb.user.findUnique).mockResolvedValue(null);
+      // Foreign team exists but lives in org-b.
+      vi.mocked(globalDb.team.findUnique).mockResolvedValue({ id: 'team-foreign', organizationId: 'org-b' } as never);
+
+      await expect(
+        UserService.create(
+          { email: 'xorg@example.com', name: 'Cross Org', organizationId: 'org-a', teamId: 'team-foreign' },
+          mockCtx('PLATFORM_ADMIN'),
+        )
+      ).rejects.toThrow(/does not belong to the selected organization/i);
+
+      expect(globalDb.user.create).not.toHaveBeenCalled();
+      expect(globalDb.member.create).not.toHaveBeenCalled();
+    });
+
+    it('rejects an unknown teamId', async () => {
+      vi.mocked(globalDb.team.findUnique).mockResolvedValue(null);
+
+      await expect(
+        UserService.create(
+          { email: 'nottfound@example.com', name: 'No Team', organizationId: 'org-a', teamId: 'ghost-team' },
+          mockCtx('PLATFORM_ADMIN'),
+        )
+      ).rejects.toThrow(/team not found/i);
+
+      expect(globalDb.user.create).not.toHaveBeenCalled();
     });
   });
 
@@ -431,9 +565,10 @@ describe('UserService', () => {
     it('skips the credential account when no password is provided', async () => {
       vi.mocked(globalDb.user.findUnique).mockResolvedValue(null);
       vi.mocked(globalDb.user.create).mockResolvedValue(castUser(mockUser({ id: 'no-pw' })) as never);
+      vi.mocked(globalDb.member.create).mockResolvedValue({ id: 'm-1' } as never);
 
       await UserService.create(
-        { email: 'nopw@example.com', name: 'No Pw' },
+        { email: 'nopw@example.com', name: 'No Pw', organizationId: 'org-nopw' },
         mockCtx('PLATFORM_ADMIN'),
       );
 

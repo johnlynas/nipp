@@ -6,6 +6,7 @@ import { organization } from 'better-auth/plugins';
 import { env } from './env';
 import { createAuthMiddleware, APIError } from 'better-auth/api';
 import { logger } from './logger';
+import { issueInviteLink } from './oidc-magic-link';
 
 interface ExtendedUser {
   permissions: string[];
@@ -16,6 +17,107 @@ interface ExtendedSession {
   user: ExtendedUser | null;
   activeOrganizationId: string | null;
 }
+
+/**
+ * Enforce the ban flag for the user with the given email.
+ *
+ * Single source of truth for ban behaviour, shared by BOTH sign-in doors so
+ * no method can bypass it (design doc §5.1):
+ *  - email sign-in: called from the `hooks.before` route middleware (pre-session,
+ *    keeps today's fast 401 on the login form)
+ *  - Google OIDC sign-in: called from `databaseHooks.session.create.before`,
+ *    the single point where every successful sign-in funnels with `session.userId`
+ *    known. A banned user cannot be banned before their first session exists, so
+ *    there is no bypass at creation time.
+ *
+ * Expired bans are lifted in place (flag cleared, login proceeds). An active ban
+ * throws APIError('UNAUTHORIZED') with the message the login page's banned banner
+ * already recognises.
+ */
+export async function enforceBanStatus(email: string): Promise<void> {
+  const user = await prisma.user.findUnique({ where: { email } });
+
+  if (user?.banned) {
+    const now = new Date();
+    // If ban has expired, allow login (ban is lifted)
+    if (user.banExpires && user.banExpires < now) {
+      await prisma.user.update({
+        where: { id: user.id },
+        data: { banned: false, banReason: null, banExpires: null },
+      });
+    } else {
+      const reason = user.banReason || 'Your account has been banned.';
+      logger.warn(
+        { userId: user.id, email },
+        `Banned user login attempt: ${reason}`,
+      );
+      throw new APIError('UNAUTHORIZED', {
+        message: `Access denied. ${reason}`,
+      });
+    }
+  }
+}
+
+/**
+ * Enforce the pre-registration gate for Google OIDC sign-in (design §4.3 +
+ * product decision: invite-only access).
+ *
+ * Single rule: EVERY session whose user has a Google `Account` row must belong
+ * to a user who (a) completed magic-link verification (`oidcVerified === true`)
+ * and (b) belongs to at least one organization (`Member` row). Rejections throw
+ * APIError('UNAUTHORIZED') — BetterAuth surfaces them as 401 on the OAuth
+ * callback with no session issued. The unverified branch issues a fresh magic
+ * link on every attempt (each issue is a new token; old ones die on consume/
+ * expiry), so a missed email self-heals by retrying the Google sign-in.
+ *
+ * INARIANT — local email/password login: the gate returns immediately for any
+ * user WITHOUT a Google account, so the `/sign-in/email` path is byte-for-byte
+ * unchanged; only the shared ban check (above) runs for them, exactly as before.
+ */
+export async function enforceOidcProvisioning(userId: string): Promise<void> {
+  const user = await prisma.user.findUnique({
+    where: { id: userId },
+    select: {
+      id: true,
+      name: true,
+      email: true,
+      oidcVerified: true,
+      accounts: { select: { providerId: true } },
+      members: { select: { orgId: true } },
+    },
+  });
+  if (!user) return; // defensive; BetterAuth guarantees the row exists
+
+  const hasGoogle = user.accounts.some((a) => a.providerId === 'google');
+  if (!hasGoogle) return; // email/password door — this gate is a no-op here
+
+  if (user.oidcVerified === false) {
+    logger.warn(
+      { userId: user.id, email: user.email },
+      '[Auth] Google sign-in blocked: magic-link verification pending — invitation link issued',
+    );
+    // issueInviteLink logs and swallows SMTP failures by contract (T2), so this
+    // cannot take the auth pipeline down; the token lands in Verification when
+    // the insert succeeds.
+    await issueInviteLink(user);
+    throw new APIError('UNAUTHORIZED', {
+      message:
+        'Access denied. We need to confirm your email first — check your inbox for a verification link, then try signing in with Google again.',
+    });
+  }
+
+  if (user.members.length === 0) {
+    logger.warn(
+      { userId: user.id, email: user.email },
+      '[Auth] Google sign-in blocked: verified but no organization membership (not provisioned)',
+    );
+    throw new APIError('UNAUTHORIZED', {
+      message:
+        'Access denied. This account has not been provisioned by an administrator yet. Contact your portal administrator.',
+    });
+  }
+}
+
 
 export const auth = betterAuth({
   database: prismaAdapter(prisma, {
@@ -50,6 +152,14 @@ export const auth = betterAuth({
     enabled: true,
     requireEmailVerification: false,
     disableSignUp: true, // Block public registration
+  },
+
+  // Google OIDC sign-in. Default scopes (openid email profile); no offline access.
+  socialProviders: {
+    google: {
+      clientId: env.GOOGLE_CLIENT_ID,
+      clientSecret: env.GOOGLE_CLIENT_SECRET,
+    },
   },
 
   plugins: [
@@ -143,7 +253,39 @@ export const auth = betterAuth({
   databaseHooks: {
     session: {
       create: {
+        // Ban enforcement for EVERY sign-in method (design doc §5.1). Session
+        // creation is the single point where every successful sign-in funnels
+        // with userId known — email, Google OIDC (returning user and any future
+        // re-login), and methods added later. Throwing APIError here makes
+        // BetterAuth reply 401 with the exact 'Access denied. …' message the
+        // login page's banned banner already recognises; no session is issued.
+        before: async (session) => {
+          const user = await prisma.user.findUnique({
+            where: { id: session.userId },
+            select: { email: true },
+          });
+          if (!user) return; // BetterAuth guarantees the row exists; be defensive
+          await enforceBanStatus(user.email);
+          // Pre-registration gate (Google OIDC only — a no-op for users without
+          // a google Account row, so email/password login is untouched).
+          await enforceOidcProvisioning(session.userId);
+        },
         after: async (session) => {
+          // Observability (Task 7): GoogleOptions has no onSuccess/onError hooks in
+          // better-auth@1.6.x, so mark social sign-ins here — the single point every
+          // successful sign-in funnels through. One extra lookup, only when a google
+          // Account row exists for the user.
+          const hasGoogleAccount = await prisma.account.findFirst({
+            where: { userId: session.userId, providerId: 'google' },
+            select: { id: true },
+          });
+          if (hasGoogleAccount) {
+            logger.info(
+              { userId: session.userId, sessionId: session.id, provider: 'google' },
+              '[Auth] Google sign-in succeeded',
+            );
+          }
+
           logger.info(
             { userId: session.userId, sessionId: session.id },
             '[Auth] Session created — checking for activeOrganizationId',
@@ -195,32 +337,10 @@ export const auth = betterAuth({
 
   hooks: {
     before: createAuthMiddleware(async (ctx) => {
-      // Check banned status during email sign-in
+      // Check banned status during email sign-in (keeps a fast 401 on the login
+      // form; social sign-in is enforced at session creation — see below).
       if (ctx.path === '/sign-in/email' && ctx.body?.email) {
-        const user = await prisma.user.findUnique({
-          where: { email: ctx.body.email },
-        });
-
-        if (user?.banned) {
-          const now = new Date();
-          // If ban has expired, allow login (ban is lifted)
-          if (user.banExpires && user.banExpires < now) {
-            // Ban expired — clear the ban flag
-            await prisma.user.update({
-              where: { id: user.id },
-              data: { banned: false, banReason: null, banExpires: null },
-            });
-          } else {
-            const reason = user.banReason || 'Your account has been banned.';
-            logger.warn(
-              { userId: user.id, email: ctx.body.email },
-              `Banned user login attempt: ${reason}`,
-            );
-            throw new APIError('UNAUTHORIZED', {
-              message: `Access denied. ${reason}`,
-            });
-          }
-        }
+        await enforceBanStatus(ctx.body.email);
       }
     }),
   },

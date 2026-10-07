@@ -20,6 +20,7 @@ import { requireAnyAdmin, logFailedAuth } from '@/lib/services/base-service';
 import { normalizePagination, PaginatedResult, UserFilters } from '@/lib/services/types';
 import { hashPassword } from 'better-auth/crypto';
 import { enrollInDefaultMembersTeam } from '@/lib/org-default-team';
+import { TeamService } from './team-service';
 
 // ---------------------------------------------------------------------------
 // Input Types
@@ -30,6 +31,12 @@ export interface CreateUserInput {
   name: string;
   password?: string;
   organizationId?: string;
+  /**
+   * Optional specific team to enroll the user in (instead of the org's
+   * default "Members" team). Must belong to the target org — enforced here,
+   * so a cross-org teamId is rejected before any rows are written.
+   */
+  teamId?: string;
 }
 
 export interface UpdateUserInput {
@@ -75,6 +82,33 @@ export const UserService = {
         ? ctx.organizationId
         : data.organizationId ?? null;
 
+    // Invite-only Google login: a passwordless user can ONLY get a session
+    // through the pre-registration gate (oidcVerified + org membership), so an
+    // organization is mandatory at invite time. Password users keep their local
+    // sign-in, so org-less creation stays an admin judgment call.
+    if (!password && !orgForUser) {
+      throw new ValidationError('organizationId is required for users without a password (Google-only accounts must be assigned to an organization at invite time)');
+    }
+
+    // A requested team must belong to the same organization as the membership
+    // being created — checked BEFORE any rows are written (cross-org teamId
+    // attack surface stays closed, per plan risk #2).
+    let targetTeam: { id: string; organizationId: string } | null = null;
+    if (data.teamId) {
+      if (!orgForUser) {
+        throw new ValidationError('Team assignment requires an organization');
+      }
+      targetTeam = await runWithTenant(orgForUser, () =>
+        tenantDb.team.findUnique({ where: { id: data.teamId! }, select: { id: true, organizationId: true } }),
+      );
+      if (!targetTeam) {
+        throw new ValidationError('Team not found');
+      }
+      if (targetTeam.organizationId !== orgForUser) {
+        throw new ValidationError('The selected team does not belong to the selected organization');
+      }
+    }
+
     // Build user data — include passwordHash if provided
     const userData: { email: string; name: string; passwordHash?: string; activeOrganizationId?: string | null } = {
       email,
@@ -102,30 +136,35 @@ export const UserService = {
       });
     }
 
-    // Tenant Admin creates a Member relationship for their own org, and the
-    // user is auto-enrolled in that org's default "Members" team.
-    if (ctx.role === 'TENANT_ADMIN' && ctx.organizationId) {
-      await runWithTenant(ctx.organizationId, async () => {
-        await tenantDb.member.create({
-          data: { userId: user.id, orgId: ctx.organizationId!, role: 'member' },
+    // One membership path for both roles: TENANT_ADMIN creates a Member row
+    // for their own org, PLATFORM_ADMIN for the explicitly targeted org.
+    const addMembership = async (organizationId: string) => {
+      // Member row first — TeamService.addTeamMember requires it.
+      await runWithTenant(organizationId, () =>
+        tenantDb.member.create({
+          data: { userId: user.id, orgId: organizationId, role: 'member' },
+        }),
+      );
+
+      if (targetTeam) {
+        // A specific team REPLACES the default enrollment path; addTeamMember
+        // re-verifies the Member row plus applies TeamRole inheritance. Pin the
+        // (already cross-checked) org on the ctx so its internal contextOrgId
+        // fallback never reaches for an unset platform-org env in edge cases.
+        await TeamService.addTeamMember(targetTeam.id, { userId: user.id }, {
+          ...ctx,
+          organizationId: targetTeam.organizationId,
         });
-
+      } else {
         // Default "Members" team auto-enrollment (idempotent)
-        await enrollInDefaultMembersTeam(tenantDb, ctx.organizationId!, user.id);
-      });
-    }
+        await runWithTenant(organizationId, () =>
+          enrollInDefaultMembersTeam(tenantDb, organizationId, user.id),
+        );
+      }
+    };
 
-    // Platform Admin can optionally assign the user to a specific org; same
-    // default "Members" team enrollment applies.
-    if (ctx.role === 'PLATFORM_ADMIN' && data.organizationId) {
-      await runWithTenant(data.organizationId, async () => {
-        await tenantDb.member.create({
-          data: { userId: user.id, orgId: data.organizationId!, role: 'member' },
-        });
-
-        // Default "Members" team auto-enrollment (idempotent)
-        await enrollInDefaultMembersTeam(tenantDb, data.organizationId!, user.id);
-      });
+    if (orgForUser) {
+      await addMembership(orgForUser);
     }
 
     logger.info(
