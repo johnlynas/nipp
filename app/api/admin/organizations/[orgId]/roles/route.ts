@@ -127,7 +127,7 @@ export async function POST(
       } as never);
 
       // Invalidate cache
-      revalidateTag('org');
+      revalidateTag('org', { expire: 0 });
 
       logger.info({ userId: session.user.id, orgId, roleId: role.id }, 'Created role in tenant organization');
       return NextResponse.json({ message: 'Role created successfully', role }, { status: 201 });

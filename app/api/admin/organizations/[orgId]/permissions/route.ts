@@ -204,7 +204,7 @@ export async function PATCH(
       }
 
       // Invalidate cache
-      revalidateTag('org');
+      revalidateTag('org', { expire: 0 });
 
       logger.info({ userId: session.user.id, orgId, assigned, revoked }, 'Updated tenant permissions');
       return NextResponse.json({ message: 'Permissions updated', results });

@@ -122,7 +122,7 @@ export async function POST(
   }
 
   // P7: Invalidate cached org details (role permissions changed)
-  revalidateTag('org');
+  revalidateTag('org', { expire: 0 });
 
   return NextResponse.json({ success: true });
 }

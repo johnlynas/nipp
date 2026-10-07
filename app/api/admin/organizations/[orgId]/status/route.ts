@@ -184,7 +184,7 @@ export const PATCH = wrapPiiRoute(async (request, decryptedBody, params) => {
         }
 
         // P7: Invalidate cached org details on status change
-        revalidateTag('org');
+        revalidateTag('org', { expire: 0 });
 
         logger.info({ userId: session.user.id, orgId, newStatus }, '[ORG_STATUS_API] Organization status updated');
 

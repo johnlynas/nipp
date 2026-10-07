@@ -25,7 +25,7 @@ export const runtime = 'nodejs';
 export const revalidate = 0;
 export const dynamic = 'force-dynamic';
 
-// P7: Cache dynamic org details with static tag (invalidated via revalidateTag('org') on mutations)
+// P7: Cache dynamic org details with static tag (invalidated via revalidateTag('org', { expire: 0 }) on mutations)
 // Note: This caches database data only; wrapPiiRoute encrypts each response separately.
 // RLS Phase 3: the resolving query runs under a verified platform-admin GUC context —
 // the caller wraps getOrgDetails in withTenantAdminContext(userId, orgId, …).
@@ -162,7 +162,7 @@ export const PATCH = wrapPiiRoute(async (request, decryptedBody, params) => {
         data: updateData,
       });
 
-      revalidateTag('org');
+      revalidateTag('org', { expire: 0 });
 
       logger.info({ userId: session.user.id, orgId }, 'Updated organization details');
 
@@ -233,7 +233,7 @@ export const DELETE = wrapPiiRoute(async (request, _decryptedBody, params) => {
     if (existingOrg.status === 'PENDING') {
       await withTenantAdminContext(session.user.id, orgId, async () => {
         await tenantDb.organization.delete({ where: { id: orgId } });
-        revalidateTag('org');
+        revalidateTag('org', { expire: 0 });
 
         // Record audit log for hard delete of pending org
         await recordAuditLog({
@@ -264,7 +264,7 @@ export const DELETE = wrapPiiRoute(async (request, _decryptedBody, params) => {
       }),
     );
 
-    revalidateTag('org');
+    revalidateTag('org', { expire: 0 });
 
     // Record audit log for archive action
     await recordAuditLog({

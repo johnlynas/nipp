@@ -263,7 +263,7 @@ describe('Tenant Management API — Structural Verification', () => {
     });
 
     it('should revalidate cache on permission changes', () => {
-      expect(content).toContain("revalidateTag('org')");
+      expect(content).toContain("revalidateTag('org', { expire: 0 })");
     });
   });
 
