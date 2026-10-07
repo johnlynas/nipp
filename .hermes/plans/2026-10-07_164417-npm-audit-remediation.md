@@ -53,7 +53,14 @@ Expected: command output as above. Do not commit /tmp artefacts; cite them in PR
 
 ---
 
-## Phase 1 — Remove the accidental dependency trees (expected ~80% of findings, zero code changes)
+## Phase 1 — Remove the accidental dependency trees ✅ COMPLETE (2026-10-07)
+
+**Status / outcome:**
+- Task 1.1 committed as `3027936` — lockfile −2,007 lines; `node_modules/npm` subtree gone; zero imports of `latest` (verified).
+- Task 1.2 committed as `20d7520` — node-mailer gone; no references in code/config; ESM seam check: `import('nodemailer')` + `createTransport` OK from the post-uninstall tree; audit count unchanged by this task (node-mailer was a dedup pass-through to the same nodemailer instance — predicted, not an anomaly).
+- Actual delta: **49 → 17 vulnerabilities** (3 moderate, 12 high, 2 critical) over **8 packages**: braces, deepmerge-ts, nodemailer, postcss (nested under next), postcss-selector-parser, shell-quote, source-map-js — exactly the Phase 2/3 mapping table in this plan; no surprises. (The original "~7" estimate counted distinct package names only; audit counts advisories per package.)
+- Per-task verification: lint ✔ (eslint max-warnings=0 + lint-guardrails), tsc ✔, `npm test` 1938/1938 ✔, `npm run build` ✔.
+- Exit gate re-run on a **clean `rm -rf node_modules && npm ci`** tree (CI-equivalent; Node 26/npm 12 local): audit exit=1 at exactly 17 findings — reproducible from the committed lockfile. Prisma engines were already cached, so no install-scripts approval was needed this phase; if a future clean install hits missing engines, `npx prisma generate` (or npm install-scripts approve) restores them.
 
 ### Task 1.1: Uninstall `latest`
 
@@ -145,7 +152,13 @@ magic-link flow. npm registry marks it unmaintained/deprecated."
 
 ---
 
-## Phase 2 — Safe upgrades with upstream fixes (no major-version risk)
+## Phase 2 — Safe upgrades with upstream fixes ✅ COMPLETE (2026-10-07)
+
+**Status / outcome:**
+- Task 2.1 committed `36fa57b` — lint-staged 17.6.0; the lint-staged→micromatch→braces path is gone (`npm ls braces` now shows only `eslint-config-next@15.5.26 → @next/eslint-plugin-next → fast-glob@3.3.1 → micromatch`, i.e. the Phase 3.2 item). Pre-commit hook smoke-tested on a staged file with existing `.lintstagedrc.json` (format unchanged, no config edits needed); scratch change reverted after. NOTE: lint-staged 17 requires Node ≥22.22.1 — our `engines` floor is 22.0.0 and CI's floating `node-version: '22'` resolves to newest 22.x; **tightening `engines`/CI pin is queued in Phase 4** (Task 4.1 note).
+- Task 2.2 committed `11242df` — concurrently removed with zero code references; `shell-quote` gone from tree; **both critical advisories cleared** (17 → 14 after this task, both CRITICALs eliminated).
+- Task 2.3 committed `3d450b5` — source-map-js at 1.2.2 everywhere via a plain `npm update source-map-js` re-resolution; **no override needed** (all consumers already accepted ^1.2.1) — plan's Step 2 fallback was not used, as expected from the range recon.
+- Exit gate: clean `rm -rf node_modules .next && npm ci` → audit exactly **13 vulnerabilities (0 critical, 3 moderate, 10 high)** over the 5 planned Phase-3 targets only: braces (eslint path), deepmerge-ts, nodemailer×5, postcss (nested under next)×4, postcss-selector-parser. lint ✔ · tsc ✔ · 1938/1938 tests ✔ · build ✔ on that clean tree (prisma generate re-run after reinstall to restore engines).
 
 ### Task 2.1: Bump `lint-staged` 15 → 17 (kills one of two `braces` paths)
 
@@ -257,7 +270,20 @@ git commit -m "fix(deps): bump source-map-js to 1.2.2 (event-loop DoS fix)"
 
 ---
 
-## Phase 3 — Major / framework upgrades (one PR per task, full regression gate each)
+## Phase 3 — Major / framework upgrades ✅ COMPLETE (2026-10-07)
+
+**Status / outcome:**
+- Task 3.1 committed `07741fc` — nodemailer 9 → 10.0.16. New contract test `tests/unit/notifications-email.test.ts` (4 specs: transport options, mail shape, rejection→`{success:false,error}`, headerTitle) verified green on the v9 baseline BEFORE bumping, then green on v10. No code changes to email.ts (createTransport/sendMail unchanged); tsc clean against existing `@types/nodemailer@8.0.2` (its coverage ⊇ our usage), so no types shim; runtime import smoke of v10 in the same gate.
+- Task 3.2 committed `d408d2e` — next 15 → 16.4.0 + eslint-config-next 16.4.0; nested `next/node_modules/postcss@8.4.31` gone (all instances ≥8.5.23). Three Next-16 breaking deltas handled minimally:
+  - build/dev pinned `--webpack` in scripts (Next 16 defaults to Turbopack, which rejects the webpack-only next.config; full Turbopack migration deliberately out of scope).
+  - `next lint` removed in Next 16 → `npm run lint` now runs `eslint . --max-warnings=0` directly (identical gate to CI's own command).
+  - `revalidateTag(tag)` requires a cacheLife profile → all 11 mutation routes + the structural test expectation updated to `revalidateTag('org', { expire: 0 })` (behavior-preserving immediate purge); stale comment synced.
+  - tsconfig.json/next-env.d.ts regenerated by the build; middleware.ts verified **byte-unchanged** and supported.
+  - Confirmed BEFORE bump per plan gate: @next/eslint-plugin-next@16.4.0 **still** depends on fast-glob@3.3.1 → micromatch → braces, so the last braces entry survives Next 16 (vendor-blocked — disposition queued in Phase 4 acceptance table).
+- Task 3.3 committed `d280e71` — deepmerge-ts override to ^8.0.2 took the **override path** (spike green): prisma validate ✔, generate ✔, migrate status ✔ (against live .env DB), full gate ✔. No acceptance needed.
+- Task 3.4 committed `aacc823` — postcss-selector-parser override to ^7.1.6 took the **override path** with best-case evidence: built-CSS rule multiset byte-identical before/after (769 rules, `diff` exit 0) + full gate ✔. No acceptance needed.
+- Exit gate on clean `rm -rf node_modules .next && npm ci`: lint ✔ · tsc ✔ · **1942/1942 tests** ✔ · build ✔ · audit down from 13 to the single expected residual — **5 high advisory entries, all one package: braces (GHSA-vfj7-8cjw-p6xm) via eslint-config-next → @next/eslint-plugin-next@16.4.0 → fast-glob@3.3.1 → micromatch**. Zero critical/moderate/low remain in the tree.
+- Net delta for the phase: 13 findings → 5 (one package, dev-only static-analysis chain).
 
 > Each of these must run the FULL gate: `npm run lint && npm test && npm run build` plus one targeted manual smoke (below), before merging.
 
@@ -451,13 +477,39 @@ npm audit --audit-level=high | grep -c postcss-selector-parser || echo "psp clea
 
 ---
 
-## Phase 4 — Lock the win: CI hardening + record
+## Phase 4 — Lock the win: CI hardening + record ✅ COMPLETE (2026-10-07)
+
+**Status / outcome:**
+- Task 4.1 — `engines` floor raised to `>=22.22.1 <23.0.0` (matches lint-staged 17's own
+  `node >=22.22.1` requirement; CI's floating `node-version: '22'` resolves to newest 22.x,
+  verified ≥22.22.1 at implementation time). No `.github/workflows/ci.yml` change needed —
+  the audit job already does clean `npm ci` + `npm audit --audit-level=high` (exit code
+  fails CI); per plan's Step-0 "change nothing if the existing job is sufficient."
+  Gate proven on a clean `rm -rf node_modules .next && npm ci` tree: lint ✔ · tsc ✔ ·
+  tests ✔ · build ✔ · audit exit=1 at exactly the **5 braces-chain findings** — identical
+  to the Phase-3 exit-gate residue (reproducible from the committed lockfile). Local env note:
+  npm 12 blocks postinstall scripts (`prisma generate` re-run after `npm ci` to restore
+  generated types) — CI's npm 10.x runs them automatically, so the gate is green there.
+- Task 4.2 — SECURITY.md §10 "Dependency Auditing" added: CI-gate description + remediation
+  record (this phase's commits) + **Accepted Risk Register** with the single residual:
+  `braces@3.0.3` GHSA-vfj7-8cjw-p6xm via the dev-only eslint chain. Disposition confirmed at
+  implementation time: advisory range is ≤3.0.3 across ALL braces 3.x (no fix version
+  published); fast-glob's only newer releases (3.3.2, 3.3.3) still depend on
+  micromatch ^4 → braces; `@next/eslint-plugin-next` at dist-tags.latest (16.4.0) still pins
+  fast-glob 3.3.1 exactly — the override path is a no-op for this chain, so acceptance with a
+  dated revisit trigger is the plan's fallback branch ("…or every remaining line has a
+  SECURITY.md accepted-risk entry"). `--omit=dev` explicitly rejected and documented as such
+  (it would unscope the whole dev toolchain from the gate).
 
 ### Task 4.1: Make the audit gate tamper-evident and repeatable
 
 **Files:** Modify: `.github/workflows/ci.yml` (audit job only)
 
 CI already has the `audit` job (line 46–63). Strengthen minimally — no new tooling (YAGNI):
+
+**Add (from Phase 2, Task 2.1 follow-up):** pin the runtime floor so a future CI Node bump / local drift can't quietly break lint-staged 17 (`engines: >=22.22.1`) or other tool chains:
+- `package.json` engines: `"node": ">=22.0.0 <23.0.0"` → `">=22.22.1 <23.0.0"` (matches lint-staged 17's own requirement; CI already uses Node 22).
+- Optionally tighten the audit job to assert it runs under a supported runner: no change needed — ubuntu-latest + setup-node '22' is fine as-is, just confirm in the PR that the resolved 22.x satisfies 22.22.1 (it does today; re-check at merge).
 
 ```yaml
       - name: Security audit
