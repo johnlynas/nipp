@@ -135,6 +135,10 @@ describe('consumeInviteToken', () => {
     });
     mockPrisma.verification.deleteMany.mockResolvedValue({ count: 1 });
 
+    // Baseline captured BEFORE the call: consumeInviteToken snapshots `now`
+    // internally, so asserting against a later Date.now() is a clock race on
+    // slow machines (CI). The delete's expiresAt.gt must be >= this baseline.
+    const before = Date.now();
     const res = await consumeInviteToken(token);
 
     expect(res.ok === true && res.email).toBe('flow.person@example.com');
@@ -142,7 +146,7 @@ describe('consumeInviteToken', () => {
     expect(mockPrisma.verification.deleteMany).toHaveBeenCalledTimes(1);
     const args = mockPrisma.verification.deleteMany.mock.calls[0][0];
     expect(args.where.identifier).toBe(token);
-    expect(args.where.expiresAt.gt.getTime()).toBeGreaterThanOrEqual(Date.now());
+    expect(args.where.expiresAt.gt.getTime()).toBeGreaterThanOrEqual(before);
   });
 
   it('unknown token → invalid, no delete attempt', async () => {
