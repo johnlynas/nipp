@@ -74,7 +74,6 @@
     "@types/react-dom": "^19.0.0",
     "@vitejs/plugin-react": "^6.0.3",
     "@vitest/coverage-v8": "^4.1.0",
-    "concurrently": "^10.0.3",
     "eslint": "^9.21.0",
     "eslint-config-next": "^15.2.0",
     "eslint-plugin-react-hooks": "^7.1.1",
