@@ -43,7 +43,6 @@
     "bree": "^9.2.9",
     "graceful": "^2.0.0",
     "ioredis": "^5.11.1",
-    "latest": "^0.2.0",
     "lru-cache": "^11.5.2",
     "lucide-react": "^1.34.0",
     "next": "^15.5.22",
