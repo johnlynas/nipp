@@ -54,6 +54,9 @@ The design follows three core principles:
   - [Environment Variables](#environment-variables)
   - [Rate Limiting Configuration](#rate-limiting-configuration)
   - [Trusted Proxies](#trusted-proxies)
+- [10. Dependency Auditing](#10-dependency-auditing)
+  - [CI Gate](#ci-gate)
+  - [Accepted Risk Register](#accepted-risk-register)
 
 ## Appendices
 
@@ -579,6 +582,34 @@ Only requests from trusted proxy IPs will have their forwarded headers honored; 
 
 ---
 
+## 10. Dependency Auditing
+
+### CI Gate
+
+- CI runs `npm audit --audit-level=high` on Node 22 from a clean `npm ci` install (`.github/workflows/ci.yml`, `audit` job). Any high- or critical-severity finding fails the build; findings below the high threshold do not block.
+- The manifest's `engines` floor (`>=22.22.1 <23.0.0`) matches the toolchain's own requirements (e.g., lint-staged 17), so a future CI Node bump cannot silently break the security gate.
+- Lockfile integrity: CI installs with `npm ci` against the committed lockfile — dependency state is reproducible and any manifest/lock drift fails the install step.
+
+**Last full remediation: 2026-10-07** (`fix/npm-audit-remediation` branch, plan in
+`.hermes/plans/2026-10-07_164417-npm-audit-remediation.md`) — removed accidental `latest`
+(npm@2 toolchain) and `node-mailer` deps, removed unused `concurrently`, upgraded
+lint-staged 15→17, nodemailer 9→10.0.16, next 15→16.4.0, source-map-js →1.2.2; npm
+overrides: `deepmerge-ts ^8.0.2` (via Prisma CLI config chain) and
+`postcss-selector-parser ^7.1.6` (verified byte-identical built CSS). Baseline 49 findings
+(1 low / 12 moderate / 28 high / 8 critical) reduced to the single accepted deviation below;
+zero critical/low remain.
+
+### Accepted Risk Register
+
+The `npm audit --audit-level=high` gate is expected to report exactly the entry in this table.
+Any *other* finding — or a change to this package's position in the tree — blocks the build until resolved and reviewed.
+
+| Package | Advisory | Accepted (date) | Why accepted | Revisit when |
+|---|---|---|---|---|
+| `braces@3.0.3` via dev-only chain `eslint-config-next@16.4.0 → @next/eslint-plugin-next → fast-glob@3.3.1 → micromatch@4.0.8` | [GHSA-vfj7-8cjw-p6xm](https://github.com/advisories/GHSA-vfj7-8cjw-p6xm) stack-exhaustion DoS on deeply nested patterns (high, CVSS 7.5 A:H) | 2026-10-07 | Dev-only static-analysis chain: never bundled into the production build, never processes untrusted input (eslint globs are repo-local check-in files); no fix exists — advisory range covers all of braces ≤3.0.3 and fast-glob/micromatch have released no non-vulnerable line as of 2026-10; `npm audit --omit=dev` deliberately NOT used (it would unscope the whole dev toolchain from the gate) | When `@next/eslint-plugin-next` releases a line that drops fast-glob (or a fast-glob/braces fix ships); re-audit at every major dependency refresh. Remove this row and confirm `npm audit --audit-level=high` passes clean when that happens |
+
+---
+
 ## Appendix A: API Route Security Summary
 
 The following table summarizes the security characteristics of all API route groups in the application:
@@ -635,5 +666,5 @@ This document covers security-specific details. For broader architectural contex
 
 ---
 
-*Last updated: 2026-10-03*
+*Last updated: 2026-10-07*
 *Document owner: Engineering Team*
