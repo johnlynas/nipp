@@ -273,3 +273,42 @@ describe('bearer over a non-localhost host (public-access pin)', () => {
     expect(body.user.email).toBe(BEARER_EMAIL);
   }, 30000);
 });
+
+describe('bearer token lifetime & refresh (Phase G)', () => {
+  it('bearer token slides to a fresh 1h window once activity lands inside the updateAge window', async () => {
+    // Renewal condition (verified in installed better-auth@1.6.23, dist/api/routes/session.mjs):
+    // fires only when expiresAt - expiresIn + updateAge <= now, i.e. during the
+    // final 15 min of the 1h window (session.updateAge = 900s). A FRESH session
+    // is therefore NOT renewed on its next call — this test ages the Session row
+    // into the renewal window first (direct DB update, same shared-dev-DB
+    // technique the ban tests in this file use), mirroring a real long-lived
+    // client whose token has been alive ~56 minutes. On renewal, better-auth
+    // updates expiresAt IN PLACE to now+1h — the bearer string is unchanged and
+    // no re-authentication happens (client-visible: no 401, same header works).
+    await seedLocalUser();
+
+    const signin = await signInWithPassword(BEARER_EMAIL, BEARER_PASSWORD);
+    expect(signin.status).toBeLessThan(300);
+    const t = signin.headers.get('set-auth-token')!;
+    expect(t).toBeTruthy();
+
+    // Age the newest Session row into the renewal window: 4 min of its 1h left.
+    // (Keyed by userId on purpose: the set-auth-token transport value is a
+    // signed/wrapped form of the raw Session.token column — no need to invert it.)
+    const user = await prisma.user.findUnique({ where: { email: BEARER_EMAIL } });
+    const row = (await prisma.session.findMany({ where: { userId: user!.id }, orderBy: { createdAt: 'desc' }, take: 1 }))[0];
+    expect(row).toBeTruthy(); // sign-in above must have created it
+    await prisma.session.update({ where: { id: row.id }, data: { expiresAt: new Date(Date.now() + 4 * 60_000) } });
+
+    // Activity NOW: same bearer string, no re-auth — and the response carries a
+    // FRESH expiry (~now+1h), proving the in-place slide happened. (A pre-window
+    // renewal gap is what dies per design §4.3 — this pins the surviving path.)
+    const me = await getMeWithBearer(t);
+    expect(me.status).toBe(200);
+    const body = (await me.json()) as { session: { expiresAt: string } };
+    const remainingMs = new Date(body.session.expiresAt).getTime() - Date.now();
+    // Renewed ≈ 1h window (allowing clock skew + handler latency): comfortably
+    // more than 50 min, and not stuck at the 4 min we aged it to.
+    expect(remainingMs, `session was not renewed — only ${Math.round(remainingMs / 60_000)} min left`).toBeGreaterThan(50 * 60_000);
+  }, 30000);
+});
