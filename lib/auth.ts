@@ -2,7 +2,7 @@ import { betterAuth } from 'better-auth/minimal';
 import { prismaAdapter } from 'better-auth/adapters/prisma';
 // Use relative import to bypass tenant isolation rule (BetterAuth needs raw Prisma client)
 import { prisma } from './db';
-import { organization } from 'better-auth/plugins';
+import { organization, bearer } from 'better-auth/plugins';
 import { env } from './env';
 import { createAuthMiddleware, APIError } from 'better-auth/api';
 import { logger } from './logger';
@@ -163,6 +163,12 @@ export const auth = betterAuth({
   },
 
   plugins: [
+    // Bearer (Authorization: Bearer <token>) ⇄ session translation for
+    // remote-domain / server-to-server clients. Converts the header to an internal
+    // session cookie per request — all existing auth gates (ban, OIDC provisioning,
+    // permissions callback) apply unchanged. Adds a set-auth-token response header
+    // on session-setting responses so a token can be acquired programmatically.
+    bearer(),
     organization({
       // Enable Teams mode — sub-organizational groupings with role inheritance
       teams: {
