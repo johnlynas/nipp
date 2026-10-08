@@ -303,7 +303,17 @@ git commit -m "test(auth): pin bearer revocation and malformed-header behavior"
 
 ---
 
-## Task 5: Test — ban gate blocks bearer acquisition
+## Task 5: Test — ban gate blocks bearer acquisition ✅ DONE (2026-10-08)
+
+**Result:** GREEN. `npx vitest run tests/integration/bearer-tokens.test.ts` → 5/5. Full integration sweep after: **22 files, 308 tests passed** (307 baseline + this new test).
+
+**Commit:** `cea2d72 test(auth): pin ban gate blocking bearer token acquisition`.
+
+**Deviations from plan text (improvements, no weakening):**
+- Asserts status ≥ 400 **and** null `set-auth-token` header **and** no NEW Session row in the DB. The "no new session row" check uses a before/after count — a straight `toBe(0)` failed on first run (3 sessions left by earlier tests in this file for the shared fixture user; expected, not a defect).
+- Ban set with an explicit future `banExpires` (matching the OIDC full-flow file's seed), so no auto-lift ambiguity. Lifted in both `finally` (per-test safety) and a new `clearBan()` pre-step in `afterAll`, so a failed run never leaves the fixture banned for sibling suites sharing the dev DB.
+
+Next: Task 6 (no-CORS assertion on auth responses).
 
 **Objective:** Banned users cannot *obtain* a bearer token through any door (design §5.1: gates sit at `session.create.before`, the single funnel for all sign-in methods). Pinned as a test so the property survives refactors.
 
