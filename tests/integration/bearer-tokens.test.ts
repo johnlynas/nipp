@@ -60,6 +60,24 @@ async function getMeWithBearer(token: string): Promise<Response> {
   );
 }
 
+/**
+ * Assert a response carries NO resolved session and did not crash (5xx).
+ *
+ * In this BetterAuth build an unauthenticated /get-session reports as "no
+ * session" — a 2xx with an empty/null body — NOT HTTP 401. The security
+ * invariant we pin for bearer edge cases is therefore two-fold: (a) no user is
+ * ever resolved, and (b) the request never surfaces a 5xx crash. This catches
+ * both "a malformed/revoked token authenticated" and "a bad header threw".
+ */
+async function expectUnauthed(res: Response): Promise<void> {
+  expect(res.status, `status was ${res.status}`).toBeLessThan(500);
+  const text = await res.text();
+  let body: unknown = null;
+  try { body = JSON.parse(text); } catch { /* empty body — no session */ }
+  const hasUser = !!body && typeof body === 'object' && (body as Record<string, unknown>).user != null;
+  expect(hasUser, `expected no resolved session but got: ${text}`).toBe(false);
+}
+
 describe('bearer token access', () => {
   afterAll(async () => {
     const user = await prisma.user.findUnique({ where: { email: BEARER_EMAIL } });
@@ -121,5 +139,48 @@ describe('bearer token access', () => {
     expect(t2).toBeTruthy();
     const me = await getMeWithBearer(t2!);
     expect(me.status).toBe(200);
+  }, 30000);
+
+  it('sign-out revokes the bearer token immediately', async () => {
+    // A stolen token dies at sign-out: the Session row is deleted, so the bearer
+    // string fails every subsequent lookup. This is the theft-damage control from
+    // design §4.3/§5.1. We sign out *by* bearer to also prove a bearer-driven
+    // sign-out works end-to-end.
+    await seedLocalUser();
+    const handler = auth.handler as (req: Request) => Promise<Response>;
+
+    const signin = await signInWithPassword(BEARER_EMAIL, BEARER_PASSWORD);
+    expect(signin.status).toBeLessThan(300);
+    const t = signin.headers.get('set-auth-token');
+    expect(t).toBeTruthy();
+
+    const out = await handler(
+      new Request('http://localhost/api/auth/sign-out', {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${t}` },
+      }),
+    );
+    expect(out.status).toBeLessThan(300);
+
+    // Same string, post sign-out: must be dead (no session resolved, no crash).
+    const after = await getMeWithBearer(t!);
+    await expectUnauthed(after);
+  }, 30000);
+
+  it('malformed / missing Authorization headers produce no session, never 500', async () => {
+    // A bad header must degrade to "unauthenticated" (no resolved session), and
+    // the request must never surface a server error — design §5.1. NOTE: in
+    // better-auth@1.6.23 an unauthenticated /get-session answers 2xx with an
+    // empty body, not HTTP 401; expectUnauthed pins the real invariant (no user +
+    // no 5xx).
+    const handler = auth.handler as (req: Request) => Promise<Response>;
+    for (const header of [undefined, 'NotAToken abc', 'Bearer ', 'Basic xyz']) {
+      const res = await handler(
+        new Request('http://localhost/api/auth/get-session', {
+          ...(header ? { headers: { Authorization: header } } : {}),
+        }),
+      );
+      await expectUnauthed(res);
+    }
   }, 30000);
 });
