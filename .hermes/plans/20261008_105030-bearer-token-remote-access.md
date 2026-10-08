@@ -354,7 +354,19 @@ git commit -m "test(auth): pin ban gate blocking bearer token acquisition"
 
 ---
 
-## Task 6: Test — no arbitrary-origin CORS on auth responses (lock in design §5.2)
+## Task 6: Test — no arbitrary-origin CORS on auth responses (lock in design §5.2) ✅ DONE (2026-10-08)
+
+**Result:** GREEN. `npx vitest run tests/integration/bearer-tokens.test.ts` → 6/6. Full integration sweep after: **22 files, 309 tests passed**.
+
+**Commit:** `5b9d420 test(auth): pin no-arbitrary-origin-CORS on auth responses`.
+
+**Pre-assertion source verification (as the plan mandates — do not proceed on a silently-opened API):**
+- Grep of app code: zero ACAO/origin-echo anywhere (`next.config.ts` headers() is entirely commented out; no CORS middleware).
+- `better-auth@1.6.23` dist: the ONLY place `Access-Control-Allow-Origin` is set is inside the **mcp** plugin (not registered in lib/auth.ts) — so asserting null on `/api/auth/sign-in/email` responses is correct, not vacuous.
+
+**Note:** plan's single-response check is sufficient per YAGNI; the assertion lives on the sign-in response (the most likely place a "quick CORS" change would first surface). The pin covers the decision: any future mcp-plugin registration or CORS middleware fails this test.
+
+Next: Task 7 (manual smoke — remote-origin call against a running server).
 
 **Objective:** Assert we have NOT opened the API to arbitrary browser origins — dynamic-origin echo and blanket `Access-Control-Allow-Origin` must be absent from `/api/auth/**` responses, so any future "just allow CORS quickly" change fails a test instead of shipping silently.
 
