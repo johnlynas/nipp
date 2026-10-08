@@ -23,6 +23,7 @@ The design follows three core principles:
   - [Auto-Logout on Inactivity](#auto-logout-on-inactivity)
   - [User Ban System](#user-ban-system)
   - [Google OIDC Sign-In & Magic-Link Verification (in development)](#google-oidc-sign-in--magic-link-verification-in-development)
+  - [Remote Bearer-Token Access — Origin Policy & Operations](#remote-bearer-token-access--origin-policy--operations)
 - [3. Authorization & Access Control](#3-authorization--access-control)
   - [Dual-Authorization Model](#dual-authorization-model)
   - [Permission Resolution Flow](#permission-resolution-flow)
@@ -204,6 +205,27 @@ One security-relevant implementation note from Phase 1: the signed `state` nonce
 | Post-verification abuse | ban enforcement at session creation applies to both doors (above) |
 
 - **Operational dependency.** Portal outbound mail delivers as its own mailbox, so per-user email forwarding must be configured for new OIDC users — a runbook item in the design doc (§6), and the first e2e diagnostic.
+
+### Remote Bearer-Token Access — Origin Policy & Operations
+
+The portal exposes an `Authorization: Bearer <token>` door for programmatic and cross-domain clients (scripts, server-to-server consumers). A bearer token **is** a BetterAuth session token: one Session row backs both the browser cookie and the header, so every gate above (rate limits, ban enforcement, provisioning, permission resolution) applies identically. Full developer reference: [documents/api/bearer-tokens.md](./documents/api/bearer-tokens.md); design document with diagrams: [bearer-token-remote-access.md](./documents/feature-planning-and-development/bearer-token-remote-access.md).
+
+**Origin policy (public access):** the base URL and trusted origins resolve **per-request from the incoming `Host` header** (`x-forwarded-host` when behind a proxy), validated against `BETTER_AUTH_ALLOWED_HOSTS` — env-driven, zero hardcoded hosts in `lib/auth.ts`. Consequences:
+
+- **Browser cookie door:** same-origin only. Trusted origins are the per-request base origin (localhost, LAN IP, or the production HTTPS domain) plus any entries in `BETTER_AUTH_TRUSTED_ORIGINS` (comma-separated; intended for named partner frontends). A **global origin echo is intentionally not shipped**: echoing arbitrary origins would let any website submit cookie-bearing auth requests against our server from a victim's browser (cross-site sign-out, session fixation at login).
+- **Bearer door:** CSRF-immune by construction — server-to-server requests send no `Origin`/cookie, and cross-origin browser JS cannot set `Authorization` nor read the `set-auth-token` response without an `Access-Control-Allow-Origin` grant we never issue. **No CORS headers are emitted by the auth layer** (pinned by test).
+- **Least privilege per deployment:** local dev runs `BETTER_AUTH_ALLOWED_HOSTS=*`; production must set its real domain(s) (e.g. `portal.example.com,www.portal.example.com`). If a per-customer subdomain scheme ever lands, the value moves to `*.customer-domain.com` — config only.
+- **CSRF/origin gate stays enabled** — neither `advanced.disableOriginCheck` nor `disableCSRFCheck` is set, and no top-level `trustedOrigins` echo exists (pinned by test).
+
+**Operations — token acquisition & rotation:**
+
+1. **Issue a developer credential:** existing admin user creation (password) or Google invite flow — no new admin surface.
+2. **Client acquires the token once** via `POST /api/auth/sign-in/email` (`set-auth-token` response header + `{token}` in the JSON body). 1h absolute max; activity keeps it alive (~45 min idle = dead); on 401 the client re-authenticates (no refresh subsystem in v1).
+3. **Rotate on suspicion:** user signs out — the Session row is deleted and the old bearer string fails its next lookup immediately — then re-authenticates for a fresh token.
+4. **Emergency kill:** ban the user (`banned` flag) — per-request ban checks stop all their bearer traffic on the next call; session callback invalidation kills any live sessions. Worst case: an in-flight request finishing before the next one.
+5. **Secret rotation (nuclear option):** changing `BETTER_AUTH_SECRET` invalidates every bearer token and cookie at once (they are HMACs over it) — last resort, not a routine control.
+
+**Proxy header contract:** behind a TLS-terminating reverse proxy/edge the deployment must set `TRUSTED_PROXY_CIDRS` to the edge's CIDR(s) and keep `TRUSTED_PROXY_HEADERS=true` so BetterAuth reads `x-forwarded-host` / `x-forwarded-proto` (base URL + protocol + client IP all come from there). The proxy must send both headers on every request; untrusted `x-forwarded-for` hops beyond a trusted CIDR are ignored, which also protects the per-IP rate limits above from client-IP spoofing.
 
 ---
 
@@ -508,6 +530,11 @@ The following environment variables control security-relevant behavior:
 | `PII_ENCRYPTION_KEY` | AES-256 encryption key for PII at-rest (hex-encoded, 32 bytes) | Yes |
 | `TRUSTED_ORIGINS` | Comma-separated list of trusted domains for CSRF validation | Yes |
 | `TRUSTED_PROXY_CIDRS` | CIDR ranges of trusted reverse proxies for real client IP extraction | No (defaults to localhost) |
+| `BETTER_AUTH_SECRET` | HMAC base for session/bearer tokens; changing it invalidates every token and cookie at once (nuclear-op rotation — see §2 bearer ops step 5) | Yes |
+| `BETTER_AUTH_ALLOWED_HOSTS` | Comma-separated host patterns for BetterAuth's per-request base URL + trusted origins (default `*`; production must set real domain(s)) | Defaulted |
+| `BETTER_AUTH_BASE_PROTOCOL` | Protocol for dynamic base-URL construction: `auto` (both http/https origins) \| `http` \| `https` — default `auto` | Defaulted |
+| `TRUSTED_PROXY_HEADERS` | Read `x-forwarded-host` / `x-forwarded-proto` behind a proxy (`true`/`false`, default `true`) | Defaulted |
+| `BETTER_AUTH_TRUSTED_ORIGINS` | Comma-separated extra trusted origins for cross-origin browser frontends (partner BFFs); cookieless bearer clients never need it | No |
 | `SESSION_SECRET` | Secret used for signing session cookies | Yes |
 | `GOOGLE_CLIENT_ID` | Google OIDC client id (required by `lib/env-schema.ts`; consumed by the in-development sign-in) | Yes |
 | `GOOGLE_CLIENT_SECRET` | Google OIDC client secret (as above); magic-link emails additionally use the existing `SMTP_*` vars and `FRONTEND_URL` as the link host | Yes |
@@ -632,8 +659,10 @@ This document covers security-specific details. For broader architectural contex
 | [CACHING_ARCHITECTURE.md](./CACHING_ARCHITECTURE.md) | Caching strategy, Redis usage, and cache invalidation patterns |
 | [QUICK_START.md](./QUICK_START.md) | Getting started guide for developers |
 | [Google OIDC design doc](./documents/feature-planning-and-development/google-oidc-design.md) | Google sign-in flow, account-linking semantics, magic-link verification and its threat table (in development) |
+| [Bearer-token developer reference](./documents/api/bearer-tokens.md) | Token acquisition doors, lifetime & refresh policy, storage/usage rules (developer-facing) |
+| [Bearer-token design doc](./documents/feature-planning-and-development/bearer-token-remote-access.md) | Bearer architecture decision, threat model, state diagram (source of truth for diagrams) |
 
 ---
 
-*Last updated: 2026-10-03*
+*Last updated: 2026-10-08*
 *Document owner: Engineering Team*

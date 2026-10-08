@@ -274,6 +274,32 @@ describe('bearer over a non-localhost host (public-access pin)', () => {
   }, 30000);
 });
 
+describe('origin/CSRF gate stays on (Phase E public-access pin)', () => {
+  // Config-intent pin for the public-access setup: in installed better-auth@1.6.23
+  // (dist/api/middlewares/origin-check.mjs) the origin/CSRF gate is disabled only by
+  // `options.advanced.disableOriginCheck` (legacy, also covers CSRF) or
+  // `options.advanced.disableCSRFCheck` — and cross-origin trust comes from a
+  // top-level `trustedOrigins`. We ship NONE of these: the cookie door stays
+  // same-origin (+ dynamic base per Phase B), bearer clients send no Origin (gate
+  // returns early for them by construction). If a future patch "enables CORS for
+  // partners" via echo/disable, this fails. NOTE: in-process tests run with
+  // isTest() which skips origin checks at REQUEST time — so asserting the shipped
+  // options object IS the meaningful pin here (it would not be if we only sent a
+  // fake Origin through auth.handler; that path returns early in test mode).
+  it('ships no CSRF/origin-disable flags and no trustedOrigins override', () => {
+    const opts = (auth as unknown).options as {
+      advanced?: { disableCSRFCheck?: boolean; disableOriginCheck?: boolean };
+      trustedOrigins?: string[] | ((req: Request) => Promise<string[]>);
+    };
+    expect(opts.advanced?.disableCSRFCheck, 'disableCSRFCheck must NOT be set').toBeUndefined();
+    expect(opts.advanced?.disableOriginCheck, 'legacy disableOriginCheck must NOT be set').toBeUndefined();
+    // Absent (not empty list) — BETTER_AUTH_TRUSTED_ORIGINS is read natively by
+    // better-auth from process.env when it is a non-empty string (helpers.mjs);
+    // keeping the option itself unset preserves per-request dynamic behavior.
+    expect(opts.trustedOrigins, 'no top-level trustedOrigins echo/list in config').toBeUndefined();
+  });
+});
+
 describe('bearer token lifetime & refresh (Phase G)', () => {
   it('bearer token slides to a fresh 1h window once activity lands inside the updateAge window', async () => {
     // Renewal condition (verified in installed better-auth@1.6.23, dist/api/routes/session.mjs):
