@@ -78,8 +78,20 @@ async function expectUnauthed(res: Response): Promise<void> {
   expect(hasUser, `expected no resolved session but got: ${text}`).toBe(false);
 }
 
+/** Clear the shared fixture's ban state (idempotent). */
+async function clearBan(): Promise<void> {
+  const user = await prisma.user.findUnique({ where: { email: BEARER_EMAIL } });
+  if (user?.banned) {
+    await prisma.user.update({
+      where: { id: user.id },
+      data: { banned: false, banReason: null, banExpires: null },
+    });
+  }
+}
+
 describe('bearer token access', () => {
   afterAll(async () => {
+    await clearBan(); // safety net: never leave the fixture banned on a failed run
     const user = await prisma.user.findUnique({ where: { email: BEARER_EMAIL } });
     if (user) {
       await prisma.session.deleteMany({ where: { userId: user.id } });
@@ -181,6 +193,37 @@ describe('bearer token access', () => {
         }),
       );
       await expectUnauthed(res);
+    }
+  }, 30000);
+
+  it('banned user sign-in yields no set-auth-token (ban gate blocks bearer acquisition)', async () => {
+    // Design §5.1: the ban gate sits at session creation — the single funnel for
+    // EVERY sign-in method — so a banned user cannot obtain a bearer token
+    // through any door. Pinned here for the email/password door; if a future
+    // change lets a banned identity mint a token, this fails. The `finally`
+    // lift keeps the shared fixture usable even when an assertion fails first.
+    await seedLocalUser();
+    const user = (await prisma.user.findUnique({ where: { email: BEARER_EMAIL } }))!;
+
+    await prisma.user.update({
+      where: { id: user.id },
+      data: { banned: true, banReason: 'test', banExpires: new Date(Date.now() + 86400_000) },
+    });
+    try {
+      const priorSessions = await prisma.session.count({ where: { userId: user.id } });
+
+      const res = await signInWithPassword(BEARER_EMAIL, BEARER_PASSWORD);
+      expect(res.status, `banned sign-in should be rejected, got ${res.status}`).toBeGreaterThanOrEqual(400);
+
+      // No token in-band (header) — the session was never created.
+      expect(res.headers.get('set-auth-token'), 'no set-auth-token for a banned sign-in').toBeNull();
+
+      // And no NEW Session row survived this attempt (baseline accounts for
+      // sessions earlier tests in this file legitimately created).
+      const sessions = await prisma.session.count({ where: { userId: user.id } });
+      expect(sessions, 'banned sign-in must not create a Session row').toBe(priorSessions);
+    } finally {
+      await clearBan();
     }
   }, 30000);
 });
