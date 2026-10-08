@@ -86,4 +86,40 @@ describe('bearer token access', () => {
     const body = await me.json();
     expect(body.user.email).toBe(BEARER_EMAIL);
   }, 30000);
+
+  it('no dedicated on-demand token re-issue exists — a Bearer client mints a fresh usable token via sign-in (and the sign-in body carries {token})', async () => {
+    // NOTE: design doc §4.2 references POST /api/auth/get-access-token as an
+    // on-demand session-token re-issue. In the installed better-auth@1.6.23 that
+    // endpoint is the PROVIDER OAuth token endpoint (body requires providerId,
+    // returns {accessToken} of the linked IdP — verified in node_modules/better-
+    // auth/dist/api/routes/account.mjs), NOT a "re-issue my bearer token" route.
+    // There is no dedicated re-issue endpoint. The real v1 mechanic for a
+    // Bearer client that needs a fresh token (max-age expired, revoked) is to
+    // authenticate over HTTP again — no cookies involved. This test pins that,
+    // plus the script-friendliness bonus that email sign-in ALSO returns the
+    // session token inline as {token} in the JSON body.
+    await seedLocalUser();
+
+    const first = await signInWithPassword(BEARER_EMAIL, BEARER_PASSWORD);
+    expect(first.status).toBe(200);
+    const t1 = first.headers.get('set-auth-token');
+    expect(t1).toBeTruthy();
+
+    // Re-authenticate over plain HTTP (a script can always do this): a NEW session
+    // row with a fresh token is minted and the old string stays valid until ITS
+    // own expiry/revocation. This is exactly how a long-running client recovers
+    // from a 401 without any cookies.
+    const second = await signInWithPassword(BEARER_EMAIL, BEARER_PASSWORD);
+    expect(second.status).toBe(200);
+
+    // Scriptable acquisition: the token is in the JSON body too (not only the header).
+    const body = await second.json();
+    expect(body.token).toBeTruthy();
+
+    // Header emission and a fresh usable string.
+    const t2 = second.headers.get('set-auth-token');
+    expect(t2).toBeTruthy();
+    const me = await getMeWithBearer(t2!);
+    expect(me.status).toBe(200);
+  }, 30000);
 });
