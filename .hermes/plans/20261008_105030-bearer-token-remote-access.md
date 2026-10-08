@@ -165,7 +165,16 @@ Expected: FAIL — `setAuthToken` is null (plugin not registered), assertion mes
 
 ---
 
-## Task 2: Minimal implementation — register the bearer plugin
+## Task 2: Minimal implementation — register the bearer plugin ✅ DONE (2026-10-08)
+
+**Result:** GREEN. `npx vitest run tests/integration/bearer-tokens.test.ts -t 'set-auth-token'` → 1 passed. Regression check on same run:
+bearer-tokens + auth + google-oidc-full-flow suites all green (3 files, 15 passed).
+
+**Commit:** `efd6d5e feat(auth): register bearer() plugin for remote-domain API access` — diff is exactly the import (`import { organization, bearer } from 'better-auth/plugins';`) + `bearer()` prepended to the `plugins:` array with explanatory comment. Zero other changes; working tree clean.
+
+**Note:** A tooling encoding artifact wrote an HTML-escaped token placeholder into the new source comment on first write; fixed before running tests (verified no escape entities remain in lib/auth.ts). Line references in plan text matched reality exactly (import at line 5, `plugins:` at line 165 pre-edit).
+
+Next: Task 3 (get-access-token re-issue test — expected to land GREEN immediately, pinning stock plugin behavior).
 
 **Objective:** One-line change makes Task 1 green and proves no other auth wiring changes.
 
