@@ -48,3 +48,12 @@ stateDiagram-v2
 ```
 
 Client-side handling (design §7.2): keep the token in memory or a secure store — never logs, never URLs; treat 401 as "re-authenticate", 429 as "back off" (rate limits apply identically to bearer and cookie sign-ins).
+
+## Public access (reachability)
+
+The portal is reachable on its own origin (localhost / LAN IP in dev; a production domain behind a TLS-terminating edge, set via `BETTER_AUTH_ALLOWED_HOSTS` — env-driven, no code change per deploy). Two doors:
+
+- **Bearer door (this document):** works over any reachable host/IP/domain by construction — cookieless requests skip BetterAuth's origin check entirely. This is the script/server-to-server path; it stays fully functional on LAN dev today and on the public domain tomorrow with zero client changes.
+- **Browser OIDC/email door:** top-level navigation (no CORS involved); works once the production callback URI is registered in Google Cloud Console for the public domain.
+
+The origin/CSRF policy, the deliberately-untaken "global origin echo" anti-pattern, and the proxy header contract (`x-forwarded-host` / `x-forwarded-proto`, `TRUSTED_PROXY_CIDRS`) are documented in [SECURITY.md — Remote Bearer-Token Access](../../SECURITY.md#remote-bearer-token-access--origin-policy--operations).

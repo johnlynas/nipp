@@ -317,7 +317,7 @@ Record D1/D2 results (raw outputs) appended to old plan Task 7. **No commit** if
 
 ---
 
-## Phase E — Security pin hardening (TDD)
+## Phase E — Security pin hardening (TDD) ✅ DONE (2026-10-08, commit 1cdd0c9)
 
 ### Task E1: Pin that the CSRF gate is NOT disabled
 Append to `tests/integration/bearer-tokens.test.ts` — note in-process tests run with `isTest()` which skips origin checks, so this pins **config intent** by asserting the auth config object directly:
@@ -329,17 +329,24 @@ it('origin gate stays enabled (no disableCSRFCheck / no global origin echo)', as
 ```
 Run file green; commit `test(auth): pin CSRF gate enabled for public-access config`.
 
-### Task E2: Rate-limit + ban gates host-independent (already covered)
+### Task E2: Rate-limit + ban gates host-independent (already covered) ✅
 Confirm existing pins (`auth.test.ts`, bearer file ban test) pass unchanged in Phase B5's sweep — they are bound to session creation, not host. No new code; record result.
+
+**Result:** confirmed — passed unchanged in the Phase B5 sweep and again in the final E/F gate (1939 tests green); ban-gate pin included.
+
+**Phase E result block (2026-10-08):**
+- E1 shipped with a corrected assertion: in installed 1.6.23 the disable switches are `advanced.disableOriginCheck` + `advanced.disableCSRFCheck` (verified in dist/api/middlewares/origin-check.mjs), plus top-level `trustedOrigins` as the cross-origin trust surface — all three asserted absent on `auth.options`. In-test comment documents why options-object assertion is the meaningful pin under `isTest()` (request-time origin checks skip in test mode).
 
 ---
 
-## Phase F — Developer docs + security runbook update
+## Phase F — Developer docs + security runbook update ✅ DONE (2026-10-08, commit 1cdd0c9)
 
 **Files:** Modify `documents/api/bearer-tokens.md` (add "Public access" section); modify `SECURITY.md` (one paragraph: origin policy = same-origin browser cookies + allowlisted partner origins via `BETTER_AUTH_TRUSTED_ORIGINS`; bearer door CSRF-immune; no wildcard CORS by design + why).
 - Document the proxy header contract (`x-forwarded-host`, `x-forwarded-proto`, trusted CIDRs) for ops.
 - Document that `allowedHosts: ['*']` is intentional for a bearer-first public API and what would change it (a per-customer subdomain scheme → switch to `*.customer-domain.com`).
 Commit `docs(auth): public-access origin policy and proxy header runbook`.
+
+**Result:** SECURITY.md gained the full §2 subsection (origin policy + 5-step ops runbook + proxy header contract), env table (+5 vars incl. BETTER_AUTH_SECRET), Appendix C cross-refs, ToC line — all in 1cdd0c9 with E1. `documents/api/bearer-tokens.md` "Public access (reachability)" section + SECURITY.md anchor link landed as a follow-up addendum (same scope, docs-only; committed with the plan status update).
 
 ---
 
