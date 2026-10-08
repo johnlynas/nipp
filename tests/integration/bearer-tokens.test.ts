@@ -226,4 +226,15 @@ describe('bearer token access', () => {
       await clearBan();
     }
   }, 30000);
+
+  it('auth responses do not grant arbitrary-origin CORS', async () => {
+    // Design §5.2: the portal must NOT echo origins or blanket-grant * —
+    // browser third-party access is out of scope by design (customer BFF
+    // pattern). This locks in that decision: any future "just allow CORS
+    // quickly" change on /api/auth/** fails here instead of shipping silently.
+    // Verified today: app code sets no ACAO, and in installed better-auth@1.6.23
+    // only the (unregistered) mcp plugin sets one — so this asserts null.
+    const res = await signInWithPassword(BEARER_EMAIL, BEARER_PASSWORD);
+    expect(res.headers.get('Access-Control-Allow-Origin'), 'no ACAO grant on auth responses').toBeNull();
+  }, 30000);
 });
