@@ -124,10 +124,10 @@ Key points:
 - Verification is stateless + DB-backed: the bearer plugin verifies the HMAC signature on each request, then the normal session lookup confirms the row exists (expiry, revocation).
 - There is exactly **one token per sign-in** — no separate long-lived second secret in v1.
 
-Token emission happens two ways:
+Token emission has exactly ONE in-band path in v1; there is no dedicated "get my token" endpoint (verified against installed better-auth 1.6.23 source):
 
-1. **`set-auth-token` response header** — automatically added by the `bearer` plugin's after-hook on *any* `/api/auth/**` response that sets a session cookie (verified in installed source, `node_modules/better-auth/dist/plugins/bearer/index.mjs`: it parses `Set-Cookie`, and when a non-zero-max-age session cookie is present it sets `set-auth-token: <value>` plus extends `Access-Control-Expose-Headers`). A web login that also carries an `Authorization` header (or a programmatic sign-in) therefore yields the token in-band.
-2. **On-demand re-issue** — `POST /api/auth/get-access-token` returns `{ token }` for the caller's current session; it works with *either* cookie or bearer auth (the bearer plugin translates first), so a client can refresh its own copy without re-signing-in.
+1. **`set-auth-token` response header** — automatically added by the `bearer` plugin's after-hook on *any* `/api/auth/**` response that sets a session cookie (verified in installed source, `node_modules/better-auth/dist/plugins/bearer/index.mjs`: it parses `Set-Cookie`, and when a non-zero-max-age session cookie is present it sets `set-auth-token: <value>` plus extends `Access-Control-Expose-Headers`). A web login that also carries an `Authorization` header (or a programmatic sign-in) therefore yields the token in-band. The email/password sign-in JSON body additionally carries `{token}` inline — scriptable acquisition without header parsing.
+2. **Re-acquisition is re-authentication** — a client needing a fresh token (after expiry/revocation, 401) simply authenticates again over plain HTTP (no cookies involved): email/password or the OAuth callback door mints a new Session row and a new `set-auth-token`. Note: `POST /api/auth/get-access-token` is NOT a session-token endpoint — in installed 1.6.23 it is the provider OAuth token endpoint (`dist/api/routes/account.mjs`), requiring a `providerId` body field and returning the linked IdP's `{ accessToken, ... }`. (An early draft of this doc misidentified it as an on-demand re-issue mechanism; corrected 2026-10-08 against source.)
 
 ### 4.2 Token Emission Sequence (external developer client)
 
@@ -244,8 +244,8 @@ sequenceDiagram
             P-->>S: 200 + data
         else 401 (expired/revoked)
             P-->>S: 401
-            S->>P: POST /api/auth/get-access-token (with cookie if still alive, else re-sign-in)
-            P-->>S: fresh token
+            S->>P: re-authenticate (POST /api/auth/sign-in/email)<br/>(no dedicated re-issue endpoint in v1.6.x — see §4.1)
+            P-->>S: new session row + fresh set-auth-token
         end
     end
 ```
@@ -262,7 +262,7 @@ sequenceDiagram
 | Phase | Contents (plan task refs) | Exit criterion |
 |---|---|---|
 | **1 — Bearer plugin + behavioral proof** | TDD: failing integration tests for bearer sign-in, `set-auth-token` emission, authorization on a protected route, revocation-on-signout; register `bearer()` in `lib/auth.ts` | `npx vitest run tests/integration/bearer-tokens.test.ts` green; zero diff elsewhere in `lib/auth.ts` |
-| **2 — Hardened edge paths** | `get-access-token` re-issue test (T4); ban gate blocks bearer acquisition (T5); no-CORS / no-origin-echo assertion on `/api/auth/**` responses (T6) | Same file green incl. negative cases; full `npm run test` passes (no regressions in cookie flow) |
+| **2 — Hardened edge paths** | re-acquisition-via-sign-in test (plan T3, corrected 2026-10-08: no `get-access-token` re-issue exists in v1.6.x); revocation + malformed-header security pins (T4); ban gate blocks bearer acquisition (T5); no-CORS / no-origin-echo assertion on `/api/auth/**` responses (T6) | Same file green incl. negative cases; full `npm run test` passes (no regressions in cookie flow) |
 | **3 — Developer docs** | `documents/api/bearer-tokens.md` runbook + §7 client guidance; `SECURITY.md` ops section (§6); `.env.example` note if any new var ever added | Docs reviewed, link from README/API docs index |
 
 Each phase ends in an independent committable state. Phase 1 alone delivers the entire feature (config-only) — Phases 2–3 are proof and paperwork.
@@ -271,7 +271,7 @@ Each phase ends in an independent committable state. Phase 1 alone delivers the 
 
 | Layer | Target | What it proves |
 |---|---|---|
-| Integration (new) | `tests/integration/bearer-tokens.test.ts` | ① cookie sign-in response carries `set-auth-token`; ② that token authenticates `GET /api/auth/me` via `Authorization: Bearer`; ③ `POST /api/auth/get-access-token` with bearer returns a usable `{ token }`; ④ sign-out → next bearer call is 401; ⑤ banned user sign-in yields NO token (gate fires in all methods); ⑥ malformed/absent/mal-scheme Authorization header → 401, not 500 |
+| Integration (new) | `tests/integration/bearer-tokens.test.ts` | ① cookie sign-in response carries `set-auth-token`; ② that token authenticates `GET /api/auth/me` via `Authorization: *** ③ re-acquisition: a fresh usable token is minted by re-authenticating over plain HTTP (no cookies; sign-in body carries `{token}`) — no dedicated re-issue endpoint exists in v1.6.x (§4.1); ④ sign-out → next bearer call resolves NO session (theft dies); ⑤ banned user sign-in yields NO token (gate fires in all methods); ⑥ malformed/absent/mal-scheme Authorization header → no resolved session and never 5xx |
 | Integration (regression) | `tests/integration/auth.test.ts`, `google-oidc-full-flow.test.ts`, `rate-limiting.test.ts` | cookie flow, Google gate, rate limits byte-for-byte unchanged |
 | Assertion of non-change | T6 CORS probe | `/api/auth/**` responses contain **no** `Access-Control-Allow-Origin: *` and no dynamic origin echo (locks in the §5.2 decision) |
 | Manual smoke | Phase 3 checklist | curl sign-in from a non-localhost network interface (e.g. LAN IP / tunnel) → token works on a real org endpoint |
