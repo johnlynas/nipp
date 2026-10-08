@@ -210,7 +210,7 @@ Rationale vs alternatives: hardcoded host = painful redeploy on every cloud plat
 
 ---
 
-## Phase G — Token expiry & refresh for bearer clients (TDD + docs)
+## Phase G — Token expiry & refresh for bearer clients (TDD + docs) ✅ DONE (2026-10-08, commit 4cd0ae8)
 
 Lifecycle facts (source-verified in installed better-auth@1.6.23, config today: `lib/auth.ts` session block):
 - Hard max: any session dies at `expiresIn = 60*60s` (1h absolute) — no bearer client outlives it; DB row deleted by better-auth's cleanup.
@@ -254,6 +254,13 @@ it('bearer token is immediately unusable after revocation (no grace period)', as
 });
 ```
 Same TDD steps as G1. (Overlaps old-plan Task 4 pin — keep only if the helper signature makes it non-duplicative; otherwise record "covered by existing pin" and skip.)
+
+**Result: SKIPPED (2026-10-08)** — covered by the existing `sign-out revokes the bearer token immediately` test in the same file: identical contract (immediate, no grace) plus an extra proof that bearer-driven sign-out itself works. Plan's own skip condition applies; recording here per plan.
+
+**Phase G result block:**
+- G1 shipped with one deviation from the sketch: aged by `userId` + newest-row lookup instead of `where: { token: t }`. Reason (verified empirically before asserting): `set-auth-token` is NOT the raw `Session.token` value — transport values are a signed/wrapped form (77 chars w/ dot vs 32-char raw column, sharing the same head), so direct DB lookup by header token misses. Aging by userId needs no inversion; renewal is then proven from the **response's** `session.expiresAt` (fresh ~1h) rather than a second DB read — equivalent assertion, zero secret handling in test code.
+- G2: created `documents/api/bearer-tokens.md` (new file). The plan assumed this doc existed with §4.3 import rules (old plan Task 8), but that task was never run and no `documents/api/` tree existed — so the file now contains acquisition doors + the "Token lifetime & refresh" section + the §4.3 diagram verbatim, with the design doc named as source of truth for all full diagrams. Old-plan Task 8's remaining scope (SECURITY.md ops runbook) stays pending under Phase F or a later docs pass.
+- Gate: project gate green — npm run test 91 files passed, lint clean, build OK (bearer file standalone: 8/8).
 
 ---
 
