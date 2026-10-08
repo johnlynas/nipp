@@ -18,6 +18,23 @@ export const envSchema = z.object({
   FRONTEND_URL: z.string().url('FRONTEND_URL must be a valid URL').default('http://localhost:3000'),
   NEXT_PUBLIC_API_URL: z.string().url('NEXT_PUBLIC_API_URL must be a valid URL').default('http://localhost:3000'),
 
+  // ---------------------------------------------------------------------------
+  // BetterAuth public access (Phase B): per-request base URL + trusted origins.
+  // lib/auth.ts hardcodes zero host values — every deploy-tunable flows from here.
+  // ---------------------------------------------------------------------------
+
+  /** Comma-separated host patterns better-auth accepts when resolving per-request base URL + trusted origins. Cloud deploys set their real domain(s); local dev uses "*". */
+  BETTER_AUTH_ALLOWED_HOSTS: z.string().min(1, 'BETTER_AUTH_ALLOWED_HOSTS is required').default('*'),
+
+  /** Protocol for dynamic baseURL construction. "auto" (default) emits both http://* and https://* trusted-origin patterns and follows x-forwarded-proto behind a proxy — required so local LAN HTTP + future public HTTPS both work. */
+  BETTER_AUTH_BASE_PROTOCOL: z.enum(['auto', 'http', 'https']).default('auto'),
+
+  /** Read x-forwarded-host / x-forwarded-proto for dynamic base resolution (officially required for dynamic baseURL; keep true behind any proxy). */
+  TRUSTED_PROXY_HEADERS: z.enum(['true', 'false']).default('true'),
+
+  /** Comma-separated extra trusted origins for cross-origin browser frontends (partner BFFs). Cookieless bearer clients never need this. */
+  BETTER_AUTH_TRUSTED_ORIGINS: z.string().optional(),
+
   REDIS_URL: z.string().url('REDIS_URL must be a valid Redis connection string').optional().default('redis://localhost:6379'),
 
   // L1 Cache Configuration

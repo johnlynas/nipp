@@ -238,3 +238,38 @@ describe('bearer token access', () => {
     expect(res.headers.get('Access-Control-Allow-Origin'), 'no ACAO grant on auth responses').toBeNull();
   }, 30000);
 });
+
+describe('bearer over a non-localhost host (public-access pin)', () => {
+  // Phase B pin: with the env-driven dynamic baseURL, a request arriving on an
+  // EXTERNAL host must behave identically to loopback — base URL + trusted
+  // origins resolve per-request from the incoming Host header. If a future
+  // change regresses us to a static base (e.g. re-enabling BETTER_AUTH_URL),
+  // this fails: trusted origins freeze to one host and external sign-ins break.
+  it('sign-in + get-session work on an arbitrary reachable host, cross-host session replay included', async () => {
+    await seedLocalUser();
+    const handler = auth.handler as (req: Request) => Promise<Response>;
+
+    // Sign in over an external-style domain (no localhost in sight).
+    const res = await handler(
+      new Request('http://remote-client.example.com/api/auth/sign-in/email', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email: BEARER_EMAIL, password: BEARER_PASSWORD }),
+      }),
+    );
+    expect(res.status, `external-host sign-in should succeed, got ${res.status}`).toBeLessThan(300);
+    const token = res.headers.get('set-auth-token');
+    expect(token).toBeTruthy();
+
+    // Replay the SAME token from a DIFFERENT host — public clients move between
+    // IPs/domains; the bearer string must stay valid (no per-host binding).
+    const me = await handler(
+      new Request('http://192.168.99.5:3000/api/auth/get-session', {
+        headers: { Authorization: `Bearer ${token}` },
+      }),
+    );
+    expect(me.status).toBe(200);
+    const body = await me.json();
+    expect(body.user.email).toBe(BEARER_EMAIL);
+  }, 30000);
+});

@@ -124,17 +124,37 @@ export const auth = betterAuth({
     provider: 'postgresql',
   }),
 
+  // PUBLIC ACCESS (Phase B): per-request base URL, fully env-driven — this file
+  // hardcodes zero host values. The Host is taken from each incoming request
+  // (Host header; x-forwarded-host when TRUSTED_PROXY_HEADERS is on), validated
+  // against BETTER_AUTH_ALLOWED_HOSTS, and used as base + trusted origin, so
+  // localhost, LAN IP, tunnel hostname, and the production domain all work with
+  // no code change. (A static BETTER_AUTH_URL froze trusted origins to one host
+  // and caused remote INVALID_ORIGIN — see public-internet-bearer-access plan.)
+  baseURL: {
+    allowedHosts: env.BETTER_AUTH_ALLOWED_HOSTS.split(',').map((s) => s.trim()).filter(Boolean),
+    protocol: env.BETTER_AUTH_BASE_PROTOCOL,
+    fallback: env.FRONTEND_URL,
+  },
+
   // SECURITY (S2): Configure BetterAuth to trust our reverse proxy for real client IP.
   // BetterAuth walks the x-forwarded-for chain right-to-left, skipping trusted proxy IPs,
   // and uses the first untrusted address as the client IP. This fixes session security
   // (IP binding) and audit log forensic integrity when behind a load balancer.
   advanced: {
+    // PUBLIC ACCESS (Phase B): trust x-forwarded-host / x-forwarded-proto for
+    // dynamic base-URL + client-IP resolution behind a reverse proxy/edge.
+    // Officially required to be explicit for dynamic baseURL in better-auth 1.6.x;
+    // keep true behind any proxy, false when the server receives direct traffic only.
+    trustedProxyHeaders: env.TRUSTED_PROXY_HEADERS === 'true',
+
     ipAddress: {
-      // Add your proxy/load-balancer CIDRs here. When set, BetterAuth strips trusted
-      // hops from the right and uses the first untrusted address as the real client IP.
-      // Without this, a single-value x-forwarded-for header is trusted (which is safe
-      // only when no proxies are in use).
-      // trustedProxies: ['10.0.0.0/8', '172.16.0.0/12'],
+      // Populate from TRUSTED_PROXY_CIDRS once we sit behind a real reverse proxy
+      // (Cloudflare/NGINX) in Phase C. Untrusted x-forwarded-for values beyond a
+      // trusted CIDR are ignored — prevents client-IP spoofing for rate limiting.
+      ...(env.TRUSTED_PROXY_CIDRS
+        ? { trustedProxies: env.TRUSTED_PROXY_CIDRS.split(',').map((s) => s.trim()).filter(Boolean) }
+        : {}),
     },
     // SECURITY (S11): Force Secure cookie attribute + SameSite=Lax for all cookies.
     // useSecureCookies: true in production ensures the Secure flag is set (required for HTTPS).
