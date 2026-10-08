@@ -220,7 +220,24 @@ git commit -m "feat(auth): register bearer() plugin for remote-domain API access
 
 ---
 
-## Task 3: Test — on-demand token re-issue via get-access-token
+## Task 3: Test — on-demand token re-issue via get-access-token ✅ DONE with DESIGN DOC FIX-REQUIRED (2026-10-08)
+
+**Result:** GREEN — but NOT as the plan wrote it. **⚠ The design doc is wrong about this endpoint.**
+
+Investigation (verified in installed `better-auth@1.6.23` source):
+- `POST /api/auth/get-access-token` is the **provider OAuth token endpoint** (`dist/api/routes/account.mjs:315`): body requires `providerId`, returns the linked IdP's `{ accessToken, idToken, ... }`. It is NOT a "re-issue my session/bearer token" route. First attempt returned 400 `USER_ID_OR_SESSION_REQUIRED` / provider-not-supported — exactly as source predicts.
+- The `set-auth-token` header exists **only** via the bearer plugin's after-hook (`dist/plugins/bearer/index.mjs:50-68`), which fires only when a response **sets the session cookie**. Core routes that do that: sign-in, sign-up, callback, update-session, update-user. No dedicated "get my token" endpoint ships in 1.6.x (contrary to `documents/feature-planning-and-development/bearer-token-remote-access.md` §4.2 point 2).
+
+**What was pinned instead** (test rewritten accordingly): a Bearer client mints a fresh usable token by authenticating over plain HTTP again — second sign-in yields a new session row + new `set-auth-token`, zero cookies involved; and the email sign-in JSON body carries `{token}` inline (scriptable acquisition). Test name documents the finding. Full bearer file: 2/2 passed; regression triple (bearer + auth + oidc): 16/16.
+
+**Commit:** `2aa8ffc test(auth): pin bearer token re-acquisition via sign-in (no re-issue endpoint in v1.6.x)`
+
+**TODOs this creates:**
+- **Design doc §4.2 point 2 ("on-demand re-issue") must be corrected** before Task 8 copies it into `documents/api/bearer-tokens.md` — document "re-authenticate to get a fresh token" as the flow; optionally mention `/update-session` also re-emits the header.
+- Design doc §7.1 diagram step ("POST /api/auth/get-access-token on 401") has the same error.
+- Task 8 doc sections 2/3 in this plan inherit the correction.
+
+Next: Task 4 (revocation + malformed-header security pins — expect stock plugin behavior to pass).
 
 **Objective:** A client holding a bearer token can mint its own fresh usable copy without re-signing-in.
 
