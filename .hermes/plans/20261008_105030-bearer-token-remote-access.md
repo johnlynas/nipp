@@ -4,7 +4,7 @@
 
 **Goal:** Allow remote-domain / server-to-server clients to authenticate to the portal API with `Authorization: Bearer <token>` while the existing cookie-based browser login stays untouched.
 
-**Architecture:** Register BetterAuth's built-in `bearer()` plugin (already shipped in installed `better-auth@1.6.23` — zero new dependencies). The plugin converts an Authorization header into an internal session cookie *on each request*, so every route that already works via cookie sessions (`withAuth` → `auth.api.getSession({ headers })`) works via bearer identically. Tokens are the existing 1h-max-expiry, revocable BetterAuth session tokens; emission happens through the plugin's automatic `set-auth-token` response header and, on demand, `/api/auth/get-access-token`.
+**Architecture:** Register BetterAuth's built-in `bearer()` plugin (already shipped in installed `better-auth@1.6.23` — zero new dependencies). The plugin converts an Authorization header into an internal session cookie *on each request*, so every route that already works via cookie sessions (`withAuth` → `auth.api.getSession({ headers })`) works via bearer identically. Tokens are the existing 1h-max-expiry, revocable BetterAuth session tokens; emission happens through the plugin's automatic `set-auth-token` response header on any cookie-setting auth response (there is no dedicated re-issue endpoint in v1.6.x — corrected against source during Task 3).
 
 **Tech Stack:** Next.js App Router, BetterAuth 1.6.23 (`lib/auth.ts`, minimal entrypoint), Prisma/PostgreSQL, Vitest integration tests (mocked Google exchange pattern from `tests/integration/google-oidc-full-flow.test.ts`).
 
@@ -220,7 +220,7 @@ git commit -m "feat(auth): register bearer() plugin for remote-domain API access
 
 ---
 
-## Task 3: Test — on-demand token re-issue via get-access-token ✅ DONE with DESIGN DOC FIX-REQUIRED (2026-10-08)
+## Task 3: Test — on-demand token re-issue via get-access-token ✅ DONE + design doc corrected (2026-10-08)
 
 **Result:** GREEN — but NOT as the plan wrote it. **⚠ The design doc is wrong about this endpoint.**
 
@@ -232,60 +232,24 @@ Investigation (verified in installed `better-auth@1.6.23` source):
 
 **Commit:** `2aa8ffc test(auth): pin bearer token re-acquisition via sign-in (no re-issue endpoint in v1.6.x)`
 
-**TODOs this creates:**
-- **Design doc §4.2 point 2 ("on-demand re-issue") must be corrected** before Task 8 copies it into `documents/api/bearer-tokens.md` — document "re-authenticate to get a fresh token" as the flow; optionally mention `/update-session` also re-emits the header.
-- Design doc §7.1 diagram step ("POST /api/auth/get-access-token on 401") has the same error.
-- Task 8 doc sections 2/3 in this plan inherit the correction.
+**TODOs this create (RESOLVED on same day — see below + commit `8d64fd7`):**
+- ~~Design doc §4.2 point 2 ("on-demand re-issue") must be corrected~~ ✅ done in commit `8d64fd7`.
+- ~~Design doc §7.1 diagram step ("POST /api/auth/get-access-token on 401") has the same error.~~ ✅ fixed in the same commit.
+- Task 8 doc sections 2/3 in this plan inherit the correction — **Task 8 spec already updated** to point at the corrected design doc §4.1, so no drift.
 
-Next: Task 4 (revocation + malformed-header security pins — expect stock plugin behavior to pass).
-
-**Objective:** A client holding a bearer token can mint its own fresh usable copy without re-signing-in.
-
-**Files:**
-- Modify: `tests/integration/bearer-tokens.test.ts` (append to the existing describe block)
-
-**Step 1: Write the test**
-
-```ts
-it('POST /api/auth/get-access-token with bearer returns a usable { token }', async () => {
-  const signin = await signInWithPassword(EMAIL, PASSWORD);
-  const t1 = signin.headers.get('set-auth-token')!;
-
-  const reissue = await auth.handler(
-    new Request('http://localhost/api/auth/get-access-token', {
-      method: 'POST',
-      headers: { Authorization: `Bearer ${t1}` },
-    }),
-  );
-  expect(reissue.status).toBe(200);
-  const body = await reissue.json();
-  expect(body.token).toBeTruthy();
-
-  const me = await getMeWithBearer(body.token);
-  expect(me.status).toBe(200);
-});
-```
-
-**Step 2: Run, verify pass (or adjust endpoint name only)**
-
-```bash
-npx vitest run tests/integration/bearer-tokens.test.ts
-```
-
-Expected: PASS immediately (plugin + endpoint both stock BetterAuth behavior pinned in Task 1's test file). If it fails on a route-name detail (check `node_modules/better-auth/dist/plugins/jwt` or the core routes for `get-access-token`), fix the *test URL*, not config — the behavior is what's pinned, per design doc §4.2.
-
-**Step 3: Commit**
-
-```bash
-git add tests/integration/bearer-tokens.test.ts
-git commit -m "test(auth): pin get-access-token re-issue over bearer"
-```
+Next: Task 4 (revocation + malformed-header security pins).
 
 ---
 
-## Task 4: Test — revocation and bad-header behavior (security pins)
+## Task 4: Test — revocation and bad-header behavior (security pins) ✅ DONE (2026-10-08)
 
-**Objective:** A stolen token dies on sign-out; malformed headers yield 401 not 500. These two tests are the theft-damage controls from design doc §4.3/§5.1.
+**Result:** GREEN — both tests pass, with one library-contract correction: in installed better-auth@1.6.23 an unauthenticated `GET /api/auth/get-session` answers **2xx with an empty body**, not HTTP 401 (verified in `dist/api/routes/session.mjs`: the handler returns `null` when no session resolves; plan/design had assumed 401 — that wording was wrong, the invariant it intended is intact). The tests therefore pin the real contract via a shared `expectUnauthed()` helper: **no resolved user AND status < 500** on (a) post-sign-out bearer replay and (b) every malformed/missing/mal-scheme header shape. Bearer-driven sign-out itself works (proven by the same test). Full file 4/4; regression triple (bearer + auth + oidc): **18/18 passed**.
+
+**Commits:** `5e2de22 test(auth): pin bearer revocation and no-session contract for bad headers` (+ `8d64fd7 docs(auth): correct get-access-token re-issue assumption against v1.6.x source`, the same-day design-doc fix listed under Task 3).
+
+**Design doc follow-up (done in `8d64fd7`):** §9 test-strategy row ④/⑥ wording now says "resolves NO session / never 5xx" so it matches the pin.
+
+**Objective:** A stolen token dies on sign-out; malformed headers yield no resolved session, never a server error. These two tests are the theft-damage controls from design doc §4.3/§5.1.
 
 **Files:**
 - Modify: `tests/integration/bearer-tokens.test.ts` (append two tests)
@@ -459,7 +423,7 @@ Expected: (2) returns org team JSON; (3) returns `401`. Note that in an actual b
 Required sections, content copied/condensed from the design doc (including its Mermaid diagrams — copy them verbatim so they stay in sync with the source of truth):
 
 1. Authentication model — one token = BetterAuth session token; header format `Authorization: Bearer <token>`.
-2. Token acquisition — the two doors (email/password door fully scriptable; Google OIDC door scriptable via redirect/callback chain), the `set-auth-token` response header, and `POST /api/auth/get-access-token` for on-demand re-issue.
+2. Token acquisition — the two doors (email/password door fully scriptable; Google OIDC door scriptable via redirect/callback chain), the `set-auth-token` response header, and re-acquisition by re-authenticating over plain HTTP (no dedicated re-issue endpoint in v1.6.x — see design doc §4.1 as corrected).
 3. Lifetime policy — 1h hard max, 15-min inactivity renewal, revocation on sign-out/ban (copy design doc §4.3 state diagram).
 4. Storage & usage rules — memory-first, never log/embed in URLs, 401 → re-authenticate, 429 → back off, no long-lived refresh secret offered in v1.
 5. Known limits — no CORS grant for third-party *browser* apps (customer-hosted BFF is that pattern), no IP pinning, no separate JWT/refresh subsystem (design §5.2 rationale table).
