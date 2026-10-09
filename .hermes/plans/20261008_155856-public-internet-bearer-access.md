@@ -350,6 +350,23 @@ Commit `docs(auth): public-access origin policy and proxy header runbook`.
 
 ---
 
+## Phase H — Fix: "access denied ~30s after login over LAN IP" (public-access follow-up)
+
+**Observed (remote machine, 2026-10-09):** login over `http://<lan-ip>:3000` works; admin dashboard renders; after ~30s the page flips to the AccessDenied screen. Console shows `Failed to obtain payload encryption key` from `encryptedFetch` (lib/api-client.ts:124) in the notifications page's org fetch.
+
+**Root cause (verified):** NOT the permission check — it was a second localhost-pinned origin gate. PII routes (incl. `/api/auth/user-permissions`, which feeds `usePermissions` → `RequireSuperAdmin`) require a payload key first; POST /api/security/payload-key compared the browser's `Origin` against `env.FRONTEND_URL` (`.env`: `http://localhost:3000`). A browser on the LAN IP sends `Origin: http://<lan-ip>:3000` → 403 "untrusted origin" → permission fetch fails after React Query retries (~30s) → `isSuperAdmin` false → AccessDenied. Same fix class as Phase A (better-auth) / B (baseURL), one gate earlier in the request chain that nobody had hit because localhost worked end-to-end.
+
+**Fix (host-independent, no IP anywhere — request carries its own identity):**
+- `lib/csrf.ts`: new `isSameOriginRequest(requestUrl, method, headers)` — compares Origin/Referer to the **request's own URL origin** (`request.url`, i.e. whatever host/IP the browser actually connected on; behind a proxy this is the forwarded-host-resolved one), with the existing dev-mode relaxation. Safe methods pass through.
+- `app/api/security/payload-key/route.ts` + `revoke/route.ts`: duplicated FRONTEND_URL-pinned `isTrustedOrigin` replaced by a call to `isSameOriginRequest(request.url, request.method, request.headers)`. Trust is now derived from the system at request time — any reachable IP/domain works with zero config and zero code; a truly cross-site Origin (evil.example.com POSTing to our origin) is still rejected in production.
+- NOT changed: ~10 other routes' `isSameSiteRequest` (FRONTEND_URL-pinned) — dev-relaxed today, same latent issue in production deploys; logged for Phase C scope when real exposure + proxy land.
+
+**Verification:** new `tests/unit/csrf.test.ts` — 13 pins (LAN IP accepted on matching request URL, localhost accepted, tunnel hostname accepted, cross-site origin rejected in prod, wrong-host origin rejected with the serving host being the LAN IP, referer fallback, GET pass-through, fail-closed no-origin in prod, dev relaxation, path/query insensitivity; plus 2 legacy-gate pins documenting isSameSiteRequest's unchanged host-specific contract). Full gate: `npm run test` 92 files / 1952 passed, lint clean, build OK.
+
+**Open (user to re-test):** restart the server and log in over the LAN IP — dashboard must now stay up past ~30s. Watch the console: the "Failed to obtain payload encryption key" error should be gone; POST /api/security/payload-key should answer 200 with `Cache-Control: no-store`.
+
+---
+
 ## Files likely to change (whole plan)
 - `lib/auth.ts` — env-driven baseURL block; `trustedProxyHeaders` from env; trustedProxies wiring. **No** hardcoded hosts, **no** CORS, **no** disableCSRFCheck, **no** jwt plugin, **no** crossSubDomainCookies.
 - `lib/env-schema.ts` — +`BETTER_AUTH_ALLOWED_HOSTS`, `BETTER_AUTH_BASE_PROTOCOL`, `TRUSTED_PROXY_HEADERS`, `BETTER_AUTH_TRUSTED_ORIGINS`.

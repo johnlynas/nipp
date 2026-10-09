@@ -16,59 +16,27 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { auth } from '@/lib/auth';
 import { env } from '@/lib/env';
+import { isSameOriginRequest } from '@/lib/csrf';
 import { logger } from '@/lib/logger';
 import { issuePayloadKey, getPayloadKeyStore, startKeyCleanupScheduler } from '@/lib/payload-key-server';
 import { incrementMetric } from '@/lib/payload-metrics';
 import { checkRateLimit, resetRateLimitStore, RATE_LIMIT_MAX, RATE_LIMIT_WINDOW } from '@/lib/rate-limiter';
 
 // ---------------------------------------------------------------------------
-// CSRF / origin validation
+// CSRF / origin validation (PUBLIC ACCESS fix)
 // ---------------------------------------------------------------------------
 
 /**
- * Validate that the request Origin or Referer matches the trusted frontend URL.
- * Returns true if the origin is trusted, false otherwise.
+ * Validate that the request is same-origin with the server serving it.
+ *
+ * Uses isSameOriginRequest (request's own origin vs Origin/Referer) instead of
+ * comparing against env.FRONTEND_URL: a browser on a LAN IP / tunnel hostname
+ * sends `http://<that-host>` as its Origin, which the FRONTEND_URL pin rejected
+ * with 403 — breaking every PII-routed call (payload key prerequisite) for
+ * non-localhost clients. Same origin = the server itself on any reachable host.
  */
 function isTrustedOrigin(request: NextRequest): boolean {
-  const trustedUrl = env.FRONTEND_URL;
-  if (!trustedUrl) return true; // No trusted URL configured — allow all (dev mode)
-
-  const origin = request.headers.get('origin');
-  const referer = request.headers.get('referer');
-
-  // Check Origin header (preferred for same-origin checks)
-  if (origin) {
-    try {
-      const originUrl = new URL(origin);
-      const trustedUrlObj = new URL(trustedUrl);
-      if (
-        originUrl.hostname === trustedUrlObj.hostname &&
-        originUrl.port === trustedUrlObj.port
-      ) {
-        return true;
-      }
-    } catch {
-      // Malformed origin — skip
-    }
-  }
-
-  // Check Referer header as fallback
-  if (referer) {
-    try {
-      const refererUrl = new URL(referer);
-      const trustedUrlObj = new URL(trustedUrl);
-      if (
-        refererUrl.hostname === trustedUrlObj.hostname &&
-        refererUrl.port === trustedUrlObj.port
-      ) {
-        return true;
-      }
-    } catch {
-      // Malformed referer — skip
-    }
-  }
-
-  return false;
+  return isSameOriginRequest(request.url, request.method, request.headers);
 }
 
 // Start the payload key cleanup scheduler (lazy, unref'd)
