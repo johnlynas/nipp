@@ -28,7 +28,7 @@ vi.mock('nodemailer', () => ({})); // isolate from transporter machinery
 vi.mock('@/lib/notifications/email', () => ({ sendEmail: mockSendEmail }));
 vi.mock('@/lib/logger', () => ({ logger: mockLogger }));
 
-import { issueInviteLink, consumeInviteToken } from '@/lib/oidc-magic-link';
+import { issueInviteLink, consumeInviteToken, normalizePortalOrigin } from '@/lib/oidc-magic-link';
 import type { User } from '@prisma/client';
 
 function makeUser(overrides: Record<string, unknown> = {}): User & { oidcVerified?: boolean } {
@@ -88,9 +88,65 @@ describe('issueInviteLink', () => {
     expect(mockSendEmail).toHaveBeenCalledTimes(1);
     const [to, subject, message] = mockSendEmail.mock.calls[0];
     expect(to).toBe('flow.person@example.com');
-    expect(String(subject)).toMatch(/activat|sign in/i);
+    // Subject is the literal product copy (NIPP account activation) — pin exact
+    // wording so a reword doesn't slip past the /activat/i net.
+    expect(String(subject)).toBe('NIPP account activation');
     expect(String(message)).toContain(res.token);
     expect(String(message)).toContain('Flow Person');
+  });
+
+  it('builds the link on the portalOrigin (LAN IP) — not a pinned FRONTEND_URL', async () => {
+    mockPrisma.verification.create.mockResolvedValue({ id: 'v-lan' });
+    mockSendEmail.mockResolvedValue({ success: true });
+
+    const res = await issueInviteLink(makeUser(), { portalOrigin: 'http://192.168.2.8:3000' });
+    expect(res.ok).toBe(true);
+    if (!res.ok) return;
+    // Button href AND the fallback text both carry the reachable server IP.
+    expect(res.url.startsWith('http://192.168.2.8:3000/auth/magic-link/verify?token=')).toBe(true);
+    expect(res.url).not.toContain('localhost');
+    const [to, _subject, message] = mockSendEmail.mock.calls[0];
+    void to;
+    // The URL appears twice (link + button href), both on the LAN origin.
+    expect(String(message).split('http://192.168.2.8:3000/auth/magic-link/verify').length - 1).toBeGreaterThanOrEqual(2);
+  });
+
+  it('drops a trailing slash from portalOrigin and keeps the token in the URL', async () => {
+    mockPrisma.verification.create.mockResolvedValue({ id: 'v-slash' });
+    mockSendEmail.mockResolvedValue({ success: true });
+
+    const res = await issueInviteLink(makeUser(), { portalOrigin: 'https://portal.example.com/' });
+    expect(res.ok).toBe(true);
+    if (!res.ok) return;
+    expect(res.url).toBe(`https://portal.example.com/auth/magic-link/verify?token=${res.token}`);
+  });
+
+  it('falls back to FRONTEND_URL when portalOrigin is malformed (never emits an unparseable URL)', async () => {
+    mockPrisma.verification.create.mockResolvedValue({ id: 'v-bad' });
+    mockSendEmail.mockResolvedValue({ success: true });
+
+    for (const bad of ['not a url', '/', '', null]) {
+      const res = await issueInviteLink(makeUser(), { portalOrigin: bad });
+      expect(res.ok).toBe(true);
+      if (!res.ok) return;
+      expect(res.url.startsWith('http://localhost:3000/auth/magic-link/verify?token=')).toBe(true);
+    }
+  });
+
+  describe('normalizePortalOrigin', () => {
+    it('accepts full URLs, bare origins, strips trailing slashes', () => {
+      expect(normalizePortalOrigin('http://192.168.2.8:3000')).toBe('http://192.168.2.8:3000');
+      expect(normalizePortalOrigin('https://portal.example.com/')).toBe('https://portal.example.com');
+      // Full URL collapses to origin (path/query stripped).
+      expect(normalizePortalOrigin('https://portal.example.com/some/path?x=1')).toBe('https://portal.example.com');
+    });
+
+    it('rejects garbage, bare paths, and empty input', () => {
+      expect(normalizePortalOrigin(null)).toBeNull();
+      expect(normalizePortalOrigin(undefined)).toBeNull();
+      expect(normalizePortalOrigin('not a url')).toBeNull();
+      expect(normalizePortalOrigin('/just/a/path')).toBeNull();
+    });
   });
 
   it('issues unique tokens per call', async () => {

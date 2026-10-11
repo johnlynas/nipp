@@ -51,7 +51,7 @@ export async function POST(
       return NextResponse.json({ alreadyVerified: true });
     }
 
-    const issueResult = await issueInviteLink(user);
+    const issueResult = await issueInviteLink(user, { portalOrigin: new URL(request.url).origin });
     if (!issueResult.ok) {
       logger.error(
         { adminUserId: auth.session!.user.id, targetUserId: id, err: issueResult.error },

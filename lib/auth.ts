@@ -2,8 +2,10 @@ import { betterAuth } from 'better-auth/minimal';
 import { prismaAdapter } from 'better-auth/adapters/prisma';
 // Use relative import to bypass tenant isolation rule (BetterAuth needs raw Prisma client)
 import { prisma } from './db';
+import { withPlatformContextForDB } from './rls-transaction';
 import { organization, bearer } from 'better-auth/plugins';
 import { env } from './env';
+import tenantDb from '@/lib/tenant-db';
 import { createAuthMiddleware, APIError } from 'better-auth/api';
 import { logger } from './logger';
 import { issueInviteLink } from './oidc-magic-link';
@@ -16,6 +18,27 @@ interface ExtendedUser {
 interface ExtendedSession {
   user: ExtendedUser | null;
   activeOrganizationId: string | null;
+}
+
+// ---------------------------------------------------------------------------
+// Portal origin for invitation emails (PUBLIC ACCESS fix, Phase H class)
+// ---------------------------------------------------------------------------
+// The magic-link email must use the origin the USER'S BROWSER is actually
+// reaching on — http://<lan-ip>:3000 today, the public HTTPS domain in a cloud
+// deploy. Pinned FRONTEND_URL produced dead links (localhost:3000 for a visitor
+// on another machine), the same failure class as Phase A/B's better-auth base.
+// The origin is derived from the incoming request at session time; outside a
+// request context (admin-invite routes, cron) it falls back to FRONTEND_URL.
+let lastRequest: Request | null = null;
+
+/** Origin of the request that created the current session (if any). */
+export function getLastRequestOrigin(): string | null {
+  if (!lastRequest) return null;
+  try {
+    return new URL(lastRequest.url).origin;
+  } catch {
+    return null;
+  }
 }
 
 /**
@@ -35,45 +58,84 @@ interface ExtendedSession {
  * already recognises.
  */
 export async function enforceBanStatus(email: string): Promise<void> {
-  const user = await prisma.user.findUnique({ where: { email } });
+  const op = async () => {
+    const user = await prisma.user.findUnique({ where: { email } });
 
-  if (user?.banned) {
-    const now = new Date();
-    // If ban has expired, allow login (ban is lifted)
-    if (user.banExpires && user.banExpires < now) {
-      await prisma.user.update({
-        where: { id: user.id },
-        data: { banned: false, banReason: null, banExpires: null },
-      });
-    } else {
-      const reason = user.banReason || 'Your account has been banned.';
-      logger.warn(
-        { userId: user.id, email },
-        `Banned user login attempt: ${reason}`,
-      );
-      throw new APIError('UNAUTHORIZED', {
-        message: `Access denied. ${reason}`,
-      });
+    if (user?.banned) {
+      const now = new Date();
+      // If ban has expired, allow login (ban is lifted)
+      if (user.banExpires && user.banExpires < now) {
+        await prisma.user.update({
+          where: { id: user.id },
+          data: { banned: false, banReason: null, banExpires: null },
+        });
+      } else {
+        const reason = user.banReason || 'Your account has been banned.';
+        logger.warn(
+          { userId: user.id, email },
+          `Banned user login attempt: ${reason}`,
+        );
+        throw new APIError('UNAUTHORIZED', {
+          message: `Access denied. ${reason}`,
+        });
+      }
     }
-  }
+  };
+
+  // RLS: the User table is exempt (global auth model), but run under the
+  // platform context anyway so this single helper's DB access behaves
+  // identically on owner and non-owner roles (mirrors lib/cache/warm.ts).
+  const platformOrgId = env.PLATFORM_ORGANIZATION_ID;
+  if (!platformOrgId) return op(); // test/deploy without a platform org — raw client pass-through
+
+  return withPlatformContextForDB(platformOrgId, op);
 }
 
 /**
  * Enforce the pre-registration gate for Google OIDC sign-in (design §4.3 +
  * product decision: invite-only access).
  *
- * Single rule: EVERY session whose user has a Google `Account` row must belong
- * to a user who (a) completed magic-link verification (`oidcVerified === true`)
- * and (b) belongs to at least one organization (`Member` row). Rejections throw
- * APIError('UNAUTHORIZED') — BetterAuth surfaces them as 401 on the OAuth
- * callback with no session issued. The unverified branch issues a fresh magic
- * link on every attempt (each issue is a new token; old ones die on consume/
- * expiry), so a missed email self-heals by retrying the Google sign-in.
+ * Primary door: the google provider is configured with `disableImplicitSignUp`
+ * (lib/auth.ts socialProviders), so the OAuth callback REFUSES any identity
+ * with no pre-existing User row — zero rows written, no email, before a session
+ * could even be attempted. This gate is the last line of defence for the
+ * sessions that DO reach creation: every such user must (a) have completed
+ * magic-link verification (`oidcVerified === true`) and (b) belong to at least
+ * one organization (`Member` row). Rejections throw APIError('UNAUTHORIZED') —
+ * BetterAuth surfaces them as 401 on the OAuth callback with no session issued.
  *
- * INARIANT — local email/password login: the gate returns immediately for any
+ * Unverified invited users get a fresh magic link on every attempt (each issue
+ * is a new token; old ones die on consume/expiry), so a missed email self-heals
+ * by retrying the Google sign-in. Stray auto-registered rows (forged requestSignUp,
+ * or legacy rows predating disableImplicitSignUp) are recognised by their shape —
+ * no org membership AND no credential account: every admin invite has a Member
+ * row, and an auto-registered identity is google-only. They are refused WITHOUT
+ * an invitation email and the user row is removed best-effort (Accounts cascade).
+ *
+ * INVARIANT — local email/password login: the gate returns immediately for any
  * user WITHOUT a Google account, so the `/sign-in/email` path is byte-for-byte
  * unchanged; only the shared ban check (above) runs for them, exactly as before.
  */
+
+/**
+ * RLS-critical: the app role is nipp_app (non-owner), so Postgres applies the
+ * rls_member_isolated policy to every Member read. User/Account are exempt, so
+ * the identity lookup works through raw prisma — but a GUC-less membership
+ * check returns ZERO rows even for provisioned users (verified live: Ruth's
+ * Platform-org membership was invisible to this gate), which mis-reports
+ * "not provisioned" and locks out valid members. The authoritative membership
+ * query therefore runs under the sanctioned platform RLS context via
+ * withPlatformRead — same pattern as lib/authz.ts's verifySuperAdmin /
+ * lib/cache/warm.ts. Integration tests never caught this: they connect as
+ * postgres (owner, RLS bypassed).
+ */
+function withPlatformRead<T>(op: () => Promise<T>): Promise<T> {
+  const platformOrgId = env.PLATFORM_ORGANIZATION_ID;
+  // Passes through raw when unset (unit-test mocks / non-platform dev) — the
+  // owner/test connection sees rows anyway under that condition.
+  return platformOrgId ? withPlatformContextForDB(platformOrgId, op) : op();
+}
+
 export async function enforceOidcProvisioning(userId: string): Promise<void> {
   const user = await prisma.user.findUnique({
     where: { id: userId },
@@ -83,13 +145,64 @@ export async function enforceOidcProvisioning(userId: string): Promise<void> {
       email: true,
       oidcVerified: true,
       accounts: { select: { providerId: true } },
-      members: { select: { orgId: true } },
     },
   });
   if (!user) return; // defensive; BetterAuth guarantees the row exists
 
   const hasGoogle = user.accounts.some((a) => a.providerId === 'google');
   if (!hasGoogle) return; // email/password door — this gate is a no-op here
+
+  // Authoritative membership count for EVERY branch (stray / unverified-invite /
+  // verified-no-org) — Member is RLS-gated, so this MUST run under the platform
+  // context (see withPlatformRead above). tenantDb resolves model ops to the
+  // pinned connection where the GUCs are visible. Mail sends deliberately stay
+  // OUTSIDE the pinned interactive transaction.
+  const memberships = await withPlatformRead(async () => {
+    const u = await tenantDb.user.findUnique({
+      where: { id: userId },
+      select: { members: { select: { orgId: true } } },
+    });
+    return u?.members ?? [];
+  });
+
+  // STRAY auto-registered identity (disableImplicitSignUp bypassed — e.g. a
+  // client-forged requestSignUp:true — or legacy rows created before the flag
+  // shipped, like today's johnlynasdev@gmail.com). Their shape is unambiguous:
+  // no org membership AND no credential account AND not yet verified — every
+  // VALID user has an organization + team (a team can carry 1:M roles for
+  // permission refinement), and an admin-created user always gets one at
+  // creation (UserService.create rejects passwordless invites without an org).
+  // A user who is verified but still awaiting org assignment is NOT a stray:
+  // it falls through to the "not provisioned" branch below (no delete, no
+  // re-invite spam — their membership is being set up by the admin). Refuse
+  // WITHOUT an invitation email, then remove the user row best-effort
+  // (Accounts/Sessions cascade per schema) and drop any pending invite tokens
+  // the earlier broken flow left behind. MUST NOT throw back to better-auth on
+  // cleanup failure — a failed delete must not 500 the callback for a user who
+  // was already refused; the rows stay quarantined and an admin can remove them.
+  const hasCredential = user.accounts.some((a) => a.providerId === 'credential');
+  if (memberships.length === 0 && !hasCredential && !user.oidcVerified) {
+    logger.warn(
+      { userId: user.id, email: user.email },
+      '[Auth] Google sign-in blocked: uninvited identity with auto-registered rows — rejecting, no invitation emailed, rows removed',
+    );
+    void prisma.user
+      .delete({ where: { id: user.id } })
+      .catch((err) => {
+        logger.error({ err, userId: user.id }, '[Auth] Failed to remove stray auto-registered identity (rows quarantined)');
+      });
+    void prisma.verification
+      .deleteMany({
+        where: { value: { contains: `"email":"${user.email.toLowerCase()}"` } },
+      })
+      .catch((err) => {
+        logger.error({ err, userId: user.id }, '[Auth] Failed to remove stale invite tokens for stray identity');
+      });
+    throw new APIError('UNAUTHORIZED', {
+      message:
+        'Access denied. This account has not been invited to the portal yet. Contact your portal administrator.',
+    });
+  }
 
   if (user.oidcVerified === false) {
     logger.warn(
@@ -99,14 +212,14 @@ export async function enforceOidcProvisioning(userId: string): Promise<void> {
     // issueInviteLink logs and swallows SMTP failures by contract (T2), so this
     // cannot take the auth pipeline down; the token lands in Verification when
     // the insert succeeds.
-    await issueInviteLink(user);
+    await issueInviteLink(user, { portalOrigin: getLastRequestOrigin() });
     throw new APIError('UNAUTHORIZED', {
       message:
         'Access denied. We need to confirm your email first — check your inbox for a verification link, then try signing in with Google again.',
     });
   }
 
-  if (user.members.length === 0) {
+  if (memberships.length === 0) {
     logger.warn(
       { userId: user.id, email: user.email },
       '[Auth] Google sign-in blocked: verified but no organization membership (not provisioned)',
@@ -174,11 +287,35 @@ export const auth = betterAuth({
     disableSignUp: true, // Block public registration
   },
 
+  // OAuth callback API errors (incl. the signup-disabled rejection for uninvited
+  // Google identities) land on the login page — where classifyGateMessage renders
+  // the proper "not invited" banner — instead of better-auth's default /error URL
+  // which has no route and 404s.
+  onAPIError: {
+    errorURL: '/login',
+  },
+
   // Google OIDC sign-in. Default scopes (openid email profile); no offline access.
+  //
+  // INVITE-ONLY DOOR (design §4.3): better-auth's OAuth callback evaluates
+  // `disableSignUp = provider.disableImplicitSignUp && !requestSignUp ||
+  // provider.options?.disableSignUp` before auto-registering an unknown identity.
+  // We set BOTH flags, so the second term keeps refusing sign-up even if a client
+  // forges requestSignUp:true — handleOAuthUserInfo returns "signup disabled" and
+  // the callback redirects to /login?error=signup_disabled with ZERO rows written
+  // (no User, no Account, no email). Pre-registered invited users are unaffected:
+  // findOAuthUser resolves them by email before any sign-up decision runs. The
+  // stray-identity branch in enforceOidcProvisioning remains as defence-in-depth:
+  // legacy rows created before this flag shipped (e.g. today's auto-registered
+  // stranger from the old flow) are refused without an invitation email and their
+  // orphan rows removed, and a future better-auth build that changes how options
+  // reach the provider instance still cannot register strangers through the gate.
   socialProviders: {
     google: {
       clientId: env.GOOGLE_CLIENT_ID,
       clientSecret: env.GOOGLE_CLIENT_SECRET,
+      disableImplicitSignUp: true,
+      disableSignUp: true,
     },
   },
 
@@ -285,7 +422,13 @@ export const auth = betterAuth({
         // re-login), and methods added later. Throwing APIError here makes
         // BetterAuth reply 401 with the exact 'Access denied. …' message the
         // login page's banned banner already recognises; no session is issued.
-        before: async (session) => {
+        before: async (session, ctx?: { request?: Request } | null) => {
+          // Pre-invite: capture the origin this server is being reached on so
+          // the emailed magic link points where the user actually logged in
+          // (LAN IP / tunnel host / public domain — not a pinned FRONTEND_URL).
+          // Verified empirically: better-auth's session.create.before receives
+          // AuthEndpointContext, which carries the incoming request.
+          lastRequest = ctx?.request ?? null;
           const user = await prisma.user.findUnique({
             where: { id: session.userId },
             select: { email: true },
@@ -336,10 +479,13 @@ export const auth = betterAuth({
             '[Auth] User has no activeOrganizationId — looking up Member record',
           );
 
-          const member = await prisma.member.findFirst({
-            where: { userId: session.userId },
-            select: { orgId: true },
-          });
+          // Member is RLS-gated — the GUC-less base-client lookup returns zero
+          // rows for everyone under nipp_app, so pin the platform context (see
+          // withPlatformRead above); inside it tenantDb routes to the pinned
+          // connection where the GUCs are visible.
+          const member = await withPlatformRead(
+            () => tenantDb.member.findFirst({ where: { userId: session.userId }, select: { orgId: true } }),
+          );
 
           if (member) {
             logger.info(

@@ -287,10 +287,13 @@ describe('origin/CSRF gate stays on (Phase E public-access pin)', () => {
   // options object IS the meaningful pin here (it would not be if we only sent a
   // fake Origin through auth.handler; that path returns early in test mode).
   it('ships no CSRF/origin-disable flags and no trustedOrigins override', () => {
-    const opts = (auth as unknown).options as {
-      advanced?: { disableCSRFCheck?: boolean; disableOriginCheck?: boolean };
-      trustedOrigins?: string[] | ((req: Request) => Promise<string[]>);
+    const authAny = auth as unknown as typeof auth & {
+      options: {
+        advanced?: { disableCSRFCheck?: boolean; disableOriginCheck?: boolean };
+        trustedOrigins?: string[] | ((req: Request) => Promise<string[]>);
+      };
     };
+    const opts = authAny.options;
     expect(opts.advanced?.disableCSRFCheck, 'disableCSRFCheck must NOT be set').toBeUndefined();
     expect(opts.advanced?.disableOriginCheck, 'legacy disableOriginCheck must NOT be set').toBeUndefined();
     // Absent (not empty list) — BETTER_AUTH_TRUSTED_ORIGINS is read natively by

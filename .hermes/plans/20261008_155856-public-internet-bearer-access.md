@@ -365,6 +365,43 @@ Commit `docs(auth): public-access origin policy and proxy header runbook`.
 
 **Open (user to re-test):** restart the server and log in over the LAN IP — dashboard must now stay up past ~30s. Watch the console: the "Failed to obtain payload encryption key" error should be gone; POST /api/security/payload-key should answer 200 with `Cache-Control: no-store`.
 
+### Phase H-cont. — Invitation email links pinned to localhost (user-reported, 2026-10-09) ✅ FIXED
+
+**Observed:** the Google-OIDC pre-registration invite email arrived with both the button href and the fallback link on `http://localhost:3000/auth/magic-link/verify` — dead links for any user not on this Mac. User also wanted the subject to read exactly **"NIPP account activation"** ("Email needs updated" was their shorthand phrasing, not a string in the codebase).
+
+**Root cause (verified):** `lib/oidc-magic-link.ts:63` built the link from `env.FRONTEND_URL` — pinned to `http://localhost:3000`. Same failure class as Phase A/B/H: trust pinned to one host instead of derived from the incoming request.
+
+**Fix (host-independent, same principle as H's `isSameOriginRequest`):**
+- `lib/auth.ts`: `databaseHooks.session.create.before` now captures `ctx.request` into a module-level `lastRequest`; new exported `getLastRequestOrigin()` returns that origin (null off-request). The hook receives the full `AuthEndpointContext` — verified empirically during this task (session-creation context keys include `request`).
+- `lib/oidc-magic-link.ts`: `issueInviteLink(user, { portalOrigin })` — link base = normalized `portalOrigin`, else `env.FRONTEND_URL` fallback for off-request contexts; new exported `normalizePortalOrigin()` (validates + strips trailing slashes/path, null on garbage → fail-safe fallback). The unverified-google gate passes `getLastRequestOrigin()`.
+- All three admin-invite routes (`app/api/admin/users/route.ts`, `app/api/dashboard/admin/users/route.ts`, `app/api/dashboard/admin/users/[id]/invite/route.ts`) pass `{ portalOrigin: new URL(request.url).origin }` — the host THEIR browser reaches, which is what the invitee's link must use.
+- Subject (mail + header title) → exactly `NIPP account activation`.
+
+**Pins:** 5 new unit pins in `tests/unit/oidc-magic-link.test.ts` (LAN-IP origin on url+message, trailing-slash normalization, malformed-origin fallback ×4, normalizePortalOrigin table ×2); 1 end-to-end pin in `tests/integration/google-oidc-full-flow.test.ts` — full mock OAuth round-trip on `http://192.168.99.5:3000`, asserts the emailed subject = "NIPP account activation" and link present on that origin with no localhost. Full gate green: 92 files / 1957 tests, lint clean, build OK (the pre-existing `bearer-tokens.test.ts:290` tsc `unknown` on a clean tree is untouched).
+
+**Open:** user re-sends the invite / retries Google sign-in over the LAN IP — email must show the LAN IP in both button and text link.
+
+### Phase H-cont.2 — "not been provisioned by an administrator" for a real org member (Google OIDC, 2026-10-11) ✅ FIXED
+
+**Observed:** `ruthbaird666@gmail.com` is verified (`oidcVerified=true`, not banned) and IS a member of the Platform organization, yet Google sign-in returned `Access denied. This account has not been provisioned by an administrator yet.` — the false `memberships.length === 0` branch of `enforceOidcProvisioning` (lib/auth.ts).
+
+**Root cause (verified live, twice):** RLS, not data. The app connects as `nipp_app` (non-owner), so Postgres enforces the Member table's isolation policy; a GUC-less read is invisible (fail-closed). Live probes:
+- raw Prisma as nipp_app, no context → Ruth's `members` = `[]` even though the row exists (owner-view shows the Platform-org Membership);
+- same query with the platform GUCs (`app.current_org_id` / `app.is_platform_admin=1`) bound on a pinned interactive tx → row visible.
+
+First fix attempt was WRONG and caught by the live probe: wrapping the op in `withPlatformContextForDB` alone did not help — the GUCs are set on the Pinned interactive-tx connection, but lib/auth.ts's raw base client (`lib/db.ts`) executes model ops on a separate pooled connection where the GUCs are not visible. The working pattern is the one already used by `lib/authz.ts`'s `verifySuperAdmin` and `lib/cache/warm.ts`: **inside the bound context, read through the `tenantDb` proxy**, which resolves model ops to the pinned tx connection (one physical connection for GUCs + query). Integration tests never caught this: they connect as postgres (owner → RLS bypassed).
+
+**Fix (lib/auth.ts):**
+- new module-local `withPlatformRead(op)` — runs `op` under `withPlatformContextForDB(env.PLATFORM_ORGANIZATION_ID, op)`, raw pass-through when the env var is unset (unit-test / non-platform dev compatibility mirrors lib/cache/warm.ts).
+- `enforceOidcProvisioning`: authoritative membership read now `tenantDb.user.findUnique(... select members)` inside `withPlatformRead`; mail send stays OUTSIDE the pinned interactive tx (deliberate: no SMTP in a 5s-lived connection window).
+- `databaseHooks.session.create.after` (auto org assignment): Member lookup now the same `withPlatformRead` + tenantDb pattern — it had the identical latent bug under nipp_app (silently never set `activeOrganizationId`).
+- `enforceBanStatus`: also runs through the platform context (User is RLS-exempt, so behaviour-identical on owner roles; makes the helper's DB access context-consistent).
+- Test accommodation: `tests/unit/auth-config.test.ts` gained a default export on its `@/lib/db` stub + a `@/lib/tenant-db → mockPrisma` pass-through mock (tenantDb resolves to the pinned tx internally; unit-level it must behave like the raw client).
+
+**Verification (gate green 2026-10-11):** live probe as nipp_app — ban gate PASS, `enforceOidcProvisioning` for Ruth **PASS** (previously DENIED with exact user error). `npm run test` 92 files / 1957 passed; `npm run lint` clean (incl. tenant-isolation import guards); `npm run build` OK.
+
+**Open:** user re-runs Google sign-in for Ruth in the browser — expect success this time (server-side path verified end-to-end at DB level; browser door unchanged). The dev server hot-reloads lib/auth.ts, so no restart is needed unless one is already stale.
+
 ---
 
 ## Files likely to change (whole plan)

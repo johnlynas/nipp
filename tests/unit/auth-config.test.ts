@@ -77,7 +77,11 @@ vi.mock('better-auth/api', (importOriginal) => {
   return importOriginal<typeof import('better-auth/api')>();
 });
 
-vi.mock('@/lib/db', () => ({ prisma: mockPrisma }));
+vi.mock('@/lib/db', () => ({ prisma: mockPrisma, default: mockPrisma }));
+
+// lib/auth.ts resolves RLS-gated Member reads via tenantDb; in this hermetic
+// unit test it must behave like the raw client (no $extends / ALS available).
+vi.mock('@/lib/tenant-db', () => ({ default: mockPrisma }));
 
 // Mirror the lib/env-schema.ts defaults for every var lib/auth.ts reads, so the
 // captured options are built against a complete env (public-access vars added in Phase B).
