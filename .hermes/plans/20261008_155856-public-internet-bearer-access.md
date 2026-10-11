@@ -402,6 +402,19 @@ First fix attempt was WRONG and caught by the live probe: wrapping the op in `wi
 
 **Open:** user re-runs Google sign-in for Ruth in the browser — expect success this time (server-side path verified end-to-end at DB level; browser door unchanged). The dev server hot-reloads lib/auth.ts, so no restart is needed unless one is already stale.
 
+### Phase H-cont.3 — Invite-only Google door: zero-row stranger refusal + org-required invariant (user follow-up, 2026-10-11) ✅ SHIPPED
+
+**Observed:** uninvited Google identities that had never been pre-registered auto-created User + Account rows on callback (legacy flow predating this change), then sat in the "not provisioned" gate — strangers accumulating DB footprints and, in one case, receiving an invitation email for an identity nobody invited. Second symptom: users could be created with no organization at all (local-password path), leaving them with no workspace and no isolation boundary.
+
+**Fix:**
+- `lib/auth.ts` (gate half, committed 9aff6e0): google provider sets BOTH `disableImplicitSignUp: true` AND `disableSignUp: true` — better-auth 1.6.23 evaluates `provider.disableImplicitSignUp && !requestSignUp || provider.options?.disableSignUp`, so the second term keeps refusing sign-up even if a client forges `requestSignUp:true` (verified in dist; pinned by FORGED round-trip spec). Unknown identity → redirect to error URL, ZERO rows, no email. `onAPIError.errorURL: '/login'` routes better-auth's machine wording (`signup disabled`) to the login page where `classifyGateMessage` renders the not-invited banner (previously dead `/api/auth/error` 404). Defence-in-depth in `enforceOidcProvisioning`: legacy stray rows (no membership, no credential account, unverified) are refused WITHOUT an invitation email and their User/Account/Verification rows removed best-effort (cleanup failure quarantines, never 500s the callback).
+- Service/UI half (committed 7bb3b5f): `classifyGateMessage` gains `'not-invited'` kind ('signup disabled' + 'not been invited' wording → shared `NOT_INVITED_MSG` copy; login page rephrases stock wording); `UserService.create` makes the org MANDATORY for every user (passworded and passwordless — a user without one has no data access, so must not exist; rejected before any rows are written), Members-team auto-enrollment always runs, a chosen team is additional to it; both admin users routes carry the crisp 400.
+- Tests: flow file's seed/verify now run through `rlsFixture` (the integration DB role IS nipp_app — raw Organization writes fail closed 42501; this pre-existing gap surfaced because seeds default to provisioned). New pins: stranger → zero rows + no email; forged `requestSignUp:true` → same; LAN-origin invite link + exact subject (already in 9aff6e0); service org-mandatory for both doors.
+
+**Gate (green 2026-10-11):** `npm run test` 92 files / 1958 passed; integration 22 files / 314 passed; lint clean; build OK.
+
+Open: user re-tests stranger + forged-signup behavior over the LAN IP if desired (server-side pinned in tests).
+
 ---
 
 ## Files likely to change (whole plan)
