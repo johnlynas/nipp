@@ -44,13 +44,16 @@ describe('Google OIDC — callback reachability', () => {
     );
     const response = await auth.handler(request);
     // The fake code/state never reach Google — we only assert the route is wired.
-    // A 302 to /api/auth/error?error=state_mismatch proves BetterAuth's own state
-    // validation ran (good: no middleware-level auth redirect swallowed us).
+    // A state-validation redirect proves BetterAuth's own state check ran (good:
+    // no middleware-level auth redirect swallowed us). With onAPIError.errorURL =
+    // '/login' (lib/auth.ts) it lands on the login page as ?error=state_mismatch,
+    // so the banner machinery can classify it instead of a dead /api/auth/error.
     const location = response.headers.get('location') ?? '';
-    expect(location).not.toContain('/login');
     if (response.status === 302) {
-      expect(location).toContain('/api/auth/error?error=state_mismatch');
+      expect(location, 'state mismatch must surface on the login page, not a bare auth-redirect').toContain('/login?error=state_mismatch');
     } else {
+      // A dummy state can be consumed before the row lookup resolves; an opaque
+      // rejection is equally proof the callback route reached BetterAuth.
       await response.body?.cancel();
     }
   });

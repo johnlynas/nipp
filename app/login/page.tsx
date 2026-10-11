@@ -21,6 +21,7 @@ import { Eye, EyeOff, Mail } from 'lucide-react';
 import { authClient, signInEmail } from '@/lib/auth-client';
 import {
   classifyGateMessage,
+  NOT_INVITED_MSG,
   oidcParamBanner,
   resolveSameOriginTarget,
 } from '@/lib/oidc-login-ui';
@@ -256,9 +257,9 @@ function LoginForm() {
   const [error, setError] = useState<string | null>(null);
   const [isBanned, setIsBanned] = useState(false);
   // Provisioning-gate classification for gate rejections (needs-inbox-check /
-  // not-provisioned) — rendered as a distinct warning banner, never swallowed
-  // into the "banned" state (lib/oidc-login-ui pins this ordering).
-  const [gateKind, setGateKind] = useState<'needs-inbox-check' | 'not-provisioned' | null>(null);
+  // not-provisioned / not-invited) — rendered as a distinct warning banner, never
+  // swallowed into the "banned" state (lib/oidc-login-ui pins this ordering).
+  const [gateKind, setGateKind] = useState<'needs-inbox-check' | 'not-provisioned' | 'not-invited' | null>(null);
   const [showPassword, setShowPassword] = useState(false);
   const [loading, setLoading] = useState(false);
   const [ssoNote, setSsoNote] = useState<string | null>(null);
@@ -277,16 +278,22 @@ function LoginForm() {
 
     // OAuth gate rejections (from the callback round-trip) win over the oidc
     // marker: surface the real server message, classified so a banned banner
-    // never swallows the two provisioning-gate messages.
+    // never swallows the provisioning-gate messages. better-auth's stock
+    // "signup disabled" rejection carries machine wording — rephrase it to the
+    // shared not-invited copy (classifyGateMessage pins both forms).
     if (oauthError || description) {
-      const msg =
+      const rawMsg =
         description && description.trim()
           ? description
           : 'Sign-in did not complete — try again.';
-      const kind = classifyGateMessage(msg);
-      if (kind === 'needs-inbox-check' || kind === 'not-provisioned') {
+      const kind = classifyGateMessage(rawMsg);
+      const msg = kind === 'not-invited' ? NOT_INVITED_MSG : rawMsg;
+      if (kind === 'banned') {
+        setIsBanned(true);
+      } else if (kind) {
         setGateKind(kind);
-      } else if (kind === 'banned') {
+      } else if (rawMsg.toLowerCase().includes('banned')) {
+        // Raw ban wording that classifyGateMessage's substring set missed.
         setIsBanned(true);
       } else {
         // Unknown OAuth failure code — plain rejection.
@@ -348,10 +355,10 @@ function LoginForm() {
         // so a banned banner can't swallow them — the email path only ever
         // returns ban rejections, so this is order-safe for it.
         const kind = classifyGateMessage(errorMsg);
-        if (kind === 'needs-inbox-check' || kind === 'not-provisioned') {
-          setGateKind(kind);
-        } else if (kind === 'banned') {
+        if (kind === 'banned') {
           setIsBanned(true);
+        } else if (kind) {
+          setGateKind(kind);
         }
         setError(errorMsg);
       } else {

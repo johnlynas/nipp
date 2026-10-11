@@ -11,18 +11,29 @@
  */
 
 /** Banner kinds for sign-in rejection messages. */
-export type GateKind = 'banned' | 'needs-inbox-check' | 'not-provisioned';
+export type GateKind = 'banned' | 'needs-inbox-check' | 'not-provisioned' | 'not-invited';
+
+/**
+ * The exact wording better-auth's stock "signup disabled" rejection produces on
+ * the OAuth callback (`/login?error=signup_disabled&error_description=signup disabled`).
+ * Kept here so the page and the unit pins share one source of truth.
+ */
+export const NOT_INVITED_MSG =
+  'Access denied. This account has not been invited to the portal yet. Contact your portal administrator.';
 
 /**
  * Classify a sign-in rejection message. Order matters: the two gate messages
  * both start with "Access denied.", so they are matched BEFORE the banned
  * detector. A genuine ban message (`Access denied. <reason>`) never contains
  * the gate substrings, so this is safe for the email path (which only ever
- * returns ban rejections) as well.
+ * returns ban rejections) as well. The uninvited-stranger message shares its
+ * "not … yet" shape with the admin-provisioning one but is matched first — it
+ * names "invited", which the provisioning message does not.
  */
 export function classifyGateMessage(message: string): GateKind | null {
   const m = message.toLowerCase();
   if (m.includes('check your inbox')) return 'needs-inbox-check';
+  if (m.includes('not been invited') || m === 'signup disabled') return 'not-invited';
   if (m.includes('provisioned')) return 'not-provisioned';
   if (m.includes('banned') || m.includes('access denied')) return 'banned';
   return null;

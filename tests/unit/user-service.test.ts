@@ -168,18 +168,11 @@ describe('UserService', () => {
       });
     });
 
-    it('skips team enrollment when the user stays unaffiliated (org-less PASSWORD user keeps local sign-in)', async () => {
-      vi.mocked(globalDb.user.findUnique).mockResolvedValue(null);
-      vi.mocked(globalDb.user.create).mockResolvedValue(castUser(mockUser({ id: 'new-user' })) as never);
-
-      await UserService.create(
-        { email: 'new@example.com', name: 'New User', password: 'LocalPwd123!' },
-        mockCtx('PLATFORM_ADMIN'),
-      );
-
-      expect(globalDb.team.findFirst).not.toHaveBeenCalled();
-      expect(globalDb.teamMember.create).not.toHaveBeenCalled();
-    });
+    // NOTE: there used to be an "org-less passworded user" spec asserting that a
+    // local-password user could exist without an organization. That behavior is
+    // gone — the isolation invariant now requires an org for EVERY user, rejected
+    // before any rows are written (see the "requires an organization for ALL
+    // users" specs below), so unaffiliated creation simply no longer happens.
 
     it('is idempotent: does not re-create the team membership when already enrolled', async () => {
       vi.mocked(globalDb.user.findUnique).mockResolvedValue(null);
@@ -197,10 +190,22 @@ describe('UserService', () => {
       expect(globalDb.teamMember.create).not.toHaveBeenCalled();
     });
 
-    it('requires an organization for passwordless creation (PLATFORM_ADMIN)', async () => {
+    it('requires an organization for ALL users — org-less passworded creation is rejected', async () => {
+      // Isolation invariant: a user without an org has no data access, so no
+      // user (local password or Google) may be created without one.
+      vi.mocked(globalDb.user.findUnique).mockResolvedValue(null);
+
+      await expect(
+        UserService.create({ email: 'local@example.com', name: 'Local', password: 'LocalPass123!' }, mockCtx('PLATFORM_ADMIN'))
+      ).rejects.toThrow(/organization is required/i);
+      // Nothing may be persisted before the validation fires.
+      expect(globalDb.user.create).not.toHaveBeenCalled();
+    });
+
+    it('requires an organization for ALL users — org-less passwordless creation is rejected', async () => {
       await expect(
         UserService.create({ email: 'invite@example.com', name: 'Invite' }, mockCtx('PLATFORM_ADMIN'))
-      ).rejects.toThrow(/organizationId is required/i);
+      ).rejects.toThrow(/organization is required/i);
       // Nothing may be persisted before the validation fires.
       expect(globalDb.user.create).not.toHaveBeenCalled();
     });
@@ -208,7 +213,7 @@ describe('UserService', () => {
     it('requires an organization for passwordless creation (TENANT_ADMIN without org context)', async () => {
       await expect(
         UserService.create({ email: 'invite@example.com', name: 'Invite' }, mockCtx('TENANT_ADMIN'))
-      ).rejects.toThrow(/organizationId is required/i);
+      ).rejects.toThrow(/organization is required/i);
     });
 
     it('allows passwordless creation when an organization is present (invite path)', async () => {
@@ -228,48 +233,45 @@ describe('UserService', () => {
       );
     });
 
-    it('allows an org-less passworded creation (behavior unchanged)', async () => {
-      vi.mocked(globalDb.user.findUnique).mockResolvedValue(null);
-      vi.mocked(globalDb.user.create).mockResolvedValue(castUser(mockUser({ id: 'pw-norg' })) as never);
-
-      const result = await UserService.create(
-        { email: 'local@example.com', name: 'Local', password: 'LocalPass123!' },
-        mockCtx('PLATFORM_ADMIN'),
-      );
-
-      expect(result.id).toBe('pw-norg');
-      expect(globalDb.member.create).not.toHaveBeenCalled();
-    });
-
-    it('enrolls in the requested team INSTEAD of the default Members team', async () => {
+    it('enrolls in the requested team IN ADDITION to the default Members team', async () => {
       vi.mocked(globalDb.user.findUnique).mockResolvedValue(null);
       vi.mocked(globalDb.user.create).mockResolvedValue(castUser(mockUser({ id: 'tm-user' })) as never);
       vi.mocked(globalDb.member.create).mockResolvedValue({ id: 'm-1' } as never);
 
-      // Target team exists and belongs to the target org.
+      // Default Members team path (slug lookup) vs the requested team path.
+      vi.mocked(globalDb.team.findFirst).mockImplementation(((args: { where?: { slug?: string } }) => {
+        if (args.where?.slug === 'members') return { id: 'members-team', slug: 'members' };
+        // addTeamMember's internal exact-id lookup falls back here via findFirst mocks
+        return { id: 'team-blue', organizationId: 'org-t' };
+      }) as never);
       vi.mocked(globalDb.team.findUnique).mockImplementation(((args: { where?: { id?: string } }) => {
         if (args.where?.id === 'team-blue') return { id: 'team-blue', organizationId: 'org-t' };
         return null;
       }) as never);
 
-      // addTeamMember internals — all under the single org context with a
-      // matching team row, membership present, no prior team membership.
-      vi.mocked(globalDb.team.findFirst).mockResolvedValue({ id: 'team-blue', organizationId: 'org-t' } as never);
-      vi.mocked(globalDb.member.findFirst).mockResolvedValue({ id: 'm-1', userId: 'tm-user', orgId: 'org-t' } as never);
+      // Members-team enrollment: not enrolled yet → create. Then the requested team:
+      // same helper shape, second create call lands under the tx in addTeamMember.
       vi.mocked(globalDb.teamMember.findFirst).mockResolvedValue(null as never);
+      vi.mocked(globalDb.teamMember.create).mockResolvedValue({ id: 'tm-1' } as never);
+      // addTeamMember's membership verification (same org).
+      vi.mocked(globalDb.member.findFirst).mockResolvedValue({ id: 'm-1', userId: 'tm-user', orgId: 'org-t' } as never);
+
       // $transaction(fn): run the callback against a tx-shaped copy of the mock.
       vi.mocked(globalDb.$transaction).mockImplementation(async (fn) => {
         const txClient = globalDb;
         return fn(txClient as never);
       });
-      vi.mocked(globalDb.teamMember.create).mockResolvedValue({ id: 'tm-1' } as never);
+      vi.mocked(globalDb.memberRole.findFirst).mockResolvedValue(null as never);
 
       await UserService.create(
         { email: 'team@example.com', name: 'Team User', organizationId: 'org-t', teamId: 'team-blue' },
         mockCtx('PLATFORM_ADMIN'),
       );
 
-      // Requested team enrollment ran with the user's id.
+      // BOTH enrollments happened: default Members team AND the chosen team.
+      expect(globalDb.teamMember.create).toHaveBeenCalledWith(
+        { data: { userId: 'tm-user', teamId: 'members-team', organizationId: 'org-t' } },
+      );
       expect(globalDb.teamMember.create).toHaveBeenCalledWith(
         { data: { userId: 'tm-user', teamId: 'team-blue', organizationId: 'org-t' } },
       );
@@ -539,9 +541,12 @@ describe('UserService', () => {
       vi.mocked(globalDb.user.create).mockResolvedValue(created as never);
       const accountResult = { id: 'account-1', accountId: 'pw-user', providerId: 'credential', password: 'hash', userId: 'pw-user' };
       vi.mocked(globalDb.account.create).mockResolvedValue(accountResult as never);
+      // Org is required for every user now (isolation invariant) — the spec's
+      // PASSWORD-ONLY point (hash, not plaintext; credential account linkage) is
+      // unchanged. Default mocks cover member.create + Members-team enrollment.
 
       await UserService.create(
-        { email: 'pw@example.com', name: 'Pw User', password: 's3cret-pass' },
+        { email: 'pw@example.com', name: 'Pw User', password: 's3cret-pass', organizationId: 'org-pw' },
         mockCtx('PLATFORM_ADMIN'),
       );
 
