@@ -107,12 +107,13 @@ export const POST = wrapPiiRoute(async (request, decryptedBody) => {
     // Accept optional organizationId from body for platform admins to target specific orgs.
     const targetOrgId = body.organizationId;
 
-    // Invite-only Google login: passwordless users must be invited into an org
-    // (the pre-registration gate makes org membership a hard requirement at
-    // sign-in). Enforced in the service too — this keeps the 400 message crisp.
-    if (!body.password && !targetOrgId) {
+    // Isolation invariant: EVERY user — local password and Google OIDC alike —
+    // is created into an organization (a user without one has no data access),
+    // with the org's default "Members" team attached automatically. Enforced in
+    // the service too — this keeps the 400 message crisp.
+    if (!targetOrgId) {
       return NextResponse.json(
-        { error: 'organizationId is required for users without a password' },
+        { error: 'organizationId is required — every user must belong to an organization' },
         { status: 400 },
       );
     }
@@ -145,7 +146,7 @@ export const POST = wrapPiiRoute(async (request, decryptedBody) => {
     // can resend from the user row (POST /api/dashboard/admin/users/[id]/invite).
     let magicLinkSent = false;
     if (!body.password) {
-      const issueResult = await issueInviteLink(user);
+      const issueResult = await issueInviteLink(user, { portalOrigin: new URL(request.url).origin });
       // emailSent distinguishes "token in DB, no email" (SMTP blip — admin
       // resends from the user row) from a real delivery.
       magicLinkSent = issueResult.ok && issueResult.emailSent;

@@ -7,6 +7,7 @@ import { logger } from '@/lib/logger';
 import { env } from '@/lib/env';
 import { issueInviteLink } from '@/lib/oidc-magic-link';
 import { hashPassword } from 'better-auth/crypto';
+import { rlsFixture } from '@/tests/utils/rls-fixture';
 
 // Mail seam mock: lib/oidc-magic-link imports sendEmail as an ESM live binding,
 // so a post-hoc vi.spyOn on the imported name cannot intercept it. Mocking the
@@ -15,11 +16,11 @@ import { hashPassword } from 'better-auth/crypto';
 // assert against that log + the Verification table row. vi.hoisted guarantees
 // the binding exists before lib/auth's import chain loads.
 const { sentInvites } = vi.hoisted(() => ({
-  sentInvites: [] as Array<{ to: string; subject: string }>,
+  sentInvites: [] as Array<{ to: string; subject: string; message?: string }>,
 }));
 vi.mock('@/lib/notifications/email', () => ({
-  sendEmail: (to: string, subject: string, _message: string, _headerTitle?: string) => {
-    sentInvites.push({ to, subject });
+  sendEmail: (to: string, subject: string, message: string, _headerTitle?: string) => {
+    sentInvites.push({ to, subject, message });
     return Promise.resolve({ success: true as const });
   },
 }));
@@ -156,6 +157,18 @@ async function runOAuthRoundTrip(t: (req: Request) => Promise<Response>, body: R
   );
 }
 
+// Identities this file drives through real callback round-trips (incl. the
+// forged-signup identity, which only exists while its spec runs).
+const ALL_FLOW_EMAILS = [
+  TEST_EMAIL,
+  BANNED_EMAIL,
+  'full-flow.forged-signup@gmail.com',
+  BANNED_INVITED_EMAIL,
+  PENDING_EMAIL,
+  PROVISIONED_EMAIL,
+  LOCAL_EMAIL,
+];
+
 describe('Google OIDC — full mocked flow (Task 6)', () => {
   const handler = auth.handler as (req: Request) => Promise<Response>;
   let tokenFetchMock: MockInstance;
@@ -191,7 +204,7 @@ describe('Google OIDC — full mocked flow (Task 6)', () => {
   afterAll(async () => {
     tokenFetchMock.mockRestore();
     infoSpy.mockRestore();
-    for (const email of [TEST_EMAIL, BANNED_EMAIL, BANNED_INVITED_EMAIL, PENDING_EMAIL, PROVISIONED_EMAIL, LOCAL_EMAIL]) {
+    for (const email of ALL_FLOW_EMAILS) {
       const user = await prisma.user.findUnique({ where: { email } });
       if (user) await prisma.session.deleteMany({ where: { userId: user.id } });
     }
@@ -200,73 +213,139 @@ describe('Google OIDC — full mocked flow (Task 6)', () => {
     await prisma.account.deleteMany({
       where: { providerId: 'google', accountId: { in: [GOOGLE_SUB, BANNED_SUB, BANNED_INVITED_SUB, PENDING_SUB, PROVISIONED_SUB] } },
     });
-    // Local regression identity's credential account + gate org memberships.
+    // Local regression identity's credential account.
     const localUser = await prisma.user.findUnique({ where: { email: LOCAL_EMAIL } });
     if (localUser) await prisma.account.deleteMany({ where: { userId: localUser.id, providerId: 'credential' } });
-    for (const email of [PENDING_EMAIL, PROVISIONED_EMAIL]) {
-      const u = await prisma.user.findUnique({ where: { email } });
-      if (u) await prisma.member.deleteMany({ where: { userId: u.id } });
-    }
-    await prisma.organization.deleteMany({ where: { id: { startsWith: 'org-gate-' } } });
-    await prisma.user.deleteMany({
-      where: { email: { in: [TEST_EMAIL, BANNED_EMAIL, BANNED_INVITED_EMAIL, PENDING_EMAIL, PROVISIONED_EMAIL, LOCAL_EMAIL] } },
+    // Seeded gate orgs — deleting an org cascades its Teams, TeamMembers and MemberRoles
+    // (schema onDelete: Cascade), so the Members-team rows go with them. RLS:
+    // Organization DELETE needs platform GUCs bound to the TARGET row's org id,
+    // so resolve each org platform-scoped and delete it under its own context.
+    const gateOrgs = await (rlsFixture(null) as unknown as typeof prisma).organization.findMany({
+      where: { id: { startsWith: 'org-gate-' } },
     });
+    for (const org of gateOrgs) {
+      await (rlsFixture(org.id) as unknown as typeof prisma).organization.delete({ where: { id: org.id } });
+    }
+    await prisma.user.deleteMany({ where: { email: { in: ALL_FLOW_EMAILS } } });
   });
 
   /**
-   * Seed an invited user (google Account pre-linked to their User) for gate specs.
+   * Seed an invited google user for gate specs, mirroring the EXACT shape that
+   * UserService.create produces (the production "Create User" path — a passwordless
+   * Google invite is always created INTO an organization with a Member row and
+   * auto-enrolled in the org's default "Members" team; only the magic-link flag and
+   * the linked google Account differ, and the Account is created on first callback).
+   *
+   * Default = FULLY provisioned (org + member + members team); flip `provisioned: false`
+   * for the verified-but-no-membership edge case the "not provisioned" branch tests.
    * Returns the seeded userId so specs can assert sessions against it.
    */
-  async function seedInvitedGoogleUser(opts: { email: string; sub: string; oidcVerified?: boolean; org?: boolean }) {
+  async function seedInvitedGoogleUser(opts: {
+    email: string;
+    sub: string;
+    oidcVerified?: boolean;
+    /** false → verified user with NO org membership (the "not provisioned" gate branch). Default true. */
+    provisioned?: boolean;
+  }) {
     const user = await prisma.user.upsert({
       where: { email: opts.email },
       create: { name: 'Gate User', email: opts.email, oidcVerified: opts.oidcVerified ?? false },
       update: { oidcVerified: opts.oidcVerified ?? false },
     });
+    // Google account pre-linked to the user (what the first callback would attach via findOAuthUser).
     await prisma.account.upsert({
       where: { providerId_accountId: { providerId: 'google', accountId: opts.sub } },
       create: { accountId: opts.sub, providerId: 'google', userId: user.id },
       update: {},
     });
-    if (opts.org) {
-      await prisma.organization.upsert({
-        where: { id: `org-gate-${user.id}` },
-        create: { id: `org-gate-${user.id}`, name: 'Gate Org' },
+
+    if (opts.provisioned !== false) {
+      // Create-User shape: org → Member row → default "Members" team enrollment.
+      // RLS note: the test app role is nipp_app, so Organization/Member/Team
+      // writes need platform GUCs — raw prisma ops fail closed (42501). Seed and
+      // verify through the fixture handle (platform context per op); User/Account
+      // are RLS-exempt and stay on the raw client.
+      const orgId = `org-gate-${user.id}`;
+      const seed = rlsFixture(null) as unknown as typeof prisma;
+      await seed.organization.upsert({ where: { id: orgId }, create: { id: orgId, name: 'Gate Org' }, update: {} });
+      // upsert (not create): specs in this file re-seed the same identities in different states.
+      const work = rlsFixture(orgId) as unknown as typeof prisma;
+      await work.member.upsert({
+        where: { userId_orgId: { userId: user.id, orgId } },
+        create: { userId: user.id, orgId },
         update: {},
       });
-      // upsert (not create): specs in this file re-seed the same identities in
-      // different states, so a member row may legitimately pre-exist.
-      await prisma.member.upsert({
-        where: { userId_orgId: { userId: user.id, orgId: `org-gate-${user.id}` } },
-        create: { userId: user.id, orgId: `org-gate-${user.id}` },
+      // Default "Members" team (idempotent) + enroll the user in it.
+      const membersTeam = (await work.team.upsert({
+        where: { organizationId_slug: { organizationId: orgId, slug: 'members' } },
+        create: { name: 'Members', slug: 'members', organizationId: orgId },
+        update: {},
+      })) as { id: string };
+      await work.teamMember.upsert({
+        where: { userId_teamId: { userId: user.id, teamId: membersTeam.id } },
+        create: { userId: user.id, teamId: membersTeam.id, organizationId: orgId },
         update: {},
       });
     }
     return user.id;
   }
 
-  it('STRANGER google identity (not invited) → rejected, no session — pre-registration gate', async () => {
+  it('STRANGER google identity (not invited) → rejected at callback, ZERO rows written, NO email', async () => {
     currentIdToken = buildIdToken(TEST_EMAIL, GOOGLE_SUB);
     clearSentInvites();
 
     const cbRes = await runOAuthRoundTrip(handler, { provider: 'google', callbackURL: CALLBACK_URL });
-    expect(cbRes.status).toBe(401);
-    const bodyText = await cbRes.text();
-    expect(bodyText).toContain('Access denied');
+    // disableImplicitSignUp refuses the unknown identity BEFORE createOAuthUser
+    // writes anything: better-auth redirects to its error page with the machine
+    // code (which the login page turns into the not-invited banner).
+    expect(cbRes.status).toBeGreaterThanOrEqual(300);
+    expect(cbRes.status).toBeLessThan(400);
+    const location = cbRes.headers.get('location') ?? '';
+    expect(location).toContain('error=signup_disabled');
     expect(extractSetCookie(cbRes).sessionToken).toBeFalsy();
 
+    // The whole point of the fix: nothing is persisted, no invitation email.
     const user = await prisma.user.findUnique({ where: { email: TEST_EMAIL } });
-    if (user) {
-      // Identity rows may be committed before the session hook fires (BetterAuth
-      // upserts in handleOAuthUserInfo; the gate runs at session creation) — pin:
-      // they exist ONLY if a User row is present, and no session was ever issued.
-      expect(user).toBeTruthy();
-      const sessions = await prisma.session.findMany({ where: { userId: user.id } });
-      expect(sessions.length).toBe(0);
-    }
-    // Rejection triggered a fresh invitation link so an admin pre-registration
-    // (or the support flow) has something to work with.
-    expect(sentInvites.length).toBeGreaterThanOrEqual(1);
+    expect(user).toBeNull();
+    const accounts = await prisma.account.findMany({
+      where: { providerId: 'google', accountId: GOOGLE_SUB },
+    });
+    expect(accounts.length).toBe(0);
+    expect(sentInvites.length).toBe(0);
+  }, 20000);
+
+  it('FORGED requestSignUp:true on an uninvited identity → rejected at callback, ZERO rows written, NO email (defence-in-depth)', async () => {
+    // Client can ask the sign-in endpoint to register a new user; better-auth
+    // 1.6.23 evaluates `disableSignUp` as:
+    //   provider.disableImplicitSignUp && !requestSignUp || provider.options?.disableSignUp
+    // With BOTH disableImplicitSignUp and disableSignUp set in lib/auth.ts, the
+    // second term is true regardless of requestSignUp — so a forged sign-up is
+    // refused at handleOAuthUserInfo before createOAuthUser runs (zero rows).
+    const FORGED_EMAIL = 'full-flow.forged-signup@gmail.com';
+    const FORGED_SUB = 'g-sub-forged-flow';
+    currentIdToken = buildIdToken(FORGED_EMAIL, FORGED_SUB);
+    clearSentInvites();
+
+    const cbRes = await runOAuthRoundTrip(handler, {
+      provider: 'google',
+      callbackURL: CALLBACK_URL,
+      requestSignUp: true,
+    });
+    // Same early rejection as the plain stranger case.
+    expect(cbRes.status).toBeGreaterThanOrEqual(300);
+    expect(cbRes.status).toBeLessThan(400);
+    const location = cbRes.headers.get('location') ?? '';
+    expect(location).toContain('error=signup_disabled');
+    expect(extractSetCookie(cbRes).sessionToken).toBeFalsy();
+
+    // No rows, no invitation email.
+    const user = await prisma.user.findUnique({ where: { email: FORGED_EMAIL } });
+    expect(user).toBeNull();
+    const accounts = await prisma.account.findMany({
+      where: { providerId: 'google', accountId: FORGED_SUB },
+    });
+    expect(accounts.length).toBe(0);
+    expect(sentInvites.length).toBe(0);
   }, 20000);
 
   it('INVITED user, magic link not clicked (oidcVerified=false) → rejected + invitation email issued', async () => {
@@ -294,8 +373,51 @@ describe('Google OIDC — full mocked flow (Task 6)', () => {
     expect(sessions.length).toBe(0);
   }, 20000);
 
+  it('invitation link + subject follow the host the user reached (LAN IP), not a pinned FRONTEND_URL', async () => {
+    // PUBLIC ACCESS pin: a visitor on http://192.168.99.5:3000 must get a magic
+    // link built on THAT origin in both the button href and the fallback text —
+    // never localhost (the FRONTEND_URL). The session-creation hook derives the
+    // origin from ctx.request of this very callback round-trip.
+    const LAN_ORIGIN = 'http://192.168.99.5:3000';
+    const userId = await seedInvitedGoogleUser({ email: PENDING_EMAIL, sub: PENDING_SUB });
+    currentIdToken = buildIdToken(PENDING_EMAIL, PENDING_SUB);
+    clearSentInvites();
+
+    const marker = `lanpin-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+    const signResponse = await handler(
+      new Request(`${LAN_ORIGIN}/api/auth/sign-in/social`, {
+        method: 'POST',
+        headers: { Origin: LAN_ORIGIN, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ provider: 'google', callbackURL: `${LAN_ORIGIN}/dashboard/calendar`, additionalData: { flowMarker: marker } }),
+      }),
+    );
+    expect(signResponse.status >= 200 && signResponse.status < 400).toBe(true);
+    await signResponse.body?.cancel();
+
+    const state = await findOAuthState(marker);
+    const cookies = extractSetCookie(signResponse).stateCookie;
+    const cbRes = await handler(
+      new Request(`${LAN_ORIGIN}/api/auth/callback/google?code=fake-auth-code&state=${encodeURIComponent(state)}`, {
+        headers: { Origin: LAN_ORIGIN, Cookie: cookies ?? '' },
+      }),
+    );
+    expect(cbRes.status).toBe(401); // pre-registration gate rejects
+
+    const invite = sentInvites.find((s) => s.to === PENDING_EMAIL);
+    expect(invite).toBeTruthy();
+    if (!invite) return;
+    expect(String(invite.subject)).toBe('NIPP account activation');
+    const msg = String(invite.message ?? '');
+    // Button href + fallback link both on the LAN origin, nowhere localhost.
+    expect(msg.includes(`${LAN_ORIGIN}/auth/magic-link/verify`)).toBe(true);
+    expect(msg).not.toContain('localhost:3000/auth/magic-link');
+
+    const sessions = await prisma.session.findMany({ where: { userId } });
+    expect(sessions.length).toBe(0);
+  }, 20000);
+
   it('INVITED + VERIFIED user WITHOUT org membership → rejected (not provisioned)', async () => {
-    const userId = await seedInvitedGoogleUser({ email: PROVISIONED_EMAIL, sub: PROVISIONED_SUB, oidcVerified: true });
+    const userId = await seedInvitedGoogleUser({ email: PROVISIONED_EMAIL, sub: PROVISIONED_SUB, oidcVerified: true, provisioned: false });
     currentIdToken = buildIdToken(PROVISIONED_EMAIL, PROVISIONED_SUB);
     clearSentInvites();
 
@@ -313,7 +435,7 @@ describe('Google OIDC — full mocked flow (Task 6)', () => {
   }, 20000);
 
   it('INVITED + VERIFIED + ORG user → full sign-in succeeds (cookie + session)', async () => {
-    const userId = await seedInvitedGoogleUser({ email: PROVISIONED_EMAIL, sub: PROVISIONED_SUB, oidcVerified: true, org: true });
+    const userId = await seedInvitedGoogleUser({ email: PROVISIONED_EMAIL, sub: PROVISIONED_SUB, oidcVerified: true });
     currentIdToken = buildIdToken(PROVISIONED_EMAIL, PROVISIONED_SUB);
 
     const cbRes = await runOAuthRoundTrip(handler, { provider: 'google', callbackURL: CALLBACK_URL });
@@ -334,7 +456,7 @@ describe('Google OIDC — full mocked flow (Task 6)', () => {
     // link has been consumed. Drives the real verify route to flip the flag —
     // no manual DB writes — so a regression in consume/markVerified/or the
     // gate would each break this arc.
-    const userId = await seedInvitedGoogleUser({ email: PENDING_EMAIL, sub: PENDING_SUB, org: true });
+    const userId = await seedInvitedGoogleUser({ email: PENDING_EMAIL, sub: PENDING_SUB });
     currentIdToken = buildIdToken(PENDING_EMAIL, PENDING_SUB);
 
     const issued = await issueInviteLink({ id: userId, name: 'Pending Flow', email: PENDING_EMAIL });
@@ -366,7 +488,7 @@ describe('Google OIDC — full mocked flow (Task 6)', () => {
   }, 30000);
 
   it('returning verified user → session again, NO invitation email re-sent (idempotent gate)', async () => {
-    const userId = await seedInvitedGoogleUser({ email: PROVISIONED_EMAIL, sub: PROVISIONED_SUB, oidcVerified: true, org: true });
+    const userId = await seedInvitedGoogleUser({ email: PROVISIONED_EMAIL, sub: PROVISIONED_SUB, oidcVerified: true });
     // Wipe sessions from the happy-path spec so this is a clean re-login.
     await prisma.session.deleteMany({ where: { userId } });
     currentIdToken = buildIdToken(PROVISIONED_EMAIL, PROVISIONED_SUB);

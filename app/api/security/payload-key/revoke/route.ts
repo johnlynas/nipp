@@ -7,7 +7,7 @@
 
 import { NextRequest, NextResponse } from 'next/server';
 import { auth } from '@/lib/auth';
-import { env } from '@/lib/env';
+import { isSameOriginRequest } from '@/lib/csrf';
 import { logger } from '@/lib/logger';
 import { revokeSessionKeys } from '@/lib/payload-key-server';
 import { checkRevokeRateLimit, resetRevokeRateLimitStore } from '@/lib/rate-limiter';
@@ -24,48 +24,11 @@ export const revalidate = 0;
 // ---------------------------------------------------------------------------
 
 /**
- * Validate that the request Origin or Referer matches the trusted frontend URL.
+ * Validate that the request is same-origin with the server serving it
+ * (host-independent — see payload-key/route.ts for rationale).
  */
 function isTrustedOrigin(request: NextRequest): boolean {
-  const trustedUrl = env.FRONTEND_URL;
-  if (!trustedUrl) return true; // No trusted URL configured — allow all (dev mode)
-
-  const origin = request.headers.get('origin');
-  const referer = request.headers.get('referer');
-
-  // Check Origin header (preferred for same-origin checks)
-  if (origin) {
-    try {
-      const originUrl = new URL(origin);
-      const trustedUrlObj = new URL(trustedUrl);
-      if (
-        originUrl.hostname === trustedUrlObj.hostname &&
-        originUrl.port === trustedUrlObj.port
-      ) {
-        return true;
-      }
-    } catch {
-      // Malformed origin — skip
-    }
-  }
-
-  // Check Referer header as fallback
-  if (referer) {
-    try {
-      const refererUrl = new URL(referer);
-      const trustedUrlObj = new URL(trustedUrl);
-      if (
-        refererUrl.hostname === trustedUrlObj.hostname &&
-        refererUrl.port === trustedUrlObj.port
-      ) {
-        return true;
-      }
-    } catch {
-      // Malformed referer — skip
-    }
-  }
-
-  return false;
+  return isSameOriginRequest(request.url, request.method, request.headers);
 }
 
 // ---------------------------------------------------------------------------

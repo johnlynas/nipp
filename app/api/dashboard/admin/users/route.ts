@@ -184,7 +184,7 @@ export async function POST(request: NextRequest) {
     // stays in the DB (magicLinkSent: false) — the admin resends from the row.
     let magicLinkSent = false;
     if (!password) {
-      const issueResult = await issueInviteLink(created);
+      const issueResult = await issueInviteLink(created, { portalOrigin: new URL(request.url).origin });
       // emailSent distinguishes "token in DB, no email" (SMTP blip — admin
       // resends from the user row) from a real delivery.
       magicLinkSent = issueResult.ok && issueResult.emailSent;

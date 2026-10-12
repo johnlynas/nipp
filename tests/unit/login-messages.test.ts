@@ -7,6 +7,7 @@
 import { describe, it, expect } from 'vitest';
 import {
   classifyGateMessage,
+  NOT_INVITED_MSG,
   oidcParamBanner,
   resolveSameOriginTarget,
   OIDC_LINK_VERIFIED_TEXT,
@@ -18,6 +19,9 @@ const INBOX_CHECK_MSG =
   'Access denied. We need to confirm your email first — check your inbox for a verification link, then try signing in with Google again.';
 const NOT_PROVISIONED_MSG =
   'Access denied. This account has not been provisioned by an administrator yet. Contact your portal administrator.';
+// Stray-identity branch (uninvited auto-registered rows) — matches the gate's thrown text.
+const STRAY_INVITED_MISSING_MSG =
+  'Access denied. This account has not been invited to the portal yet. Contact your portal administrator.';
 
 describe('classifyGateMessage', () => {
   it('classifies the unverified-inbox gate message as needs-inbox-check (NOT banned)', () => {
@@ -26,6 +30,15 @@ describe('classifyGateMessage', () => {
 
   it('classifies the not-provisioned gate message distinctly', () => {
     expect(classifyGateMessage(NOT_PROVISIONED_MSG)).toBe('not-provisioned');
+  });
+
+  it('classifies better-auth stock "signup disabled" wording as not-invited (the disableSignUp callback path)', () => {
+    expect(classifyGateMessage('signup disabled')).toBe('not-invited');
+  });
+
+  it('classifies the gate stray-identity message ("not been invited") as not-invited, NOT banned', () => {
+    expect(classifyGateMessage(STRAY_INVITED_MISSING_MSG)).toBe('not-invited');
+    expect(STRAY_INVITED_MISSING_MSG).toBe(NOT_INVITED_MSG); // single source of truth for the login banner copy
   });
 
   it('keeps genuine ban messages classified as banned', () => {

@@ -77,9 +77,23 @@ vi.mock('better-auth/api', (importOriginal) => {
   return importOriginal<typeof import('better-auth/api')>();
 });
 
-vi.mock('@/lib/db', () => ({ prisma: mockPrisma }));
+vi.mock('@/lib/db', () => ({ prisma: mockPrisma, default: mockPrisma }));
 
-vi.mock('@/lib/env', () => ({ env: { NODE_ENV: 'test' } }));
+// lib/auth.ts resolves RLS-gated Member reads via tenantDb; in this hermetic
+// unit test it must behave like the raw client (no $extends / ALS available).
+vi.mock('@/lib/tenant-db', () => ({ default: mockPrisma }));
+
+// Mirror the lib/env-schema.ts defaults for every var lib/auth.ts reads, so the
+// captured options are built against a complete env (public-access vars added in Phase B).
+vi.mock('@/lib/env', () => ({
+  env: {
+    NODE_ENV: 'test',
+    BETTER_AUTH_ALLOWED_HOSTS: '*',
+    BETTER_AUTH_BASE_PROTOCOL: 'auto',
+    TRUSTED_PROXY_HEADERS: 'true',
+    FRONTEND_URL: 'http://localhost:3000',
+  },
+}));
 
 vi.mock('@/lib/logger', () => ({ logger: mockLogger }));
 
@@ -134,9 +148,13 @@ beforeEach(() => {
 // ---------------------------------------------------------------------------
 
 describe('auth configuration (options)', () => {
-  it('registers exactly one plugin (organization with teams enabled)', () => {
+  it('registers exactly two plugins (organization with teams enabled + bearer)', () => {
     const plugins = options().plugins as Array<Record<string, unknown>>;
-    expect(plugins).toHaveLength(1);
+    expect(plugins).toHaveLength(2);
+    // bearer() was added for remote/script clients (bearer-token plan Task 2) —
+    // the pin predates it and asserted one. Both must be registered, in this order:
+    // bearer before organization so its after-hook sees every session-setting response.
+    expect(plugins.map((p) => p.id)).toEqual(['bearer', 'organization']);
     // The organization plugin marks itself with $id / metadata — assert by the
     // documented teams-mode surface it returns rather than internal shapes.
     expect(plugins[0]).toBeTruthy();
@@ -158,6 +176,22 @@ describe('auth configuration (options)', () => {
   it('enables session cookie cache (1h maxAge) to survive short DB outages', () => {
     const s = options().session as Record<string, any>;
     expect(s.cookieCache).toEqual({ enabled: true, maxAge: 60 * 60 });
+  });
+
+  it('uses an env-driven dynamic baseURL (no static base pinning trusted origins)', () => {
+    // Phase B: a static BETTER_AUTH_URL froze trusted origins to one host and broke
+    // remote sign-in. The shipped config must resolve base + trusted origins
+    // per-request from the incoming Host, validated against an env allowlist.
+    const bu = options().baseURL as Record<string, any>;
+    expect(Array.isArray(bu.allowedHosts)).toBe(true);
+    expect(bu.allowedHosts).toHaveLength(1);
+    expect(bu.protocol).toBe('auto'); // http(s) LAN + prod HTTPS both match
+    expect(bu.fallback).toBe('http://localhost:3000'); // FRONTEND_URL default
+
+    const adv = options().advanced as Record<string, any>;
+    expect(adv.trustedProxyHeaders).toBe(true); // dynamic baseURL requires explicit opt-in
+    // No TRUSTED_PROXY_CIDRS in this env → no trustedProxies key (no proxy today).
+    expect(adv.ipAddress).toEqual({});
   });
 
   it('forces secure cookies with SameSite=Lax', () => {

@@ -68,3 +68,59 @@ export function isSameSiteRequest(
 
   return false;
 }
+
+// ---------------------------------------------------------------------------
+// True same-origin check (PUBLIC ACCESS fix)
+// ---------------------------------------------------------------------------
+
+/** Parse a URL string defensively — null on malformed input. */
+function tryParseOrigin(value: string): string | null {
+  try {
+    return new URL(value).origin;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Validate that a state-changing request is same-origin WITH THE SERVER THAT IS
+ * SERVING IT — i.e. the request's Origin/Referer matches the origin of the
+ * request's own URL, not a configured FRONTEND_URL.
+ *
+ * Why this exists: `isSameSiteRequest` compares against `FRONTEND_URL`, which
+ * pins trust to one host (e.g. localhost). A browser on a LAN IP / tunnel
+ * hostname sends `Origin: http://<that-host>:3000`, gets 403 "untrusted
+ * origin", and the payload-key endpoint — the prerequisite for every PII route
+ * call — fails. The server that receives a request is by definition trusted by
+ * its own users on any reachable host, so comparing against the request's own
+ * origin is both correct and host-independent (same fix class as the Phase B
+ * dynamic baseURL in lib/auth.ts).
+ *
+ * Returns true when:
+ * - The method is safe (GET/HEAD/OPTIONS) — no validation needed
+ * - Origin header's origin equals the request URL's origin
+ * - Referer's origin equals the request URL's origin (fallback)
+ * - Development mode and no Origin/Referer present (tools like curl/Postman)
+ */
+export function isSameOriginRequest(
+  requestUrl: string | URL,
+  method: string,
+  headers: Headers
+): boolean {
+  const safeMethods = ['GET', 'HEAD', 'OPTIONS'];
+  if (safeMethods.includes(method.toUpperCase())) return true;
+
+  const ownOrigin = tryParseOrigin(requestUrl.toString());
+  if (!ownOrigin) return false; // Malformed server URL — fail closed
+
+  const origin = headers.get('origin');
+  if (origin && tryParseOrigin(origin) === ownOrigin) return true;
+
+  const referer = headers.get('referer');
+  if (referer && tryParseOrigin(referer) === ownOrigin) return true;
+
+  // In development, relax validation to allow tools like curl/Postman.
+  if (env.NODE_ENV !== 'production') return true;
+
+  return false;
+}

@@ -42,6 +42,17 @@ export interface IssueInviteOptions {
    * report magicLinkSent) pass their own wrapper; tests inject a recorder.
    */
   sendFn?: (to: string, subject: string, message: string, headerTitle?: string) => Promise<{ success: boolean; error?: unknown }>;
+
+  /**
+   * Origin the link is built on (PUBLIC ACCESS fix). Without it the server
+   * falls back to FRONTEND_URL — which pins links to localhost:3000 in a LAN /
+   * cloud deployment and produces dead URLs. Call sites must pass `new URL(
+   * request.url).origin` from their OWN incoming request so the button points
+   * at wherever the user/admin is actually reaching (LAN IP, tunnel host,
+   * public domain) — same host-independent principle as lib/csrf.ts's
+   * isSameOriginRequest.
+   */
+  portalOrigin?: string | null;
 }
 
 /**
@@ -60,7 +71,12 @@ export async function issueInviteLink(
     sendEmail(to, subject, message, headerTitle));
 
   const token = generateRandomString(32);
-  const url = `${env.FRONTEND_URL}${VERIFY_PATH}?token=${token}`;
+  // PUBLIC ACCESS fix: derive the link's origin from the originating request
+  // (options.portalOrigin) so it works on LAN IP / tunnel host / public domain;
+  // FRONTEND_URL only as the off-request-context fallback. Malformed origins are
+  // rejected (fail closed to FRONTEND_URL — never emit an unparseable URL).
+  const base = normalizePortalOrigin(options.portalOrigin)?.replace(/\/$/, '') ?? env.FRONTEND_URL;
+  const url = `${base}${VERIFY_PATH}?token=${token}`;
 
   try {
     await prisma.verification.create({
@@ -103,9 +119,9 @@ export async function issueInviteLink(
   try {
     const result = await sendFn(
       user.email,
-      'Activate your Property NI account',
+      'NIPP account activation',
       htmlMessage,
-      'Property NI — Account Activation'
+      'NIPP account activation'
     );
     if (!result.success) {
       logger.error({ err: result.error, userId: user.id }, '[OidcInvite] Invite email failed (token remains valid for resend window)');
@@ -174,6 +190,22 @@ export async function markOidcVerified(email: string): Promise<{ userId: string 
     });
   }
   return { userId: user.id };
+}
+
+/**
+ * Normalize a candidate portal origin (PUBLIC ACCESS fix). Accepts a full
+ * URL or a bare origin, strips any trailing slash. Returns null on malformed
+ * input so the caller can fall back deterministically to FRONTEND_URL.
+ */
+export function normalizePortalOrigin(origin: string | null | undefined): string | null {
+  if (!origin) return null;
+  try {
+    const u = new URL(origin, 'http://local.invalid'); // relative inputs (host:port only) resolve here
+    if (u.origin === 'http://local.invalid') return null; // bare path — not an origin
+    return u.origin.replace(/\/$/, '');
+  } catch {
+    return null;
+  }
 }
 
 function escapeHtml(s: string): string {

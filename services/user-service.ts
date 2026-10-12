@@ -32,9 +32,10 @@ export interface CreateUserInput {
   password?: string;
   organizationId?: string;
   /**
-   * Optional specific team to enroll the user in (instead of the org's
-   * default "Members" team). Must belong to the target org — enforced here,
-   * so a cross-org teamId is rejected before any rows are written.
+   * Optional ADDITIONAL team to enroll the user in, on top of the org's
+   * default "Members" team (which is ALWAYS attached at creation). Must belong
+   * to the target org — enforced here, so a cross-org teamId is rejected before
+   * any rows are written.
    */
   teamId?: string;
 }
@@ -73,21 +74,25 @@ export const UserService = {
     }
 
     // The organization the user is being created for. TENANT_ADMIN always
-    // knows it from ctx; PLATFORM_ADMIN passes it explicitly. Without one the
-    // user has no workspace and every tenant dashboard page shows "No
-    // organization selected" — so pin activeOrganizationId at create time
-    // (the session hook in lib/auth.ts only backfills on first sign-in).
+    // knows it from ctx; PLATFORM_ADMIN passes it explicitly. Without it the
+    // user has no workspace (access denied on every page) and no isolation
+    // boundary — so pin activeOrganizationId at create time (the session hook in
+    // lib/auth.ts only backfills on first sign-in).
     const orgForUser =
       ctx.role === 'TENANT_ADMIN'
         ? ctx.organizationId
         : data.organizationId ?? null;
 
-    // Invite-only Google login: a passwordless user can ONLY get a session
-    // through the pre-registration gate (oidcVerified + org membership), so an
-    // organization is mandatory at invite time. Password users keep their local
-    // sign-in, so org-less creation stays an admin judgment call.
-    if (!password && !orgForUser) {
-      throw new ValidationError('organizationId is required for users without a password (Google-only accounts must be assigned to an organization at invite time)');
+    // INVARIANT (isolation boundary, local AND Google users): EVERY user is
+    // created INTO an organization — a user without one sees nothing and
+    // therefore must not exist. Reject before any rows are written. The Members
+    // team auto-enrollment below gives the user their default team (the canonical
+    // "all members of this org" reporting surface); a chosen specific team is
+    // additional to it, and teams carry 1:M roles for permission refinement.
+    if (!orgForUser) {
+      throw new ValidationError(
+        'Organization is required — every user must belong to an organization (local password and Google accounts alike) at creation',
+      );
     }
 
     // A requested team must belong to the same organization as the membership
@@ -95,9 +100,6 @@ export const UserService = {
     // attack surface stays closed, per plan risk #2).
     let targetTeam: { id: string; organizationId: string } | null = null;
     if (data.teamId) {
-      if (!orgForUser) {
-        throw new ValidationError('Team assignment requires an organization');
-      }
       targetTeam = await runWithTenant(orgForUser, () =>
         tenantDb.team.findUnique({ where: { id: data.teamId! }, select: { id: true, organizationId: true } }),
       );
@@ -146,26 +148,27 @@ export const UserService = {
         }),
       );
 
+      // INVARIANT: every user joins the org's default "Members" team on
+      // creation (idempotent, self-heals legacy orgs missing the team). This is
+      // the canonical reporting surface for all members of an organization.
+      await runWithTenant(organizationId, () =>
+        enrollInDefaultMembersTeam(tenantDb, organizationId, user.id),
+      );
+
       if (targetTeam) {
-        // A specific team REPLACES the default enrollment path; addTeamMember
-        // re-verifies the Member row plus applies TeamRole inheritance. Pin the
-        // (already cross-checked) org on the ctx so its internal contextOrgId
-        // fallback never reaches for an unset platform-org env in edge cases.
+        // An additional specific team on TOP of the Members default (admin chose
+        // one on the create form); addTeamMember re-verifies the Member row plus
+        // applies TeamRole inheritance. Pin the (already cross-checked) org on
+        // the ctx so its internal contextOrgId fallback never reaches for an
+        // unset platform-org env in edge cases.
         await TeamService.addTeamMember(targetTeam.id, { userId: user.id }, {
           ...ctx,
           organizationId: targetTeam.organizationId,
         });
-      } else {
-        // Default "Members" team auto-enrollment (idempotent)
-        await runWithTenant(organizationId, () =>
-          enrollInDefaultMembersTeam(tenantDb, organizationId, user.id),
-        );
       }
     };
 
-    if (orgForUser) {
-      await addMembership(orgForUser);
-    }
+    await addMembership(orgForUser);
 
     logger.info(
       { userId: ctx.userId, createdUserId: user.id, method: 'UserService.create' },
