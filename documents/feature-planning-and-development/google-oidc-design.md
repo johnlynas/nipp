@@ -1,9 +1,17 @@
 # Google OIDC Integration — Design Document
 
-**Date:** 2026-10-02 (updated 2026-10-03: magic-link verification for new Google users)
-**Status:** Proposed
-**Branch:** `google-oidc`
-**Related plan:** `.hermes/plans/20261003_042133-google-oidc-with-magic-link.md`
+**Date:** 2026-10-02 (updated 2026-10-03: magic-link verification for new Google users; **2026-10-11: invite-only door, §12**)
+**Status:** **Shipped** (pre-registration + magic link 2026-10-06; invite-only zero-row refusal 2026-10-11)
+**Branch:** `google-oidc` → merged into the public-access line
+**Related plan:** `.hermes/plans/20261003_042133-google-oidc-with-magic-link.md`; follow-up `.hermes/plans/20261008_155856-public-internet-bearer-access.md` (Phases H-cont. / H-cont.2 / H-cont.3)
+
+> **Superseded by §12 (read that first).** The 2026-10-11 invite-only door changed the core
+> account model: implicit sign-up is now **disabled** (both `disableImplicitSignUp` and
+> `disableSignUp`), so brand-new Google identities create **no rows at all** — the §4.3
+> "create the account, withhold only the session" mechanism (§4.3 below documents *why* that was
+> initially believed impossible) is replaced by a provider-level refusal plus host-independent
+> magic links and RLS-visible provisioning reads. Everything else (OAuth leg, state nonces,
+> verify route, ban funnel, rate limits) stands as described here.
 
 ---
 
@@ -27,6 +35,8 @@
 - [8. Phased Delivery](#8-phased-delivery)
 - [9. Test Strategy](#9-test-strategy)
 - [10. Risks & Open Questions](#10-risks--open-questions)
+- [11. Implementation Cross-Reference (2026-10-06)](#11-implementation-cross-reference-2026-10-06)
+- [12. Invite-Only Door & Public-Access Updates (shipped 2026-10-11)](#12-invite-only-door--public-access-updates-shipped-2026-10-11)
 - [Appendix A: Reference — /Users/johnlynas/dev/social-login](#appendix-a-reference---usersjohnlynavsocial-login)
 
 ---
@@ -173,9 +183,9 @@ Porting the hand-rolled flow would mean **two parallel session systems** in one 
 
 | Case | State before login | Behavior | New row(s) |
 |---|---|---|---|
-| A. Returning Google user | `Account(google, sub)` exists | Sign in as the linked user (subject to the §4.3 provisioning gate) | none |
+| A. Returning Google user | `Account(google, sub)` exists | Sign in as the linked user (subject to the §4.3 / §12 provisioning gate) | none |
 | B. Google email matches password-only user | `User(email)` exists, no google `Account` | **Blocked for v1 pre-registration** — session withheld at the provisioning gate until an admin invites the account (magic link consumed + org membership exists); free link-by-email was the doc's original default and is superseded by the implementation plan (product decision #3) | none until invited |
-| C. Brand-new identity | No match on sub or email | Implicit sign-up creates `User` (email + verified flag from Google's token) + `Account`, then the **session gate rejects** (magic link sent, no session) until the user clicks their magic link; second "Sign in with Google" succeeds (§4.3) | 1 × `User` + 1 × `Account` |
+| C. Brand-new identity | No match on sub or email | **Superseded by §12:** the invite-only door now refuses sign-up at the callback — zero rows, no session, no email ("not invited" banner). The original behavior described here (implicit sign-up creating `User` + `Account`, then a session-gate rejection with magic link) was the 2026-10-03→06 implementation and is preserved in the text below as history | historically: 1 × `User` + 1 × `Account`; now: *none* |
 | D. Google identity, password also set later | any of A–C | Both login methods work against the same `User.id` forever after | — |
 
 Case B was originally the decision most worth calling out: **one account, two doors.** We do *not* create a shadow user when a Google email matches an existing password user (the naive behavior some IdPs produce) — that would strand their org membership and history on an orphan row. **Superseded for v1 pre-registration** by the implementation plan (`.hermes/plans/20261005_135703-google-login-pre-registration-magic-link.md`, product decision #3): in an invite-only deployment, case-B free linkage is a claim vector rather than a convenience, so the provisioning gate (`enforceOidcProvisioning`) withholds every Google-only session until an admin invites the account — which also covers admin-created users (decision #3/#4). The "no shadow user" posture is retained; only the link-by-email step is suppressed.
@@ -187,6 +197,8 @@ Consequences to keep in mind:
 - The ban flag on `User` applies to both doors — enforced identically at session-creation time (§5.1).
 
 ### 4.2 First Google Sign-In State Diagram
+
+> **Pre-§12 diagram.** It depicts the historical implicit-sign-up path (rows created, session withheld at the gate). The shipped flow adds an earlier refusal: an identity with no `User` row is rejected by the provider *before* any row exists (§12 carries the current state diagram). Everything past "LinkedExisting" is unchanged.
 
 ```mermaid
 stateDiagram-v2
@@ -282,20 +294,14 @@ No change required. `app/api/auth/[...all]/route.ts` runs `checkAuthRateLimit(ip
 
 ## 6. Configuration & Environment
 
-Already in place — no changes needed for v1:
-
-```env
-GOOGLE_CLIENT_ID="<from Google Cloud Console>"     # lib/env-schema.ts:11, .env.example:24
-GOOGLE_CLIENT_SECRET="<…>"                          # lib/env-schema.ts:12, .env.example:25
-FRONTEND_URL="http://localhost:3000"                # used for redirect URIs AND as the magic-link host
-SMTP_HOST / SMTP_PORT / SMTP_USER / SMTP_PASS       # existing nodemailer config (lib/notifications/email.ts)
-SMTP_FROM="noreply@nipp.gov.uk"                     # sender of magic-link emails
-```
+- `GOOGLE_CLIENT_ID` / `GOOGLE_CLIENT_SECRET` — consumed by the shipped sign-in door (below).
+- Magic-link email **host**: originally `${FRONTEND_URL}`; since 2026-10-11 it is the origin of the *request that issued the link* (`portalOrigin`, host-independent), with `FRONTEND_URL` only as off-request fallback — see §12.3.
+- `SMTP_HOST` / `SMTP_PORT` / `SMTP_USER` / `SMTP_PASS` (existing nodemailer config, `lib/notifications/email.ts`) and `SMTP_FROM="noreply@nipp.gov.uk"` — sender of the magic-link emails.
 
 Operational checklist (runbook, not code):
 
 1. Google Cloud Console → create OAuth client (Web application).
-2. Redirect URI **must exactly match** what BetterAuth constructs: `FRONTEND_URL + /api/auth/callback/google` (dev: `http://localhost:3000/api/auth/callback/google`; prod: the production origin).
+2. Redirect URI **must exactly match** what BetterAuth constructs from the deployment's per-request base origin: `<origin>/api/auth/callback/google` (dev: `http://localhost:3000/api/auth/callback/google`; prod: the production HTTPS domain — `http://` raw IPs are not acceptable to Google for production, which is why the public door assumes the Phase-C domain and LAN-IP OIDC keeps failing with Google's "Invalid URI" until a registered domain exists).
 3. Consent screen scope: `openid email profile` — BetterAuth's google provider default. Do **not** request offline access in v1.
 4. Publish/verify status: for a portal whose users are not on staff emails, the consent screen must be *Published* or those users can't authenticate.
 5. **Email forwarder (external dependency, user-owned):** the portal's outbound mail is delivered via its own mailbox (`SMTP_FROM`), so an email forwarder must route `noreply@nipp.gov.uk` → each Google account of a new OIDC user so they actually receive the magic-link email. Forwarding is per-user and lives outside this codebase (DNS/MX or provider-side forwarding rules); until it is configured for a given address, that new user will never see their magic link — treat "email not arriving" as the first diagnostic in the e2e checklist (Task 9).
@@ -376,7 +382,7 @@ Each phase ends in an independent, committable state; Phase 1 is mergeable befor
 
 | # | Risk / Question | Severity | Disposition |
 |---|---|---|---|
-| 1 | **Account claim via email match (case B):** a user who owns a Google address matching an existing password-only account can take over that portal identity. Mitigation options: require admin approval for first Google link on pre-existing accounts, or block case B and force contact with support. Precedent (the reference starter) links freely. | Medium | **Decided (2026-10-05):** case B is blocked in v1 — the provisioning gate withholds all Google-only sessions until an admin invites the account (plan product decision #3; §4.1). Free linkage remains a post-GA option if the deployment opens up. |
+| 1 | **Account claim via email match (case B):** a user who owns a Google address matching an existing password-only account can take over that portal identity. Mitigation options: require admin approval for first Google link on pre-existing accounts, or block case B and force contact with support. Precedent (the reference starter) links freely. | Medium | **Decided (2026-10-05):** case B is blocked in v1 — the provisioning gate withholds all Google-only sessions until an admin invites the account (plan product decision #3; §4.1). Free linkage remains a post-GA option if the deployment opens up. The 2026-10-11 invite-only door (§12) closes the adjacent self-registration vector entirely: no uninvited rows can exist at all. |
 | 2 | Any Google account may sign in (no domain restriction). If portal access should be limited to specific organizations/domains, set `hostedDomain` on the provider config. | Low–Medium | Open question; deferred — org membership gates *what* a user can do once inside. |
 | 3 | New Google users have no org → they land in a login-but-contextless state (same as today's orphan email users). Acceptable v1. | Low | Documented; provisioning is a separate feature. |
 | 4 | **Email forwarder is an external, per-user dependency.** Until forwarding for a new user's address is configured, they receive no magic link and are stuck at `/login?oidc=inbox-check`. This is the single biggest operational gap for v1 rollout. | Medium | Runbook item (§6 step 5); surfaced in the `oidc=inbox-check` banner; first diagnostic in Task 9. |
@@ -417,6 +423,92 @@ shipped behavior refines this doc, the plan is authoritative:
   (mocked OAuth token exchange over the real DB), `tests/integration/user-invite-flow.test.ts`,
   `tests/integration/rate-limiting.test.ts` (verify-route + social sign-in IP limits)
   and `tests/unit/oidc-magic-link.test.ts`.
+
+---
+
+## 12. Invite-Only Door & Public-Access Updates (shipped 2026-10-11)
+
+*Source of truth for everything below: the working tree (`lib/auth.ts`, `lib/oidc-magic-link.ts`, `services/user-service.ts`) and `.hermes/plans/20261008_155856-public-internet-bearer-access.md` Phases H-cont./H-cont.2/H-cont.3.*
+
+This section records the shipped refinements to this design from the public-access follow-up (branch `bearer-tokens`). Where it conflicts with §4.1–§4.3 above, **this section wins**.
+
+### 12.1 Self-registration refusal at the provider (replaces §4.3's "create rows, withhold session")
+
+The original design kept implicit sign-up **on** and withheld only the *session* (§4.3 argued `disableSignUp` couldn't express that — true in isolation). Shipped config sets **both** flags on the provider:
+
+```ts
+socialProviders: { google: { clientId, clientSecret, disableImplicitSignUp: true, disableSignUp: true } }
+```
+
+Installed 1.6.23 evaluates `provider.disableImplicitSignUp && !requestSignUp || provider.options?.disableSignUp` in `handleOAuthUserInfo`, so the *second* term refuses sign-up even if a client forges `requestSignUp: true` (defense-in-depth against that client-controlled body field). Unknown identity → `"signup disabled"` before `createOAuthUser` runs: **zero rows, no email**, callback redirect to `onAPIError.errorURL = '/login'` → `/login?error=signup_disabled`, which `classifyGateMessage` (lib/oidc-login-ui.ts) renders as the "not invited" banner.
+
+Consequences vs §4.1 case C:
+- No `User`/`Account` rows for strangers — the invite email is no longer a leak channel ("invitation to your own stranger account"), and `Verification` accumulates no stray tokens.
+- The gate now has a **stray branch** (defense-in-depth for legacy rows created before this flag shipped): identity with no org membership, no credential Account, and `oidcVerified=false` is refused *without* an invitation email, its user/verification rows are removed best-effort (cleanup failure quarantines — never 500s the callback), then the same "not invited" rejection.
+
+### 12.2 Current sign-in state machine (supersedes §4.2's diagram)
+
+```mermaid
+stateDiagram-v2
+    [*] --> Callback: OAuth callback round-trip<br/>(code exchanged, sig/aud/exp/iss verified server-to-server)
+    Callback --> RefuseNoRows: no User row for identity<br/>disableSignUp → zero rows, no email
+    RefuseNoRows --> [*]: /login?error=signup_disabled → "not invited" banner
+    Callback --> SessionGate: pre-created (invited) identity
+    SessionGate --> RejectBan: banned and not expired<br/>(expired bans auto-clear in place)
+    RejectBan --> [*]
+    SessionGate --> RefuseStray: legacy stray shape — no org,<br/>no credential Account, unverified:<br/>rows removed best-effort, NO email
+    RefuseStray --> [*]: "not invited" banner
+    SessionGate --> ReInvite: oidcVerified = false (invited)<br/>fresh magic link issued per attempt
+    ReInvite --> InboxBanner: 401 "confirm your email first"
+    InboxBanner --> Verified: click emailed link — token consumed atomically,<br/>oidcVerified = true, deliberately NO session minted
+    Verified --> Callback: second "Sign in with Google" click
+    SessionGate --> RejectNotProvisioned: verified but no Member row
+    RejectNotProvisioned --> [*]: "not provisioned by an administrator" banner
+    SessionGate --> SessionCreated: invited + verified + org member
+    SessionCreated --> [*]: cookie + set-auth-token → callbackUrl
+```
+
+### 12.3 Host-independent magic links (supersedes §4.3's `${FRONTEND_URL}` link host)
+
+`issueInviteLink(user, { portalOrigin })` builds the button href and fallback text on **the origin of the request that triggered the email** — `getLastRequestOrigin()` from the session-creation context for gate invites; `new URL(request.url).origin` passed explicitly by every admin-invite route (create + resend). `normalizePortalOrigin()` validates/strips trailing slashes and falls back to `FRONTEND_URL` on garbage (fail-safe: never emit an unparseable URL). Email subject/header title is the exact string **"NIPP account activation"**. Rationale: pinning the host to a static env var produced dead `localhost:3000` links for any remote user (same failure class as the better-auth base-URL pin, Phase A of the public-access plan).
+
+### 12.4 RLS-visible provisioning reads (corrects §5/§4.3's implicit "membership visible" assumption)
+
+The app role is the non-owner `nipp_app`, so Postgres applies the Member isolation policy to every read: a GUC-less membership query returns **zero rows for everyone**, including provisioned users (verified live 2026-10-11 — a real Platform-org member was falsely denied with "not been provisioned by an administrator"). Integration tests never caught it (they connect as the owner, who bypasses RLS).
+
+The sanctioned pattern — same one used by `lib/authz.ts`'s `verifySuperAdmin` and `lib/cache/warm.ts`:
+
+```ts
+// lib/auth.ts (module-local)
+function withPlatformRead<T>(op: () => Promise<T>): Promise<T> {
+  const platformOrgId = env.PLATFORM_ORGANIZATION_ID;
+  return platformOrgId ? withPlatformContextForDB(platformOrgId, op) : op();
+}
+// usage: GUCs and the query share ONE pinned interactive-tx connection
+await withPlatformRead(() => tenantDb.user.findUnique({ where: { id }, select: { members: … } }))
+```
+
+Applied to: `enforceOidcProvisioning` (authoritative membership count for every branch), `session.create.after`'s `Member` lookup (auto-org-assignment had the identical latent bug — it silently never set `activeOrganizationId` under nipp_app), and `enforceBanStatus` (User is RLS-exempt, context-consistency only). Mail sends stay **outside** the 5-second pinned transaction (no SMTP in a short-lived connection window).
+
+### 12.5 Org-mandatory user creation (supersedes §7's "org-less local users exist")
+
+`UserService.create` now requires an organization for **every** user, passworded or not — a user without one has no workspace and no isolation boundary, so the row must not be written (pre-write `ValidationError`, pinned). At creation every user joins the org's default "Members" team (idempotent, self-healing); a specifically chosen team is *additional* to that default. Both admin users routes carry the crisp 400.
+
+### 12.6 Callback error routing
+
+`onAPIError: { errorURL: '/login' }` in `lib/auth.ts`: all OAuth-callback API errors (state mismatch, signup disabled, …) redirect to `/login?error=…&error_description=…` — the page's existing classifier owns rendering — instead of BetterAuth's default `/api/auth/error` URL, which has no route and 404s. `tests/integration/google-oidc.test.ts` pins the state-mismatch Location accordingly.
+
+### 12.7 New/changed pins
+
+| Test | Proves |
+|---|---|
+| `google-oidc-full-flow.test.ts` — STRANGER spec | no `User`, no `Account(google, sub)`, **no email**, redirect carries `signup_disabled` |
+| `…` FORGED `requestSignUp: true` spec | same zero-row/no-email refusal (the second flag term) |
+| `…` LAN-origin invite spec (`http://192.168.99.5:3000`) | subject exactly "NIPP account activation"; button href + fallback text on that origin, zero localhost occurrences |
+| `tests/unit/oidc-magic-link.test.ts` | portalOrigin normalization table; malformed-input → FRONTEND_URL fallback (×4) |
+| `tests/unit/login-messages.test.ts` | `classifyGateMessage`: "signup disabled" / "not been invited" → `not-invited`, never banned |
+| `tests/unit/user-service.test.ts` | org-mandatory for both doors; Members-team + chosen team enrollment |
+| live probe (recorded in plan) | as `nipp_app`: ban gate PASS, `enforceOidcProvisioning` for a real Platform-org member PASS (previously DENIED) |
 
 ---
 

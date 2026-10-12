@@ -22,7 +22,7 @@ The design follows three core principles:
   - [Cross-Tab Session Invalidation](#cross-tab-session-invalidation)
   - [Auto-Logout on Inactivity](#auto-logout-on-inactivity)
   - [User Ban System](#user-ban-system)
-  - [Google OIDC Sign-In & Magic-Link Verification (in development)](#google-oidc-sign-in--magic-link-verification-in-development)
+  - [Google OIDC Sign-In (invite-only door + magic-link verification)](#google-oidc-sign-in-invite-only-door--magic-link-verification)
   - [Remote Bearer-Token Access — Origin Policy & Operations](#remote-bearer-token-access--origin-policy--operations)
 - [3. Authorization & Access Control](#3-authorization--access-control)
   - [Dual-Authorization Model](#dual-authorization-model)
@@ -140,7 +140,7 @@ Exempt tables (no policy, documented): User / Session / Account (BetterAuth auth
 
 Authentication is handled by [BetterAuth](https://www.better-auth.com/), configured in `lib/auth.ts`. Key configuration:
 
-- **Providers**: Email/password is the only fully *user-facing live* sign-in method today. Google OIDC sign-in behind the "Sign in with Google" button is in development on branch `google-oidc` — its **server-side provider wiring is implemented** (see [below](#google-oidc-sign-in--magic-link-verification-in-development)); only the login UI, magic-link verification gate, and hardening remain. Its credentials (`GOOGLE_CLIENT_ID` / `GOOGLE_CLIENT_SECRET`) are already required by the env schema (`lib/env-schema.ts`). No other providers are configured.
+- **Providers**: Email/password is fully live for admin-created users; Google OIDC behind the "Sign in with Google" button is also **live** — an invite-only door (see [below](#google-oidc-sign-in-invite-only-door--magic-link-verification)). Its credentials (`GOOGLE_CLIENT_ID` / `GOOGLE_CLIENT_SECRET`) are required by the env schema (`lib/env-schema.ts`). No other providers are configured.
 - **Cookie settings**: The session cookie uses `Secure` flag (HTTPS only) and `SameSite=Lax` to prevent CSRF via cross-site navigation.
 - **Rate limiting**: Request rate limits are enforced:
   - General requests: 10 requests per 15 minutes
@@ -185,26 +185,44 @@ Ban enforcement happens in the authentication callback: when a user attempts to 
 
 **All-methods enforcement (implemented on branch `google-oidc`):** this check previously ran on the email sign-in path only (`lib/auth.ts` route hook). Branch `google-oidc` consolidates it into `databaseHooks.session.create.before` via one shared exported helper (`enforceBanStatus(email)`) — the single point every successful sign-in funnels through with a resolved user id — so a banned user cannot bypass the ban by using Google (or any future method). The email route hook now calls the *same* helper (fast 401 on the login form, behavior unchanged). Expired-ban auto-clear happens in the same place for all doors. Behavior is pinned by `tests/integration/google-oidc.test.ts` (active ban rejected; expired ban lifts the flag).
 
-### Google OIDC Sign-In & Magic-Link Verification (in development)
+### Google OIDC Sign-In (invite-only door + magic-link verification)
 
-Google sign-in behind the login page's "Sign in with Google" button is being built on branch `google-oidc`. **Phase 1 (server-side) is implemented:** provider registration, PKCE state/nonce storage in a new Prisma `Verification` table, all-methods ban enforcement at session creation, and callback public-route verification. The login UI, magic-link gate, and hardening phases are still in build. Full design: [documents/feature-planning-and-development/google-oidc-design.md](./documents/feature-planning-and-development/google-oidc-design.md).
+Google sign-in behind the login page's "Sign in with Google" button is **shipped** as an invite-only OAuth 2.0 door through BetterAuth's built-in `google` provider (`socialProviders.google`). Full design (linking semantics, phased delivery, test strategy): [documents/feature-planning-and-development/google-oidc-design.md](./documents/feature-planning-and-development/google-oidc-design.md); architectural shape: ARCHITECTURE.md §3.
 
-One security-relevant implementation note from Phase 1: the signed `state` nonce for each OAuth flow is **persisted in the Prisma `Verification` table** (BetterAuth's DB-backed state storage) and validated at callback time — a callback with an unknown/mismatched state is rejected with a redirect to BetterAuth's own error page (`/api/auth/error?error=state_mismatch`). The original plan assumed no schema change was needed; it was not — the table is mandatory for the CSRF control to work.
+**Security-relevant shape:**
 
-- **Flow.** Standard OAuth 2.0 authorization-code flow through BetterAuth's built-in `google` provider (`socialProviders.google`). The auth code never returns to the browser; BetterAuth performs a server-to-server token exchange and verifies the ID token (signature, audience, expiry, issuer) before any user row is touched. A signed per-flow `state` nonce guards the callback against CSRF injection.
-- **Account linking.** One `User` row per person: returning Google identities sign in as their linked account; a Google email matching an existing password-only user **links** a new `Account(google, sub)` to that user (no shadow users); brand-new identities create a fresh `User` + `Account`.
-- **Magic-link verification gate.** A brand-new Google identity's rows are created on first sign-in, but **no session is issued**: `databaseHooks.session.create.before` rejects session creation when the user has only a Google account and `oidcVerified = false`, and sends a one-time magic link to the (Google-asserted) email. The verify endpoint (`GET /auth/magic-link/verify?token=…`) consumes the token atomically from a `Verification` row, sets `User.oidcVerified = true`, and redirects — it **deliberately does not mint a session**. Sign-in completes on the user's second "Sign in with Google" click. Passwordless admin-created users follow the same emailed-link path; local (password) logins are untouched by design invariant.
-- **Threat controls** (full table in the design doc):
+- **No self-registration. Ever.** The provider config sets *both* `disableImplicitSignUp` and `disableSignUp`. Installed better-auth@1.6.23 evaluates `provider.disableImplicitSignUp && !requestSignUp || provider.options?.disableSignUp`, so the flag set refuses sign-up even when a client forges `requestSignUp: true` on the sign-in call (verified in dist; pinned by a forged-signup integration spec). An unknown Google identity is turned away at the callback **with zero rows written — no `User`, no `Account` — and no email**, redirected to `/login?error=signup_disabled` where the login page's banner classifier renders "not invited".
+- **Invited identities are gated in one place.** `databaseHooks.session.create.before` is the single funnel every sign-in passes through (email, Google, future methods). Gate order: ban (`enforceBanStatus`) → provisioning (`enforceOidcProvisioning`). Outcomes for a Google-only identity whose rows were admin-created:
+
+```mermaid
+flowchart TD
+    CB["OAuth callback — ID token verified<br/>(sig / aud / exp / iss, server-to-server)"] --> GATE{"session.create.before"}
+    GATE -- "banned (active)" --> REJB["401 'Access denied.' + banned banner<br/>no session issued; expired bans auto-clear in the same place"]
+    GATE -- "oidcVerified = false (invited, link not clicked)" --> ML["issueInviteLink: 32-char token → Verification row,<br/>5-min expiry, email on the request's own origin<br/>401 'confirm your email first' — no session"]
+    GATE -- "verified but no Member row" --> REJP["401 'not provisioned by an administrator'<br/>no session; membership can still be set up by the admin"]
+    GATE -- "invited + verified + org member" --> SESS["Session created → cookie + set-auth-token"]
+    ML -. "user clicks emailed link — token consumed atomically,<br/>oidcVerified = true, deliberately NO session minted" .- VR["GET /auth/magic-link/verify<br/>(public, IP-rate-limited, session-less)"]
+    VR -. "user signs in with Google again" .-> CB
+```
+
+- **Membership reads are RLS-visible.** The app role is the non-owner `nipp_app`, so a GUC-less `Member` read returns zero rows for *every* user — including provisioned ones. The gate's authoritative membership query therefore runs `tenantDb.user.findUnique(… select members)` under the platform context (`withPlatformContextForDB` from `lib/rls-transaction.ts`), where the GUCs and the query share one pinned connection. A naive raw-Prisma read here produces false "not provisioned" denials (caught in production, 2026-10-11; integration tests connecting as owner never see it). The auto-org-assignment hook (`session.create.after`) uses the same pattern for its `Member` lookup.
+- **State/CSRF.** A signed per-flow `state` nonce is stored in the Prisma `Verification` table and validated at callback time; a mismatched state redirects to `/login?error=state_mismatch` (via `onAPIError.errorURL: '/login'`, which replaces BetterAuth's default `/api/auth/error` — that URL has no route and used to 404).
+- **Magic-link integrity.** The token is 192-bit random, consumed atomically on verify, expires in 5 minutes; the link host is the origin of the request that issued it (host-independent — LAN IP today, public domain tomorrow), not a pinned `FRONTEND_URL`. Worst case for interception: an attacker consumes the victim's token and the victim simply retries sign-in, which re-issues a fresh link.
+
+**Threat controls (supersedes/extends the original table):**
 
 | Threat | Control |
 |--------|---------|
-| CSRF on OAuth callback | signed `state` nonce per flow (BetterAuth) |
-| Magic-link interception / replay | 32-char random token; stored in `Verification`, consumed atomically on verify; 5-minute expiry; verify route IP-rate-limited and session-less |
-| Token enumeration | 192-bit random tokens, not enumerable |
-| Open redirect via `callbackUrl` | same-origin guard on post-login navigation (login page); server callback URLs are hardcoded constants |
-| Post-verification abuse | ban enforcement at session creation applies to both doors (above) |
+| Uninvited Google identity creating account rows (self-registration) | Provider double-sign-up-disable: zero rows + no email at the callback; stray legacy rows quarantined by the gate (removed best-effort, refused without an invitation) |
+| Client-forged `requestSignUp: true` to bypass invite-only | Second flag term (`options?.disableSignUp`) refuses regardless of forged request body — pinned by integration spec |
+| CSRF on OAuth callback | signed `state` nonce per flow (BetterAuth), verified against `Verification` |
+| Magic-link interception / replay | 192-bit token; atomic consume; 5-min expiry; IP-rate-limited session-less verify route that never mints a session |
+| Token enumeration | random tokens not enumerable |
+| Open redirect via `callbackUrl` | same-origin guard on post-login navigation (login page); BetterAuth's callback-allowlist (`trustedOrigins`) applies to the OAuth callback itself |
+| False "not provisioned" denial of valid members (RLS) | membership read under platform context through `tenantDb`; pinned by integration + live probes |
+| Post-verification abuse / ban evasion | ban enforcement at session creation applies to both doors — no sign-in method can bypass it |
 
-- **Operational dependency.** Portal outbound mail delivers as its own mailbox, so per-user email forwarding must be configured for new OIDC users — a runbook item in the design doc (§6), and the first e2e diagnostic.
+**Operational requirement:** the Google Cloud Console OAuth client must list the deployment's callback (`<origin>/api/auth/callback/google`) — `http://` LAN IPs are not acceptable to Google for production, so the public door assumes the Phase-C domain; until then the email/password door remains fully scriptable. Email forwarding for new OIDC users is a per-user external dependency (design doc §6).
 
 ### Remote Bearer-Token Access — Origin Policy & Operations
 

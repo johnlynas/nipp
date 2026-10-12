@@ -1,10 +1,18 @@
 # Bearer-Token Access for Remote Domains — Design Document
 
-**Date:** 2026-10-08
-**Status:** Proposed
+**Date:** 2026-10-08 (updated **2026-10-11: shipped + public-access config, §5.4 & §11**)
+**Status:** **Shipped** (Phases 1–3 plus the Phase A–H plan of `.hermes/plans/20261008_155856-public-internet-bearer-access.md`)
 **Branch:** `bearer-tokens`
-**Related plan:** `.hermes/plans/20261008_105030-bearer-token-remote-access.md`
-**Builds on:** `documents/feature-planning-and-development/google-oidc-design.md` (shipped, 2026-10-06)
+**Related plan:** `.hermes/plans/20261008_105030-bearer-token-remote-access.md` (feature phases) and `.hermes/plans/20261008_155856-public-internet-bearer-access.md` (public-internet follow-up, Phases A–H)
+**Builds on:** `documents/feature-planning-and-development/google-oidc-design.md` (shipped; see its §12 for the 2026-10-11 invite-only door updates)
+
+> **Superseded in two places — read first.** (1) The v1 "keep a fixed portal origin" decision
+> in §5.2 row 1 was reversed by the public-access plan: base URL + trusted origins now resolve
+> **per-request** from the incoming `Host`/`x-forwarded-host`, env-tunable, zero hardcoded hosts
+> (§5.4 below). (2) The Google OIDC "door" section of this design assumed uninvited identities
+> could register rows; since 2026-10-11 that is impossible — the provider refuses sign-up with
+> zero rows written (OIDC design doc §12). The token model (§4), lifetime policy (§4.3), threat
+> controls (§5.1) and no-CORS stance are unchanged and live exactly as designed.
 
 ---
 
@@ -22,12 +30,14 @@
 - [5. Security Design](#5-security-design)
   - [5.1 Threat Model & Controls](#51-threat-model--controls)
   - [5.2 What we deliberately do NOT change](#52-what-we-deliberately-do-not-change)
+  - [5.4 Public-Access Configuration (shipped)](#54-public-access-configuration-shipped-flips-52-row-1)
 - [6. Configuration & Runbook](#6-configuration--runbook)
 - [7. Client Guidance (developer-facing)](#7-client-guidance-developer-facing)
   - [7.1 Reference integration sequence diagram](#71-reference-integration-sequence-diagram)
 - [8. Phased Delivery](#8-phased-delivery)
 - [9. Test Strategy](#9-test-strategy)
 - [10. Risks, Tradeoffs & Open Questions](#10-risks-tradeoffs--open-questions)
+- [11. Shipped Status & Post-Delivery Verification (2026-10-11)](#11-shipped-status--post-delivery-verification-2026-10-11)
 
 ---
 
@@ -44,12 +54,12 @@ Concretely:
 
 ## 2. Current State
 
-Audited against the working tree (branch `bearer-tokens`, commit c67bd4b):
+Audited against the working tree at design time (branch `bearer-tokens`, commit c67bd4b); **shipped state since then** noted per row:
 
 | Area | File(s) | Finding |
 |---|---|---|
-| Auth core | `lib/auth.ts` | `betterAuth` v1.6.23 (`minimal` entrypoint), Prisma adapter, `socialProviders.google`, org plugin, `session: { expiresIn: 3600, updateAge: 900 }`, ban + provisioning gates at `session.create.before`. **No `bearer` plugin registered.** |
-| Session resolution | `lib/middleware/auth.ts:25` (`withAuth`) and `lib/authz-route.ts` | Every protected API route resolves auth via `auth.api.getSession({ headers: await headers() })` — a pure header lookup. This is the single reason bearer support is a config change, not a per-route change. |
+| Auth core | `lib/auth.ts` | `betterAuth` v1.6.23 (`minimal` entrypoint), Prisma adapter, `socialProviders.google`, org plugin, `session: { expiresIn: 3600, updateAge: 900 }`, ban + provisioning gates at `session.create.before`. **Then:** `bearer()` registered; env-driven per-request `baseURL` + proxy-header wiring added (§5.4); invite-only Google door (OIDC design doc §12). |
+| Session resolution | `lib/middleware/auth.ts:25` (`withAuth`) and `lib/authz-route.ts` | Every protected API route resolves auth via `auth.api.getSession({ headers: await headers() })` — a pure header lookup. This is the single reason bearer support was a config change, not a per-route change, and it stayed that way through shipping. |
 | Browser gate | `middleware.ts:63-73` | Page routes (HTML) require a session *cookie*; without one they redirect to `/login`. API routes are unaffected by this cookie check. |
 | Auth endpoints | `app/api/auth/[...all]/route.ts` | Catch-all → `auth.handler(req)`; all POSTs IP-rate-limited via `checkAuthRateLimit`. `/api/auth/**` is already in `PUBLIC_PATTERNS` (`middleware.ts:7`). |
 | Login doors | `lib/auth-client.ts`, `app/login/page.tsx` | Cookie-based browser flow only; no token surfaced to the client. |
@@ -147,7 +157,7 @@ sequenceDiagram
     else Google OIDC door
         C->>A: POST /api/auth/sign-in/social?provider=google
         A-->>C: 302 → accounts.google.com (...state nonce)
-        Note over C,G: script follows redirect chain,<br/>posts code back to callback (scriptable flow)
+        Note over C,G: browser-driven round-trip, uninvited identities get zero rows at the callback - scriptable only for invited ones (OIDC design doc 12.1), with the token emitted in-band after approval
         C->>A: GET /api/auth/callback/google?code&state
         A->>BA: handler(req) → verify ID token
     end
@@ -205,17 +215,87 @@ stateDiagram-v2
 
 | Reference-idea (from the research brief) | Decision | Rationale |
 |---|---|---|
-| `baseURL: { allowedHosts: ["*"] }` | **Not in v1** — portal served on fixed origins | Wildcard host trust expands phishing/CSRF surface; not needed: bearer requests don't depend on host matching at all. Revisit only if multi-tenant branded domains land. |
+| `baseURL: { allowedHosts: ["*"] }` (a fixed origin for the portal) | **Superseded — flipped 2026-10-11, see §5.4** | The v1 "fixed origins" posture assumed localhost + one prod domain. Remote clients over a LAN IP/tunnel/domain broke against a static `BETTER_AUTH_URL` base (Phase A: trusted origins frozen to the pinned host → remote browsers got 403 `INVALID_ORIGIN`). Public access forced per-request base resolution — env-driven `allowedHosts` (dev `*`, prod real domains), no hardcoded hosts. |
 | `trustedOrigins` dynamic echo + `disableCSRFCheck: true` | **Rejected** | Only justifiable when tokens are the *only* auth; we keep cookie sessions for the web, so CSRF check must stay on. Echoing any origin is strictly more dangerous than fixed origins. |
 | Separate 15-min JWT access token + 7-day refresh token (jwt plugin) | **Deferred (post-GA)** | Session tokens already satisfy "short-lived + revocable" with server-side destruction the jwt plugin cannot beat. Adding a second token family doubles issuance/verification surface for a benefit we don't need until a customer requires stateless verification. The `jwt` plugin stays available in node_modules if/when that requirement appears. |
 | BFF proxy route handler on the portal (reference Part 2) | **Rejected for the portal** | A BFF's job is hiding tokens from *browsers on a third-party domain*. External server-to-server clients have no browser — direct bearer calls are simpler and expose less code. Customers who want browser apps on their own domains can run that BFF themselves against the now-public bearer API; we will document it in §7 as guidance, not ship it here. |
 | IP pinning of tokens | **Deferred** | Works only for fixed server-to-server callers; kills mobile/roaming clients; adds per-request lookup complexity. Revisit if abuse demands it (open question 2). |
 
+### 5.4 Public-Access Configuration (shipped — flips §5.2 row 1)
+
+Remote access in practice broke against a static base: with `BETTER_AUTH_URL=http://localhost:3000`, the better-auth context froze trusted origins to localhost and every browser on a LAN IP got 403 `INVALID_ORIGIN` at sign-in (bearer/curl traffic was unaffected — no Origin header — which is exactly why only the cookie door looked broken). The shipped config makes host trust **per-request, env-driven, zero hardcoded** (Phase B of the public-access plan; commit line in `lib/auth.ts`):
+
+```ts
+baseURL: {
+  allowedHosts: env.BETTER_AUTH_ALLOWED_HOSTS.split(',').map(s => s.trim()).filter(Boolean), // dev: "*"; prod: portal.example.com,www.portal.example.com
+  protocol: env.BETTER_AUTH_BASE_PROTOCOL, // "auto" — emits both http://* and https://* trusted patterns; follows x-forwarded-proto behind a proxy
+  fallback: env.FRONTEND_URL,              // only reached for a Host that matches no allowedHosts entry
+},
+advanced: {
+  trustedProxyHeaders: env.TRUSTED_PROXY_HEADERS === 'true',   // default true — required explicitly in 1.6.x dynamic mode
+  ipAddress: { /* trustedProxies from TRUSTED_PROXY_CIDRS when set */ },
+},
+```
+
+How a request flows through it (the security-relevant part):
+
+```mermaid
+flowchart LR
+    subgraph Edge["Direct or behind TLS edge"]
+        R1["request arrives on Host H<br/>(direct) "]
+        R2["edge forwards with<br/>x-forwarded-host / x-forwarded-proto"]
+    end
+
+    RB{"trustedProxyHeaders = true?"}
+    HOST["effective host := x-forwarded-host or Host header<br/>base origin := proto(effective host, port)"]
+    MATCH{"effective host matches<br/>BETTER_AUTH_ALLOWED_HOSTS?"}
+    REJ500[["500: Host not in allowed hosts (fail-closed per-request gate, NOT a CSRF disable)"]]
+    BASE[["base URL + trusted origins := per-request origin (+ BETTER_AUTH_TRUSTED_ORIGINS extras)"]]
+
+    COOKIE{"cookie-bearing POST with Origin header?"}
+    CSRFOK[["Origin in trusted set: proceed (SameSite=Lax still applies to cookie send)"]]
+    CSRF403[["403 INVALID_ORIGIN - gate enforced, never echoed"]]
+    BEAREROK[["no Origin / no cookie (bearer door): origin check returns early by design"]]
+
+    R1 --> RB
+    R2 --> RB
+    RB -- yes --> HOST
+    RB -- "no: direct traffic only" --> HOST
+    HOST --> MATCH
+    MATCH -- no --> REJ500
+    MATCH -- yes --> BASE
+    BASE --> COOKIE
+    COOKIE -- "yes - trusted (browser door)" --> CSRFOK
+    COOKIE -- "yes - not trusted" --> CSRF403
+    COOKIE -- "no" --> BEAREROK
+
+    style REJ500 fill:#fee,stroke:#900
+    style CSRF403 fill:#fee,stroke:#900
+```
+
+Properties pinned by test (`tests/integration/bearer-tokens.test.ts` Phase E pins + `tests/unit/auth-config.test.ts`):
+
+- **CSRF/origin gate stays fully enabled** — neither `advanced.disableOriginCheck` nor `disableCSRFCheck` is set and no top-level `trustedOrigins` override exists. A cross-site page POSTing to the portal with a foreign Origin still gets 403 in production; dev-mode relaxation in `lib/csrf.ts` is the only bypass and it is NODE_ENV-gated.
+- **The per-request Host gate is NOT "trust anyone":** matching validates against `BETTER_AUTH_ALLOWED_HOSTS`; with the dev value `*`, any reachable host works (deliberate — dev affordance); production sets real domain(s) and everything else 500s at base resolution before auth logic runs.
+- **`protocol: 'auto'`** is what makes http LAN + future https public both work from one config (the docs' canonical `protocol: "https"` example would have left the http LAN origin untrusted — verified against installed dist behavior).
+- **Cookie transport reality:** with `Secure` + `SameSite=Lax`, browser cookie sessions do not function cross-domain on HTTPS — by design. Public access above same-origin is bearer-first; do *not* set `crossSubDomainCookies` (it scopes cookie domain only; it cannot make Lax work across unrelated origins).
+- **Client IP:** with `TRUSTED_PROXY_CIDRS` = the edge's CIDR(s), BetterAuth walks `x-forwarded-for` right-to-left skipping trusted hops — untrusted spoofed values are ignored, so per-IP rate limits and audit logs see the true client.
+
+**Deployment contract (prod):** set `BETTER_AUTH_ALLOWED_HOSTS` to real domain(s); keep `TRUSTED_PROXY_HEADERS=true` and set `TRUSTED_PROXY_CIDRS` to the edge; `protocol=auto` covers both schemes; register the public callback in Google Cloud Console (OIDC door). No code change on redeploy — this is the whole point of the flip.
+
 ## 6. Configuration & Runbook
 
-No new required env vars in v1 — `BETTER_AUTH_SECRET` (signing), `FRONTEND_URL`, Google client id/secret, SMTP are all already required by `lib/env-schema.ts`. No DB migration (the Session token column is existing BetterAuth schema).
+Shipped env surface (all declared in `lib/env-schema.ts`, documented in `.env.example`; `BETTER_AUTH_URL` is deliberately *not* set — a static base freezes trusted origins, see §5.4):
 
-Operational runbook (append to `SECURITY.md` in Phase 3):
+| Variable | Default | Meaning |
+|---|---|---|
+| `BETTER_AUTH_ALLOWED_HOSTS` | `*` | comma-separated host patterns for per-request base URL + trusted origins; prod = real domain(s) |
+| `BETTER_AUTH_BASE_PROTOCOL` | `auto` | `auto` (both http/https) \| `http` \| `https` |
+| `TRUSTED_PROXY_HEADERS` | `true` | read `x-forwarded-host` / `x-forwarded-proto` behind an edge |
+| `BETTER_AUTH_TRUSTED_ORIGINS` | — | extra trusted origins for named partner browser frontends (cookieless bearer clients never need this) |
+| `TRUSTED_PROXY_CIDRS` | — | edge CIDR(s) for real client-IP extraction (§5.4) |
+
+Operational runbook (live in `SECURITY.md`, "Remote Bearer-Token Access — Origin Policy & Operations"):
 
 1. **Issue a developer credential:** existing admin user creation (password) or Google invite flow — no new admin surface in v1.
 2. **Client acquires the token** exactly once via §4.2 sequence; store it per §7.2.
@@ -267,6 +347,8 @@ sequenceDiagram
 
 Each phase ends in an independent committable state. Phase 1 alone delivers the entire feature (config-only) — Phases 2–3 are proof and paperwork.
 
+**Status (2026-10-11): all three phases shipped**, plus the public-internet follow-up plan (`phasing A–H`) extended the surface with the per-request base URL, host-independent magic links, RLS-visible provisioning reads, and the invite-only Google door — see §5.4 and §11.
+
 ## 9. Test Strategy
 
 | Layer | Target | What it proves |
@@ -283,7 +365,22 @@ Mocking notes: reuse the established `google-oidc-full-flow.test.ts` pattern (mo
 | # | Item | Severity | Disposition |
 |---|---|---|---|
 | 1 | Third-party **browser** apps on customer domains cannot use bearer directly (no CORS grant, by design). Their correct pattern is a customer-hosted BFF proxy. If demand emerges for portal-issued browser tokens, that's a separate feature with its own origin policy. | Medium | Open question — document the BFF pattern in Phase 3; no portal code change now. |
-| 2 | No per-token IP binding: a stolen token works from any source IP until expiry/revocation (mitigated by §4.3 lifetime + revocation). Fixed-server customers wanting tighter control get IP pinning as a follow-up if requested. | Low–Medium | Deferred; revisit on abuse signal. |
+| 2 | No per-token IP binding: a stolen token works from any source IP until expiry/revocation (mitigated by §4.3 lifetime + revocation). Fixed-server customers wanting tighter control get IP pinning as a follow-up if requested. Client-IP *spoofing* is already closed by `TRUSTED_PROXY_CIDRS` (§5.4) — only per-token binding remains out of scope. | Low–Medium | Deferred; revisit on abuse signal. |
 | 3 | `set-auth-token` header is emitted on *cookie* responses only when the bearer plugin's after-hook fires — we assert it in T2, so "token silently absent" becomes a caught failure, not a field surprise. | Low | Covered by test. |
 | 4 | Session max-age (1h) may feel short for long-running scripts; renewal is per-request while active and requires no client action (the token string stays valid through in-window renewals). If customers want longer-lived machine credentials, that's the deferred jwt-plugin / service-token feature. | Low | Document §6 runbook; open question 3. |
 | 5 | BetterAuth patch-version drift: bearer plugin internals were verified against installed 1.6.23 source. Lock the version in package.json (existing pin) and re-run T2 on any bump. | Low | Covered by test + lockfile pin. |
+
+## 11. Shipped Status & Post-Delivery Verification (2026-10-11)
+
+State of this plan after both tracking plans completed:
+
+| Item | Result |
+|---|---|
+| `bearer()` plugin registered (`lib/auth.ts`) | ✅ ships; `set-auth-token` emitted on every session-setting response (incl. the Google door) |
+| Phases 1–2 pins (`tests/integration/bearer-tokens.test.ts`) | ✅ all green: sign-in emits token, replay across hosts works, no-grace revocation, sliding-renewal window, ban-gate blocks acquisition, malformed headers never 5xx, **no-CORS / no-origin-echo assertion**, CSRF-gate-stays-enabled config pin |
+| Phase A diagnosis ("remote computer") | resolved class (a): static `BETTER_AUTH_URL` froze trusted origins → fixed by §5.4 per-request base; remote battery re-run is the user's remaining manual step |
+| §5.4 public-access config (allowedHosts / protocol auto / proxy headers / CIDRs) | ✅ env-driven, zero hosts in code; `.env.example` documented |
+| Host-independent magic links + RLS-visible provisioning + invite-only Google door | ✅ shipped separately this date (OIDC design doc §12); the bearer file's `options` cast and CSRF pins absorbed the new `onAPIError` config in the same sweep |
+| Full gate on ship day | unit 92 files / 1958 ✓ · integration 22 files / 314 ✓ · lint ✓ · build ✓ |
+
+**Open for the user (manual, not blocking):** re-run the remote battery from a non-localhost machine over the LAN IP (bearer sign-in + protected endpoint must answer 200 without cookies); then Phase C of the public-access plan picks up the permanent TLS edge (tunnel decision) and D1/D2 run over the public URL.
