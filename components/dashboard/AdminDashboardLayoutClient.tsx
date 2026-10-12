@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useMemo } from 'react';
-import { useRouter, usePathname } from 'next/navigation';
+import { usePathname } from 'next/navigation';
 import Link from 'next/link';
 import { Menu, X, UserRound, Building2, UsersRound, Shield, Key, Layers, LogOut, CalendarDays, Bell, XCircle, HeartPulse, ChartNoAxesCombined, ScrollText, Network, FileSearch, TerminalSquare } from 'lucide-react';
 import { authClient } from '@/lib/auth-client';
@@ -52,7 +52,6 @@ export default function AdminDashboardLayout({ children }: { children: React.Rea
   const [sidebarOpen, setSidebarOpen] = useState<boolean>(() =>
     typeof window !== 'undefined' ? window.innerWidth >= 768 : true
   );
-  const router = useRouter();
   const pathname = usePathname();
   const isCalendarPage = useMemo(() => pathname === '/dashboard/admin/calendar', [pathname]);
   // Full-bleed pages (no content padding) so their canvases + slide-in panels
