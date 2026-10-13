@@ -19,9 +19,8 @@ const LOCATED_ZOOM = 16;
 // Marker ctor from the latest load (client-only). `maps`-library classes are
 // accessed per-load where needed; the map instance itself lives in a ref.
 let markerCtor: typeof google.maps.Marker | null = null;
-// js-api-loader's setOptions() accepts only a single call per page — Fast
-// Refresh remounts the effect repeatedly, so track the configured key.
-let loaderKey: string | null = null;
+// js-api-loader's setOptions() accepts only a single call per page — the key
+// is applied once below; Fast Refresh remounts just re-run the effect.
 
 function pinSvg(fill: string): string {
   const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="34" height="46" viewBox="0 0 34 46"><path d="M17 1C8.2 1 1 8.2 1 17c0 11.5 16 28 16 28s16-16.5 16-28C33 8.2 25.8 1 17 1z" fill="${fill}" stroke="#ffffff" stroke-width="2"/><circle cx="17" cy="17" r="6.5" fill="#ffffff"/></svg>`;
@@ -101,11 +100,11 @@ export default function OrgMap({ orgName, address }: OrgMapProps) {
 
       // Centre on the org's stored location when one was provided.
       if (address && address.trim()) {
-        void geocoderRef.current?.geocode({ address: address.trim() }, (results) => {
+        void geocode(address.trim(), geocoderRef.current!, null, (status, results) => {
           if (cancelled || !mapRef.current) return;
           const loc = results?.[0]?.geometry?.location;
           if (!loc) {
-            setStatus('Stored location not found — showing default area');
+            setStatus(describeGeocodeFailure(status, 'Stored location not found — showing default area'));
             return;
           }
           homeViewRef.current = { center: { lat: loc.lat(), lng: loc.lng() }, zoom: LOCATED_ZOOM };
@@ -165,10 +164,10 @@ export default function OrgMap({ orgName, address }: OrgMapProps) {
     if (!q || !map || !geocoder) return;
 
     setStatus('Locating…');
-    void geocode(q, geocoder, map.getBounds() ?? null, (results) => {
+    void geocode(q, geocoder, map.getBounds() ?? null, (status, results) => {
       const first = results?.[0];
       if (!first?.geometry?.location) {
-        setStatus(`No results found for “${q}”`);
+        setStatus(describeGeocodeFailure(status, `No results found for “${q}”`));
         return;
       }
       resultMarkerRef.current?.setMap(null);
@@ -225,7 +224,7 @@ export default function OrgMap({ orgName, address }: OrgMapProps) {
           <button type="button" onClick={resetView} aria-label="Reset view" disabled={!mapReady} className="rounded p-1.5 text-slate-600 hover:bg-slate-100 disabled:opacity-40">
             <Maximize2 className="h-4 w-4" />
           </button>
-          <span className="px-1 text-xs text-slate-500 tabular-nums">z{Math.round(zoomLevel)}</span>
+          <span className="px-1 text-xs text-slate-500 tabular-nums">{(() => { const pct = Math.min(100, Math.max(1, Math.round((zoomLevel - MIN_ZOOM) / (MAX_ZOOM - MIN_ZOOM) * 99 + 1))); return `${pct}%`; })()}</span>
         </div>
 
         {/* Address / postcode field (same box style as the chart's search) */}
@@ -283,7 +282,29 @@ function geocode(
   query: string,
   geocoder: google.maps.Geocoder,
   bounds: google.maps.LatLngBounds | null,
-  cb: (results: google.maps.GeocoderResult[] | null) => void,
+  cb: (status: string, results: google.maps.GeocoderResult[] | null) => void,
 ): void {
-  geocoder.geocode({ address: query, bounds }, cb);
+  geocoder.geocode({ address: query, bounds }, (results, status) => cb(String(status), results));
+}
+
+/** Friendly status text when a geocode fails for a reason other than absence. */
+function describeGeocodeFailure(
+  status: string,
+  notFoundFallback: string,
+): string {
+  switch (status) {
+    case google.maps.GeocoderStatus.OK:
+    case google.maps.GeocoderStatus.ZERO_RESULTS:
+      return notFoundFallback;
+    case google.maps.GeocoderStatus.REQUEST_DENIED:
+      return 'Geocoding is disabled for this API key — enable billing on the Google Cloud project (console.cloud.google.com) to use search.';
+    case google.maps.GeocoderStatus.OVER_QUERY_LIMIT:
+      return 'Google daily query limit reached — try again later.';
+    case google.maps.GeocoderStatus.INVALID_REQUEST:
+      return 'Invalid location for this key — check it is allowed for Geocoding on the Google Cloud project.';
+    case google.maps.GeocoderStatus.UNKNOWN_ERROR:
+      return 'Geocoding failed — check your network / API key billing later.';
+    default:
+      return notFoundFallback;
+  }
 }

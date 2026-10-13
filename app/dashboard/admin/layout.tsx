@@ -3,7 +3,7 @@
 import { useState, useMemo } from 'react';
 import { useRouter, usePathname } from 'next/navigation';
 import Link from 'next/link';
-import { Menu, X, UserRound, Building2, UsersRound, Shield, Key, Layers, LogOut, CalendarDays, Bell, XCircle, HeartPulse, ChartNoAxesCombined, ScrollText, Network, FileSearch, TerminalSquare } from 'lucide-react';
+import { Menu, X, UserRound, Building2, UsersRound, Shield, Key, Layers, LogOut, CalendarDays, Bell, XCircle, HeartPulse, ChartNoAxesCombined, ScrollText, Network, FileSearch, TerminalSquare, Map as MapIcon } from 'lucide-react';
 import { authClient } from '@/lib/auth-client';
 import { RequireSuperAdmin } from '@/components/auth/RequireSuperAdmin';
 import { useNotifications, PRIORITY_COLORS, getPriorityIcon } from '@/hooks/useNotifications';
@@ -31,6 +31,7 @@ const navGroups: NavGroup[] = [
       { href: '/dashboard/admin/notifications', label: 'Notifications', icon: Bell },
       { href: '/dashboard/admin/calendar', label: 'Calendar', icon: CalendarDays },
       { href: '/dashboard/admin/org-chart', label: 'Org Chart', icon: Network },
+      { href: '/dashboard/admin/map', label: 'Map', icon: MapIcon },
     ],
   },
   {
@@ -57,7 +58,7 @@ export default function AdminDashboardLayout({ children }: { children: React.Rea
   const isCalendarPage = useMemo(() => pathname === '/dashboard/admin/calendar', [pathname]);
   // Full-bleed pages (no content padding) so their canvases + slide-in panels
   // anchor edge-to-edge between the top bar and the footer rail.
-  const isFullScreenPage = isCalendarPage || pathname === '/dashboard/admin/org-chart';
+  const isFullScreenPage = isCalendarPage || pathname === '/dashboard/admin/org-chart' || pathname === '/dashboard/admin/map';
   const { notifications, isConnected, dismissNotification, clearNotifications } = useNotifications();
 
   const handleLogout = async () => {
