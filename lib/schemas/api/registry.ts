@@ -934,6 +934,19 @@ export const registry: Record<string, ApiEntry> = {
   },
 
   // ---------------------------------------------------------------------------
+  // Organization location — the tenant Map page centres on `metadata.location.address`
+  // (best-effort; null when the org has no address set). Same auth as org-chart.
+  // ---------------------------------------------------------------------------
+  'GET /api/organizations/{orgId}/location': {
+    responses: {
+      '200': z
+        .object({ name: z.string(), location: z.object({ address: z.string() }).nullable() })
+        .meta({ id: 'OrgLocation' }),
+      '400': E, '401': E, '403': E, '404': E, '500': E,
+    },
+  },
+
+  // ---------------------------------------------------------------------------
   // Org roles — membership-scoped read-only rolename list for the tenant
   // dashboard (the full CRUD surface stays under /api/admin/organizations).
   // Membership OR super admin via resolveTenantAccess.

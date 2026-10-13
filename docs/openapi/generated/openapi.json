@@ -5152,6 +5152,38 @@
         ],
         "additionalProperties": false
       },
+      "OrgLocation": {
+        "type": "object",
+        "properties": {
+          "name": {
+            "type": "string"
+          },
+          "location": {
+            "anyOf": [
+              {
+                "type": "object",
+                "properties": {
+                  "address": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "address"
+                ],
+                "additionalProperties": false
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "required": [
+          "name",
+          "location"
+        ],
+        "additionalProperties": false
+      },
       "PayloadKeyResponse": {
         "type": "object",
         "properties": {
@@ -13870,6 +13902,35 @@
         }
       }
     },
+    "/api/dashboard/admin/users/{id}/invite": {
+      "post": {
+        "tags": [
+          "dashboard-admin"
+        ],
+        "summary": "POST /api/dashboard/admin/users/{id}/invite",
+        "description": "Resend the activation magic link for an invited (pre-registered) user.\nIdempotent by design: a verified account gets `{ alreadyVerified: true }`\nwithout touching email; a pending account gets a fresh 5-minute token (old\ntokens stay consumable until expiry — see lib/oidc-magic-link).\n\nRequires super admin session.\n\nHandler: `app/api/dashboard/admin/users/[id]/invite/route.ts`.",
+        "security": [
+          {
+            "cookieAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "default": {
+            "description": "Unspecified — response schema not yet documented (add a registry entry in lib/schemas/api/ to fill this in)."
+          }
+        }
+      }
+    },
     "/api/dashboard/admin/users/{id}": {
       "delete": {
         "tags": [
@@ -15630,6 +15691,92 @@
         }
       }
     },
+    "/api/organizations/{orgId}/location": {
+      "get": {
+        "tags": [
+          "organizations"
+        ],
+        "summary": "GET /api/organizations/{orgId}/location",
+        "description": "Organization location read endpoint.\nlocation (stored under `metadata.location` as `{ address }`) so the tenant\nworkspace Map page can centre on the organization.\nAuthorization (mirrors the org-chart route):\n- membership OR super admin via resolveTenantAccess (401 / 403 / 503)\n\nRequires authenticated session (BetterAuth cookie).\n\nHandler: `app/api/organizations/[orgId]/location/route.ts`.",
+        "security": [
+          {
+            "cookieAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "orgId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "200",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OrgLocation"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "400",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "401",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "403",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "404",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "500",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/organizations/{orgId}/org-chart": {
       "get": {
         "tags": [
@@ -15695,6 +15842,72 @@
           },
           "404": {
             "description": "404",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "500",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/organizations/{orgId}/roles": {
+      "get": {
+        "tags": [
+          "organizations"
+        ],
+        "summary": "GET /api/organizations/{orgId}/roles",
+        "description": "Any member of the organization can read its roles; super admins can read\nany (via the platform fallback in resolveTenantAccess). Writes remain on\nthe admin-gated endpoints (/api/admin/organizations/[orgId]/roles and\n/api/roles), so this route intentionally only implements GET.\n\nRequires authenticated session (BetterAuth cookie).\n\nHandler: `app/api/organizations/[orgId]/roles/route.ts`.",
+        "security": [
+          {
+            "cookieAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "orgId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "200",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OrgRolesList"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "401",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "403",
             "content": {
               "application/json": {
                 "schema": {
