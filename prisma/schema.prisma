@@ -201,6 +201,13 @@ model Organization {
   description String?
   status      OrgStatus @default(PENDING)
   metadata    Json?
+  // Map coordinates + zoom for the organization's Map page (NOT exposed in the org
+  // CRUD/view dialogs — read via GET /api/organizations/[orgId]/location). Zoom is
+  // clamped to [MIN_ZOOM, MAX_ZOOM] when applied; e.g. 9 renders as "34%" with the
+  // current display-percent formula.
+  latitude    Float?
+  longitude   Float?
+  mapZoom     Float?
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
 

@@ -554,6 +554,10 @@ async function main() {
         description: 'Platform-level organization for global administration and tenant management.',
         status: 'ACTIVE',
         metadata: { type: 'platform' },
+        // Map pin over Lough Neagh, Northern Ireland — zoom 9 displays as "34%" in the map controls.
+        latitude: 54.649599,
+        longitude: -6.402947,
+        mapZoom: 9,
       },
     });
     console.log(`✅ Updated existing Platform Organization: ${platformOrg.id}`);
@@ -565,6 +569,10 @@ async function main() {
         description: 'Platform-level organization for global administration and tenant management.',
         status: 'ACTIVE',
         metadata: { type: 'platform' },
+        // Map pin over Lough Neagh, Northern Ireland — zoom 9 displays as "34%" in the map controls.
+        latitude: 54.649599,
+        longitude: -6.402947,
+        mapZoom: 9,
       },
     });
     console.log(`✅ Created new Platform Organization: ${platformOrg.id}`);
@@ -797,16 +805,21 @@ async function main() {
     console.log(`\n📦 Seeding testing profile...`);
 
     // --- Test Tenant: Test Tenant Ltd ---
+    // Map pin: Greenland Ct, Larne — exact place coordinates (54.858189, -5.822625).
+    // Zoom 19 displays as "89%" in the map controls.
+    const testTenantLat = 54.858189;
+    const testTenantLng = -5.822625;
+    const testTenantZoom = 19;
     testTenantOrg = await prisma.organization.findFirst({ where: { slug: 'test-tenant-ltd' } });
     if (!testTenantOrg) {
       testTenantOrg = await prisma.organization.create({
-        data: { name: 'Test Tenant Ltd', slug: 'test-tenant-ltd', description: 'Testing tenant organization for QA and integration testing.', status: 'ACTIVE' },
+        data: { name: 'Test Tenant Ltd', slug: 'test-tenant-ltd', description: 'Testing tenant organization for QA and integration testing.', status: 'ACTIVE', latitude: testTenantLat, longitude: testTenantLng, mapZoom: testTenantZoom },
       });
       console.log(`✅ Created Test Tenant Org: ${testTenantOrg.id}`);
     } else {
       await prisma.organization.update({
         where: { id: testTenantOrg.id },
-        data: { name: 'Test Tenant Ltd', slug: 'test-tenant-ltd', description: 'Testing tenant organization for QA and integration testing.', status: 'ACTIVE' },
+        data: { name: 'Test Tenant Ltd', slug: 'test-tenant-ltd', description: 'Testing tenant organization for QA and integration testing.', status: 'ACTIVE', latitude: testTenantLat, longitude: testTenantLng, mapZoom: testTenantZoom },
       });
       console.log(`✅ Updated Test Tenant Org: ${testTenantOrg.id}`);
     }

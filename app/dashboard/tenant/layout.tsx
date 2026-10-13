@@ -3,7 +3,7 @@
 import { useState, useMemo } from 'react';
 import { usePathname } from 'next/navigation';
 import Link from 'next/link';
-import { Menu, X, LogOut, CalendarDays, Network, UsersRound, Shield, Building2, XCircle } from 'lucide-react';
+import { Menu, X, LogOut, CalendarDays, Network, UsersRound, Shield, Building2, XCircle, MapPin } from 'lucide-react';
 import { authClient } from '@/lib/auth-client';
 import { useNotifications, PRIORITY_COLORS, getPriorityIcon } from '@/hooks/useNotifications';
 import { TopBarNotificationBell } from '@/components/dashboard/TopBarNotificationBell';
@@ -29,6 +29,7 @@ const navGroups: NavGroup[] = [
       // doubles as the teams view; a "Teams" item alongside it would be
       // redundant.
       { href: '/dashboard/tenant/settings', label: 'Organization Setup', icon: Building2 },
+      { href: '/dashboard/tenant/map', label: 'Map', icon: MapPin },
     ],
   },
 ];
@@ -44,7 +45,8 @@ export default function TenantDashboardLayout({ children }: { children: React.Re
   const isCalendarPage = useMemo(() => pathname === '/dashboard/tenant/calendar', [pathname]);
   // Full-bleed pages (no content padding) so their canvases + slide-in panels
   // anchor edge-to-edge between the top bar and the footer rail — same rule as admin.
-  const isFullScreenPage = isCalendarPage || pathname === '/dashboard/tenant/org-chart';
+  const isFullScreenPage =
+    isCalendarPage || pathname === '/dashboard/tenant/org-chart' || pathname === '/dashboard/tenant/map';
   const { notifications, isConnected, dismissNotification, clearNotifications } = useNotifications();
 
   const handleLogout = async () => {

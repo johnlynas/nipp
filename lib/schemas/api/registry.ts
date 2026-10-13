@@ -934,6 +934,25 @@ export const registry: Record<string, ApiEntry> = {
   },
 
   // ---------------------------------------------------------------------------
+  // Organization location — preferred are stored coordinates (`latitude`/
+  // `longitude`); `metadata.location.address` is a geocoding fallback. Null when
+  // the org has neither set. Same auth as org-chart.
+  // ---------------------------------------------------------------------------
+  'GET /api/organizations/{orgId}/location': {
+    responses: {
+      '200': z
+        .object({
+          name: z.string(),
+          location: z
+            .object({ lat: z.number().optional(), lng: z.number().optional(), zoom: z.number().optional(), address: z.string().optional() })
+            .nullable(),
+        })
+        .meta({ id: 'OrgLocation' }),
+      '400': E, '401': E, '403': E, '404': E, '500': E,
+    },
+  },
+
+  // ---------------------------------------------------------------------------
   // Org roles — membership-scoped read-only rolename list for the tenant
   // dashboard (the full CRUD surface stays under /api/admin/organizations).
   // Membership OR super admin via resolveTenantAccess.
