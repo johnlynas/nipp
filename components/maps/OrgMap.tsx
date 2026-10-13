@@ -2,6 +2,7 @@
 'use client';
 
 import { useCallback, useEffect, useRef, useState } from 'react';
+import type { ReactNode } from 'react';
 import { importLibrary, setOptions } from '@googlemaps/js-api-loader';
 import { ZoomIn, ZoomOut, Maximize2, MapPin, TriangleAlert } from 'lucide-react';
 
@@ -31,6 +32,9 @@ interface OrgMapProps {
   orgName: string;
   /** Organization's stored address (from metadata.location.address), if any. */
   address?: string | null;
+  /** Optional control rendered at the bottom of the right-hand overlay stack
+      (e.g. the admin page's organization selector). */
+  extraControls?: ReactNode;
 }
 
 /**
@@ -40,7 +44,7 @@ interface OrgMapProps {
  * postcode/address field to jump anywhere. Zoom in/out/reset controls are the
  * same overlay pattern as the org chart canvas (same icons, same box).
  */
-export default function OrgMap({ orgName, address }: OrgMapProps) {
+export default function OrgMap({ orgName, address, extraControls }: OrgMapProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const mapRef = useRef<google.maps.Map | null>(null);
   const geocoderRef = useRef<google.maps.Geocoder | null>(null);
@@ -210,8 +214,8 @@ export default function OrgMap({ orgName, address }: OrgMapProps) {
     <div className="relative h-full w-full overflow-hidden bg-canvas-subtle">
       <div ref={containerRef} className="h-full w-full" role="application" aria-label={`Map: ${orgName}`} />
 
-      {/* Zoom controls + address field + pin key — fixed overlay, right/top,
-          styled exactly like the org chart's control stack. */}
+      {/* Zoom controls + address field + pin key (+ optional extra controls) —
+          fixed overlay, right/top, styled exactly like the org chart's control stack. */}
       <div className="absolute right-4 top-4 z-10 flex flex-col items-stretch gap-2">
         {/* Zoom controls (org-chart page parity) */}
         <div className="flex items-center gap-1 rounded-md border bg-white p-1 shadow-sm" style={{ borderColor: 'var(--color-slate-200)' }}>
@@ -272,6 +276,9 @@ export default function OrgMap({ orgName, address }: OrgMapProps) {
             </div>
           ))}
         </div>
+
+        {/* Page-specific controls (e.g. admin organization selector) */}
+        {extraControls}
       </div>
     </div>
   );

@@ -131,33 +131,35 @@ export default function AdminMapPage() {
 
   return (
     <div className="relative h-full w-full">
-      <OrgMap orgName={orgName || 'Organization'} address={address} />
-
-      {/* Organization selector — top-left overlay, same box style as the map's
-          address field (right-side stack), so OrgMap's overlays stay intact. */}
-      {organizations.length > 0 && (
-        <div className="absolute left-4 top-4 z-10 w-64 rounded-md border bg-white shadow-sm" style={{ borderColor: 'var(--color-slate-200)' }}>
-          <label htmlFor="admin-map-org-select" className="sr-only">
-            Select organization
-          </label>
-          <div className="flex items-center gap-1.5 p-1.5">
-            <Building2 aria-hidden="true" className="h-4 w-4 shrink-0 text-slate-500" />
-            <select
-              id="admin-map-org-select"
-              value={orgId}
-              onChange={(e) => setOrgId(e.target.value)}
-              className="w-full bg-transparent text-xs outline-none"
-              style={{ color: 'var(--color-navy-850)' }}
-            >
-              {organizations.map((o) => (
-                <option key={o.id} value={o.id}>
-                  {o.name}
-                </option>
-              ))}
-            </select>
-          </div>
-        </div>
-      )}
+      <OrgMap
+        orgName={orgName || 'Organization'}
+        address={address}
+        extraControls={
+          organizations.length > 0 ? (
+            <div className="w-64 rounded-md border bg-white shadow-sm" style={{ borderColor: 'var(--color-slate-200)' }}>
+              <label htmlFor="admin-map-org-select" className="sr-only">
+                Select organization
+              </label>
+              <div className="flex items-center gap-1.5 p-1.5">
+                <Building2 aria-hidden="true" className="h-4 w-4 shrink-0 text-slate-500" />
+                <select
+                  id="admin-map-org-select"
+                  value={orgId}
+                  onChange={(e) => setOrgId(e.target.value)}
+                  className="w-full bg-transparent text-xs outline-none"
+                  style={{ color: 'var(--color-navy-850)' }}
+                >
+                  {organizations.map((o) => (
+                    <option key={o.id} value={o.id}>
+                      {o.name}
+                    </option>
+                  ))}
+                </select>
+              </div>
+            </div>
+          ) : null
+        }
+      />
     </div>
   );
 }
