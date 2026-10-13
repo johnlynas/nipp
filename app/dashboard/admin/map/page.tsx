@@ -16,6 +16,11 @@ export default function AdminMapPage() {
   const [orgId, setOrgId] = useState<string | null>(null);
   const [orgName, setOrgName] = useState<string>('');
   const [address, setAddress] = useState<string | null>(null);
+  // Stored coordinates + zoom — preferred centre over the geocoded address. Selecting
+  // a new org refetches these and the map re-centres on its location.
+  const [lat, setLat] = useState<number | null>(null);
+  const [lng, setLng] = useState<number | null>(null);
+  const [zoom, setZoom] = useState<number | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [refreshKey, setRefreshKey] = useState(0);
@@ -74,6 +79,9 @@ export default function AdminMapPage() {
     (async () => {
       setError(null);
       setAddress(null);
+      setLat(null);
+      setLng(null);
+      setZoom(null);
       setOrgName('');
       try {
         const res = await fetch(`/api/organizations/${orgId}/location`);
@@ -81,10 +89,13 @@ export default function AdminMapPage() {
           const body = await res.json().catch(() => ({}));
           throw new Error(body.error || `Failed to load location (${res.status})`);
         }
-        const data: { name?: string; location?: { address?: string } | null } = await res.json();
+        const data: { name?: string; location?: { lat?: number; lng?: number; zoom?: number; address?: string } | null } = await res.json();
         if (cancel) return;
         setOrgName(data.name ?? '');
         setAddress(data.location?.address ?? null);
+        setLat(typeof data.location?.lat === 'number' ? data.location!.lat : null);
+        setLng(typeof data.location?.lng === 'number' ? data.location!.lng : null);
+        setZoom(typeof data.location?.zoom === 'number' ? data.location!.zoom : null);
       } catch (e) {
         if (!cancel) setError(e instanceof Error ? e.message : 'Failed to load location');
       }
@@ -134,6 +145,9 @@ export default function AdminMapPage() {
       <OrgMap
         orgName={orgName || 'Organization'}
         address={address}
+        lat={lat}
+        lng={lng}
+        zoom={zoom}
         extraControls={
           organizations.length > 0 ? (
             <div className="w-64 rounded-md border bg-white shadow-sm" style={{ borderColor: 'var(--color-slate-200)' }}>

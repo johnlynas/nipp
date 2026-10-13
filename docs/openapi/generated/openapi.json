@@ -5163,13 +5163,19 @@
               {
                 "type": "object",
                 "properties": {
+                  "lat": {
+                    "type": "number"
+                  },
+                  "lng": {
+                    "type": "number"
+                  },
+                  "zoom": {
+                    "type": "number"
+                  },
                   "address": {
                     "type": "string"
                   }
                 },
-                "required": [
-                  "address"
-                ],
                 "additionalProperties": false
               },
               {
@@ -15697,7 +15703,7 @@
           "organizations"
         ],
         "summary": "GET /api/organizations/{orgId}/location",
-        "description": "Organization location read endpoint.\nlocation (stored under `metadata.location` as `{ address }`) so the tenant\nworkspace Map page can centre on the organization.\nAuthorization (mirrors the org-chart route):\n- membership OR super admin via resolveTenantAccess (401 / 403 / 503)\n\nRequires authenticated session (BetterAuth cookie).\n\nHandler: `app/api/organizations/[orgId]/location/route.ts`.",
+        "description": "Organization location read endpoint.\nlocation so the Map pages can centre on it: preferred are the stored\ncoordinates (`latitude`/`longitude`, plus optional `mapZoom`);\n`metadata.location.address` remains a geocoding fallback when only an address\nis set. Zoom is clamped to Google's 3–21 range before being returned.\nAuthorization (mirrors the org-chart route):\n- membership OR super admin via resolveTenantAccess (401 / 403 / 503)\n\nRequires authenticated session (BetterAuth cookie).\n\nHandler: `app/api/organizations/[orgId]/location/route.ts`.",
         "security": [
           {
             "cookieAuth": []

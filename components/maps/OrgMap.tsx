@@ -32,6 +32,13 @@ interface OrgMapProps {
   orgName: string;
   /** Organization's stored address (from metadata.location.address), if any. */
   address?: string | null;
+  /** Stored map coordinates — when both are present the map centres directly
+      here (no geocoding call) and pins the org at this point. */
+  lat?: number | null;
+  lng?: number | null;
+  /** Stored map zoom level for the located view (clamped to MIN..MAX); defaults
+      to LOCATED_ZOOM when absent. */
+  zoom?: number | null;
   /** Optional control rendered at the bottom of the right-hand overlay stack
       (e.g. the admin page's organization selector). */
   extraControls?: ReactNode;
@@ -44,7 +51,7 @@ interface OrgMapProps {
  * postcode/address field to jump anywhere. Zoom in/out/reset controls are the
  * same overlay pattern as the org chart canvas (same icons, same box).
  */
-export default function OrgMap({ orgName, address, extraControls }: OrgMapProps) {
+export default function OrgMap({ orgName, address, lat, lng, zoom, extraControls }: OrgMapProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const mapRef = useRef<google.maps.Map | null>(null);
   const geocoderRef = useRef<google.maps.Geocoder | null>(null);
@@ -102,8 +109,37 @@ export default function OrgMap({ orgName, address, extraControls }: OrgMapProps)
       });
       setMapReady(true);
 
-      // Centre on the org's stored location when one was provided.
-      if (address && address.trim()) {
+      // Centre on the org's stored location when one was provided. Stored
+      // coordinates are preferred (no geocoding call needed); an address alone
+      // falls back to geocoding.
+      const hasStoredCoords =
+        typeof lat === 'number' && Number.isFinite(lat) && lat >= -90 && lat <= 90 &&
+        typeof lng === 'number' && Number.isFinite(lng) && lng >= -180 && lng <= 180;
+
+      // Located-view zoom: stored value (clamped to Google's range) or LOCATED_ZOOM.
+      const locatedZoom = typeof zoom === 'number' && Number.isFinite(zoom)
+        ? Math.round(Math.min(MAX_ZOOM, Math.max(MIN_ZOOM, zoom)))
+        : LOCATED_ZOOM;
+
+      const locateOrg = (loc: google.maps.LatLng, label: string) => {
+        if (cancelled || !mapRef.current) return;
+        homeViewRef.current = { center: { lat: loc.lat(), lng: loc.lng() }, zoom: locatedZoom };
+        orgMarkerRef.current?.setMap(null);
+        if (!markerCtor) return;
+        orgMarkerRef.current = new markerCtor({
+          map,
+          position: loc,
+          title: `${orgName} — ${label}`,
+          icon: { url: pinSvg('#1B2A4A'), anchor: new google.maps.Point(17, 45) },
+        });
+        map.setCenter(loc);
+        map.setZoom(locatedZoom);
+        setStatus(null);
+      };
+
+      if (hasStoredCoords) {
+        locateOrg(new google.maps.LatLng(lat!, lng!), address?.trim() ? `${address!.trim()}` : 'stored location');
+      } else if (address && address.trim()) {
         void geocode(address.trim(), geocoderRef.current!, null, (status, results) => {
           if (cancelled || !mapRef.current) return;
           const loc = results?.[0]?.geometry?.location;
@@ -111,18 +147,7 @@ export default function OrgMap({ orgName, address, extraControls }: OrgMapProps)
             setStatus(describeGeocodeFailure(status, 'Stored location not found — showing default area'));
             return;
           }
-          homeViewRef.current = { center: { lat: loc.lat(), lng: loc.lng() }, zoom: LOCATED_ZOOM };
-          orgMarkerRef.current?.setMap(null);
-          if (!markerCtor) return;
-          orgMarkerRef.current = new markerCtor({
-            map,
-            position: loc,
-            title: `${orgName} — ${address}`,
-            icon: { url: pinSvg('#1B2A4A'), anchor: new google.maps.Point(17, 45) },
-          });
-          map.setCenter(loc);
-          map.setZoom(LOCATED_ZOOM);
-          setStatus(null);
+          locateOrg(loc, address.trim());
         });
       }
     })().catch((e) => {
@@ -139,7 +164,7 @@ export default function OrgMap({ orgName, address, extraControls }: OrgMapProps)
       mapRef.current = null;
       geocoderRef.current = null;
     };
-  }, [orgName, address]);
+  }, [orgName, address, lat, lng, zoom]);
 
   // -----------------------------------------------------------------------
   // Org-chart-parity zoom controls: clamp + step + reset.

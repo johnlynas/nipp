@@ -17,6 +17,10 @@ export default function TenantMapPage() {
   const [orgId, setOrgId] = useState<string | null>(null);
   const [orgName, setOrgName] = useState<string>('');
   const [address, setAddress] = useState<string | null>(null);
+  // Stored coordinates + zoom — preferred centre over the geocoded address.
+  const [lat, setLat] = useState<number | null>(null);
+  const [lng, setLng] = useState<number | null>(null);
+  const [zoom, setZoom] = useState<number | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
@@ -65,6 +69,9 @@ export default function TenantMapPage() {
     (async () => {
       setError(null);
       setAddress(null);
+      setLat(null);
+      setLng(null);
+      setZoom(null);
       setOrgName('');
       try {
         const res = await fetch(`/api/organizations/${orgId}/location`);
@@ -72,10 +79,13 @@ export default function TenantMapPage() {
           const body = await res.json().catch(() => ({}));
           throw new Error(body.error || `Failed to load location (${res.status})`);
         }
-        const data: { name?: string; location?: { address?: string } | null } = await res.json();
+        const data: { name?: string; location?: { lat?: number; lng?: number; zoom?: number; address?: string } | null } = await res.json();
         if (cancel) return;
         setOrgName(data.name ?? '');
         setAddress(data.location?.address ?? null);
+        setLat(typeof data.location?.lat === 'number' ? data.location!.lat : null);
+        setLng(typeof data.location?.lng === 'number' ? data.location!.lng : null);
+        setZoom(typeof data.location?.zoom === 'number' ? data.location!.zoom : null);
       } catch (e) {
         if (!cancel) setError(e instanceof Error ? e.message : 'Failed to load location');
       }
@@ -113,5 +123,5 @@ export default function TenantMapPage() {
     );
   }
 
-  return <OrgMap orgName={orgName || 'Organization'} address={address} />;
+  return <OrgMap orgName={orgName || 'Organization'} address={address} lat={lat} lng={lng} zoom={zoom} />;
 }

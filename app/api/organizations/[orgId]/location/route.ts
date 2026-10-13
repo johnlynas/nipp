@@ -2,8 +2,10 @@
  * Organization location read endpoint.
  *
  * GET /api/organizations/[orgId]/location — returns the organization's map
- * location (stored under `metadata.location` as `{ address }`) so the tenant
- * workspace Map page can centre on the organization.
+ * location so the Map pages can centre on it: preferred are the stored
+ * coordinates (`latitude`/`longitude`, plus optional `mapZoom`);
+ * `metadata.location.address` remains a geocoding fallback when only an address
+ * is set. Zoom is clamped to Google's 3–21 range before being returned.
  *
  * Authorization (mirrors the org-chart route):
  *   - membership OR super admin via resolveTenantAccess (401 / 403 / 503)
@@ -17,6 +19,11 @@ import tenantDb from '@/lib/tenant-db';
 import { withRLSContext } from '@/lib/rls-transaction';
 
 export const runtime = 'nodejs';
+
+/** Both coordinates must be finite numbers in range to count as a location. */
+function isFiniteCoord(value: unknown): value is number {
+  return typeof value === 'number' && Number.isFinite(value);
+}
 
 export async function GET(
   req: NextRequest,
@@ -40,15 +47,25 @@ export async function GET(
     try {
       const org = await tenantDb.organization.findUnique({
         where: { id: orgId },
-        select: { name: true, metadata: true },
+        select: { name: true, metadata: true, latitude: true, longitude: true, mapZoom: true },
       });
 
       if (!org) {
         return NextResponse.json({ error: 'Organization not found' }, { status: 404 });
       }
 
-      // Location is best-effort JSON: { address?: string }. Anything unexpected
-      // (old shapes, strings, booleans) simply means "no location set".
+      // Stored coordinates are preferred — the map can centre directly, no
+      // geocoding call needed. Out-of-range values (bad data) are ignored.
+      const lat = isFiniteCoord(org.latitude) ? org.latitude : null;
+      const lng = isFiniteCoord(org.longitude) ? org.longitude : null;
+      const hasCoords = lat !== null && lng !== null && Math.abs(lat) <= 90 && Math.abs(lng) <= 180;
+
+      // Stored zoom — optional (map falls back to its located/default zoom).
+      const zoom = isFiniteCoord(org.mapZoom) ? Math.round(Math.min(21, Math.max(3, org.mapZoom!))) : null;
+
+      // Address is best-effort JSON: { address?: string }. Anything unexpected
+      // (old shapes, strings, booleans) simply means "no address set". The map
+      // uses it as a geocoding fallback when coordinates are absent.
       const meta = org.metadata as Record<string, unknown> | null;
       const rawLocation = meta?.location;
       let address: string | null = null;
@@ -57,7 +74,13 @@ export async function GET(
         if (typeof addr === 'string' && addr.trim().length > 0) address = addr.trim();
       }
 
-      return NextResponse.json({ name: org.name, location: address ? { address } : null });
+      const location = hasCoords
+        ? { lat: lat!, lng: lng!, ...(zoom !== null ? { zoom } : {}), ...(address ? { address } : {}) }
+        : address
+          ? { address }
+          : null;
+
+      return NextResponse.json({ name: org.name, location });
     } catch (error) {
       if (error instanceof Error) {
         return NextResponse.json({ error: error.message }, { status: 400 });
