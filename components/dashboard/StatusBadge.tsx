@@ -9,6 +9,8 @@ const statusStyles: Record<string, { bg: string; text: string }> = {
   Verified: { bg: '#f0fdf4', text: '#166534' },
   'Email Verified': { bg: '#f0fdf4', text: '#166534' },
   PENDING: { bg: '#fffbeb', text: '#92400e' },
+  Rented: { bg: '#fffbeb', text: '#92400e' },
+  'Owner Occupied': { bg: '#f0fdf4', text: '#166534' },
   SUSPENDED: { bg: '#fef2f2', text: '#991b1b' },
   Banned: { bg: '#fef2f2', text: '#991b1b' },
   ARCHIVED: { bg: 'var(--color-canvas-subtle)', text: 'var(--color-slate-500)' },
