@@ -204,7 +204,7 @@ export const UnitService = {
     // org at the route layer (see admin teams GET).
     return runWithTenant(organizationId, async () => {
       // Search over owner / address / post code.
-      let where: Prisma.UnitsWhereInput = { organizationId };
+      const where: Prisma.UnitsWhereInput = { organizationId };
       if (search) {
         const q = search.trim();
         where.OR = [

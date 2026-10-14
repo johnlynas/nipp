@@ -46,7 +46,7 @@ const TYPE_LABELS: Record<Unit['type'], string> = {
 export default function UnitsPage() {
   const [units, setUnits] = useState<Unit[]>([]);
   const [organizations, setOrganizations] = useState<Organization[]>([]);
-  const [pagination, setPagination] = useState<PaginationState>({ page: 1, pageSize: 20, total: 0, totalPages: 0 });
+  const [pagination, setPagination] = useState<PaginationState>({ page: 1, pageSize: 8, total: 0, totalPages: 0 });
   const [search, setSearch] = useState('');
   const [orgFilter, setOrgFilter] = useState('');
   const [rentedFilter, setRentedFilter] = useState('');
@@ -324,7 +324,6 @@ export default function UnitsPage() {
         <StatCard label="Total Units" value={counts.totalCount} />
         <StatCard label="Rented" value={counts.rentedCount} color="warning" />
         <StatCard label="Owner Occupied" value={counts.ownerOccupiedCount} color="success" />
-        <StatCard label="Showing" value={pagination.total} />
       </div>
 
       {/* Page Header */}
