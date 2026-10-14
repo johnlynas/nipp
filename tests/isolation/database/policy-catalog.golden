@@ -31,3 +31,4 @@ SentInvitation | rls_sentinvitation_isolated | ALL | (("orgId" = current_setting
 Team | rls_team_isolated | ALL | (("organizationId" = current_setting('app.current_org_id'::text, true)) OR ((NULLIF(current_setting('app.is_platform_admin'::text, true), ''::text))::integer = 1))
 TeamMember | rls_teammember_isolated | ALL | (("organizationId" = current_setting('app.current_org_id'::text, true)) OR ((NULLIF(current_setting('app.is_platform_admin'::text, true), ''::text))::integer = 1))
 TeamRole | rls_teamrole_isolated | ALL | (("organizationId" = current_setting('app.current_org_id'::text, true)) OR ((NULLIF(current_setting('app.is_platform_admin'::text, true), ''::text))::integer = 1))
+Units | rls_units_isolated | ALL | (("organizationId" = current_setting('app.current_org_id'::text, true)) OR ((NULLIF(current_setting('app.is_platform_admin'::text, true), ''::text))::integer = 1))

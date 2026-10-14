@@ -49,6 +49,13 @@ const ORG_TABLES: Record<string, OrgTableDef> = {
     insertCols: 'id, name, "organizationId", "updatedAt"',
     insertVals: (o) => `('x-cal', 'Rogue Cal', '${o}', now())`,
   },
+  Units: {
+    orgField: 'organizationId', seedA: ['u-a1', 'u-a2'], seedB: ['u-b1'],
+    // No FK dependencies — the only check that can fail on a foreign-org
+    // INSERT is the RLS WITH CHECK (same shape as Team/Calendar).
+    insertCols: '"unitId", "organizationId", owner, address, "postCode"',
+    insertVals: (o) => `('x-unit', '${o}', 'Rogue Owner', '1 Rogue Lane', 'BT00 0XX')`,
+  },
   CalendarEvent: {
     orgField: 'organizationId', seedA: ['ev-a1', 'ev-a2'], seedB: ['ev-b1'],
     insertCols: 'id, title, "startDate", "endDate", "calendarId", "organizationId"',

@@ -83,6 +83,13 @@ enum CalendarRecurrenceFrequency {
   ANNUALLY
 }
 
+/** Property (unit) types — the kind of property a managed unit is. */
+enum UnitType {
+  HOUSE
+  APARTMENT
+  OTHER
+}
+
 /** Notification scope — who receives the notification */
 enum NotificationScope {
   GLOBAL
@@ -228,6 +235,8 @@ model Organization {
   // Calendars: organization-scoped calendar containers and events
   calendars          Calendar[]
   calendarEvents     CalendarEvent[]
+  // Units: the properties managed by this organization (1:M)
+  units              Units[]
 }
 
 model Member {
@@ -624,6 +633,31 @@ model CalendarEvent {
 
   @@index([organizationId, startDate]) // Efficient date range queries
   @@index([propertyId])                 // Property-based event lookups (future scheduler)
+}
+
+// ============================================================
+// Units Models (Properties — org-scoped)
+// ============================================================
+
+/**
+ * Units — A property managed by an organization (1:M from Organization).
+ * Org column `organizationId` is the RLS policy column and the app-layer
+ * scoping column (TENANT_SCOPED_MODELS); policy rls_units_isolated is keyed
+ * on it (prisma/migrations/…_units_rls_policy).
+ */
+model Units {
+  unitId      String   @id @default(cuid()) // Auto-generated primary key
+  organizationId     String
+  organization       Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  owner       String   // Name of the unit owner
+  address     String   // Street address of the unit
+  postCode    String   // Post code of the unit
+  rented      Boolean  @default(false) // Is the property rented out?
+  type        UnitType @default(APARTMENT)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@index([organizationId]) // Tenant-scoped queries (RLS + app-layer scoping)
 }
 
 // ============================================================

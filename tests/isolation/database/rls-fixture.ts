@@ -154,6 +154,12 @@ INSERT INTO "Team" (id, name, slug, "organizationId", "updatedAt") VALUES
   ('team-a1', 'Ops A',  'ops-a', '${f.orgA}', now()),
   ('team-b1', 'Ops B',  'ops-b', '${f.orgB}', now());
 
+-- Units (the properties a tenant manages): 2 in org A, 1 in org B — count-distinguishable.
+INSERT INTO "Units" ("unitId", "organizationId", owner, address, "postCode", rented, type, "createdAt", "updatedAt") VALUES
+  ('u-a1', '${f.orgA}', 'Janet Owens',   '4 Antrim Road',  'BT48 6XX', false, 'APARTMENT', now(), now()),
+  ('u-a2', '${f.orgA}', 'Michael Byrne', '12 High Street', 'BT49 3AB', true,  'HOUSE',     now(), now()),
+  ('u-b1', '${f.orgB}', 'Sadie Carson',  '7 Shore Road',   'BT78 5ZZ', true,  'OTHER',     now(), now());
+
 INSERT INTO "TeamMember" (id, "teamId", "userId", "organizationId") VALUES
   ('tm-a1', 'team-a1', '${f.userA}', '${f.orgA}'),
   ('tm-b1', 'team-b1', '${f.userB}', '${f.orgB}');
