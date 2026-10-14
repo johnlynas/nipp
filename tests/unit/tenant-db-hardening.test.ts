@@ -161,6 +161,13 @@ describe('count/aggregate/groupBy are org-scoped', () => {
     expect(lastCallFor('count').args.where).toEqual({ orgId: 'org-A' });
   });
 
+  it('count uses the organizationId column for Units', async () => {
+    mockState.userId = 'u1';
+    mockState.orgId = 'org-A';
+    await tenantDb.units.count();
+    expect(lastCallFor('count').args.where).toEqual({ organizationId: 'org-A' });
+  });
+
   it('count/aggregate/groupBy fail closed with no context', async () => {
     await expect(tenantDb.team.count()).rejects.toThrow(/Tenant context missing/);
     await expect((tenantDb.team.aggregate as (a?: Record<string, unknown>) => Promise<unknown>)({ _sum: {} } as never)).rejects.toThrow(/Tenant context missing/);

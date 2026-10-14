@@ -69,6 +69,7 @@ const FIXTURE_MODELS = new Set([
   'sentInvitation',
   'notification',
   'user',
+  'units',
 ]);
 
 /**

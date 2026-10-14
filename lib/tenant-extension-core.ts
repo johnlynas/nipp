@@ -32,7 +32,7 @@ import { getCurrentOrgId as readCurrentOrgId, getTenantContext } from './tenant-
  * scoping. Regeneration guard: if you touch this list, run
  * `npm test` — coverage drift is a release-blocking failure (design §5.2).
  */
-export const TENANT_SCOPED_MODELS = ['Role', 'RolePermission', 'MemberRole', 'Member', 'Invitation', 'SentInvitation', 'Team', 'TeamMember', 'TeamRole', 'Calendar', 'CalendarEvent'] as const;
+export const TENANT_SCOPED_MODELS = ['Role', 'RolePermission', 'MemberRole', 'Member', 'Invitation', 'SentInvitation', 'Team', 'TeamMember', 'TeamRole', 'Calendar', 'CalendarEvent', 'Units'] as const;
 
 /** Compile-time name type for any tenant-scoped model. */
 export type TenantScopedModelName = (typeof TENANT_SCOPED_MODELS)[number];

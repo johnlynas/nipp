@@ -61,7 +61,7 @@ describe('ownership: app role owns no public table', () => {
     expect(rolcanlogin).toBe(true);
   });
 
-  it('RLS enabled on exactly the catalog’s 18 tables', async () => {
+  it('RLS enabled on exactly the catalog’s 19 tables', async () => {
     const q = await db.owner.query(`
       SELECT c.relname FROM pg_class c
       JOIN pg_namespace n ON n.oid = c.relnamespace
@@ -72,7 +72,7 @@ describe('ownership: app role owns no public table', () => {
       'AuditLog', 'Calendar', 'CalendarEvent', 'Invitation', 'JobDefinition',
       'JobExecution', 'Member', 'MemberRole', 'Notification', 'NotificationLog',
       'Organization', 'Permission', 'Role', 'RolePermission', 'SentInvitation',
-      'Team', 'TeamMember', 'TeamRole',
+      'Team', 'TeamMember', 'TeamRole', 'Units',
     ]);
   });
 

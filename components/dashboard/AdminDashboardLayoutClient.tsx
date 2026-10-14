@@ -3,7 +3,7 @@
 import { useState, useMemo } from 'react';
 import { usePathname } from 'next/navigation';
 import Link from 'next/link';
-import { Menu, X, UserRound, Building2, UsersRound, Shield, Key, Layers, LogOut, CalendarDays, Bell, XCircle, HeartPulse, ChartNoAxesCombined, ScrollText, Network, FileSearch, TerminalSquare } from 'lucide-react';
+import { Menu, X, UserRound, Building2, UsersRound, Shield, Key, Layers, LogOut, CalendarDays, Bell, XCircle, HeartPulse, ChartNoAxesCombined, ScrollText, Network, FileSearch, TerminalSquare, Houses } from 'lucide-react';
 import { authClient } from '@/lib/auth-client';
 import { RequireSuperAdmin } from '@/components/auth/RequireSuperAdmin';
 import { useNotifications, PRIORITY_COLORS, getPriorityIcon } from '@/hooks/useNotifications';
@@ -20,6 +20,7 @@ const navGroups: NavGroup[] = [
       { href: '/dashboard/admin/users', label: 'Users', icon: UserRound },
       { href: '/dashboard/admin/organizations', label: 'Organizations', icon: Building2 },
       { href: '/dashboard/admin/teams', label: 'Teams', icon: UsersRound },
+      { href: '/dashboard/admin/units', label: 'Units', icon: Houses },
     ],
   },
   {
