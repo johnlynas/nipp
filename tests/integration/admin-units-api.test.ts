@@ -140,10 +140,13 @@ describe('Admin Units API (Integration)', () => {
       const data = await response.json();
       expect(data.items[0].type).toBe('HOUSE');
 
-      // Count where should carry search + rented + type.
-      const countCalls = dbUnits.count.mock.calls.map((c) => (c[0] as { where: Record<string, unknown> }).where);
-      expect(countCalls.some((w) => w.rented === true)).toBe(true);
-      expect(countCalls.every((w) => ((w.OR as unknown[] | undefined)?.length ?? 0) > 0)).toBe(true);
+      // Total Units is the unconditional full-table count (no where clause);
+      // rented/owner-occupied counts stay filter-aware.
+      const countCalls = dbUnits.count.mock.calls.map((c) => c[0] as { where?: Record<string, unknown> } | undefined);
+      expect(countCalls.some((a) => a === undefined)).toBe(true);
+      const filteredWheres = countCalls.filter((a) => a?.where).map((a) => (a as { where: Record<string, unknown> }).where);
+      expect(filteredWheres.some((w) => w.rented === true)).toBe(true);
+      expect(filteredWheres.every((w) => ((w.OR as unknown[] | undefined)?.length ?? 0) > 0)).toBe(true);
     });
 
     it('lists a single org via organizationId when provided', async () => {

@@ -56,9 +56,10 @@ export async function GET(request: NextRequest) {
         ...(type !== undefined ? { type } : {}),
       };
 
-      // Counts over the full dataset (filter-aware, pagination-independent).
+      // Counts: Total Units is ALWAYS the full-table count (independent of any
+      // filter); Rented / Owner-Occupied stay filter-aware, pagination-independent.
       const [totalCount, rentedCount, ownerOccupiedCount] = await Promise.all([
-        tenantDb.units.count({ where: filteredWhere }),
+        tenantDb.units.count(),
         tenantDb.units.count({ where: { ...filteredWhere, rented: true } }),
         // Owner-occupied = not rented out.
         tenantDb.units.count({ where: { ...filteredWhere, rented: false } }),
