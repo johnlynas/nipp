@@ -26,6 +26,11 @@
 //   Resource, ResourceRole        global feature catalog; the sensitive side sits
 //                                 on org-scoped Role rows which ARE policied.
 //                                 Re-evaluate before any route queries these directly.
+//   Contractors                   global shared directory of external contractors
+//                                 usable by ALL organizations; no org column by
+//                                 design (RLS-exempt — SECURITY.md Appendix B).
+//                                 Do NOT add an org column or RLS policy without
+//                                 a proposal.
 //   JobDefinition, JobExecution   platform-only by strongest stance: policies gate
 //                                 on app.is_platform_admin AND app.platform_org_id =
 //                                 the row's platformOrgId (no tenant-context path).
@@ -112,6 +117,22 @@ enum NotificationPriority {
   CRITICAL
   CALENDAR
   JOB
+}
+
+/** Contractor business types — global directory shared by all organizations. */
+enum ContractorType {
+  PAINTER
+  ELECTRICIAN
+  PLUMBER
+  GAS_ENGINEER
+  LIFT_MAINTENANCE
+  GARDENER
+  ACCOUNTANT
+  FIRE_ALARMS
+  SOLICITOR
+  ROOFER
+  WINDOW_CLEANER
+  OTHER
 }
 
 // ============================================================
@@ -752,4 +773,30 @@ model JobExecution {
 
   @@index([jobDefinitionId, startedAt])
   @@index([platformOrgId, status])
+}
+
+// ============================================================
+// Contractors (Global shared directory — NOT org-scoped)
+// ============================================================
+
+/**
+ * Contractors — external contractor records shared by all organizations.
+ * Globally accessible on purpose: any organization can use any contractor,
+ * so there is NO organizationId column, NO app-layer tenant scoping
+ * (absent from TENANT_SCOPED_MODELS), and NO RLS policy (RLS-exempt table,
+ * documented in SECURITY.md Appendix B). Grants for nipp_app come from the
+ * ALTER DEFAULT PRIVILEGES set in 20260919035439_rls_roles.
+ */
+model Contractors {
+  contractorId  String         @id @default(cuid()) // Auto-generated primary key
+  companyName   String         // Contractor's company name
+  name          String         // Contractor's name
+  email         String         // Contractor contact email
+  phone         String         // Contractor contact phone number
+  address       String         // Contractor business address
+  postCode      String         // Contractor business address post code
+  type          ContractorType @default(OTHER) // Business type; description clarifies when OTHER
+  description   String?        // Optional; primarily used for type=OTHER, usable by all types
+  createdAt     DateTime       @default(now())
+  updatedAt     DateTime       @updatedAt
 }
