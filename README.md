@@ -33,7 +33,7 @@ Self-service registration is not available (`/register` redirects to
     - [Auto-logout on inactivity](#auto-logout-on-inactivity)
   - [Multi-Tenant Isolation](#2-multi-tenant-isolation)
   - [Super Admin Console](#3-super-admin-console)
-  - [Integrated Tenant Dashboard](#4-integrated-tenant-dashboard)
+  - [Tenant Workspace](#4-tenant-workspace-read-only)
     - [Resources & feature-level access control](#resources-feature-level-access-control)
   - [Roles, Permissions & Teams (RBAC)](#5-roles-permissions-teams-rbac)
   - [Interactive Calendar](#6-interactive-calendar)
@@ -72,13 +72,16 @@ Self-service registration is not available (`/register` redirects to
 | Area | What it does |
 |------|--------------|
 | **Multi-tenant isolation** | Two independent layers: Prisma query interception + PostgreSQL Row Level Security |
-| **Authentication** | BetterAuth with email/password; Google OIDC plus magic-link verification for new Google users is in development (branch `google-oidc`, see §1) — 1-hour session cap, inactivity auto-logout |
+| **Authentication** | BetterAuth with email/password plus invite-only Google OIDC (magic-link verification before first sign-in) and cookieless bearer-token access for remote domains — 1-hour session cap, inactivity auto-logout |
 | **RBAC** | Organization-scoped roles, a catalog of ~50 atomic permissions, feature-level access via Resources |
 | **Teams** | Sub-organizational groupings with role inheritance |
-| **Super Admin console** | Manage organizations, users, roles, permissions, audit logs, cache metrics, system health/logs |
-| **Tenant dashboard** | Integrated dashboard for users, organizations, roles, permissions, resources, teams, and the calendar |
+| **Super Admin console** | Manage organizations, users, units, contractors, roles, permissions, teams, audit logs, cache metrics, custom scripts, system health/logs |
+| **Tenant dashboard** | Read-only tenant workspace: calendar, org chart, members, roles, organization setup, and Google Maps — scoped to the user's own organization; Super Admins additionally browse every tenant (`/dashboard/tenant`) |
+| **Units** | Org-scoped unit registry (address, contact email/phone, rented flag, unit type) with CRUD and a full-table "Total Units" stat (`/dashboard/admin/units`) |
+| **Contractors** | External contractor registry (company, contact, business type + description) with CRUD (`/dashboard/admin/contractors`) |
 | **Interactive Calendar** | Month/week/day/year views, drag-and-drop rescheduling, RFC 5545 (rrule) recurrence, event modals, quick-add, live "due to start" SSE alerts |
 | **Org Chart** | Live interactive tree of org → teams → members: zoom/pan canvas (opens centred in the viewport, mouse-wheel zoom toward the cursor, middle-click recentres), member detail modal with roles & permissions, tenant-switcher sidebar, unassigned bucket, mobile accordion (`/dashboard/admin/org-chart`) |
+| **Map** | Google Maps pages in both dashboards centred on each organization's stored location (database columns `latitude` / `longitude` / `mapZoom`, address-string geocoding as fallback), with mouse-wheel zoom, drag-pan and middle-click recentre (`/dashboard/admin/map`, `/dashboard/tenant/map`) |
 | **Calendar Notifications** | Rate-limited email alerts for today's events, delivery logged to `NotificationLog` |
 | **Hybrid caching** | L1 in-memory + L2 Redis cache with stampede protection, warming, and live metrics |
 | **Real-time notifications** | Live server-side SSE broadcast (health checks, all admin management events, and upcoming calendar events) with org/global scoping, deduplication, and a persisted notification log |
@@ -89,18 +92,21 @@ Self-service registration is not available (`/register` redirects to
 
 ```
 app/                  Next.js App Router: pages and API route handlers
-  admin/              Super Admin console (pages + /api/admin/* handlers)
-  dashboard/          Integrated role-based dashboards (+ /api/dashboard/admin/*)
-  organizations/      Organization-scoped tenant pages
-  api/                Other route handlers (auth, calendar, teams, health, …)
-components/           React UI (admin, calendar, org-chart, dashboard, auth, providers)
-features/             Client-side feature modules (notifications, org, permissions, user)
-hooks/                Shared client hooks (useInactivityTimeout, usePermission)
-lib/                  Core infrastructure: auth, tenant-db, cache, crypto, notifications
-services/             Server-side domain services (calendar, teams, roles, resources, …)
+  dashboard/admin/    Super Admin console (accordion sidebar: People / Platform / Ops)
+  dashboard/tenant/   Read-only tenant workspace (calendar, org chart, members, roles, settings, map)
+  login/ register/ auth/   Sign-in, registration redirect, magic-link verification
+  org/ organizations/ Legacy tenant-scoped pages (org roles page, org layout)
+  api-docs/           Swagger UI + generated OpenAPI spec
+  api/                Route handlers (auth, admin, dashboard/admin, organizations, notifications/stream, health, …)
+components/           React UI (admin, calendar, maps, org-chart, dashboard, auth, providers)
+features/             Client-side feature modules (auth, notifications, organization, permissions, user)
+hooks/                Shared client hooks (useInactivityTimeout, useNotifications, usePermission, useTenantScope)
+lib/                  Core infrastructure: auth (OIDC + bearer), tenant-db, cache, crypto, notifications, job scheduler, RLS
+services/             Server-side domain services (calendar, teams, roles, resources, units, contractors, …)
 prisma/               Schema, migrations, RLS scripts, and seed
-tests/                unit/, integration/, isolation/ (app-layer + Playwright E2E)
-scripts/              DB setup, test env setup/teardown, cache benchmark, secret check
+tests/                unit/, integration/, isolation/ (app-layer + database golden + Playwright E2E)
+scripts/              DB setup, test env setup/teardown, cache benchmark, secret check, RLS tooling
+types/                Ambient type declarations (better-auth, breejs-later)
 openspec/             OpenSpec change proposals (the project's design process)
 documents/            Business research, feature planning, operations runbooks
 ```
@@ -114,10 +120,19 @@ documents/            Business research, feature planning, operations runbooks
 Authentication is handled by [BetterAuth](https://www.better-auth.com/)
 (configured in `lib/auth.ts`):
 
-- **Providers:** email/password is the live sign-in method. Google OIDC is
-  in development (branch `google-oidc`, currently a presentation-only button
-  that shows a notice) — see below and
+- **Providers:** email/password and Google OIDC are both live sign-in methods.
+  Google is **invite-only**: `disableImplicitSignUp` blocks uninvited
+  identities (their stray auto-registered rows are removed on attempt), new
+  invited Google users must complete magic-link email verification before any
+  session exists, and access requires at least one org membership — all
+  enforced by a shared gate in `lib/auth.ts` (`enforceOidcProvisioning`) that
+  the `/sign-in/social` route calls per attempt. See below and
   [documents/feature-planning-and-development/google-oidc-design.md](./documents/feature-planning-and-development/google-oidc-design.md).
+  A cookieless **bearer-token** mode (BetterAuth `bearer()` plugin) issues the
+  session token via the `set-auth-token` response header so browser frontends on
+  other origins/domains can authenticate remotely and pass it as an
+  `Authorization: Bearer …` header — see
+  [documents/feature-planning-and-development/bearer-token-remote-access.md](./documents/feature-planning-and-development/bearer-token-remote-access.md).
 - **Sessions:** secure, HTTP-only cookies; `expiresIn` of **1 hour** is the
   absolute maximum lifetime, with renewal on any server request once remaining
   time drops below 15 minutes (`updateAge`). Active users who make at least one
@@ -149,12 +164,11 @@ server-side 1-hour expiry is the backstop if client-side detection is bypassed
 React context (`components/providers/InactivityTimeoutConfig.tsx`) — no
 `NEXT_PUBLIC_` duplication.
 
-### Google OIDC sign-in & magic-link verification (in development)
+### Google OIDC sign-in & magic-link verification (live)
 
-The login page's "Sign in with Google" button becomes functional on branch
-`google-oidc`. **Server-side provider wiring is complete** (BetterAuth `socialProviders.google`,
-PKCE/state storage, ban enforcement at session creation — details below); the UI,
-magic-link gate, and hardening phases are still in build. All sign-in methods share
+The login page's "Sign in with Google" button is a working sign-in method:
+provider wiring, the invite-only door, the magic-link gate, and hardening have
+all shipped (see below for how each piece is wired). All sign-in methods share
 the same session machinery as email/password: cookies, 1-hour expiry, ban
 enforcement, and org bootstrap.
 
@@ -177,19 +191,21 @@ exactly matches `FRONTEND_URL/api/auth/callback/google`. Full flow diagrams, the
 threat table, phased delivery plan, and test strategy live in the design doc:
 [documents/feature-planning-and-development/google-oidc-design.md](./documents/feature-planning-and-development/google-oidc-design.md).
 
-**What's actually wired today (server side, Phase 1):** `lib/auth.ts` registers
-`socialProviders.google` as a **plain options object** (`{ clientId, clientSecret }`) —
-in BetterAuth 1.6.x the older `google({…})` factory call no longer type-checks and
-must not be used. The provider endpoints reply with a `Location` header (200 +
-`{ url, redirect: true }` in this minimal build) carrying the accounts.google.com
-authorization URL; `/api/auth/callback/google` is public via `PUBLIC_PATTERNS`
-(`middleware.ts`). Google's PKCE state/nonce storage needs a Prisma **`Verification`
-table**, which the repo did not have — it was added to `prisma/schema.prisma` and applied
-via `prisma db push` (this table also serves the magic-link flow below). Ban
-enforcement now runs for **every** sign-in method from one shared helper
-(`enforceBanStatus`) at `databaseHooks.session.create.before`, because the
-`/sign-in/social` route itself only sees the provider id — never Google's user `sub`.
-Tests: `tests/integration/google-oidc.test.ts`.
+**How it's wired:** `lib/auth.ts` registers `socialProviders.google` as a
+**plain options object** (`{ clientId, clientSecret }`) with
+`disableImplicitSignUp: true` — in BetterAuth 1.6.x the older `google({…})`
+factory call no longer type-checks and must not be used. The provider endpoints
+reply with a `Location` header (200 + `{ url, redirect: true }` in this minimal
+build) carrying the accounts.google.com authorization URL;
+`/api/auth/callback/google` is public via `PUBLIC_PATTERNS` (`middleware.ts`).
+Google's PKCE state/nonce storage lives in the Prisma **`Verification`** table
+(`prisma/schema.prisma`), which also serves the magic-link flow above. The
+shared session gate (`enforceOidcProvisioning`, called per sign-in attempt from
+`databaseHooks.session.create.before`) runs ban enforcement for **every**
+sign-in method plus the invite-only checks, because the `/sign-in/social` route
+itself only sees the provider id — never Google's user `sub`. Tests:
+`tests/integration/google-oidc.test.ts` and
+`tests/integration/bearer-tokens.test.ts`.
 
 ## 2. Multi-Tenant Isolation
 
@@ -216,50 +232,65 @@ Organizations follow a strict lifecycle state machine:
 
 ## 3. Super Admin Console
 
-Super Admins (`app/admin/*`, guarded server-side by `requireSuperAdmin()` and
-client-side by `<RequireSuperAdmin>`) get a console for platform operations:
+Super Admins (`/dashboard/admin/*`, guarded server-side by `requireSuperAdmin()`
+and client-side by `<RequireSuperAdmin>`) get a console for platform operations.
+The sidebar is divided into three accordion sections — **People**, **Platform**,
+and **Ops** (each expands/retracts to save space; the section of the active page
+auto-expands):
 
 | Route | Purpose |
 |-------|---------|
-| `/admin/organizations` | List orgs with search, filter, pagination; create/edit/delete, member management, per-org roles & permissions, status changes, settings |
-| `/admin/users` | Platform user accounts (create/view/edit/delete) |
-| `/admin/roles` | Global role management |
-| `/admin/permissions` | Global permission catalog (resources, search, CRUD) |
-| `/admin/audit-logs` | Cross-tenant security audit log viewer with filters |
-| `/admin/cache-metrics` | Live L1/L2 cache hit-rate metrics |
+| `/dashboard/admin/users` | Platform user accounts (create/view/edit/delete, ban, invite with magic link) |
+| `/dashboard/admin/organizations` | List orgs with search, filter, pagination; create/edit/delete, member management, per-org roles & permissions, status changes, settings |
+| `/dashboard/admin/teams` | Teams, members, and team-level roles (People) |
+| `/dashboard/admin/units` | Org-scoped unit registry: CRUD, contact email/phone, rented flag, "Total Units" stat (People) |
+| `/dashboard/admin/contractors` | External contractor registry: company, contact, business type + description (People) |
+| `/dashboard/admin/roles` | Global role management |
+| `/dashboard/admin/permissions` | Global permission catalog (resources, search, CRUD) |
+| `/dashboard/admin/resources` | Feature resources and role-to-resource bindings |
+| `/dashboard/admin/notifications` | Live notification log: stat cards, filters, search, acknowledge/delete actions, admin broadcast |
+| `/dashboard/admin/calendar` | The interactive calendar with a full org switcher (see §6) |
+| `/dashboard/admin/org-chart` | Interactive organization chart: org → teams → members tree, detail modal, tenant switcher (see §7) |
+| `/dashboard/admin/map` | Google Maps of the active organization's stored location (see At a glance) |
 | `/dashboard/admin/system-health` | Dependency health card (database, cache) |
-| `/admin/system-logs` | Application/system log browser |
+| `/dashboard/admin/cache-metrics` | Live L1/L2 cache hit-rate metrics |
+| `/dashboard/admin/custom-scripts` | Job scheduler console: job CRUD, approval gate, dry-run, trigger, execution history (Ops, see §11) |
+| `/dashboard/admin/audit-logs` | Cross-tenant security audit log viewer with filters |
+| `/dashboard/admin/system-logs` | Application/system log browser |
 
-Backed by REST endpoints under `/api/admin/*` (organizations, members, roles,
-permissions, users, audit logs, cache & payload-encryption metrics, system
-logs). The **organization lifecycle** (activate/suspend/archive) is driven
-through `/api/admin/organizations/[orgId]/status`.
+Backed by REST endpoints under `/api/admin/*` and `/api/dashboard/admin/*`
+(organizations, members, roles, permissions, users, teams, units, contractors,
+audit logs, cache & payload-encryption metrics, system logs, jobs). The
+**organization lifecycle** (activate/suspend/archive) is driven through
+`/api/admin/organizations/[orgId]/status`.
 
 A public health check for load balancers and uptime monitors lives at
 `/api/health` — it checks the database (`SELECT 1`) and optionally Redis,
 returning per-check latency. See [Appendix C](#appendix-c-health-endpoint).
 
-## 4. Integrated Tenant Dashboard
+## 4. Tenant Workspace (read-only)
 
-The tenant-facing dashboard lives under `/dashboard/admin/*` and is assembled
-from reusable components (`components/dashboard/`):
+Tenant-facing roles (tenant, owner, manager, agent, maintenance, accountant,
+member — `lib/dashboard-router.ts`) land in **`/dashboard/tenant/*`**, a
+read-only workspace scoped to the user's own organization (`useTenantScope()`
+provides `isReadOnly`; Super Admins can switch organizations, everyone else is
+strictly view-only on their own org):
 
 | Route | Purpose |
 |-------|---------|
-| `/dashboard/admin/users` | Users of the active organization |
-| `/dashboard/admin/organizations` | Organization view/settings |
-| `/dashboard/admin/roles` | Roles scoped to the organization |
-| `/dashboard/admin/permissions` | Permission catalog as visible in org context |
-| `/dashboard/admin/resources` | Feature resources and role-to-resource bindings |
-| `/dashboard/admin/teams` | Teams, members, and team-level roles |
-| `/dashboard/admin/calendar` | The interactive calendar (see below) |
-| `/dashboard/admin/org-chart` | Interactive organization chart: org → teams → members tree, detail modal, tenant switcher (see §7) |
-| `/dashboard/admin/notifications` | Live notification log: stat cards, filters, search, acknowledge/delete actions |
+| `/dashboard/tenant/calendar` | The interactive calendar in read-only mode (default landing page; see §6) |
+| `/dashboard/tenant/org-chart` | Read-only organization chart of the user's organization |
+| `/dashboard/tenant/members` | Members and their roles within the organization |
+| `/dashboard/tenant/roles` | Roles visible in the user's organization |
+| `/dashboard/tenant/settings` | Organization setup (view) |
+| `/dashboard/tenant/map` | Google Maps of the organization's stored location |
 
-These pages talk to REST endpoints under `/api/dashboard/admin/*`. Role-based
-routing (`lib/dashboard-router.ts`) maps a user's role to their dashboard; the
-`contractor` route is currently scaffolding only, deferred to a future
-OpenSpec proposal.
+The Super Admin console ([section 3](#3-super-admin-console)) is the full
+write-capable surface built on the same reusable components
+(`components/dashboard/`) and talks to REST endpoints under `/api/admin/*` and
+`/api/dashboard/admin/*`; tenant users read through the org-scoped endpoints
+under `/api/organizations/[orgId]/*`. The `contractor` route is currently
+scaffolding only, deferred to a future OpenSpec proposal.
 
 ### Resources & feature-level access control
 
@@ -520,7 +551,8 @@ caused 429 churn under React StrictMode). It:
    with exponential-backoff reconnects (1 s → 30 s max) and client-side id
    deduplication (max 20 items kept).
 2. Renders a **footer ticker** in the Super Admin console *and* the tenant
-   dashboard layouts (`app/admin/layout.tsx`, `app/dashboard/admin/layout.tsx`).
+   dashboard layouts (`app/dashboard/admin/layout.tsx`,
+   `app/dashboard/tenant/layout.tsx`).
    INFO/WARNING items auto-dismiss after 10 s; ERROR/CRITICAL items persist
    until manually dismissed.
 3. **Mirrors every received message to an `sse-notification` CustomEvent**, so
@@ -548,7 +580,7 @@ Permission resolution and search use a **hybrid cache**: an L1 in-memory LRU
 (`lib/cache/lru.ts`, with stampede protection and background warming) in front
 of L2 Redis (`lib/redis.ts`), orchestrated by `lib/cache/hybrid.ts`. The app
 degrades gracefully when Redis is absent (reads fall back to the database).
-Live hit-rate metrics are shown at `/admin/cache-metrics`, and a benchmark
+Live hit-rate metrics are shown at `/dashboard/admin/cache-metrics`, and a benchmark
 script measures the real-world benefit of each layer:
 
 ```bash
@@ -737,9 +769,9 @@ npm run docs:generate
 # equivalent via npx (runs the project script by name):
 npx --no-install npm run docs:generate
 
-# or invoke the scanner with plain node / npx node:
+# or invoke the scanner directly:
 node scripts/generate-openapi.mjs
-npx node scripts/generate-openapi.mjs
+npx tsx scripts/generate-openapi.mjs
 ```
 
 The command prints a coverage summary — `routes · operations · documented ·
@@ -879,7 +911,7 @@ npm run lint         # ESLint — zero warnings expected
 | `npm run test:isolation:app` | `vitest run tests/isolation/application/` | App-layer tenant-separation tests |
 | `npm run test:isolation:e2e` | Playwright | Browser E2E (cross-tenant UI isolation, calendar, payload encryption) |
 | `npm run build:cloud` / `deploy:cloud` | — | Placeholders for the cloud pipeline |
-| `npm run docs:generate` | `node scripts/generate-openapi.mjs` | Regenerate the OpenAPI spec from route JSDoc (served at `/api-docs`) |
+| `npm run docs:generate` | `tsx scripts/generate-openapi.mjs` | Regenerate the OpenAPI spec from route JSDoc (served at `/api-docs`) |
 
 ## Quality gates (pre-commit & pre-push)
 
@@ -951,7 +983,7 @@ Start from `.env.example` (committed, placeholders only).
 |----------|----------|---------|
 | `BETTER_AUTH_SECRET` | yes (≥ 32 chars) | Session encryption key |
 | `BETTER_AUTH_URL` | no | BetterAuth base URL |
-| `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET` | required by the env schema; consumed once Google OIDC sign-in lands (branch `google-oidc`) | Google credentials — additionally register the OAuth client's redirect URI as `FRONTEND_URL/api/auth/callback/google` in Google Cloud Console |
+| `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET` | yes (consumed by Google OIDC sign-in) | Google credentials — register the OAuth client's redirect URI as `FRONTEND_URL/api/auth/callback/google` in Google Cloud Console. Remote-domain frontends additionally authenticate cookieless via bearer tokens (`Authorization: Bearer …`, issued over the `set-auth-token` header) |
 | `INACTIVITY_TIMEOUT_MINS` | no (default `15`) | Auto-logout after this idle time; digits only |
 | `SUPER_ADMIN_EMAIL` | no | Optional super-admin email hint |
 
@@ -1070,11 +1102,12 @@ Prisma models (`prisma/schema.prisma`), grouped by domain:
 
 | Group | Models |
 |-------|--------|
-| Identity & auth | `User`, `Session`, `Account` (+ implemented `Verification` model for OAuth state / magic-link tokens, and planned `User.oidcVerified` — branch `google-oidc`) |
-| Organizations & membership | `Organization`, `Member`, `Invitation`, `SentInvitation` |
+| Identity & auth | `User` (+ `oidcVerified` for the Google invite-only door), `Session`, `Account`, `Verification` (OAuth PKCE state + magic-link tokens) |
+| Organizations & membership | `Organization` (+ stored map location: `latitude` / `longitude` / `mapZoom`, address geocoding as fallback), `Member`, `Invitation`, `SentInvitation` |
 | Teams | `Team`, `TeamMember`, `TeamRole` (also the source of the [org chart](#7-interactive-organization-chart)) |
 | RBAC | `Permission`, `Role`, `RolePermission`, `MemberRole`, `Resource`, `ResourceRole` |
 | Calendar | `Calendar`, `CalendarEvent` (rrule JSON + exdates, optional `propertyId`) |
+| Units & contractors | `Units` (org-scoped unit registry: address, email/phone, rented flag, `UnitType`), `Contractors` (external contractor registry: company, contact, `ContractorType`, description) |
 | Audit & notifications | `AuditLog`, `Notification` (SSE in-app events, org/global scope, acknowledged flag), `NotificationLog` (email deliveries) |
 | Job scheduler | `JobDefinition` (platform-org job spec + approval gate), `JobExecution` (run history) |
 
@@ -1122,8 +1155,10 @@ own OpenSpec proposal (see SPECIFICATION_DESIGN_PROCESS.md).
 [openspec/changes/project-initialization/proposal.md](./openspec/changes/project-initialization/proposal.md).
 Notable open threads: multi-instance SSE fan-out (the broadcast layer is
 in-process today; multiple server instances would need a Redis Pub/Sub relay),
-contractor-role feature, property management business flows and the cloud
-build/deploy pipeline (scripts are placeholders).
+the contractor-role tenant workspace (the external-contractor data model and admin
+registry pages have shipped; the `/dashboard/contractor` route remains scaffolding),
+and property management business flows and the cloud build/deploy pipeline
+(scripts are placeholders).
 
 ## License
 
