@@ -1,9 +1,9 @@
 'use client';
 
-import { useState, useMemo } from 'react';
+import { useState, useEffect, useMemo } from 'react';
 import { useRouter, usePathname } from 'next/navigation';
 import Link from 'next/link';
-import { Menu, X, UserRound, Building2, UsersRound, Houses, Drill, Shield, Key, Layers, LogOut, CalendarDays, Bell, XCircle, HeartPulse, ChartNoAxesCombined, ScrollText, Network, FileSearch, TerminalSquare, Map as MapIcon } from 'lucide-react';
+import { Menu, X, ChevronDown, UserRound, Building2, UsersRound, Houses, Drill, Shield, Key, Layers, LogOut, CalendarDays, Bell, XCircle, HeartPulse, ChartNoAxesCombined, ScrollText, Network, FileSearch, TerminalSquare, Map as MapIcon } from 'lucide-react';
 import { authClient } from '@/lib/auth-client';
 import { RequireSuperAdmin } from '@/components/auth/RequireSuperAdmin';
 import { useNotifications, PRIORITY_COLORS, getPriorityIcon } from '@/hooks/useNotifications';
@@ -58,6 +58,17 @@ export default function AdminDashboardLayout({ children }: { children: React.Rea
   const router = useRouter();
   const pathname = usePathname();
   const isCalendarPage = useMemo(() => pathname === '/dashboard/admin/calendar', [pathname]);
+  // Accordion sections: People / Platform / Ops expand & retract to free up space.
+  // All expanded by default; the group containing the active route auto-expands.
+  const [expandedSections, setExpandedSections] = useState<Record<string, boolean>>(() =>
+    Object.fromEntries(navGroups.map((g) => [g.label, true]))
+  );
+  useEffect(() => {
+    const activeGroup = navGroups.find((g) => g.items.some((item) => item.href === pathname));
+    if (activeGroup) {
+      setExpandedSections((prev) => (prev[activeGroup.label] ? prev : { ...prev, [activeGroup.label]: true }));
+    }
+  }, [pathname]);
   // Full-bleed pages (no content padding) so their canvases + slide-in panels
   // anchor edge-to-edge between the top bar and the footer rail.
   const isFullScreenPage = isCalendarPage || pathname === '/dashboard/admin/org-chart' || pathname === '/dashboard/admin/map';
@@ -122,37 +133,49 @@ export default function AdminDashboardLayout({ children }: { children: React.Rea
             </button>
           </div>
 
-          {/* Navigation — grouped */}
+          {/* Navigation — grouped into accordian sections */}
           <nav className="flex-1 mt-4 overflow-y-auto scroll-dark">
-            {navGroups.map((group, gi) => (
-              <div key={group.label} className={gi > 0 ? 'mt-3 border-t pt-2' : ''} style={{ borderColor: 'var(--color-navy-800)' }}>
-                {sidebarOpen && (
-                  <p className="px-5 pb-1.5 pt-1 text-[11px] font-semibold uppercase tracking-wider text-slate-500">
-                    {group.label}
-                  </p>
-                )}
-                {group.items.map((item) => {
-                  const isActive = pathname === item.href;
-                  const Icon = item.icon;
-                  return (
-                    <Link
-                      key={item.href}
-                      href={item.href}
-                      onClick={handleNavClick}
-                      title={item.label}
-                      className={`flex items-center gap-3 mx-2 my-1.5 rounded transition-colors ${
-                        isActive
-                          ? 'bg-navy-700/40 text-white'
-                          : 'text-slate-400 hover:bg-navy-800/60 hover:text-white'
-                      }`}
+            {navGroups.map((group, gi) => {
+              const isExpanded = !!expandedSections[group.label];
+              return (
+                <div key={group.label} className={gi > 0 ? 'mt-2 border-t pt-2' : ''} style={{ borderColor: 'var(--color-navy-800)' }}>
+                  {sidebarOpen && (
+                    <button
+                      onClick={() => setExpandedSections((prev) => ({ ...prev, [group.label]: !prev[group.label] }))}
+                      className="flex w-full items-center gap-2 rounded px-3 py-1.5 text-left text-[11px] font-semibold uppercase tracking-wider text-slate-500 hover:text-white hover:bg-navy-800/60 transition-colors"
+                      aria-expanded={isExpanded}
                     >
-                      <Icon className="h-[30px] w-[30px] shrink-0 mx-3" />
-                      {sidebarOpen && <span className="text-sm font-medium">{item.label}</span>}
-                    </Link>
-                  );
-                })}
-              </div>
-            ))}
+                      <span>{group.label}</span>
+                      <ChevronDown
+                        className={`ml-auto h-3.5 w-3.5 shrink-0 transition-transform duration-200 ${
+                          isExpanded ? 'rotate-0' : '-rotate-90'
+                        }`}
+                      />
+                    </button>
+                  )}
+                  {isExpanded && group.items.map((item) => {
+                    const isActive = pathname === item.href;
+                    const Icon = item.icon;
+                    return (
+                      <Link
+                        key={item.href}
+                        href={item.href}
+                        onClick={handleNavClick}
+                        title={item.label}
+                        className={`flex items-center gap-3 mx-2 my-1.5 rounded transition-colors ${
+                          isActive
+                            ? 'bg-navy-700/40 text-white'
+                            : 'text-slate-400 hover:bg-navy-800/60 hover:text-white'
+                        }`}
+                      >
+                        <Icon className="h-[30px] w-[30px] shrink-0 mx-3" />
+                        {sidebarOpen && <span className="text-sm font-medium">{item.label}</span>}
+                      </Link>
+                    );
+                  })}
+                </div>
+              );
+            })}
           </nav>
 
           {/* Sidebar Footer */}
