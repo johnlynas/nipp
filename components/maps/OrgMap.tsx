@@ -167,6 +167,31 @@ export default function OrgMap({ orgName, address, lat, lng, zoom, extraControls
   }, [orgName, address, lat, lng, zoom]);
 
   // -----------------------------------------------------------------------
+  // Middle mouse button = snap back to the organization's starting view
+  // (the located org position, same target as the "Reset view" control).
+  // Capture phase + preventDefault so the click is consumed before Google
+  // Maps starts a drag or middle-button auto-scroll.
+  // -----------------------------------------------------------------------
+  useEffect(() => {
+    const container = containerRef.current;
+    if (!container) return;
+
+    const onMiddleMouseDown = (e: MouseEvent) => {
+      if (e.button !== 1) return; // 1 = middle button
+      e.preventDefault();
+      e.stopPropagation();
+      const map = mapRef.current;
+      if (!map) return;
+      const { center, zoom } = homeViewRef.current;
+      map.setCenter(center);
+      map.setZoom(zoom);
+    };
+
+    container.addEventListener('mousedown', onMiddleMouseDown, true);
+    return () => container.removeEventListener('mousedown', onMiddleMouseDown, true);
+  }, []);
+
+  // -----------------------------------------------------------------------
   // Org-chart-parity zoom controls: clamp + step + reset.
   // -----------------------------------------------------------------------
   const applyZoom = useCallback((next: number) => {
