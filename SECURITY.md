@@ -663,7 +663,8 @@ CalendarEvent, not a model):
 
 RLS-only tables (see Two-Layer Strategy above): Organization, AuditLog,
 NotificationLog, Notification, JobDefinition, JobExecution, Permission. (Permission writes — create/update/delete via `/api/dashboard/admin/permissions` — are additionally gated at the DB layer to verified platform admins only: `rls_permission_platform_insert`/`_update`/`_delete` on the `is_platform_admin` flag; tenants have no catalog write path.)
-Exempt: User, Session, Account, Resource, ResourceRole.
+Exempt: User, Session, Account, Resource, ResourceRole, Contractors.
+(Contractors: global shared directory of external contractors usable by ALL organizations — no org column, no RLS policy; future CRUD routes must gate access at the app/route layer since the DB enforces nothing for this table.)
 
 ---
 
