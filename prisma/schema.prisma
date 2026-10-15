@@ -652,6 +652,8 @@ model Units {
   owner       String   // Name of the unit owner
   address     String   // Street address of the unit
   postCode    String   // Post code of the unit
+  email       String   // Contact email address of the unit owner
+  phone       String   // Contact phone number of the unit owner
   rented      Boolean  @default(false) // Is the property rented out?
   type        UnitType @default(APARTMENT)
   createdAt   DateTime @default(now())

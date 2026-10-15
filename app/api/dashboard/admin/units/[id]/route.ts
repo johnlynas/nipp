@@ -74,7 +74,7 @@ export async function PATCH(
     return NextResponse.json({ error: 'rate_limited' }, { status: 429 });
   }
 
-  let body: { owner?: string; address?: string; postCode?: string; rented?: boolean; type?: UnitTypeValue };
+  let body: { owner?: string; address?: string; postCode?: string; email?: string; phone?: string; rented?: boolean; type?: UnitTypeValue };
   try {
     body = await request.json();
   } catch {

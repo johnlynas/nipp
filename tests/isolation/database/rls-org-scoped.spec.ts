@@ -18,6 +18,8 @@ interface OrgTableDef {
   orgField: string;
   seedA: string[];
   seedB: string[];
+  /** PK column used by the visibility probes (defaults to `id`). */
+  idCol?: string;
   /** Columns + values for a WITH-CHECK probe: FK-valid under ctx A, org = B. */
   insertCols: string;
   insertVals: (org: string) => string;
@@ -50,11 +52,11 @@ const ORG_TABLES: Record<string, OrgTableDef> = {
     insertVals: (o) => `('x-cal', 'Rogue Cal', '${o}', now())`,
   },
   Units: {
-    orgField: 'organizationId', seedA: ['u-a1', 'u-a2'], seedB: ['u-b1'],
+    orgField: 'organizationId', seedA: ['u-a1', 'u-a2'], seedB: ['u-b1'], idCol: 'unitId',
     // No FK dependencies — the only check that can fail on a foreign-org
     // INSERT is the RLS WITH CHECK (same shape as Team/Calendar).
-    insertCols: '"unitId", "organizationId", owner, address, "postCode"',
-    insertVals: (o) => `('x-unit', '${o}', 'Rogue Owner', '1 Rogue Lane', 'BT00 0XX')`,
+    insertCols: '"unitId", "organizationId", owner, address, "postCode", email, phone',
+    insertVals: (o) => `('x-unit', '${o}', 'Rogue Owner', '1 Rogue Lane', 'BT00 0XX', 'rogue@evil.example', '+00 000 000')`,
   },
   CalendarEvent: {
     orgField: 'organizationId', seedA: ['ev-a1', 'ev-a2'], seedB: ['ev-b1'],
@@ -111,12 +113,12 @@ afterAll(async () => {
 describe('org-scoped: ctx sees exactly its own-org rows', () => {
   for (const [table, def] of Object.entries(ORG_TABLES)) {
     it(`ctx=org A → ${def.seedA.join(',')} in ${table}`, async () => {
-      const ids = await withGucTxn(c, CTX.tenantA, () => visibleIds(c, table));
+      const ids = await withGucTxn(c, CTX.tenantA, () => visibleIds(c, table, def.idCol));
       expect(ids).toEqual(def.seedA);
     });
 
     it(`ctx=org B → ${def.seedB.join(',')} in ${table}`, async () => {
-      const ids = await withGucTxn(c, CTX.tenantB, () => visibleIds(c, table));
+      const ids = await withGucTxn(c, CTX.tenantB, () => visibleIds(c, table, def.idCol));
       expect(ids).toEqual(def.seedB);
     });
   }

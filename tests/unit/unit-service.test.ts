@@ -54,6 +54,8 @@ const mockUnit = (overrides: Record<string, unknown> = {}) => ({
   unitId: 'unit-1',
   organizationId: 'org-1',
   owner: 'Janet Owens',
+  email: 'janet.owens@example.com',
+  phone: '+44 28 9123 4501',
   address: '4 Antrim Road',
   postCode: 'BT48 6XX',
   rented: false,
@@ -62,6 +64,15 @@ const mockUnit = (overrides: Record<string, unknown> = {}) => ({
   updatedAt: new Date(),
   ...overrides,
 }) as Record<string, unknown>;
+
+const validCreate = (extra: Partial<CreateUnitInput> = {}): CreateUnitInput => ({
+  owner: 'James Doherty',
+  address: '9 Queen Street',
+  postCode: 'BT1 2AA',
+  email: 'james.doherty@example.com',
+  phone: '+44 28 998 7654',
+  ...extra,
+});
 
 describe('UnitService', () => {
   beforeEach(() => {
@@ -83,7 +94,7 @@ describe('UnitService', () => {
       });
 
       const result = await UnitService.createUnit(
-        { owner: 'Michael Byrne', address: '12 High Street', postCode: 'BT49 3AB' },
+        validCreate({ owner: 'Michael Byrne', address: '12 High Street', postCode: 'BT49 3AB' }),
         'org-2',
         mockCtx('PLATFORM_ADMIN'),
       );
@@ -100,7 +111,7 @@ describe('UnitService', () => {
       });
 
       const result = await UnitService.createUnit(
-        { owner: 'Sadie Carson', address: '7 Shore Road', postCode: 'BT78 5ZZ', rented: true, type: 'HOUSE' },
+        validCreate({ owner: 'Sadie Carson', address: '7 Shore Road', postCode: 'BT78 5ZZ', rented: true, type: 'HOUSE' }),
         'org-1',
         mockCtx('TENANT_ADMIN', 'org-1'),
       );
@@ -110,45 +121,57 @@ describe('UnitService', () => {
 
     it('throws ForbiddenError for TENANT_ADMIN creating in a different org', async () => {
       await expect(
-        UnitService.createUnit(
-          { owner: 'X', address: 'A', postCode: 'P' },
-          'org-2',
-          mockCtx('TENANT_ADMIN', 'org-1'),
-        ),
+        UnitService.createUnit(validCreate(), 'org-2', mockCtx('TENANT_ADMIN', 'org-1')),
       ).rejects.toThrow(ForbiddenError);
     });
 
     it('throws ForbiddenError for MEMBER', async () => {
       await expect(
-        UnitService.createUnit({ owner: 'X', address: 'A', postCode: 'P' }, 'org-1', mockCtx('MEMBER')),
+        UnitService.createUnit(validCreate({ owner: 'X' }), 'org-1', mockCtx('MEMBER')),
       ).rejects.toThrow(ForbiddenError);
     });
 
     it('throws ValidationError when organizationId is missing', async () => {
       await expect(
-        UnitService.createUnit({ owner: 'X', address: 'A', postCode: 'P' }, '', mockCtx('PLATFORM_ADMIN')),
+        UnitService.createUnit(validCreate(), '', mockCtx('PLATFORM_ADMIN')),
       ).rejects.toThrow(ValidationError);
     });
 
     it.each([
-      ['empty owner', (o: Record<string, unknown>) => ({ ...o, owner: '' })],
-      ['whitespace owner', (o: Record<string, unknown>) => ({ ...o, owner: '   ' })],
-      ['owner over 100 chars', (o: Record<string, unknown>) => ({ ...o, owner: 'a'.repeat(101) })],
-      ['empty address', (o: Record<string, unknown>) => ({ ...o, address: '' })],
-      ['address over 255 chars', (o: Record<string, unknown>) => ({ ...o, address: 'a'.repeat(256) })],
-      ['empty post code', (o: Record<string, unknown>) => ({ ...o, postCode: '' })],
-      ['post code over 32 chars', (o: Record<string, unknown>) => ({ ...o, postCode: 'a'.repeat(33) })],
+      ['empty owner', (o: Partial<CreateUnitInput>) => ({ ...o, owner: '' })],
+      ['whitespace owner', (o: Partial<CreateUnitInput>) => ({ ...o, owner: '   ' })],
+      ['owner over 100 chars', (o: Partial<CreateUnitInput>) => ({ ...o, owner: 'a'.repeat(101) })],
+      ['empty address', (o: Partial<CreateUnitInput>) => ({ ...o, address: '' })],
+      ['address over 255 chars', (o: Partial<CreateUnitInput>) => ({ ...o, address: 'a'.repeat(256) })],
+      ['empty post code', (o: Partial<CreateUnitInput>) => ({ ...o, postCode: '' })],
+      ['post code over 32 chars', (o: Partial<CreateUnitInput>) => ({ ...o, postCode: 'a'.repeat(33) })],
+      ['empty email', (o: Partial<CreateUnitInput>) => ({ ...o, email: '' })],
+      ['whitespace email', (o: Partial<CreateUnitInput>) => ({ ...o, email: '   ' })],
+      ['email over 100 chars', (o: Partial<CreateUnitInput>) => ({ ...o, email: `${'a'.repeat(96)}@example.com` })],
+      ['empty phone', (o: Partial<CreateUnitInput>) => ({ ...o, phone: '' })],
+      ['whitespace phone', (o: Partial<CreateUnitInput>) => ({ ...o, phone: '   ' })],
+      ['phone over 32 chars', (o: Partial<CreateUnitInput>) => ({ ...o, phone: 'p'.repeat(33) })],
     ])('throws ValidationError for %s', async (_label, mutate) => {
-      const input = mutate({ owner: 'X', address: 'A', postCode: 'P' }) as CreateUnitInput;
+      const input = mutate(validCreate()) as CreateUnitInput;
       await expect(
         UnitService.createUnit(input, 'org-1', mockCtx('PLATFORM_ADMIN')),
+      ).rejects.toThrow(ValidationError);
+    });
+
+    it.each([
+      ['missing @ sign', (o: Partial<CreateUnitInput>) => ({ ...o, email: 'not-an-email' })],
+      ['missing domain', (o: Partial<CreateUnitInput>) => ({ ...o, email: 'user@' })],
+      ['space in local part', (o: Partial<CreateUnitInput>) => ({ ...o, email: 'us er@example.com' })],
+    ])('throws ValidationError for %s on create', async (_label, mutate) => {
+      await expect(
+        UnitService.createUnit(mutate(validCreate()) as CreateUnitInput, 'org-1', mockCtx('PLATFORM_ADMIN')),
       ).rejects.toThrow(ValidationError);
     });
 
     it('throws ValidationError for an invalid type value', async () => {
       await expect(
         UnitService.createUnit(
-          { owner: 'X', address: 'A', postCode: 'P', type: 'CASTLE' as never },
+          validCreate({ type: 'CASTLE' as never }),
           'org-1',
           mockCtx('PLATFORM_ADMIN'),
         ),
@@ -160,11 +183,19 @@ describe('UnitService', () => {
         expect(args.data.owner).toBe('Trimmed Owner');
         expect(args.data.address).toBe('1 Trim Street');
         expect(args.data.postCode).toBe('BT0 1AA');
+        expect(args.data.email).toBe('trim@example.com');
+        expect(args.data.phone).toBe('+44 28 999');
         return mockUnit() as never;
       });
 
       await UnitService.createUnit(
-        { owner: '  Trimmed Owner  ', address: '  1 Trim Street  ', postCode: '  BT0 1AA  ' },
+        validCreate({
+          owner: '  Trimmed Owner  ',
+          address: '  1 Trim Street  ',
+          postCode: '  BT0 1AA  ',
+          email: '  trim@example.com  ',
+          phone: '  +44 28 999  ',
+        }),
         'org-1',
         mockCtx('PLATFORM_ADMIN'),
       );
@@ -216,12 +247,15 @@ describe('UnitService', () => {
       expect(result.pagination.total).toBe(2);
     });
 
-    it('applies search across owner, address and postCode', async () => {
+    it('applies search across owner, address, postCode, email and phone', async () => {
       units.findMany.mockImplementation(async (args: any) => {
         const or = args.where.OR as Array<Record<string, { contains: string }>>;
+        expect(or).toHaveLength(5);
         expect(or[0].owner.contains).toBe('antrim');
         expect(or[1].address.contains).toBe('antrim');
         expect(or[2].postCode.contains).toBe('antrim');
+        expect(or[3].email.contains).toBe('antrim');
+        expect(or[4].phone.contains).toBe('antrim');
         return [mockUnit()];
       });
 
@@ -299,6 +333,30 @@ describe('UnitService', () => {
       await UnitService.updateUnit('unit-1', { rented: true, type: 'OTHER' }, mockCtx('PLATFORM_ADMIN'));
     });
 
+    it('updates email and phone', async () => {
+      units.findUnique.mockResolvedValue(mockUnit() as never);
+      units.update.mockImplementation(async (args: any) => {
+        expect(args.data.email).toBe('new@example.com');
+        expect(args.data.phone).toBe('+44 28 555');
+        return mockUnit({ email: 'new@example.com', phone: '+44 28 555' });
+      });
+
+      const result = (await UnitService.updateUnit('unit-1', { email: 'new@example.com', phone: '+44 28 555' }, mockCtx('PLATFORM_ADMIN'))) as Record<string, unknown>;
+      expect(result.email).toBe('new@example.com');
+      expect(result.phone).toBe('+44 28 555');
+    });
+
+    it('trims email and phone on update', async () => {
+      units.findUnique.mockResolvedValue(mockUnit() as never);
+      units.update.mockImplementation(async (args: any) => {
+        expect(args.data.email).toBe('clean@example.com');
+        expect(args.data.phone).toBe('+44 28');
+        return mockUnit({ email: 'clean@example.com', phone: '+44 28' });
+      });
+
+      await UnitService.updateUnit('unit-1', { email: '  clean@example.com  ', phone: ' +44 28 ' }, mockCtx('PLATFORM_ADMIN'));
+    });
+
     it('throws NotFoundError when the unit does not exist', async () => {
       units.findUnique.mockResolvedValue(null);
       await expect(UnitService.updateUnit('missing', { owner: 'X' }, mockCtx('PLATFORM_ADMIN')))
@@ -315,6 +373,11 @@ describe('UnitService', () => {
       ['empty owner', () => ({ owner: '' })],
       ['address over 255 chars', () => ({ address: 'a'.repeat(256) })],
       ['post code over 32 chars', () => ({ postCode: 'p'.repeat(33) })],
+      ['empty email', () => ({ email: '' })],
+      ['invalid email format', () => ({ email: 'not-an-email' })],
+      ['email over 100 chars', () => ({ email: `${'a'.repeat(96)}@example.com` })],
+      ['empty phone', () => ({ phone: '' })],
+      ['phone over 32 chars', () => ({ phone: 'p'.repeat(33) })],
     ])('throws ValidationError for %s on update', async (_label, fields) => {
       units.findUnique.mockResolvedValue(mockUnit() as never);
       await expect(UnitService.updateUnit('unit-1', fields() as UpdateUnitInput, mockCtx('PLATFORM_ADMIN')))

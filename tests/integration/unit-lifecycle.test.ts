@@ -40,11 +40,13 @@ describe('Unit Lifecycle Integration', () => {
     }
   });
 
-  async function createUnit(extra?: Partial<{ owner: string; address: string; postCode: string; rented: boolean; type: 'HOUSE' | 'APARTMENT' | 'OTHER' }>) {
+  async function createUnit(extra?: Partial<{ owner: string; address: string; postCode: string; email: string; phone: string; rented: boolean; type: 'HOUSE' | 'APARTMENT' | 'OTHER' }>) {
     const unit = await withTenantAccess(testOrgId, false, () => UnitService.createUnit({
       owner: extra?.owner ?? 'Janet Owens',
       address: extra?.address ?? `${Math.floor(Math.random() * 999)} Test Street`,
       postCode: extra?.postCode ?? 'BT48 6XX',
+      email: extra?.email ?? `janet+${Math.random().toString(36).slice(2, 8)}@example.com`,
+      phone: extra?.phone ?? '+44 28 9123 0000',
       ...(extra?.rented !== undefined ? { rented: extra.rented } : {}),
       ...(extra?.type !== undefined ? { type: extra.type } : {}),
     }, testOrgId, adminCtx()));
@@ -60,8 +62,15 @@ describe('Unit Lifecycle Integration', () => {
     expect(unit.organizationId).toBe(testOrgId);
   });
 
+  it('should persist the email and phone contact fields', async () => {
+    const unit = await createUnit({ email: 'contact@example.com', phone: '+44 28 555 0123' });
+
+    expect(unit.email).toBe('contact@example.com');
+    expect(unit.phone).toBe('+44 28 555 0123');
+  });
+
   it('should create a rented HOUSE unit', async () => {
-    const unit = await createUnit({ owner: 'Michael Byrne', address: '12 High Street', postCode: 'BT49 3AB', rented: true, type: 'HOUSE' });
+    const unit = await createUnit({ owner: 'Michael Byrne', address: '12 High Street', postCode: 'BT49 3AB', email: 'michael@example.com', phone: '+44 28 555 0124', rented: true, type: 'HOUSE' });
 
     expect(unit.rented).toBe(true);
     expect(unit.type).toBe('HOUSE');
@@ -100,13 +109,15 @@ describe('Unit Lifecycle Integration', () => {
     void apartment;
   });
 
-  it('should update a unit owner and address', async () => {
+  it('should update a unit owner, address and contact details', async () => {
     const unit = await createUnit();
     const id = unit.unitId as string;
 
-    const updated = (await withTenantAccess(testOrgId, false, () => UnitService.updateUnit(id, { owner: 'New Owner', address: '1 New Road' }, adminCtx()))) as unknown as Record<string, unknown>;
+    const updated = (await withTenantAccess(testOrgId, false, () => UnitService.updateUnit(id, { owner: 'New Owner', address: '1 New Road', email: 'new.owner@example.com', phone: '+44 28 777' }, adminCtx()))) as unknown as Record<string, unknown>;
     expect(updated.owner).toBe('New Owner');
     expect(updated.address).toBe('1 New Road');
+    expect(updated.email).toBe('new.owner@example.com');
+    expect(updated.phone).toBe('+44 28 777');
   });
 
   it('should toggle rented and change type via update', async () => {
