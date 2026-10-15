@@ -10012,6 +10012,127 @@
         }
       }
     },
+    "/api/dashboard/admin/contractors/{id}": {
+      "delete": {
+        "tags": [
+          "dashboard-admin"
+        ],
+        "summary": "DELETE /api/dashboard/admin/contractors/{id}",
+        "description": "Delete a contractor.\n\nRequires super admin session.\n\nHandler: `app/api/dashboard/admin/contractors/[id]/route.ts`.",
+        "security": [
+          {
+            "cookieAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "default": {
+            "description": "Unspecified — response schema not yet documented (add a registry entry in lib/schemas/api/ to fill this in)."
+          }
+        }
+      },
+      "get": {
+        "tags": [
+          "dashboard-admin"
+        ],
+        "summary": "GET /api/dashboard/admin/contractors/{id}",
+        "description": "Get a single contractor by ID.\n\nRequires super admin session.\n\nHandler: `app/api/dashboard/admin/contractors/[id]/route.ts`.",
+        "security": [
+          {
+            "cookieAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "default": {
+            "description": "Unspecified — response schema not yet documented (add a registry entry in lib/schemas/api/ to fill this in)."
+          }
+        }
+      },
+      "patch": {
+        "tags": [
+          "dashboard-admin"
+        ],
+        "summary": "PATCH /api/dashboard/admin/contractors/{id}",
+        "description": "Update a contractor.\n\nRequires super admin session.\n\nHandler: `app/api/dashboard/admin/contractors/[id]/route.ts`.",
+        "security": [
+          {
+            "cookieAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "default": {
+            "description": "Unspecified — response schema not yet documented (add a registry entry in lib/schemas/api/ to fill this in)."
+          }
+        }
+      }
+    },
+    "/api/dashboard/admin/contractors": {
+      "get": {
+        "tags": [
+          "dashboard-admin"
+        ],
+        "summary": "GET /api/dashboard/admin/contractors",
+        "description": "List contractors with pagination, search and type filter.\n\nRequires super admin session.\n\nHandler: `app/api/dashboard/admin/contractors/route.ts`.",
+        "security": [
+          {
+            "cookieAuth": []
+          }
+        ],
+        "parameters": [],
+        "responses": {
+          "default": {
+            "description": "Unspecified — response schema not yet documented (add a registry entry in lib/schemas/api/ to fill this in)."
+          }
+        }
+      },
+      "post": {
+        "tags": [
+          "dashboard-admin"
+        ],
+        "summary": "POST /api/dashboard/admin/contractors",
+        "description": "Create a new contractor in the global directory.\n\nRequires super admin session.\n\nHandler: `app/api/dashboard/admin/contractors/route.ts`.",
+        "security": [
+          {
+            "cookieAuth": []
+          }
+        ],
+        "parameters": [],
+        "responses": {
+          "default": {
+            "description": "Unspecified — response schema not yet documented (add a registry entry in lib/schemas/api/ to fill this in)."
+          }
+        }
+      }
+    },
     "/api/dashboard/admin/errors": {
       "post": {
         "tags": [
@@ -13818,6 +13939,127 @@
                 }
               }
             }
+          }
+        }
+      }
+    },
+    "/api/dashboard/admin/units/{id}": {
+      "delete": {
+        "tags": [
+          "dashboard-admin"
+        ],
+        "summary": "DELETE /api/dashboard/admin/units/{id}",
+        "description": "Delete a unit.\n\nRequires super admin session.\n\nHandler: `app/api/dashboard/admin/units/[id]/route.ts`.",
+        "security": [
+          {
+            "cookieAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "default": {
+            "description": "Unspecified — response schema not yet documented (add a registry entry in lib/schemas/api/ to fill this in)."
+          }
+        }
+      },
+      "get": {
+        "tags": [
+          "dashboard-admin"
+        ],
+        "summary": "GET /api/dashboard/admin/units/{id}",
+        "description": "Get a single unit by ID (with organization).\n\nRequires super admin session.\n\nHandler: `app/api/dashboard/admin/units/[id]/route.ts`.",
+        "security": [
+          {
+            "cookieAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "default": {
+            "description": "Unspecified — response schema not yet documented (add a registry entry in lib/schemas/api/ to fill this in)."
+          }
+        }
+      },
+      "patch": {
+        "tags": [
+          "dashboard-admin"
+        ],
+        "summary": "PATCH /api/dashboard/admin/units/{id}",
+        "description": "Update a unit.\n\nRequires super admin session.\n\nHandler: `app/api/dashboard/admin/units/[id]/route.ts`.",
+        "security": [
+          {
+            "cookieAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "default": {
+            "description": "Unspecified — response schema not yet documented (add a registry entry in lib/schemas/api/ to fill this in)."
+          }
+        }
+      }
+    },
+    "/api/dashboard/admin/units": {
+      "get": {
+        "tags": [
+          "dashboard-admin"
+        ],
+        "summary": "GET /api/dashboard/admin/units",
+        "description": "List units with pagination, search, org filter and rented-state filter.\n\nRequires super admin session.\n\nHandler: `app/api/dashboard/admin/units/route.ts`.",
+        "security": [
+          {
+            "cookieAuth": []
+          }
+        ],
+        "parameters": [],
+        "responses": {
+          "default": {
+            "description": "Unspecified — response schema not yet documented (add a registry entry in lib/schemas/api/ to fill this in)."
+          }
+        }
+      },
+      "post": {
+        "tags": [
+          "dashboard-admin"
+        ],
+        "summary": "POST /api/dashboard/admin/units",
+        "description": "Create a new unit.\n\nRequires super admin session.\n\nHandler: `app/api/dashboard/admin/units/route.ts`.",
+        "security": [
+          {
+            "cookieAuth": []
+          }
+        ],
+        "parameters": [],
+        "responses": {
+          "default": {
+            "description": "Unspecified — response schema not yet documented (add a registry entry in lib/schemas/api/ to fill this in)."
           }
         }
       }
