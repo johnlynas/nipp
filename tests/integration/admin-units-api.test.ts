@@ -86,6 +86,8 @@ const unitRow = (overrides: Record<string, unknown> = {}) => ({
   unitId: 'u-1',
   organizationId: 'org-1',
   owner: 'Janet Owens',
+  email: 'janet.owens@example.com',
+  phone: '+44 28 9123 4501',
   address: '4 Antrim Road',
   postCode: 'BT48 6XX',
   rented: false,
@@ -138,10 +140,13 @@ describe('Admin Units API (Integration)', () => {
       const data = await response.json();
       expect(data.items[0].type).toBe('HOUSE');
 
-      // Count where should carry search + rented + type.
-      const countCalls = dbUnits.count.mock.calls.map((c) => (c[0] as { where: Record<string, unknown> }).where);
-      expect(countCalls.some((w) => w.rented === true)).toBe(true);
-      expect(countCalls.every((w) => ((w.OR as unknown[] | undefined)?.length ?? 0) > 0)).toBe(true);
+      // Total Units is the unconditional full-table count (no where clause);
+      // rented/owner-occupied counts stay filter-aware.
+      const countCalls = dbUnits.count.mock.calls.map((c) => c[0] as { where?: Record<string, unknown> } | undefined);
+      expect(countCalls.some((a) => a === undefined)).toBe(true);
+      const filteredWheres = countCalls.filter((a) => a?.where).map((a) => (a as { where: Record<string, unknown> }).where);
+      expect(filteredWheres.some((w) => w.rented === true)).toBe(true);
+      expect(filteredWheres.every((w) => ((w.OR as unknown[] | undefined)?.length ?? 0) > 0)).toBe(true);
     });
 
     it('lists a single org via organizationId when provided', async () => {
@@ -172,7 +177,7 @@ describe('Admin Units API (Integration)', () => {
       svc.createUnit.mockResolvedValue(unitRow() as never);
 
       const request = jsonRequest('http://localhost/api/dashboard/admin/units', 'POST', {
-        owner: 'Sadie Carson', address: '7 Shore Road', postCode: 'BT78 5ZZ', organizationId: 'org-1',
+        owner: 'Sadie Carson', address: '7 Shore Road', postCode: 'BT78 5ZZ', email: 'sadie.carson@example.com', phone: '+44 28 965 4321', organizationId: 'org-1',
       });
       const response = await POST(request) as Response;
       expect(response.status).toBe(201);
@@ -181,26 +186,45 @@ describe('Admin Units API (Integration)', () => {
       expect(svc.createUnit).toHaveBeenCalledWith(expect.objectContaining({ owner: 'Sadie Carson' }), 'org-1', expect.objectContaining({ userId: 'admin-1' }));
     });
 
+    it('passes email and phone through to the service on create', async () => {
+      const { POST } = await import('@/app/api/dashboard/admin/units/route');
+      svc.createUnit.mockResolvedValue(unitRow() as never);
+
+      const request = jsonRequest('http://localhost/api/dashboard/admin/units', 'POST', {
+        owner: 'O', address: 'A', postCode: 'P', email: 'o@a.example', phone: '+1 234', organizationId: 'org-1',
+      });
+      const response = await POST(request) as Response;
+      expect(response.status).toBe(201);
+      expect(svc.createUnit).toHaveBeenCalledWith(expect.objectContaining({ email: 'o@a.example', phone: '+1 234' }), 'org-1', expect.anything());
+    });
+
     it('returns 400 when required fields are missing', async () => {
       const { POST } = await import('@/app/api/dashboard/admin/units/route');
-      const response = await POST(jsonRequest('http://localhost/api/dashboard/admin/units', 'POST', { owner: 'X' })) as Response;
-      expect(response.status).toBe(400);
+      // email + phone are now required alongside owner/address/postCode.
+      const noPhone = await POST(jsonRequest('http://localhost/api/dashboard/admin/units', 'POST', { owner: 'X', address: 'A', postCode: 'P', organizationId: 'org-1' })) as Response;
+      expect(noPhone.status).toBe(400);
+
+      const noEmail = await POST(jsonRequest('http://localhost/api/dashboard/admin/units', 'POST', { owner: 'X', address: 'A', postCode: 'P', phone: '+1 234', organizationId: 'org-1' })) as Response;
+      expect(noEmail.status).toBe(400);
+
+      const onlyOwner = await POST(jsonRequest('http://localhost/api/dashboard/admin/units', 'POST', { owner: 'X' })) as Response;
+      expect(onlyOwner.status).toBe(400);
     });
 
     it('returns 400 for an invalid type', async () => {
       const { POST } = await import('@/app/api/dashboard/admin/units/route');
-      const response = await POST(jsonRequest('http://localhost/api/dashboard/admin/units', 'POST', { owner: 'X', address: 'A', postCode: 'P', type: 'CASTLE', organizationId: 'org-1' })) as Response;
+      const response = await POST(jsonRequest('http://localhost/api/dashboard/admin/units', 'POST', { owner: 'X', address: 'A', postCode: 'P', email: 'x@y.example', phone: '+1 555', type: 'CASTLE', organizationId: 'org-1' })) as Response;
       expect(response.status).toBe(400);
     });
 
     it('maps a service ValidationError to 400 with the message', async () => {
       const { POST } = await import('@/app/api/dashboard/admin/units/route');
-      svc.createUnit.mockRejectedValue(new ValidationError('Owner, address and post code are required'));
+      svc.createUnit.mockRejectedValue(new ValidationError('Invalid email format'));
 
-      const response = await POST(jsonRequest('http://localhost/api/dashboard/admin/units', 'POST', { owner: '', address: 'A', postCode: 'P', organizationId: 'org-1' })) as Response;
+      const response = await POST(jsonRequest('http://localhost/api/dashboard/admin/units', 'POST', { owner: 'X', address: 'A', postCode: 'P', email: 'not-an-email', phone: '+1 555', organizationId: 'org-1' })) as Response;
       expect(response.status).toBe(400);
       const data = await response.json();
-      expect(data.error).toBe('Owner, address and post code are required');
+      expect(data.error).toBe('Invalid email format');
     });
   });
 

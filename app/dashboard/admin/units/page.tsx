@@ -16,6 +16,8 @@ interface Unit {
   unitId: string;
   organizationId: string;
   owner: string;
+  email: string;
+  phone: string;
   address: string;
   postCode: string;
   rented: boolean;
@@ -62,12 +64,12 @@ export default function UnitsPage() {
 
   // Create modal states
   const [createModalOpen, setCreateModalOpen] = useState(false);
-  const [createForm, setCreateForm] = useState({ owner: '', address: '', postCode: '', rented: false, type: 'APARTMENT' as Unit['type'] });
+  const [createForm, setCreateForm] = useState({ owner: '', email: '', phone: '', address: '', postCode: '', rented: false, type: 'APARTMENT' as Unit['type'] });
   const [createOrgId, setCreateOrgId] = useState('');
 
   // Edit modal states
   const [editModalOpen, setEditModalOpen] = useState(false);
-  const [editForm, setEditForm] = useState({ owner: '', address: '', postCode: '', rented: false, type: 'APARTMENT' as Unit['type'] });
+  const [editForm, setEditForm] = useState({ owner: '', email: '', phone: '', address: '', postCode: '', rented: false, type: 'APARTMENT' as Unit['type'] });
 
   // Abort controller to cancel stale fetch requests
   const abortControllerRef = useRef<AbortController | null>(null);
@@ -96,7 +98,7 @@ export default function UnitsPage() {
   // Reset create form when modal opens/closes
   useEffect(() => {
     if (!createModalOpen) {
-      setCreateForm({ owner: '', address: '', postCode: '', rented: false, type: 'APARTMENT' });
+      setCreateForm({ owner: '', email: '', phone: '', address: '', postCode: '', rented: false, type: 'APARTMENT' });
       setCreateOrgId('');
     }
   }, [createModalOpen]);
@@ -166,8 +168,8 @@ export default function UnitsPage() {
 
   // Handle create unit
   const handleCreateUnit = async () => {
-    if (!createForm.owner.trim() || !createForm.address.trim() || !createForm.postCode.trim()) {
-      const message = 'Owner, address and post code are required';
+    if (!createForm.owner.trim() || !createForm.address.trim() || !createForm.postCode.trim() || !createForm.email.trim() || !createForm.phone.trim()) {
+      const message = 'Owner, email, phone, address and post code are required';
       logClientError(message, 'units', 'create');
       setError(message);
       return;
@@ -183,6 +185,8 @@ export default function UnitsPage() {
     try {
       const body = {
         owner: createForm.owner.trim(),
+        email: createForm.email.trim(),
+        phone: createForm.phone.trim(),
         address: createForm.address.trim(),
         postCode: createForm.postCode.trim(),
         rented: createForm.rented,
@@ -267,6 +271,12 @@ export default function UnitsPage() {
     { key: 'owner', label: 'Owner', render: (u: Unit) => (
       <span style={{ color: 'var(--color-navy-850)' }}>{u.owner}</span>
     )},
+    { key: 'email', label: 'Email', render: (u: Unit) => (
+      <span style={{ color: 'var(--color-navy-850)' }}>{u.email}</span>
+    )},
+    { key: 'phone', label: 'Phone', render: (u: Unit) => (
+      <span style={{ color: 'var(--color-navy-850)' }}>{u.phone}</span>
+    )},
     { key: 'type', label: 'Type', render: (u: Unit) => (
       <span style={{ color: 'var(--color-navy-850)' }}>{TYPE_LABELS[u.type] || u.type}</span>
     )},
@@ -289,7 +299,7 @@ export default function UnitsPage() {
         <button
           onClick={() => {
             setSelectedUnit(u);
-            setEditForm({ owner: u.owner, address: u.address, postCode: u.postCode, rented: u.rented, type: u.type });
+            setEditForm({ owner: u.owner, email: u.email, phone: u.phone, address: u.address, postCode: u.postCode, rented: u.rented, type: u.type });
             setEditModalOpen(true);
           }}
           title={`Edit ${u.address}`}
@@ -337,7 +347,7 @@ export default function UnitsPage() {
 
       {/* Filters */}
       <div className="mb-4 flex flex-wrap items-center gap-3">
-        <SearchBar value={search} onChange={setSearch} placeholder="Search units by owner, address or post code..." aria-label="Search units" />
+        <SearchBar value={search} onChange={setSearch} placeholder="Search units by owner, email, phone, address or post code..." aria-label="Search units" />
         <select
           value={orgFilter}
           onChange={(e) => setOrgFilter(e.target.value)}
@@ -401,6 +411,16 @@ export default function UnitsPage() {
             </div>
             <div className="flex gap-4">
               <div>
+                <label className="text-sm font-medium" style={{ color: 'var(--color-slate-500)' }}>Email</label>
+                <p className="mt-1" style={{ color: 'var(--color-navy-850)' }}>{selectedUnit.email}</p>
+              </div>
+              <div>
+                <label className="text-sm font-medium" style={{ color: 'var(--color-slate-500)' }}>Phone</label>
+                <p className="mt-1" style={{ color: 'var(--color-navy-850)' }}>{selectedUnit.phone}</p>
+              </div>
+            </div>
+            <div className="flex gap-4">
+              <div>
                 <label className="text-sm font-medium" style={{ color: 'var(--color-slate-500)' }}>Type</label>
                 <div className="mt-1"><StatusBadge status={TYPE_LABELS[selectedUnit.type] || selectedUnit.type} /></div>
               </div>
@@ -448,6 +468,32 @@ export default function UnitsPage() {
               style={{ borderColor: 'var(--color-slate-200)', color: 'var(--color-navy-850)' }}
               placeholder="Unit owner name"
             />
+          </div>
+          <div className="flex gap-4">
+            <div>
+              <label htmlFor="create-email" className="mb-1 block text-sm font-medium" style={{ color: 'var(--color-navy-850)' }}>Email</label>
+              <input
+                id="create-email"
+                type="email"
+                value={createForm.email}
+                onChange={(e) => setCreateForm((f) => ({ ...f, email: e.target.value }))}
+                className="w-full rounded border px-3 py-2 text-sm focus:outline-none"
+                style={{ borderColor: 'var(--color-slate-200)', color: 'var(--color-navy-850)' }}
+                placeholder="e.g. jane.doe@example.com"
+              />
+            </div>
+            <div>
+              <label htmlFor="create-phone" className="mb-1 block text-sm font-medium" style={{ color: 'var(--color-navy-850)' }}>Phone</label>
+              <input
+                id="create-phone"
+                type="tel"
+                value={createForm.phone}
+                onChange={(e) => setCreateForm((f) => ({ ...f, phone: e.target.value }))}
+                className="w-full rounded border px-3 py-2 text-sm focus:outline-none"
+                style={{ borderColor: 'var(--color-slate-200)', color: 'var(--color-navy-850)' }}
+                placeholder="e.g. +44 28 9123 4567"
+              />
+            </div>
           </div>
           <div>
             <label htmlFor="create-address" className="mb-1 block text-sm font-medium" style={{ color: 'var(--color-navy-850)' }}>Address</label>
@@ -528,7 +574,7 @@ export default function UnitsPage() {
             </button>
             <button
               onClick={handleCreateUnit}
-              disabled={!createForm.owner.trim() || !createForm.address.trim() || !createForm.postCode.trim() || !createOrgId}
+              disabled={!createForm.owner.trim() || !createForm.email.trim() || !createForm.phone.trim() || !createForm.address.trim() || !createForm.postCode.trim() || !createOrgId}
               className="rounded px-4 py-2 text-sm font-medium text-accent-ink transition-colors hover:opacity-90 disabled:opacity-50"
               style={{ backgroundColor: 'var(--color-accent)' }}
             >
@@ -552,6 +598,30 @@ export default function UnitsPage() {
                 className="w-full rounded border px-3 py-2 text-sm focus:outline-none"
                 style={{ borderColor: 'var(--color-slate-200)', color: 'var(--color-navy-850)' }}
               />
+            </div>
+            <div className="flex gap-4">
+              <div>
+                <label htmlFor="edit-email" className="mb-1 block text-sm font-medium" style={{ color: 'var(--color-navy-850)' }}>Email</label>
+                <input
+                  id="edit-email"
+                  type="email"
+                  value={editForm.email}
+                  onChange={(e) => setEditForm((f) => ({ ...f, email: e.target.value }))}
+                  className="w-full rounded border px-3 py-2 text-sm focus:outline-none"
+                  style={{ borderColor: 'var(--color-slate-200)', color: 'var(--color-navy-850)' }}
+                />
+              </div>
+              <div>
+                <label htmlFor="edit-phone" className="mb-1 block text-sm font-medium" style={{ color: 'var(--color-navy-850)' }}>Phone</label>
+                <input
+                  id="edit-phone"
+                  type="tel"
+                  value={editForm.phone}
+                  onChange={(e) => setEditForm((f) => ({ ...f, phone: e.target.value }))}
+                  className="w-full rounded border px-3 py-2 text-sm focus:outline-none"
+                  style={{ borderColor: 'var(--color-slate-200)', color: 'var(--color-navy-850)' }}
+                />
+              </div>
             </div>
             <div>
               <label htmlFor="edit-address" className="mb-1 block text-sm font-medium" style={{ color: 'var(--color-navy-850)' }}>Address</label>
@@ -614,7 +684,7 @@ export default function UnitsPage() {
               </button>
               <button
                 onClick={handleEditUnit}
-                disabled={!editForm.owner.trim() || !editForm.address.trim() || !editForm.postCode.trim()}
+                disabled={!editForm.owner.trim() || !editForm.email.trim() || !editForm.phone.trim() || !editForm.address.trim() || !editForm.postCode.trim()}
                 className="rounded px-4 py-2 text-sm font-medium text-accent-ink transition-colors hover:opacity-90 disabled:opacity-50"
                 style={{ backgroundColor: 'var(--color-accent)' }}
               >

@@ -36,6 +36,8 @@ export interface CreateUnitInput {
   owner: string;
   address: string;
   postCode: string;
+  email: string;
+  phone: string;
   rented?: boolean;
   type?: UnitTypeValue;
 }
@@ -44,6 +46,8 @@ export interface UpdateUnitInput {
   owner?: string;
   address?: string;
   postCode?: string;
+  email?: string;
+  phone?: string;
   rented?: boolean;
   type?: UnitTypeValue;
 }
@@ -113,6 +117,20 @@ export const UnitService = {
     if (input.postCode.length > 32) {
       throw new ValidationError('Post code must be at most 32 characters');
     }
+    if (!input.email || input.email.trim().length === 0) {
+      throw new ValidationError('Email is required');
+    }
+    if (input.email.length > 100) {
+      throw new ValidationError('Email must be at most 100 characters');
+    } else if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(input.email.trim())) {
+      throw new ValidationError('Email must be a valid email address');
+    }
+    if (!input.phone || input.phone.trim().length === 0) {
+      throw new ValidationError('Phone is required');
+    }
+    if (input.phone.length > 32) {
+      throw new ValidationError('Phone must be at most 32 characters');
+    }
     validateType(input.type);
 
     const unit = await runWithTenant(organizationId, async () =>
@@ -122,6 +140,8 @@ export const UnitService = {
           owner: input.owner.trim(),
           address: input.address.trim(),
           postCode: input.postCode.trim(),
+          email: input.email.trim(),
+          phone: input.phone.trim(),
           ...(input.rented !== undefined ? { rented: input.rented } : {}),
           ...(input.type !== undefined ? { type: input.type } : {}),
         },
@@ -203,7 +223,7 @@ export const UnitService = {
     // like TeamService.getTeamsByOrg. Cross-org (all-orgs) listings loop per
     // org at the route layer (see admin teams GET).
     return runWithTenant(organizationId, async () => {
-      // Search over owner / address / post code.
+      // Search over owner / address / post code / email / phone.
       const where: Prisma.UnitsWhereInput = { organizationId };
       if (search) {
         const q = search.trim();
@@ -211,6 +231,8 @@ export const UnitService = {
           { owner: { contains: q, mode: 'insensitive' } },
           { address: { contains: q, mode: 'insensitive' } },
           { postCode: { contains: q, mode: 'insensitive' } },
+          { email: { contains: q, mode: 'insensitive' } },
+          { phone: { contains: q, mode: 'insensitive' } },
         ];
       }
       if (rented !== undefined) where.rented = rented;
@@ -277,6 +299,17 @@ export const UnitService = {
       if (input.postCode.trim().length === 0) throw new ValidationError('Post code cannot be empty');
       if (input.postCode.length > 32) throw new ValidationError('Post code must be at most 32 characters');
       updateData.postCode = input.postCode.trim();
+    }
+    if (input.email !== undefined) {
+      if (input.email.trim().length === 0) throw new ValidationError('Email cannot be empty');
+      if (input.email.length > 100) throw new ValidationError('Email must be at most 100 characters');
+      if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(input.email.trim())) throw new ValidationError('Email must be a valid email address');
+      updateData.email = input.email.trim();
+    }
+    if (input.phone !== undefined) {
+      if (input.phone.trim().length === 0) throw new ValidationError('Phone cannot be empty');
+      if (input.phone.length > 32) throw new ValidationError('Phone must be at most 32 characters');
+      updateData.phone = input.phone.trim();
     }
     if (input.rented !== undefined) updateData.rented = input.rented;
     validateType(input.type);

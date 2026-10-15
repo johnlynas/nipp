@@ -155,10 +155,10 @@ INSERT INTO "Team" (id, name, slug, "organizationId", "updatedAt") VALUES
   ('team-b1', 'Ops B',  'ops-b', '${f.orgB}', now());
 
 -- Units (the properties a tenant manages): 2 in org A, 1 in org B — count-distinguishable.
-INSERT INTO "Units" ("unitId", "organizationId", owner, address, "postCode", rented, type, "createdAt", "updatedAt") VALUES
-  ('u-a1', '${f.orgA}', 'Janet Owens',   '4 Antrim Road',  'BT48 6XX', false, 'APARTMENT', now(), now()),
-  ('u-a2', '${f.orgA}', 'Michael Byrne', '12 High Street', 'BT49 3AB', true,  'HOUSE',     now(), now()),
-  ('u-b1', '${f.orgB}', 'Sadie Carson',  '7 Shore Road',   'BT78 5ZZ', true,  'OTHER',     now(), now());
+INSERT INTO "Units" ("unitId", "organizationId", owner, address, "postCode", email, phone, rented, type, "createdAt", "updatedAt") VALUES
+  ('u-a1', '${f.orgA}', 'Janet Owens',   '4 Antrim Road',  'BT48 6XX', 'janet.owens@example.com',   '+44 28 9123 4501', false, 'APARTMENT', now(), now()),
+  ('u-a2', '${f.orgA}', 'Michael Byrne', '12 High Street', 'BT49 3AB', 'michael.byrne@example.com', '+44 28 9123 4502', true,  'HOUSE',     now(), now()),
+  ('u-b1', '${f.orgB}', 'Sadie Carson',  '7 Shore Road',   'BT78 5ZZ', 'sadie.carson@example.com',  '+44 28 9654 3201', true,  'OTHER',     now(), now());
 
 INSERT INTO "TeamMember" (id, "teamId", "userId", "organizationId") VALUES
   ('tm-a1', 'team-a1', '${f.userA}', '${f.orgA}'),

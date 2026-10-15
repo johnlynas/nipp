@@ -45,6 +45,8 @@ export async function GET(request: NextRequest) {
           { owner: { contains: search, mode: 'insensitive' } },
           { address: { contains: search, mode: 'insensitive' } },
           { postCode: { contains: search, mode: 'insensitive' } },
+          { email: { contains: search, mode: 'insensitive' } },
+          { phone: { contains: search, mode: 'insensitive' } },
         ];
       }
       const filteredWhere: Prisma.UnitsWhereInput = {
@@ -54,9 +56,10 @@ export async function GET(request: NextRequest) {
         ...(type !== undefined ? { type } : {}),
       };
 
-      // Counts over the full dataset (filter-aware, pagination-independent).
+      // Counts: Total Units is ALWAYS the full-table count (independent of any
+      // filter); Rented / Owner-Occupied stay filter-aware, pagination-independent.
       const [totalCount, rentedCount, ownerOccupiedCount] = await Promise.all([
-        tenantDb.units.count({ where: filteredWhere }),
+        tenantDb.units.count(),
         tenantDb.units.count({ where: { ...filteredWhere, rented: true } }),
         // Owner-occupied = not rented out.
         tenantDb.units.count({ where: { ...filteredWhere, rented: false } }),
@@ -81,7 +84,9 @@ export async function GET(request: NextRequest) {
             (u) =>
               u.owner.toLowerCase().includes(q) ||
               u.address.toLowerCase().includes(q) ||
-              u.postCode.toLowerCase().includes(q),
+              u.postCode.toLowerCase().includes(q) ||
+              u.email.toLowerCase().includes(q) ||
+              u.phone.toLowerCase().includes(q),
           );
         }
 
@@ -131,6 +136,8 @@ export async function POST(request: NextRequest) {
     owner?: string;
     address?: string;
     postCode?: string;
+    email?: string;
+    phone?: string;
     rented?: boolean;
     type?: UnitTypeValue;
     organizationId?: string;
@@ -144,8 +151,8 @@ export async function POST(request: NextRequest) {
   if (!body.organizationId) {
     return NextResponse.json({ error: 'Organization ID is required' }, { status: 400 });
   }
-  if (!body.owner || !body.address || !body.postCode) {
-    return NextResponse.json({ error: 'Owner, address and post code are required' }, { status: 400 });
+  if (!body.owner || !body.address || !body.postCode || !body.email || !body.phone) {
+    return NextResponse.json({ error: 'Owner, email, phone, address and post code are required' }, { status: 400 });
   }
   if (body.type !== undefined && !UNIT_TYPES.includes(body.type)) {
     return NextResponse.json(
@@ -163,6 +170,8 @@ export async function POST(request: NextRequest) {
       owner: body.owner,
       address: body.address,
       postCode: body.postCode,
+      email: body.email,
+      phone: body.phone,
       ...(body.rented !== undefined ? { rented: body.rented } : {}),
       ...(body.type !== undefined ? { type: body.type } : {}),
     };
