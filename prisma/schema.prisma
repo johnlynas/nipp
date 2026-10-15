@@ -114,6 +114,22 @@ enum NotificationPriority {
   JOB
 }
 
+/** Contractor business types — global directory shared by all organizations. */
+enum ContractorType {
+  PAINTER
+  ELECTRICIAN
+  PLUMBER
+  GAS_ENGINEER
+  LIFT_MAINTENANCE
+  GARDENER
+  ACCOUNTANT
+  FIRE_ALARMS
+  SOLICITOR
+  ROOFER
+  WINDOW_CLEANER
+  OTHER
+}
+
 // ============================================================
 // Authentication Models (BetterAuth — global, not org-scoped)
 // ============================================================
