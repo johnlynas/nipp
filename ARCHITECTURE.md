@@ -2,100 +2,43 @@
 
 A full-stack, multi-tenant property management system for Northern Ireland's public sector housing authority. It provides a secure, role-based platform for managing organizations (tenants), users, properties, leases, and maintenance requests. The system enforces strict data isolation between organizations using a defense-in-depth architecture combining application-layer query interception and database-level Row Level Security (RLS).
 
-This document is organized by **functional area**. Use the table of contents below to navigate directly to the section you need.
+## How to Read This Document
+
+- **Audience:** developers who will work on this codebase — new team members, platform engineers, and reviewers. Familiarity with Next.js and PostgreSQL is assumed; domain context (Northern Ireland housing) is not.
+- **Core concepts first.** If you only read three sections, read [High-Level Architecture (§2)](#2-high-level-architecture), [Multi-Tenant (§5)](#5-multi-tenant-architecture), and [Authorization (§4)](#4-authorization-rbac). Everything else hangs off these.
+- **Per-feature deep dives.** Sections 8–11 (notifications, calendar, org chart, job scheduler) are structured on a repeating template: *Component table → Data model → API → Authorization → Testing*. Once you've read one, the rest skim faster.
+- **Where to go for more depth.** Feature design rationale, threat models, and trade-offs live in `documents/feature-planning-and-development/`; each relevant section links its document. Operational commands and environment variables are in `QUICK_START.md` and `SECURITY.md`.
+
+## Glossary
+
+| Term | Meaning in this codebase |
+|------|--------------------------|
+| Organization (tenant) | A public-sector housing organization, the unit of data isolation. Every tenant-scoped row carries its ID. |
+| Platform Organization | The platform's own organization (`PLATFORM_ORGANIZATION_ID`); membership in it is what makes a user a Super Admin. |
+| Super Admin | `User.role = super_admin`, i.e. a member of the Platform Organization. Bypasses org-scoped permission checks and can operate on any tenant. |
+| Door | A sign-in path (email/password vs Google OIDC), per §3. |
+| `tenantDb` | The Prisma client wrapper (`lib/tenant-db.ts`) whose queries inherit the active tenant context from `AsyncLocalStorage`; inside an RLS-bound transaction it resolves to the same transactional client so app-layer scoping and RLS evaluate on one physical connection. |
+| `globalDb` | The unscoped platform Prisma client (`lib/global-db.ts`) for global (non-org-scoped) models. Org-scoped reads through it must be wrapped in a verified context (e.g. `superAdminStorage.run`) — see §9/§10 route patterns. |
+| RLS context | The `app.current_org_id` GUC set on a transaction that PostgreSQL Row Level Security policies read; the database-level half of tenant isolation (§5). |
 
 ## Table of Contents
 
 - [1. Technology Stack](#1-technology-stack)
-  - [Frontend](#frontend)
-  - [Backend & Infrastructure](#backend--infrastructure)
-  - [Testing & Quality](#testing--quality)
 - [2. High-Level Architecture](#2-high-level-architecture)
-  - [Component Diagram](#component-diagram)
-  - [Layer Responsibilities](#layer-responsibilities)
 - [3. Authentication & Session Management](#3-authentication--session-management)
-  - [Auth Flow](#auth-flow)
-  - [Session Cookies & Caching](#session-cookies--caching)
-  - [Auto-Logout on Inactivity](#auto-logout-on-inactivity)
-  - [Middleware Protection](#middleware-protection)
-  - [Public Routes](#public-routes)
-  - [Google OIDC Sign-In (invite-only door + magic-link verification)](#google-oidc-sign-in-invite-only-door--magic-link-verification)
-  - [Bearer-Token Access & Public Reachability](#bearer-token-access--public-reachability)
 - [4. Authorization (RBAC)](#4-authorization-rbac)
-  - [Identity vs. Membership](#identity-vs-membership)
-  - [Dual-Authorization Model](#dual-authorization-model)
-  - [Permission Resolution Flow](#permission-resolution-flow)
-  - [Domain-Specific Permission Modules](#domain-specific-permission-modules)
-  - [Role Validation](#role-validation)
 - [5. Multi-Tenant Architecture](#5-multi-tenant-architecture)
-  - [Defense-in-Depth Strategy](#defense-in-depth-strategy)
-    - [Layer 1: Application-Level Isolation](#layer-1-application-level-isolation)
-    - [Layer 2: Database-Level Isolation](#layer-2-database-level-isolation)
-  - [Tenant Context Propagation](#tenant-context-propagation)
-  - [Data Flow](#data-flow)
-  - [Tenant-Scoped vs. Global Models](#tenant-scoped-vs-global-models)
 - [6. Service Layer](#6-service-layer)
-  - [Base Services](#base-services)
-  - [Domain Services](#domain-services)
 - [7. Data Layer](#7-data-layer)
-  - [Core Entities](#core-entities)
-  - [Relationships](#relationships)
-  - [Indexing Strategy](#indexing-strategy)
-  - [Connection Pooling (PgBouncer)](#connection-pooling-pgbouncer)
 - [8. Real-Time Notification System (SSE)](#8-real-time-notification-system-sse)
-  - [System Overview](#system-overview)
-  - [Core Components](#core-components)
-  - [Data Model: Scope & Priority](#data-model-scope--priority)
-  - [Event Source Catalog](#event-source-catalog)
-  - [Connection Security, Caps & Lifecycle](#connection-security-caps--lifecycle)
-  - [Deduplication & Delivery Flow](#deduplication--delivery-flow)
-  - [Client Architecture](#client-architecture-react-side)
-  - [Health Event Integration](#health-event-integration)
-  - [Notification Log API](#notification-log-api)
-  - [Testing](#testing)
-  - [Multi-Instance Limitation](#multi-instance-limitation)
 - [9. Calendar System](#9-calendar-system)
-  - [Models & Services](#models--services)
-  - [Due-to-Start SSE Notifications](#due-to-start-sse-notifications)
-  - [Authorization](#authorization)
 - [10. Organization Chart](#10-organization-chart)
-  - [Architecture](#architecture)
-  - [Files & Responsibilities](#files--responsibilities)
-  - [Data Flow & API](#data-flow--api)
-  - [Tree Shaping Rules](#tree-shaping-rules)
-  - [Authorization](#authorization-1)
-  - [Test Suites](#test-suites)
 - [11. Job Scheduler](#11-job-scheduler)
-  - [Components](#components)
-  - [Execution modes](#execution-modes)
-  - [Concurrency and circuit breaking](#concurrency-and-circuit-breaking)
-  - [Built-in handlers](#built-in-handlers)
-  - [Operator scripts and dry run](#operator-scripts-and-dry-run)
-  - [Approval Gate](#approval-gate)
-  - [Data Model](#data-model)
-  - [Lifecycle notifications via SSE](#lifecycle-notifications-via-sse)
-  - [Admin API](#admin-api)
-  - [Testing](#testing-1)
 - [12. Cache Architecture](#12-cache-architecture)
-  - [Overview](#overview)
-  - [Layer 1: In-Memory LRU Cache](#layer-1-in-memory-lru-cache)
-  - [Layer 2: Redis (Distributed Cache)](#layer-2-redis-distributed-cache)
-  - [Hybrid Cache Orchestration](#hybrid-cache-orchestration)
-  - [Adaptive TTL Strategy](#adaptive-ttl-strategy)
-  - [Cross-Instance Invalidation](#cross-instance-invalidation)
-  - [Stampede Protection](#stampede-protection)
-  - [Cache Monitoring & Metrics](#cache-monitoring--metrics)
-  - [13. Security](#13-security)
-  - [Content Security Policy (CSP)](#content-security-policy-csp)
-  - [Data-in-Transit Payload Encryption](#data-in-transit-payload-encryption)
-  - [CSRF Protection](#csrf-protection)
-  - [Secrets Management](#secrets-management)
-  - [PII Logging Policy](#pii-logging-policy)
-  - [14. Project Structure](#14-project-structure)
-  - [15. Development & Testing](#15-development--testing)
-  - [Local Setup](#local-setup)
-  - [Running Tests](#running-tests)
-  - [Database Migrations](#database-migrations)
+- [13. Security](#13-security)
+- [14. Project Structure](#14-project-structure)
+- [15. Development & Testing](#15-development--testing)
+- [16. API Reference (OpenAPI + Swagger UI)](#16-api-reference-openapi--swagger-ui)
 
 ---
 
@@ -267,7 +210,7 @@ flowchart TB
     RT --> BA
     BA <-->|"state nonce, round-trip with auth code"| GOO
     BA -- "ID token verified: resolve identity (findOAuthUser by email/Account)" --> DB
-    BA -- "unknown identity → signup disabled, ZERO rows" --> LP
+    BA -- "unknown identity → signup disabled, zero rows" --> LP
     BA -- "known identity → create session attempt" --> GATE
     GATE -- "banned" --> LP
     GATE -- "invited, magic link pending: issue link (no session)" --> ML
@@ -321,15 +264,7 @@ stateDiagram-v2
 
 **Local-user invariant:** email/password sign-in keeps its exact code path — the provisioning gate returns immediately for any user without a Google `Account` row, verified by the integration suite.
 
-**Phase 1 deviations from the original implementation plan** (recorded 2026-10-03; full detail in `.hermes/plans/20261002_204440-google-oidc-integration.md`, "Phase 1 implementation notes"):
-
-| Plan assumption | Reality (installed better-auth@1.6.23) | Mitigation taken |
-|---|---|---|
-| Register google via the `google({…})` factory call from `better-auth/social-providers` | `socialProviders.<id>` values are typed as plain options objects; the factory result fails type-checking (TS2322) | Registered with a plain object `{ clientId: env.GOOGLE_CLIENT_ID, clientSecret: env.GOOGLE_CLIENT_SECRET }` — matches BetterAuth's official Google docs |
-| `/api/auth/sign-in/social?provider=google&callbackURL=…` returns 302 to accounts.google.com | Provider id is read from the **JSON body**; this `better-auth/minimal` build answers **200** with a `Location` header + `{ url, redirect: true }` body (full build answers 30x) | Tests target the canonical body form and accept any 2xx/3xx carrying an `accounts.google.com` Location — wiring is verified without pinning a build-specific status |
-| "No migration needed" for social auth | Social sign-in 500'd: BetterAuth needs a Prisma `Verification` table for PKCE state, which the repo lacked | Added the model + index; applied to dev DB with `prisma db push` per repo convention (no `_prisma_migrations` history tracked). Same table later serves magic-link tokens |
-| Ban hook on the `/sign-in/social` route path (plan Task 3 step 3) | That route only sees the provider id, not Google's user `sub` — returning users could never be pre-checked there (bypass open) | Moved enforcement to `databaseHooks.session.create.before`, fed by the exported shared helper `enforceBanStatus(email)`; email path now reuses the same helper via its existing route hook. Behavior-pinning tests in `tests/integration/google-oidc.test.ts` |
-| Callback with fake code returns 4xx (route-wired proof) | Returns **302 to BetterAuth's own error URL** — state validation ran, proving the route is wired and public. Shipped config then sets `onAPIError.errorURL: '/login'` so that same redirect lands on `/login?error=…` where the banner classifier can render it (see OIDC state diagram above) | Test pins the `/login?error=state_mismatch` Location; `PUBLIC_PATTERNS` (`middleware.ts`) covers `/api/auth/*`, unchanged as predicted |
+**Phase 1 deviations from the original implementation plan:** five build-level surprises were worked around (provider registration as a plain options object, a JSON-body sign-in response instead of a 302, a `Verification` table that had to be added for PKCE state, ban enforcement moved into the session-creation hook, and the error redirect landing on `/login?error=…`). Each was behavior-pinned in `tests/integration/google-oidc.test.ts`; design context: [google-oidc-design.md](./documents/feature-planning-and-development/google-oidc-design.md).
 
 ### Bearer-Token Access & Public Reachability
 
@@ -438,7 +373,24 @@ Domain-specific role modules under `lib/roles/` provide additional validation an
 
 ### Defense-in-Depth Strategy
 
-The system enforces strict tenant isolation using a **defense-in-depth** approach. If one layer fails, the other acts as a safety net to prevent cross-tenant data leakage.
+The system enforces strict tenant isolation using a **defense-in-depth** approach. If one layer fails, the other acts as a safety net to prevent cross-tenant data leakage:
+
+```mermaid
+flowchart LR
+    REQ[Request] --> MW["middleware.ts<br/>session cookie check (Edge-safe)"]
+    MW --> ALS["lib/tenant-context.ts<br/>organizationId → AsyncLocalStorage"]
+    ALS --> EXT["Layer 1 — lib/tenant-db.ts ($extends)<br/>auto-injects organizationId into where/data/<br/>create/update; throws when context is missing"]
+    EXT --> RLS{"Layer 2 — PostgreSQL RLS<br/>policies read app.current_org_id GUC"}
+
+    DB[(PostgreSQL)]
+    RLS -- "row's org matches → pass" --> DB
+    RLS -. "mismatch / unverified → row invisible (fail-closed)" .-> X(["denied"])
+
+    style EXT fill:#e8f0fe,stroke:#4285f4
+    style RLS fill:#fce8e6,stroke:#ea4335
+```
+
+Layer 1 is convenient and fail-loud (a scoped query with no context throws); Layer 2 is authoritative — it applies even to the non-owner `nipp_app` role, so a bypassed or misconfigured application layer still cannot cross tenant boundaries.
 
 #### Layer 1: Application-Level Isolation
 
@@ -510,10 +462,10 @@ A dedicated `services/` layer sits between the API routes and the database (Pris
 
 | Entity | Scope | Description |
 |--------|-------|-------------|
-| `User` | Global | Authentication principal with email, password hash, system role (`super_admin`/`member`), ban status (planned: `oidcVerified` flag for the magic-link gate) |
-| `Account` | Global | Provider identities: `(providerId, providerAccountId)` — enables Google OIDC sign-in to link to existing users by email match (planned feature, branch `google-oidc`) |
-| `Verification` | Global | *(planned)* Magic-link tokens: `id`, `identifier` (the token), `value` JSON (email + kind), `expiresAt` — atomically consumed on verify; one migration alongside `User.oidcVerified` |
-| `Organization` | Global | Tenant entity with lifecycle states (`PENDING`, `ACTIVE`, `SUSPENDED`, `ARCHIVED`) |
+| `User` | Global | Authentication principal with email, password hash, system role (`super_admin`/`member`), ban status, and the `oidcVerified` flag (the magic-link gate marker for invite-only Google sign-in) |
+| `Account` | Global | Provider identities: `(providerId, providerAccountId)` — a Google identity links to its user by email match; credential accounts back local logins |
+| `Verification` | Global | Magic-link and OAuth PKCE tokens: `id`, `identifier` (the token), `value` JSON (email + kind), `expiresAt` — atomically consumed on verify |
+| `Organization` | Global | Tenant entity with lifecycle states (`PENDING`, `ACTIVE`, `SUSPENDED`, `ARCHIVED`) and a stored map location (`latitude` / `longitude` / `mapZoom`; address-string geocoding as fallback) |
 | `Member` | Global | Junction linking Users to Organizations (many-to-many) |
 | `Role` | Org-scoped | Organization-scoped role definitions (bootstrapped defaults vs. custom admin-created) |
 | `Permission` | Global | Master catalog of atomic actions (`resource:action` syntax) |
@@ -528,14 +480,16 @@ A dedicated `services/` layer sits between the API routes and the database (Pris
 | `NotificationLog` | Global | Tracks email notifications sent by the notification system |
 | `Notification` | Global | In-app events pushed over SSE: title, message, priority (`INFO`/`WARNING`/`ERROR`/`CRITICAL`), scope (`GLOBAL`/`ORG`), source tag, optional `organizationId`, and an `acknowledged` admin flag |
 | `Calendar` | Org-scoped | Container/namespace for calendar events (one default per org) |
-| `CalendarEvent` | Org-scoped | Individual events within a calendar (local datetimes, optional `propertyId`; recurrence stored as RFC 5545 `rrule` JSON + `exdates` Json columns, not a separate model) |
-| `JobDefinition` | Platform-org | Job specification. Fields: `name` (unique per org), `description`, `handlerKey`, `code` (operator script source — sandboxed, not eval'd), `scheduleExpr` (JSON), `timezone`, `timeoutMs`, `concurrencyLimit`, `enabled`, the approval gate (`approved` / `approvedBy` / `approvedAt` / `approvalNote`), `lastRunAt` (claim marker), `lastRunStatus`, `createdBy`. |
-| `JobExecution` | Platform-org | Per-run record: status (PENDING→RUNNING→SUCCEEDED/FAILED/CANCELLED), trigger (SCHEDULE/MANUAL), actorId, resultJson, error, dryRun flag on the result. Cascading delete from `JobDefinition`. |
+| `CalendarEvent` | Org-scoped | Individual events within a calendar (local datetimes, optional `propertyId`); recurrence is stored as RFC 5545 — expansion semantics in [Section 9](#9-calendar-system) |
+| `JobDefinition` | Platform-org | Job specification: name (unique per org), handler key, optional operator script source (sandboxed), schedule expression, timezone, timeout, concurrency limit, enable flag, approval gate fields. Full field list and state machine: [Section 11 — Data Model](#data-model). |
+| `JobExecution` | Platform-org | Per-run record with status lifecycle (PENDING→RUNNING→terminal), trigger type, actor, and result; cascades delete from `JobDefinition`. Full detail in [Section 11 — Data Model](#data-model). |
+| `Units` | Org-scoped | Per-organization unit registry: address, contact email/phone, `rented` flag, and a `UnitType` (e.g. 1–5 bed). Managed under `/dashboard/admin/units`; feeds the "Total Units" stat and future property scheduling. |
+| `Contractors` | Global | Shared external-contractor directory usable by all organizations (no org column, no RLS policy — access is gated at the app/route layer): company name, contact, a `ContractorType`, and a description. Managed under `/dashboard/admin/contractors`. |
 
 ### Relationships
 
 - `User` ↔ `Organization`: Via `Member` (many-to-many)
-- `User` → `Account`: One-to-many provider identities (`providerId`, `providerAccountId`) — the link target for Google OIDC sign-in (planned feature) and credential accounts for local logins
+- `User` → `Account`: One-to-many provider identities (`providerId`, `providerAccountId`) — the link target for Google OIDC sign-in (shipped; [Section 3](#3-authentication--session-management)) and credential accounts for local logins
 - `Role` → `Permission`: Via `RolePermission` (one-to-many from Role)
 - `Member` → `Role`: Via `MemberRole` (one-to-many from Member)
 - `Organization` → `Role`, `Team`, `Calendar`: One-to-many cascading deletes
@@ -560,6 +514,27 @@ The system uses **PgBouncer** as a connection pooler between the Node.js applica
 - **Health Monitoring:** The `/api/health` endpoint includes a dedicated PgBouncer health check via `lib/pgbouncer-monitor.ts`. It queries the admin interface for connection counts and pool utilization.
 - **System Health Card:** The admin dashboard displays PgBouncer status, latency, and active connections alongside Database and Cache health.
 - **Pool Modes:** Configured for `transaction` or `session` pooling depending on requirements.
+
+### Health Endpoint
+
+`GET /api/health` is public (excluded from session validation) and exists for load balancers, orchestrators, and uptime monitors:
+
+```json
+{
+  "status": "healthy",
+  "timestamp": "2026-07-14T12:00:00.000Z",
+  "version": "0.1.0",
+  "uptime": 3600,
+  "checks": {
+    "database": { "status": "healthy", "latency_ms": 12 },
+    "cache":    { "status": "healthy", "latency_ms": 3 }
+  }
+}
+```
+
+- **200** — healthy (or degraded: a non-critical check like Redis failed)
+- **503** — critical check failed (database unreachable)
+- No sensitive information is exposed. Health *state transitions* are pushed over SSE by the real-time notification system ([§8](#health-event-integration)).
 
 ---
 
@@ -638,7 +613,8 @@ Step by step, a notification travels this path:
    connected.
 4. **It serializes once and fans out** — the JSON frame is written to each
    matching subscriber's stream: `GLOBAL` goes to everyone; `ORG` goes only to
-   that tenant's subscribers plus Super Admins (who have no org binding).
+   that tenant's subscribers plus Super Admins (see [Glossary](#glossary) for why),
+   who receive every ORG event for cross-tenant oversight.
 5. **The route handler ships it over SSE** — each connection is a web
    `ReadableStream` with proper `text/event-stream` headers, a 15-second
    heartbeat comment frame (`: heartbeat`) so proxies don't drop idle streams,
@@ -837,7 +813,7 @@ which instance handled the event — but a client on instance B would not
 instantly receive an event pushed by instance A. Scaling out requires relaying
 pushes through a shared broker (e.g. the same Redis Pub/Sub pattern used for
 cache invalidation) plus a shared dedup store; this is tracked as deferred work
-(see README, Appendix F). The calendar due-to-start scheduler (Section 9) has
+(see README, "Known open threads"). The calendar due-to-start scheduler (Section 9) has
 the same per-process property: its `firedKeys` set lives on `globalThis`, so N
 instances would each emit one alert per detected event instance — another
 input to the shared-dedup-store work above.
@@ -863,6 +839,45 @@ Recurrence handling is supported by:
 - `lib/recurrence-rrule.ts` — rrule library integration (RFC 5545 rules stored as JSON on the event); shared by the API service *and* the due-to-start scheduler so both expand instances identically
 - `lib/recurrence.ts` — Display/formatting helpers
 - `lib/recurrence-scopes.ts` — Scoping logic for recurrence instances
+
+### Interactive UI Features
+
+The calendar is a standalone component tree in `components/calendar/`, embedded at `/dashboard/admin/calendar` (admin) and `/dashboard/tenant/calendar` (tenant, view-by-default; tenant admins can modify). Each organization bootstraps with one default calendar; more can be added per org. The admin sidebar includes a live search box, the next upcoming events for the visible date range, and a typeable organization combobox — Super Admins switch between Platform and any tenant org from there (or via `?org=` in the URL).
+
+- **Views:** month, week, day, year; week/day views autoscroll while dragging.
+- **Drag-and-drop rescheduling:** single events move across dates and times; changes persist to the database, including preserved start/end times across month-view drags. Dragging a *recurring* event's occurrence excludes the original date from the series (`exdates`) and creates a one-off event at the new location — the rest of the series is untouched.
+- **Event detail modal** for viewing/editing; **quick-add** via right-click context menu on any day, plus a "+ Create Event" toolbar button pre-populated for the visible date range; clicking an upcoming-event row navigates the calendar to it.
+- **Color-coded event types:** `VIEWING`, `INSPECTION`, `MAINTENANCE`, `LEASE_SIGNING`, `LEASE_RENEWAL`, `KEY_EXCHANGE`, `OTHER` — with per-event color overrides.
+
+### API Routes
+
+| Route | Methods | Purpose |
+|-------|---------|---------|
+| `/api/organizations/[orgId]/calendar` | GET, POST | List calendars / create a calendar |
+| `/api/organizations/[orgId]/calendar/[id]` | GET, PATCH, DELETE | Get / update / delete calendar |
+| `/api/organizations/[orgId]/calendar-events` | GET, POST | List events in date range / create event |
+| `/api/organizations/[orgId]/calendar-events/[id]` | GET, PATCH, DELETE | Get / update / delete event |
+| `/api/organizations/[orgId]/calendar-events/upcoming` | GET | Upcoming events for the sidebar |
+
+Event listing takes `start`, `end`, and optional `calendarId` query params:
+
+```
+GET /api/organizations/[orgId]/calendar-events?start=2026-08-01&end=2026-08-31&calendarId=xxx
+```
+
+Events carry an optional `propertyId` for future property-scheduling work.
+
+### Today's Events Email Notifications
+
+The email flow (distinct from the live SSE push above) emails a specific user or *all* members of an organization about events happening **today**, reusing the shared email infrastructure (`lib/notifications/`) and logging every delivery to `NotificationLog`:
+
+| Route | Methods | Purpose |
+|-------|---------|---------|
+| `/api/organizations/[orgId]/calendar-notifications/today` | GET | Today's events for the current user/org |
+| `/api/organizations/[orgId]/calendar-notifications/send-today` | POST | Trigger today-event notifications |
+| `/api/organizations/[orgId]/calendar-notifications/history` | GET | Delivery history |
+
+Flow: scan for events whose `startDate` is today → resolve recipients (specific user or all org members) → build a branded email via nodemailer (`SMTP_*` variables) → dispatch through the shared rate-limited dispatcher (5 per event type per 24h; fails open without Redis) → log each delivery.
 
 ### Due-to-Start SSE Notifications
 
@@ -1141,16 +1156,7 @@ timeout, audit trail, and notification. Because the worker path calls the same
 - **`inline`** — the main thread runs `runJob` directly. Phase 1 fallback /
   rollback path (and used by tests); no fork cost per run.
 
-The worker side cannot rely on anything the main process set up, so the
-bootstrap (`job-scheduler-worker-bootstrap.cjs`, materialized by
-`lib/job-scheduler-bree.ts`) registers a per-worker `node:module.registerHooks`
-loader (Node ≥ 22.15) that transpiles project `.ts` files to CJS and resolves
-both `@/…` aliases and extensionless relative imports to TypeScript candidates.
-It is rewritten **only when the template content changed** (byte-identical
-files are kept), so loader fixes in `job-scheduler-bree.ts` take effect on the
-next run instead of outliving a freshness window. Bree and its deps stay
-webpack-external (`serverExternalPackages` in `next.config.ts`) so the workers
-see real filesystem paths.
+The worker side cannot rely on anything the main process set up: each run materializes a file-based CJS runner from `job-scheduler-worker-bootstrap.cjs`, which registers a per-worker TS loader (Node ≥ 22.15) that transpiles project `.ts` files and resolves both `@/…` aliases and extensionless relative imports (rewritten only when the template content changes, so loader fixes apply on the next run). Bree and its deps stay webpack-external (`serverExternalPackages` in `next.config.ts`) so workers see real filesystem paths. Full rationale and spike evidence: [job-scheduler-service-plan.md](./documents/feature-planning-and-development/job-scheduler-service-plan.md).
 
 **Worker-thread threading rules** (why some things happen in the parent):
 
@@ -1246,18 +1252,7 @@ Two platform-org-scoped models in `prisma/schema.prisma`:
 
 ### Lifecycle notifications via SSE
 
-| Event | Priority | Scope | Source |
-|-------|----------|-------|--------|
-| Job succeeded (scheduled, manual, or dry-run's parent re-emit) | `JOB` | GLOBAL | `job-scheduler:execution` |
-| Job failed (handler throws / times out; carries the failure reason) | `ERROR` | GLOBAL | `job-scheduler:failure` |
-| Worker engine itself fails (fork crash, dispatch error) | `ERROR` | GLOBAL | `job-scheduler:worker-error` |
-| Concurrency circuit saturated (run queued > 1 s) | `WARNING` | GLOBAL | `job-scheduler:throttled` |
-| `health-check` handler detects unhealthy platform | `ERROR` | GLOBAL | `job-scheduler:health-check` |
-| `calendar-selftest` handler fires | `CALENDAR` | GLOBAL | `job-scheduler:calendar-selftest` |
-
-Routine job lifecycle uses the dedicated `JOB` priority so it stays visually
-distinct from alert colours in the ticker (the same reasoning that justified
-`CALENDAR`).
+The scheduler emits lifecycle events through the platform SSE system ([Section 8](#8-real-time-notification-system-sse)): success runs push `JOB`-priority, failures and worker-engine errors push `ERROR`, and a saturated concurrency circuit pushes a debounced `WARNING`. Routine job lifecycle uses the dedicated `JOB` priority so it stays visually distinct from alert colours in the ticker (the same reasoning that justified `CALENDAR`). The full event catalog — sources, priorities, scopes, and the parent-thread re-emit dedup — is in the [Section 8 Event Source Catalog](#event-source-catalog) (`job-scheduler:*` rows).
 
 ### Admin API
 
@@ -1488,15 +1483,7 @@ The server rejects requests with missing/unsupported versions, expired timestamp
 
 #### Configuration
 
-| Variable | Default | Description |
-|----------|---------|-------------|
-| `PAYLOAD_ENCRYPTION_MODE` | `disabled` | Feature flag mode |
-| `PAYLOAD_ENCRYPTION_MAX_BYTES` | 65536 | Maximum encrypted payload size |
-| `PAYLOAD_ENCRYPTION_KEY_TTL_SECONDS` | 300 | Payload key lifetime |
-| `PAYLOAD_ENCRYPTION_REPLAY_WINDOW_SECONDS` | 30 | Replay protection window |
-| `PAYLOAD_ENCRYPTION_NONCE_TTL_SECONDS` | 60 | Replay nonce cache TTL |
-| `PAYLOAD_ENCRYPTION_REPLAY_CACHE` | `redis` | Replay cache backend (`memory`, `redis`) |
-| `PAYLOAD_ENCRYPTION_REQUIRE_REPLAY_CACHE` | `false` | Fail closed if replay cache unavailable |
+All payload-encryption variables are documented in one place: [`SECURITY.md` — Payload Encryption Variables](./SECURITY.md#payload-encryption-variables). The default mode is `PAYLOAD_ENCRYPTION_MODE=disabled`.
 
 ### CSRF Protection
 
@@ -1549,7 +1536,7 @@ nipp/
 │   ├── auth/                     # Auth components (LogoutButton, RequirePermission, RequireSuperAdmin)
 │   ├── calendar/                 # Interactive calendar (month/week/day/year views, DnD, recurrence)
 │   ├── dashboard/                # Dashboard UI (ConfirmDialog, DataTable)
-│   ├── org-chart/                # Interactive org chart (canvas tree, sidebar, member detail modal) — Section 7
+│   ├── org-chart/                # Interactive org chart (canvas tree, sidebar, member detail modal) — Section 10
 │   └── ui/                       # Shared UI primitives
 ├── features/                     # Client feature modules (auth, notifications inbox, org, permissions, user)
 ├── hooks/                        # Custom React hooks
@@ -1586,7 +1573,7 @@ nipp/
 │   ├── notification-push.ts      # In-process SSE push hub: subscriber registry, dedup, persist & broadcast (Section 8)
 │   ├── notifications/            # Email notification system (dispatcher, email, events — calendar today-events flow)
 │   ├── org-bootstrap.ts          # Organization bootstrapping logic
-│   ├── org-chart.ts              # Org chart tree shaper: Prisma rows → ChartTree, primary-team placement — Section 7
+│   ├── org-chart.ts              # Org chart tree shaper: Prisma rows → ChartTree, primary-team placement — Section 10
 │   ├── organization-context.tsx  # React context for organization state
 │   ├── organization.ts           # Organization utilities
 │   ├── payload-format.ts         # Payload encryption wire format
@@ -1644,7 +1631,7 @@ nipp/
 │   │   ├── calendar-events-*.test.ts  # Calendar event CRUD & query tests
 │   │   ├── logout-flow.test.ts   # Cross-tab session invalidation tests
 │   │   ├── notification-reliability.test.ts  # SSE/notification reliability
-│   │   ├── org-chart.test.ts                 # Org chart API authz matrix: membership / super-admin / 1:1 rule — Section 7
+│   │   ├── org-chart.test.ts                 # Org chart API authz matrix: membership / super-admin / 1:1 rule — Section 10
 │   │   ├── org-lifecycle.test.ts # Organization lifecycle tests
 │   │   ├── organization-*.test.ts  # Organization API & bootstrap tests
 │   │   ├── payload-encryption.test.ts  # Payload encryption integration tests
@@ -1712,5 +1699,57 @@ npm run dev                      # Start development server
 
 ---
 
-*Last Updated: 11/10/26 — Google OIDC door shipped (invite-only, magic-link), bearer-token access & public reachability added to §3*
+## 16. API Reference (OpenAPI + Swagger UI)
+
+A browsable, auto-generated OpenAPI reference for every `app/api/**` route is served at **`/api-docs`** (public — it contains no secrets, only paths, methods, and descriptions). The spec is generated from the JSDoc header blocks that live next to each route handler, so the documentation ships with the code.
+
+### How the spec is generated
+
+| Piece | Where | Purpose |
+|-------|-------|---------|
+| Generator | `scripts/generate-openapi.mjs` | Scans every `app/api/**/route.ts`, parses the leading `/** */` header (`METHOD /path -- …` becomes an operation; the rest is the description), merges with the handlers the file exports, and writes the spec (pure Node, no deps) |
+| Generated spec | `docs/openapi/generated/openapi.json` | Committed artifact served by the app |
+| Swagger UI page | `app/api-docs/route.ts` | HTML shell + UI configuration |
+| Spec endpoint | `app/api-docs/openapi/route.ts` | Serves the JSON (extensionless on purpose) |
+| Asset router | `app/api-docs/assets/[file]/route.ts` | Serves swagger-ui-dist from node_modules (whitelisted, fs-based to avoid the bundle's `self` crash in Node) |
+
+The generator understands both export styles (`export function GET …` and `export const GET = …`, plus destructured/aliased exports) and normalizes JSDoc path params (`[orgId]`, `[…all]`, `:roleId`) to OpenAPI `{param}`. Request/response schemas are intentionally not modelled yet (operations carry a `default` response); adding them is a separate pass using zod + `zod-to-openapi`.
+
+### Viewing the reference
+
+With the dev or production server running:
+
+```bash
+open http://localhost:3000/api-docs        # Swagger UI
+# raw spec (extensionless on purpose):
+curl -s http://localhost:3000/api-docs/openapi
+```
+
+The UI uses the BetterAuth `better-auth.session_token` cookie for authenticated calls — set it via the **Authorize** button and "Try it out" works against protected routes.
+
+### Keeping it up to date
+
+Regenerate the spec whenever a route or its JSDoc header changes, then commit the result:
+
+```bash
+npm run docs:generate          # prints a routes/operations/documented coverage summary
+```
+
+**Commit every regenerated `docs/openapi/generated/openapi.json`** — the spec is checked in, not built at deploy time, so the docs always match the code you ship. When adding a new route, give it a JSDoc header of the form:
+
+```ts
+/**
+ * GET /api/admin/roles          -- list the global role catalog
+ * POST /api/admin/roles         -- create a global role
+ *
+ * Super Admin only; writes are rate-limited per session and audit-logged.
+ */
+export async function GET() { /* … */ }
+```
+
+Routes missing a JSDoc header still appear in the spec (generated summary only) — the command lists them so none slip through.
+
+---
+
+*Last Updated: 16/10/26 — readability pass: added How-to-Read + Glossary, slimmed TOC; deduped JobDefinition/JobExecution (now in §11) and calendar recurrence (now in §9); added the defense-in-depth diagram to §5; OIDC phase-deviation detail condensed (was 5 rows of build-quirk table); fixed stale cross-references (org-chart Section 7→10, "planned feature"→shipped, dead README Appendix F pointer to README "Known open threads"). Earlier: calendar UI/API + email flows, health endpoint, Units & Contractors entities, and the API reference moved here; env-var references relocated to QUICK_START.md (operational) and SECURITY.md (security)*
 *Maintained by: Property NI Development Team*
