@@ -27,7 +27,7 @@ Depending on the portal's scale and security needs, portals use one or more of t
 
 • Database-Level Isolation using Row Level Security : This is a security policy that ensures that tenants can only access data from their own organization.
 
-• Personnally Indentifiable Information (PII) encryption: Tenant data is saved in a shared database but it is encrypted using cryptographic keys so that a users personal data is unreadable by anyone outside of their organization. 
+• Personally Indentifiable Information (PII) encryption: Tenant data is saved in a shared database but it is encrypted using cryptographic keys so that a users personal data is unreadable by anyone outside of their organization. 
 
 
 3. Resource & Performance Isolation
