@@ -10,53 +10,17 @@ The design follows three core principles:
 
 ## Table of Contents
 
-- [1. Multi-Tenant Isolation](#1-multi-tenant-isolation)
-  - [Two-Layer Strategy](#two-layer-strategy)
-  - [Application-Level Isolation (Prisma Extension)](#application-level-isolation-prisma-extension)
-  - [Database-Level Isolation (PostgreSQL RLS)](#database-level-isolation-postgresql-rls)
-  - [Tenant Context Propagation](#tenant-context-propagation)
-  - [Global vs. Tenant-Scoped Models](#global-vs-tenant-scoped-models)
-- [2. Authentication & Session Security](#2-authentication--session-security)
-  - [BetterAuth Configuration](#betterauth-configuration)
-  - [Session Lifecycle](#session-lifecycle)
-  - [Cross-Tab Session Invalidation](#cross-tab-session-invalidation)
-  - [Auto-Logout on Inactivity](#auto-logout-on-inactivity)
-  - [User Ban System](#user-ban-system)
-  - [Google OIDC Sign-In (invite-only door + magic-link verification)](#google-oidc-sign-in-invite-only-door--magic-link-verification)
-  - [Remote Bearer-Token Access — Origin Policy & Operations](#remote-bearer-token-access--origin-policy--operations)
-- [3. Authorization & Access Control](#3-authorization--access-control)
-  - [Dual-Authorization Model](#dual-authorization-model)
-  - [Permission Resolution Flow](#permission-resolution-flow)
-  - [Domain-Specific Permission Modules](#domain-specific-permission-modules)
-  - [Role Validation Utilities](#role-validation-utilities)
-  - [Resource-Based Feature Access Control](#resource-based-feature-access-control)
-- [4. Teams & Sub-Organization Security](#4-teams--sub-organization-security)
-  - [Data Model](#data-model)
-  - [Tenant Isolation](#tenant-isolation-1)
-  - [Default Teams Bootstrapping](#default-teams-bootstrapping)
-  - [API Endpoints](#api-endpoints)
-- [5. Calendar Security](#5-calendar-security)
-  - [Data Model](#data-model-1)
-  - [Authorization Flow](#authorization-flow)
-  - [Tenant Isolation](#tenant-isolation-2)
-- [6. Data Protection](#6-data-protection)
-  - [PII At-Rest Encryption](#pii-at-rest-encryption)
-  - [Data-in-Transit Payload Encryption](#data-in-transit-payload-encryption)
-  - [CSRF Protection](#csrf-protection)
-  - [Secrets Management](#secrets-management)
-- [7. Content Security Policy](#7-content-security-policy)
-  - [CSP Directives](#csp-directives)
-  - [Nonce Generation & Propagation](#nonce-generation--propagation)
-- [8. Logging & PII Redaction](#8-logging--pii-redaction)
-  - [Pino Logger Configuration](#pino-logger-configuration)
-  - [PII Field List](#pii-field-list)
-  - [Error Serialization Redaction](#error-serialization-redaction)
-- [9. Security Configuration Reference](#9-security-configuration-reference)
-  - [Environment Variables](#environment-variables)
-  - [Rate Limiting Configuration](#rate-limiting-configuration)
-  - [Trusted Proxies](#trusted-proxies)
+1. [Multi-Tenant Isolation](#1-multi-tenant-isolation)
+2. [Authentication & Session Security](#2-authentication--session-security)
+3. [Authorization & Access Control](#3-authorization--access-control)
+4. [Teams & Sub-Organization Security](#4-teams--sub-organization-security)
+5. [Calendar Security](#5-calendar-security)
+6. [Data Protection](#6-data-protection)
+7. [Content Security Policy](#7-content-security-policy)
+8. [Logging & PII Redaction](#8-logging--pii-redaction)
+9. [Security Configuration Reference](#9-security-configuration-reference)
 
-## Appendices
+### Appendices
 
 - [A. API Route Security Summary](#appendix-a-api-route-security-summary)
 - [B. Tenant-Scoped Model Inventory](#appendix-b-tenant-scoped-model-inventory)
@@ -128,9 +92,27 @@ is established at the route boundary from **server-verified inputs only**:
 | Calendar | organizationId | ✓ | ✓ | tenant calendars |
 | CalendarEvent | organizationId | ✓ | ✓ | recurrence lives in JSON fields (rrule/exdates); there is no separate model |
 
-Tables enforced **by RLS only** (no app-layer org injection — their visibility rules are richer than a single-column filter): Organization (per-command policies; UPDATE/DELETE = platform ops acting *on* the target org, which prevents self-privilege edits), AuditLog + NotificationLog (append-only for `nipp_app` — no UPDATE/DELETE policy by design; NULL-org global rows visible cross-tenant), Notification (org ∪ NULL-global reads, admin ack path on UPDATE, GLOBAL broadcasts stored with `organizationId = NULL`), JobDefinition / JobExecution (platform-only: `is_platform_admin` flag AND `app.platform_org_id` matching the row's `platformOrgId`), Permission (global catalog — platform sees all, tenants see only permissions assigned to their org's roles via RolePermission).
+### Tables Enforced by RLS Only
 
-Exempt tables (no policy, documented): User / Session / Account (BetterAuth auth models containing no tenant data) and Resource / ResourceRole (global feature catalog; the sensitive side — which roles can use a resource — sits on org-scoped Role rows which ARE policied; `ResourceRole` has no direct org column by design, re-evaluate before any route ever queries it directly). All other models require a valid `tenantId` in the current request context.
+These tables have no app-layer org injection — their visibility rules are richer than a single-column filter:
+
+| Table | Policy shape |
+|-------|--------------|
+| Organization | Per-command policies; UPDATE/DELETE = platform ops acting *on* the target org (prevents self-privilege edits) |
+| AuditLog / NotificationLog | Append-only for `nipp_app` — no UPDATE/DELETE policy by design; NULL-org global rows visible cross-tenant |
+| Notification | Org ∪ NULL-global reads; admin ack path on UPDATE; GLOBAL broadcasts stored with `organizationId = NULL` |
+| JobDefinition / JobExecution | Platform only: `is_platform_admin` flag AND `app.platform_org_id` matching the row's `platformOrgId` |
+| Permission | Global catalog — platform sees all, tenants see only permissions assigned to their org's roles via RolePermission. Writes additionally gated at the DB layer to verified platform admins (`rls_permission_platform_insert`/`_update`/`_delete`) — tenants have no catalog write path |
+
+### Exempt Tables (no policy, documented)
+
+| Table | Reason |
+|-------|--------|
+| User / Session / Account | BetterAuth auth models containing no tenant data |
+| Resource / ResourceRole | Global feature catalog; the sensitive side — which roles can use a resource — sits on org-scoped Role rows which ARE policied. `ResourceRole` has no direct org column by design — re-evaluate before any route ever queries it directly |
+| Contractor | Global shared directory of external contractors usable by all organizations; no org column, no RLS policy. Future CRUD routes must gate access at the app/route layer — the DB enforces nothing for this table |
+
+All other models require a valid tenant context in the current request.
 
 ---
 
@@ -165,11 +147,11 @@ When a user signs out, the session is invalidated server-side and across all bro
 
 ### Auto-Logout on Inactivity
 
-Users are automatically logged out after 30 minutes of inactivity. The mechanism:
+Users are automatically logged out after a configurable period of inactivity (default **15 minutes**, set with `INACTIVITY_TIMEOUT_MINS`). The mechanism:
 
-1. On each authenticated request, the "last active" timestamp is updated in the session store
-2. A client-side heartbeat (every 60 seconds) keeps sessions alive during active use
-3. When the inactivity threshold is reached, the client detects the expired session and triggers sign-out
+1. A client hook tracks mouse, keyboard, scroll, and touch activity
+2. 30 seconds before expiry, a warning toast appears
+3. If no activity follows, the session is deleted server-side and the browser is redirected to `/login` — any activity during the warning cancels it
 
 ### User Ban System
 
@@ -183,7 +165,7 @@ Users can be banned at any time. The `User` model includes three ban-related fie
 
 Ban enforcement happens in the authentication callback: when a user attempts to sign in or refresh their session, the system checks `banned` and `banExpires`. If a temporary ban has expired (`banExpires < now`), the ban is automatically cleared.
 
-**All-methods enforcement (implemented on branch `google-oidc`):** this check previously ran on the email sign-in path only (`lib/auth.ts` route hook). Branch `google-oidc` consolidates it into `databaseHooks.session.create.before` via one shared exported helper (`enforceBanStatus(email)`) — the single point every successful sign-in funnels through with a resolved user id — so a banned user cannot bypass the ban by using Google (or any future method). The email route hook now calls the *same* helper (fast 401 on the login form, behavior unchanged). Expired-ban auto-clear happens in the same place for all doors. Behavior is pinned by `tests/integration/google-oidc.test.ts` (active ban rejected; expired ban lifts the flag).
+Ban enforcement is method-agnostic: every successful sign-in (email, Google, and any future method) funnels through `databaseHooks.session.create.before`, where `enforceBanStatus(email)` runs — the single check that no sign-in door can route around. The email login form fast-paths the same helper for an immediate 401 on the form; expired-ban auto-clearing happens in the same place for all doors. Behavior is pinned by `tests/integration/google-oidc.test.ts` (active ban rejected; expired ban lifts the flag).
 
 ### Google OIDC Sign-In (invite-only door + magic-link verification)
 
@@ -314,7 +296,7 @@ This allows organizations to enable or disable specific features for different r
 
 ## 4. Teams & Sub-Organization Security
 
-### Data Model
+### Teams Data Model
 
 Teams provide sub-organization structure within a tenant:
 
@@ -326,7 +308,7 @@ Teams provide sub-organization structure within a tenant:
 
 A user can have different roles at the tenant level and within each team they belong to. Team membership is determined by `TeamMember` records linking users to teams with specific team roles.
 
-### Tenant Isolation
+### Team Tenant Isolation
 
 All team-related models (`Team`, `TeamMember`, `TeamRole`) are tenant-scoped. The Prisma extension automatically injects the tenant filter when querying team data, ensuring that users cannot access teams from other organizations.
 
@@ -336,20 +318,20 @@ When a new tenant is created, default teams are automatically bootstrapped (e.g.
 
 ### API Endpoints
 
-Team management is exposed through the following route patterns:
+Team management is exposed through org-scoped routes, all tenant-isolated by the shared `resolveTenantAccess` gate:
 
-| Pattern | Method | Access |
-|---------|--------|--------|
-| `/api/teams` | GET, POST | Tenant-scoped; user must be a team member |
-| `/api/teams/:id` | GET, PUT, DELETE | Tenant-scoped; user must have team management permissions |
-| `/api/teams/:id/members` | GET, POST, DELETE | Tenant-scoped; user must manage team membership |
-| `/api/teams/:id/roles` | GET, POST, PUT, DELETE | Tenant-scoped; user must manage team roles |
+| Pattern | Methods | Access |
+|---------|---------|--------|
+| `/api/organizations/[orgId]/teams` | GET, POST | Tenant-scoped; member of the org |
+| `/api/organizations/[orgId]/teams/[teamId]` | GET, PATCH, DELETE | Tenant-scoped; tenant admin (mutations) |
+| `/api/organizations/[orgId]/teams/[teamId]/members` | GET, POST, DELETE | Tenant-scoped; team membership management permissions |
+| `/api/organizations/[orgId]/teams/[teamId]/roles` | GET, POST, DELETE | Tenant-scoped; team role management permissions |
 
 ---
 
 ## 5. Calendar Security
 
-### Data Model
+### Calendar Data Model
 
 Calendar data is stored in three models:
 
@@ -370,9 +352,9 @@ Calendar access follows the dual-authorization model:
 
 Calendar events are not individually permissioned; access is determined at the calendar level. This means if a user can read a calendar, they can read all events within it.
 
-### Tenant Isolation
+### Calendar Tenant Isolation
 
-Calendar data is isolated by tenant through the Prisma extension and RLS policies. The `tenantId` field on all calendar models ensures that queries from one tenant cannot access another tenant's calendars or events.
+Calendar data is isolated by tenant through the Prisma extension and RLS policies. The `organizationId` field on all calendar models ensures that queries from one tenant cannot access another tenant's calendars or events.
 
 ---
 
@@ -553,29 +535,43 @@ The following environment variables control security-relevant behavior:
 | `BETTER_AUTH_BASE_PROTOCOL` | Protocol for dynamic base-URL construction: `auto` (both http/https origins) \| `http` \| `https` — default `auto` | Defaulted |
 | `TRUSTED_PROXY_HEADERS` | Read `x-forwarded-host` / `x-forwarded-proto` behind a proxy (`true`/`false`, default `true`) | Defaulted |
 | `BETTER_AUTH_TRUSTED_ORIGINS` | Comma-separated extra trusted origins for cross-origin browser frontends (partner BFFs); cookieless bearer clients never need it | No |
-| `SESSION_SECRET` | Secret used for signing session cookies | Yes |
-| `GOOGLE_CLIENT_ID` | Google OIDC client id (required by `lib/env-schema.ts`; consumed by the in-development sign-in) | Yes |
-| `GOOGLE_CLIENT_SECRET` | Google OIDC client secret (as above); magic-link emails additionally use the existing `SMTP_*` vars and `FRONTEND_URL` as the link host | Yes |
+| `GOOGLE_CLIENT_ID` | Google OIDC client id — required by the env schema (`lib/env-schema.ts`) | Yes |
+| `GOOGLE_CLIENT_SECRET` | Google OIDC client secret (same requirement) | Yes |
 | `DATABASE_URL` | PostgreSQL connection string (includes credentials) | Yes |
 | `REDIS_URL` | Redis connection string for caching and replay cache (optional) | No |
 | `NODE_ENV` | Environment mode (`development`, `production`) — affects CSP strictness and CSRF relaxation | Yes |
+
+### Payload Encryption Variables
+
+Tuning for the in-transit payload encryption feature (see [§6](#data-in-transit-payload-encryption); operational setup variables live in [`QUICK_START.md`](./QUICK_START.md#environment-variables)):
+
+| Variable | Default | Purpose |
+|----------|---------|---------|
+| `PAYLOAD_ENCRYPTION_MODE` | `disabled` | `disabled` \| `permissive` \| `enforce` — feature flag |
+| `PAYLOAD_ENCRYPTION_MAX_BYTES` | `65536` | Maximum encrypted request body size |
+| `PAYLOAD_ENCRYPTION_KEY_TTL_SECONDS` | `300` | Payload key lifetime |
+| `PAYLOAD_ENCRYPTION_REPLAY_WINDOW_SECONDS` | `30` | Replay-protection window |
+| `PAYLOAD_ENCRYPTION_NONCE_TTL_SECONDS` | `60` | Nonce cache TTL |
+| `PAYLOAD_ENCRYPTION_REPLAY_CACHE` | `redis` | `memory` \| `redis` replay-dedup backend |
+| `PAYLOAD_ENCRYPTION_REQUIRE_REPLAY_CACHE` | `false` | Fail closed in enforce mode if the replay cache is unavailable |
 
 ### Rate Limiting Configuration
 
 The application uses a unified rate limiting system with three distinct implementations, each configurable via environment variables with sensible defaults.
 
-#### HTTP Route Rate Limiting (In-Memory)
+#### Route-Gate Limits (In-Memory)
 
-Used by payload-key endpoints to prevent abuse of cryptographic key operations. All thresholds are configurable:
+Applied to security-critical route groups to prevent abuse of auth, admin, and cryptographic key operations:
 
 | Variable | Purpose | Default |
 |----------|---------|---------|
-| `RATE_LIMIT_PAYLOAD_KEY_MAX` | Max requests per window for key issuance | 30 |
-| `RATE_LIMIT_PAYLOAD_KEY_WINDOW` | Window duration in seconds for key issuance | 60 |
-| `RATE_LIMIT_PAYLOAD_KEY_REVOKE_MAX` | Max requests per window for key revocation | 5 |
-| `RATE_LIMIT_PAYLOAD_KEY_REVOKE_WINDOW` | Window duration in seconds for key revocation | 60 |
+| `RATE_LIMIT_PAYLOAD_KEY_MAX` / `_WINDOW` | Payload-key issuance limit per session | 30 / 60s |
+| `RATE_LIMIT_PAYLOAD_KEY_REVOKE_MAX` / `_WINDOW` | Payload-key revocation limit (stricter, prevents brute-force key destruction) | 5 / 60s |
+| `RATE_LIMIT_AUTH_MAX` / `_WINDOW` | Auth-route limit per IP — applied in `/api/auth/*` | 5 / 60s |
+| `RATE_LIMIT_ADMIN_MAX` / `_WINDOW` | Admin-write limit per session — `/api/admin/*`, `/api/dashboard/admin/*`, `/api/roles/*` mutations | 30 / 60s |
+| `RATE_LIMIT_CALENDAR_MAX` / `_WINDOW` | Calendar/team mutation limit per session | 30 / 60s |
 
-The payload-key issuance endpoint uses a stricter limit (30 req/min) while revocation is capped at 5 req/min to prevent brute-force key destruction. Stores are in-memory and cleaned up every 5 minutes (entries older than 2× the window).
+Stores are in-memory and cleaned up every 5 minutes (entries older than 2× the window).
 
 #### Notification Rate Limiting (Redis-Backed)
 
@@ -597,24 +593,22 @@ BetterAuth provides built-in rate limiting for authentication endpoints:
 | General requests | 10 requests | 15 minutes |
 | Sign-in attempts | 5 requests | 15 minutes |
 
-These limits are enforced per-IP address. The stricter limit on sign-in attempts is designed to prevent brute-force password attacks. In addition, every POST under `/api/auth/*` passes through the route-level IP rate limit (`checkAuthRateLimit`) in `app/api/auth/[...all]/route.ts`, so social sign-in (`/api/auth/sign-in/social`) inherits the same per-IP window as email login — and the planned magic-link verify endpoint will do the same.
+These limits are enforced per-IP address. The stricter limit on sign-in attempts is designed to prevent brute-force password attacks. In addition, every POST under `/api/auth/*` passes through the route-level IP rate limit (`checkAuthRateLimit`) in `app/api/auth/[...all]/route.ts`, so social sign-in (`/api/auth/sign-in/social`) and the magic-link verify endpoint inherit the same per-IP window as email login.
 
 #### Rate Limiting Across API Routes
 
-The unified rate limiter module (`lib/rate-limiter.ts`) is designed to be shared across all routes. Currently applied to:
+All security-relevant routes are rate limited through the unified limiter (`lib/rate-limiter.ts`):
 
-| Route Group | Rate Limiting Applied |
-|-------------|----------------------|
-| `POST /api/security/payload-key` (issuance) | ✅ 30 req/min per session |
-| `POST /api/security/payload-key/revoke` | ✅ 5 req/min per session |
-| Notification dispatcher (email sending) | ✅ 5 per event type/recipient/24h |
-| Auth endpoints (`/api/auth/*`) | ✅ BetterAuth built-in limits |
-| Admin/Dashboard-Admin routes (`/api/admin/*`, `/api/dashboard/admin/*`) | ❌ Not yet rate limited — priority for future implementation |
-| Organization routes (`/api/organizations/*`) | ❌ Not yet rate limited — priority for future implementation |
-| Role routes (`/api/roles/*`) | ❌ Not yet rate limited — priority for future implementation |
-| `POST /api/csp-report` | ❌ Not yet rate limited — ingestion endpoint needs protection |
+| Route group | Gate | Default (tunable) |
+|-------------|------|-------------------|
+| `/api/auth/*` (all methods incl. social sign-in & magic-link verify) | `checkAuthRateLimit` + BetterAuth built-ins | 5 req/60s per IP (`RATE_LIMIT_AUTH_MAX/WINDOW`) |
+| `/api/admin/*`, `/api/dashboard/admin/*`, `/api/roles/*` (mutations) | `checkAdminRateLimit` | 30 req/60s per session (`RATE_LIMIT_ADMIN_MAX/WINDOW`) |
+| `/api/organizations/[orgId]/*` calendar & team routes (mutations) | `checkCalendarRateLimit` | 30 req/60s per session (`RATE_LIMIT_CALENDAR_MAX/WINDOW`) |
+| `POST /api/security/payload-key` | `checkRateLimit` | 30 req/60s (`RATE_LIMIT_PAYLOAD_KEY_MAX/WINDOW`) |
+| `POST /api/security/payload-key/revoke` | `checkRevokeRateLimit` | 5 req/60s (`RATE_LIMIT_PAYLOAD_KEY_REVOKE_MAX/WINDOW`) |
+| Notification dispatcher (email sending) | Redis-backed per event-type/recipient | 5 per 24h (`RATE_LIMIT_NOTIFICATION_MAX/WINDOW_HOURS`) |
 
-See [Unified Rate Limiting Design](./openspec/changes/unified-rate-limiter/design.md) for the full architecture and plans to extend rate limiting to unprotected routes.
+Not rate limited: `POST /api/csp-report` (report ingestion — flagged for protection). See [Unified Rate Limiting Design](./openspec/changes/unified-rate-limiter/design.md) for the architecture.
 
 ### Trusted Proxies
 
@@ -626,26 +620,26 @@ Only requests from trusted proxy IPs will have their forwarded headers honored; 
 
 ## Appendix A: API Route Security Summary
 
-The following table summarizes the security characteristics of all API route groups in the application:
+Route groups as they exist under `app/api/`:
 
-| Route Group | Authentication Required | Tenant-Scoped | CSRF Protected | PII Encrypted |
-|-------------|------------------------|---------------|----------------|---------------|
-| Auth routes (`/api/auth/*`) | No (login/signup) | No | Yes | No |
-| Tenant routes (`/api/tenants/*`) | Yes | Yes (self) | Yes | No |
-| Team routes (`/api/teams/*`) | Yes | Yes | Yes | No |
-| Calendar routes (`/api/calendars/*`) | Yes | Yes | Yes | No |
-| PII routes (`/api/pii/*`) | Yes | Yes | Yes | Yes (at-rest + in-transit) |
-| Permission routes (`/api/permissions/*`) | Yes | Yes | Yes | No |
+| Route group | Access | Rate limiting |
+|-------------|--------|---------------|
+| `/api/auth/*` (sign-in, social sign-in, magic-link verify) | Public doors; ban + provisioning gates at session creation; origin/CSRF checks enabled, no CORS emitted | `checkAuthRateLimit` per IP + BetterAuth built-ins |
+| `/api/admin/*`, `/api/dashboard/admin/*` | Verified platform admin only (app gate + RLS `is_platform_admin`) | `checkAdminRateLimit` per session on mutations |
+| `/api/organizations/[orgId]/*` (teams, calendar, org chart, location) | Target-org membership via the shared tenant-access gate; mutations permission-checked; RLS-scoped | `checkCalendarRateLimit` per session on mutation routes |
+| `/api/roles/*` | Member of the user's own organization with role-management permissions | `checkAdminRateLimit` per session |
+| `/api/security/payload-key`, `/revoke` | Authenticated; keys never traversed in clear (see §6) | dedicated payload-key limits (30 / 5 req per 60s) |
+| `/api/notifications/stream`, `/api/auth/me`, `/api/auth/*permissions*` | Authenticated — own data only | via the auth-route limit |
+| `/api/health`, `/api/csp-report`, `/api/cache/metrics` | Public (status + report ingestion); `csp-report` not yet rate limited | — |
 
-All authenticated routes require a valid session cookie. Tenant-scoped routes verify the `tenantId` context before processing any request.
+All authenticated routes require a valid session (cookie or bearer token). Tenant-scoped routes verify tenant context (`resolveTenantAccess`) before any query and run under the RLS transaction wrapper. PII at-rest encryption (§6) applies at the model layer, so it is orthogonal to route grouping.
 
 ---
 
 ## Appendix B: Tenant-Scoped Model Inventory
 
-The complete inventory, current after the RLS rollout (org column is `organizationId`
-— historical docs referenced a nonexistent `tenantId`; recurrence is a JSON field on
-CalendarEvent, not a model):
+The complete inventory of tenant-scoped models (org column is `organizationId`;
+recurrence is a JSON field on CalendarEvent, not a model):
 
 | Model | Org column | App-layer (tenantDb) | RLS policy | Notes |
 |-------|-----------|----------------------|------------|-------|
@@ -661,10 +655,8 @@ CalendarEvent, not a model):
 | Calendar | organizationId | ✓ | ✓ | Tenant calendars |
 | CalendarEvent | organizationId | ✓ | ✓ | Events incl. recurrence JSON fields |
 
-RLS-only tables (see Two-Layer Strategy above): Organization, AuditLog,
-NotificationLog, Notification, JobDefinition, JobExecution, Permission. (Permission writes — create/update/delete via `/api/dashboard/admin/permissions` — are additionally gated at the DB layer to verified platform admins only: `rls_permission_platform_insert`/`_update`/`_delete` on the `is_platform_admin` flag; tenants have no catalog write path.)
-Exempt: User, Session, Account, Resource, ResourceRole, Contractors.
-(Contractors: global shared directory of external contractors usable by ALL organizations — no org column, no RLS policy; future CRUD routes must gate access at the app/route layer since the DB enforces nothing for this table.)
+RLS-only tables and exempt tables (policy shapes, write gates, and the Contractor
+caveat in detail): see [Tables Enforced by RLS Only](#tables-enforced-by-rls-only) and [Exempt Tables](#exempt-tables-no-policy-documented) in §1.
 
 ---
 
@@ -677,11 +669,11 @@ This document covers security-specific details. For broader architectural contex
 | [ARCHITECTURE.md](./ARCHITECTURE.md) | Overall system architecture, data flow, and component interactions |
 | [CACHING_ARCHITECTURE.md](./CACHING_ARCHITECTURE.md) | Caching strategy, Redis usage, and cache invalidation patterns |
 | [QUICK_START.md](./QUICK_START.md) | Getting started guide for developers |
-| [Google OIDC design doc](./documents/feature-planning-and-development/google-oidc-design.md) | Google sign-in flow, account-linking semantics, magic-link verification and its threat table (in development) |
+| [Google OIDC design doc](./documents/feature-planning-and-development/google-oidc-design.md) | Google sign-in flow, account-linking semantics, magic-link verification and its threat table (shipped) |
 | [Bearer-token developer reference](./documents/api/bearer-tokens.md) | Token acquisition doors, lifetime & refresh policy, storage/usage rules (developer-facing) |
 | [Bearer-token design doc](./documents/feature-planning-and-development/bearer-token-remote-access.md) | Bearer architecture decision, threat model, state diagram (source of truth for diagrams) |
 
 ---
 
-*Last updated: 2026-10-08*
+*Last updated: 2026-10-16*
 *Document owner: Engineering Team*
