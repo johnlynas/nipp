@@ -13,7 +13,7 @@ In software architecture, tenant isolation ensures that a shared software applic
 
 In a property management system, a "tenant" can refer to an independent property management company or a management agent with a number of different housing complexes under management
 
-Because portals handle highly sensitive personal information, banking details, and legal contracts, enforcing a strict tenant isolation layers is vital: 
+Because portals handle highly sensitive personal information, banking details, and legal contracts, enforcing strict tenant isolation layers is vital: 
 
 1. Logical Segregation (Roles and Permissions)
 
@@ -32,7 +32,7 @@ Depending on the portal's scale and security needs, portals use one or more of t
 
 3. Resource & Performance Isolation
 
-A proper isolation strategy prevents a "noisy neighbor" effect. If one large property management client initiates a massive data extraction or runs a complex portfolio-wide tax report, it should not slow down rent processing or maintenance logging for other independent users on the system.
+A proper isolation strategy prevents a "noisy neighbour" effect. If one large property management client initiates a massive data extraction or runs a complex portfolio-wide tax report, it should not slow down rent processing or maintenance logging for other independent users on the system.
 
 
 The portal is built with Next.js 15 (App Router), React 19, BetterAuth, Prisma 6, and PostgreSQL 16, with optional Redis for caching.
