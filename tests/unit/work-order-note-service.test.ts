@@ -116,15 +116,18 @@ describe('WorkOrderNoteService', () => {
   });
 
   describe('list', () => {
-    it('lists a work order\'s notes oldest-first for any verified ctx (RLS enforces boundary)', async () => {
+    it("lists a work order's notes oldest-first (RLS enforces the tenant boundary at the route)", async () => {
       db.workOrderNote.findMany.mockResolvedValue([{ workOrderNoteId: 'n1' }]);
-      const result = await WorkOrderNoteService.list({ workOrderId: 'wo-1' }, ctx('MEMBER', 'org-1'));
+      const result = await WorkOrderNoteService.list({ workOrderId: 'wo-1' });
       expect(result).toHaveLength(1);
       expect(db.workOrderNote.findMany.mock.calls[0][0].orderBy).toEqual({ createdAt: 'asc' });
     });
 
     it('requires a workOrderId', async () => {
-      await expect(WorkOrderNoteService.list({} as Record<string, unknown>, ctx('PLATFORM_ADMIN'))).rejects.toThrow(ValidationError);
+      // No `workOrderId` — the input type makes this impossible for callers, so
+      // we widen deliberately to prove the runtime guard also exists.
+      await expect(WorkOrderNoteService.list({} as unknown as { workOrderId: string }))
+        .rejects.toThrow(ValidationError);
     });
   });
 
