@@ -7,7 +7,8 @@ import { isSameSiteRequest } from '@/lib/csrf';
 import { handleServiceError } from '@/lib/services/error-handler';
 import { ValidationError } from '@/lib/services/types';
 import type { WorkOrderState } from '@prisma/client';
-import { WorkOrderService, WORK_ORDER_STATES } from '@/services/work-order-service';
+import { WorkOrderService, WORK_ORDER_STATES, setWorkOrderEmailDispatcher } from '@/services/work-order-service';
+import { sendWorkOrderEmailEvent } from '@/services/work-order-email';
 
 export const runtime = 'nodejs';
 
@@ -78,6 +79,10 @@ export async function POST(
     if (!row) return NextResponse.json({ error: 'Work order not found' }, { status: 404 });
 
     return await withTenantAdminContext(adminUserId, row.organizationId, async () => {
+      // Wire the real email dispatcher for this module instance (dev double-
+      // evaluation safe: idempotent set). Email dispatch runs AFTER the
+      // transition commits and inherits this tenant RLS context.
+      setWorkOrderEmailDispatcher(sendWorkOrderEmailEvent);
       const updated = await WorkOrderService.transition(
         id,
         body.to as WorkOrderState,

@@ -73,7 +73,7 @@ export interface WorkOrderEmailEvent {
   quotesDue?: Date;
 }
 
-type EmailDispatcher = (evt: WorkOrderEmailEvent) => Promise<void>;
+type EmailDispatcher = (evt: WorkOrderEmailEvent) => Promise<unknown>;
 
 let dispatchWorkOrderEmail: EmailDispatcher = async () => {};
 
