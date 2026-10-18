@@ -138,8 +138,11 @@ describe('work-order email templates', () => {
     const subject = renderRfqSubject({ workOrder: workOrderFixture as never, organisationName: orgFixture.name });
     expect(NO_URL_RE.test(subject)).toBe(false);
 
-    const assigned: typeof workOrderFixture & { contractorId: string } = { ...workOrderFixture, contractorId: 'c-1' };
-    const a = renderAssignment({ workOrder: assigned as never, organisationName: orgFixture.name, contractor: contractorFixture as never });
+    const assigned = { ...workOrderFixture, contractorId: 'c-1' } as Pick<
+      import('@prisma/client').WorkOrder,
+      'description' | 'workOrderId'
+    >;
+    const a = renderAssignment({ workOrder: assigned, organisationName: orgFixture.name, contractor: contractorFixture as never });
     expect(NO_URL_RE.test(a.subject)).toBe(false);
     expect(NO_URL_RE.test(a.message)).toBe(false);
 

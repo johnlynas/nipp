@@ -187,10 +187,14 @@ describe('runWorkOrderDeadlineScan', () => {
 // ---------------------------------------------------------------------------
 
 describe('workOrdersQuoteDeadlinesHandler', () => {
+  // The JobHandler contract returns unknown (JSON-serializable, persisted to
+  // resultJson) — these tests assert the shape.
+  const run = (ctx: JobRunContext) => workOrdersQuoteDeadlinesHandler(ctx) as Promise<{ handler: string; scanned: number; alerted: number }>;
+
   it('returns the {scanned, alerted} summary as a JSON-serializable result', async () => {
     setFindMany([]);
     const ctx: JobRunContext = { jobDefinitionId: 'job-wo', platformOrgId: 'platform-org', trigger: 'SCHEDULE' };
-    const result = await workOrdersQuoteDeadlinesHandler(ctx);
+    const result = await run(ctx);
     expect(result).toEqual({ handler: 'work-order-quote-deadlines', scanned: 0, alerted: 0 });
   });
 
@@ -202,7 +206,7 @@ describe('workOrdersQuoteDeadlinesHandler', () => {
       trigger: 'MANUAL',
       input: { now: NOW.toISOString() },
     };
-    const result = await workOrdersQuoteDeadlinesHandler(ctx);
+    const result = await run(ctx);
     expect(result.scanned).toBe(0);
     const findManyWhere = ((tenantDbMock.workOrder.findMany as ReturnType<typeof vi.fn>).mock.calls[0][0] as { where: Record<string, unknown> }).where;
     expect((findManyWhere.quotesDue as Record<string, unknown>).lte).toEqual(NOW);

@@ -79,6 +79,18 @@ vi.mock('@/lib/logger', () => ({
   logger: { info: vi.fn(), warn: vi.fn(), error: vi.fn() },
 }));
 
+// RLS binding hermeticity: withEnvPlatformContext (used by the engine's scan
+// read) binds a REAL Prisma interactive tx when PLATFORM_ORGANIZATION_ID is
+// present in the environment — and vite injects .env into vitest processes. A
+// live-DB bind here would run queries on the real client, bypassing the
+// module mocks below (observed: scanDueJobs tests 42501/empty). Mock it to the
+// documented unbound pass-through (rls-transaction.ts: "Passes through UNBOUND
+// when PLATFORM_ORGANIZATION_ID is unset so mock-client unit tests keep
+// running").
+vi.mock('@/lib/rls-transaction', () => ({
+  withEnvPlatformContext: async (op: () => unknown) => op(),
+}));
+
 // --- Imports under test ---------------------------------------------------
 
 import {
