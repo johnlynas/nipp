@@ -129,7 +129,7 @@ beforeEach(() => {
 // --- Registration ---------------------------------------------------------
 
 describe('registerBuiltinHandlers', () => {
-  it('registers the four trusted built-in handlers as functions', () => {
+  it('registers the trusted built-in handlers as functions', () => {
     registerBuiltinHandlers();
     expect(mockRegister).toHaveBeenCalled();
 
@@ -142,6 +142,7 @@ describe('registerBuiltinHandlers', () => {
       'health-check',
       'calendar-health-check',
       'calendar-selftest',
+      'work-order-quote-deadlines',
       ]);
     expect(registration.every((b) => typeof b.handler === 'function')).toBe(true);
     });

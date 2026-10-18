@@ -21,6 +21,7 @@ import {
 import { checkHealthStatus, type HealthResponse } from '@/lib/health-check';
 import { findDueToStartEvents } from '@/lib/calendar-event-scheduler';
 import { pushNotification } from '@/lib/notification-push';
+import { workOrdersQuoteDeadlinesHandler } from '@/services/work-order-deadline-handler';
 import { NotificationPriority, NotificationScope } from '@prisma/client';
 
 /** `noop` — the minimal smoke-test handler. Proves the end-to-end path. */
@@ -117,6 +118,10 @@ export const BUILTIN_HANDLERS: Array<{ key: string; handler: JobHandler }> = [
   { key: 'health-check', handler: healthCheckHandler },
   { key: 'calendar-health-check', handler: calendarHealthCheckHandler },
   { key: 'calendar-selftest', handler: calendarSelfTestHandler },
+  // Hourly quote-deadline scan for work orders (Work Order Flow, design §Scheduling).
+  // The job definition is created by super admins in the admin jobs UI
+  // (cron "0 * * * *", platform org, enabled + approved like other built-ins).
+  { key: 'work-order-quote-deadlines', handler: workOrdersQuoteDeadlinesHandler },
 ];
 
 /**
