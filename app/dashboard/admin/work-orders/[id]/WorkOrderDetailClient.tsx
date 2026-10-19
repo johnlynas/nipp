@@ -132,7 +132,10 @@ export default function WorkOrderDetailClient({ id }: { id: string }) {
       }
     })();
     return () => { cancelled = true; };
-  }, [rfqOpen, contractorOptions.length, contractorsLoading]);
+    // deps intentionally exclude `contractorsLoading`: the effect flips it, so
+    // depending on it would cancel-and-restart this very fetch on its own state
+    // change. The loaded guard + `cancelled` cover the real races.
+  }, [rfqOpen, contractorOptions.length]);
 
   const closeRfqDialog = () => {
     setRfqOpen(false);
