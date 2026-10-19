@@ -289,6 +289,140 @@ describe('WorkOrderInvoicePanel — record form (COMPLETE only)', () => {
   });
 });
 
+describe('WorkOrderInvoicePanel — edit (pre-payment corrections)', () => {
+  function renderWithInvoice(state: WorkOrderStateValue) {
+    return renderPanel(detail(state, { invoice: baseInvoice() }));
+  }
+
+  it('offers the Edit pencil at COMPLETE and INVOICED only (never terminal/other states)', () => {
+    for (const state of ['COMPLETE', 'INVOICED'] as const) {
+      renderWithInvoice(state);
+      expect(screen.getByRole('button', { name: 'Edit invoice' }), `${state}`).toBeInTheDocument();
+      cleanup();
+    }
+    for (const state of ['FINISHED', 'CLOSED', 'STARTED'] as const) {
+      renderWithInvoice(state);
+      expect(screen.queryByRole('button', { name: 'Edit invoice' }), `${state}`).toBeNull();
+      cleanup();
+    }
+  });
+
+  it('never offers delete outside INVOICED (server rule — COMPLETE would 422)', () => {
+    for (const state of ['COMPLETE', 'FINISHED', 'CLOSED', 'STARTED'] as const) {
+      renderWithInvoice(state);
+      expect(screen.queryByRole('button', { name: 'Delete invoice' }), `${state}`).toBeNull();
+      cleanup();
+    }
+    renderWithInvoice('INVOICED');
+    expect(screen.getByRole('button', { name: 'Delete invoice' })).toBeInTheDocument();
+  });
+
+  it('prefills edit fields from the stored values and PATCHes on save + resyncs', async () => {
+    json(200, {}, 'PATCH');
+    const { load } = renderWithInvoice('INVOICED');
+
+    fireEvent.click(screen.getByRole('button', { name: 'Edit invoice' }));
+    // Edit zone labels are the same names with -edit ids.
+    expect(String((screen.getByLabelText(/price/i) as HTMLInputElement).value)).toBe('2400.5');
+
+    const todayPlusOne = toLocalInputDate(new Date(Date.now() + 86400_000));
+    fireEvent.change(screen.getByLabelText(/invoice date/i), { target: { value: todayPlusOne } });
+    fireEvent.click(screen.getByRole('button', { name: /^save$/i }));
+
+    await waitFor(() => {
+      const calls = callsWith('/api/admin/invoices/inv-1', 'PATCH');
+      expect(calls).toHaveLength(1);
+      const body = calls[0].body!;
+      expect(body.price).toBe(2400.5);
+      expect(String(body.invoiceDate)).toMatch(/^20\d{2}-\d{2}-\d{2}T12:00:00/);
+      expect('dueDate' in body).toBe(true);
+    });
+    await waitFor(() => expect(load).toHaveBeenCalledTimes(1));
+    // Back to card view.
+    expect(screen.queryByRole('button', { name: /^save$/i })).toBeNull();
+  });
+
+  it('sends link null when cleared (PATCH contract)', async () => {
+    json(200, {}, 'PATCH');
+    renderPanel(detail('INVOICED', { invoice: baseInvoice({ invoiceLink: 'https://invoices.example/7' }) }));
+
+    fireEvent.click(screen.getByRole('button', { name: 'Edit invoice' }));
+    fireEvent.change(screen.getByLabelText(/invoice link/i), { target: { value: '' } });
+    fireEvent.click(screen.getByRole('button', { name: /^save$/i }));
+
+    await waitFor(() => expect(callsWith('/api/admin/invoices/inv-1', 'PATCH')[0]?.body?.invoiceLink).toBeNull());
+  });
+
+  it('rejects a non-positive edit price client-side without calling the API', async () => {
+    json(200, {}, 'PATCH');
+    const { onFailed } = renderWithInvoice('INVOICED');
+
+    fireEvent.click(screen.getByRole('button', { name: 'Edit invoice' }));
+    fireEvent.change(screen.getByLabelText(/price/i), { target: { value: '' } });
+    fireEvent.click(screen.getByRole('button', { name: /^save$/i }));
+
+    await waitFor(() => expect(onFailed).toHaveBeenCalledWith(expect.stringMatching(/greater than zero/i)));
+    expect(callsWith('/api/admin/invoices/inv-1', 'PATCH')).toHaveLength(0);
+  });
+
+  it('surfaces a concurrent-finish 409 verbatim and resyncs (form closes, card may be gone)', async () => {
+    json(409, { error: 'Invoices cannot be edited while the work order is FINISHED' }, 'PATCH');
+    const { load, onFailed } = renderWithInvoice('INVOICED');
+
+    fireEvent.click(screen.getByRole('button', { name: 'Edit invoice' }));
+    fireEvent.change(screen.getByLabelText(/price/i), { target: { value: '1' } });
+    fireEvent.click(screen.getByRole('button', { name: /^save$/i }));
+
+    await waitFor(() => expect(onFailed).toHaveBeenCalledWith('Invoices cannot be edited while the work order is FINISHED'));
+    await waitFor(() => expect(load).toHaveBeenCalledTimes(1));
+  });
+
+  it('Escape exits a clean edit; a dirty edit asks before discarding', async () => {
+    renderWithInvoice('INVOICED');
+
+    fireEvent.click(screen.getByRole('button', { name: 'Edit invoice' }));
+    expect(screen.getByRole('button', { name: /^save$/i })).toBeInTheDocument();
+    fireEvent.keyDown(window, { key: 'Escape', bubbles: true });
+    await waitFor(() => expect(screen.queryByRole('button', { name: /^save$/i })).toBeNull());
+    expect(screen.queryByText(/discard changes/i)).toBeNull();
+
+    // Dirty: confirm dialog appears, confirming discards.
+    fireEvent.click(screen.getByRole('button', { name: 'Edit invoice' }));
+    fireEvent.change(screen.getByLabelText(/invoice link/i), { target: { value: 'https://x.example' } });
+    fireEvent.keyDown(window, { key: 'Escape', bubbles: true });
+    expect(await screen.findByText(/discard changes/i)).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: /discard/i }));
+    await waitFor(() => expect(screen.queryByRole('button', { name: /^save$/i })).toBeNull());
+  });
+});
+
+describe('WorkOrderInvoicePanel — delete (INVOICED-only correction flow)', () => {
+  it('confirms with the honest consequence copy, issues DELETE, and resyncs', async () => {
+    json(200, {}, 'DELETE');
+    const { load } = renderPanel(detail('INVOICED', { invoice: baseInvoice() }));
+
+    fireEvent.click(screen.getByRole('button', { name: 'Delete invoice' }));
+    expect(await screen.findByText(/delete this invoice\? you will need to re-record it/i)).toBeInTheDocument();
+    expect(screen.getByText(/the contractor is not notified/i)).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: /^delete$|^deleting…$/i }));
+    await waitFor(() => expect(callsWith('/api/admin/invoices/inv-1', 'DELETE')).toHaveLength(1));
+    await waitFor(() => expect(load).toHaveBeenCalledTimes(1));
+  });
+
+  it('surfaces a blocked delete (409) verbatim to the parent and resyncs', async () => {
+    json(409, { error: 'Invoices cannot be deleted while the work order is FINISHED (paid/closed chain is a closed audit record)' }, 'DELETE');
+    const { load, onFailed } = renderPanel(detail('INVOICED', { invoice: baseInvoice() }));
+
+    fireEvent.click(screen.getByRole('button', { name: 'Delete invoice' }));
+    await screen.findByText(/delete this invoice\?/i);
+    fireEvent.click(screen.getByRole('button', { name: /^delete$/i }));
+
+    await waitFor(() => expect(onFailed).toHaveBeenCalledWith(expect.stringMatching(/closed audit record/)));
+    await waitFor(() => expect(load).toHaveBeenCalledTimes(1));
+  });
+});
+
 describe('WorkOrderInvoicePanel — terminal invariants', () => {
   it('FINISHED renders the card read-only with zero controls', () => {
     renderPanel(detail('FINISHED', { invoice: baseInvoice() }));
