@@ -2,18 +2,19 @@
 
 import { useState, useEffect, useCallback, useRef } from 'react';
 import Link from 'next/link';
-import { ArrowLeft, CalendarClock } from 'lucide-react';
+import { ArrowLeft, CalendarClock, Mail, Play, Send, UserCheck, XCircle, CheckCircle2 } from 'lucide-react';
 import { logClientError } from '@/lib/client-error-logger';
 import { PageSkeleton } from '@/components/dashboard/PageSkeleton';
+import { Modal } from '@/components/dashboard/Modal';
+import { ConfirmDialog } from '@/components/dashboard/ConfirmDialog';
 import { WorkOrderStateBadge } from '@/components/dashboard/WorkOrderStateBadge';
+import { WORK_ORDER_TRANSITIONS, type WorkOrderState } from '@/lib/work-order-state';
 import {
   type WorkOrderDetail,
   workOrderDate,
   isQuoteOverdue,
 } from '@/components/dashboard/work-order-shared';
 
-const inputClass = 'w-full rounded border px-3 py-2 text-sm bg-white focus:outline-none';
-const inputStyle = { borderColor: 'var(--color-slate-200)', color: 'var(--color-navy-850)' } as const;
 const labelClass = 'mb-1 block text-sm font-medium';
 const labelStyle = { color: 'var(--color-navy-850)' } as const;
 
@@ -28,26 +29,67 @@ function SectionCard({ title, children }: { title: string; children: React.React
 }
 
 /** Label/value meta row (slate labels, navy values) — the detail header's vocabulary. */
-function FieldRow({ label, children, className = '' }: { label: string; children: React.ReactNode; className?: string }) {
+function FieldRow({ label, children }: { label: string; children: React.ReactNode }) {
   return (
-    <div className={`flex items-baseline justify-between gap-4 text-sm ${className}`}>
+    <div className="flex items-baseline justify-between gap-4 text-sm">
       <span className="shrink-0 text-xs font-medium uppercase tracking-wide text-slate-500">{label}</span>
       <span className="min-w-0 break-words text-right" style={{ color: 'var(--color-navy-850)' }}>{children}</span>
     </div>
   );
 }
 
+/** UI copy for transition destinations (display only — the map stays in lib). */
+/** No state transitions back to CREATED, so it is not a possible destination. */
+type ActionDest = Exclude<WorkOrderState, 'CREATED'>;
+
+const ACTION_LABELS: Record<ActionDest, string> = {
+  OUT_FOR_QUOTES: 'Send RFQ',
+  QUOTES_IN: 'Mark Quotes In',
+  CONTRACTOR_ASSIGNED: 'Assign Contractor',
+  STARTED: 'Start Work',
+  COMPLETE: 'Mark Complete',
+  INVOICED: 'Mark Invoiced',
+  FINISHED: 'Finish (payment made)',
+  CLOSED: 'Close Work Order',
+};
+
+const ACTION_ICONS: Record<Exclude<WorkOrderState, 'CREATED'>, React.ComponentType<{ className?: string }>> = {
+  OUT_FOR_QUOTES: Send,
+  QUOTES_IN: Mail,
+  CONTRACTOR_ASSIGNED: UserCheck,
+  STARTED: Play,
+  COMPLETE: CheckCircle2,
+  INVOICED: CheckCircle2,
+  FINISHED: CheckCircle2,
+  CLOSED: XCircle,
+};
+
+/** One-line confirm copy for the simple (no-dialog-option) transitions. */
+const CONFIRM_TEXT: Partial<Record<WorkOrderState, (d: WorkOrderDetail) => string>> = {
+  QUOTES_IN: (d) => `Mark quotations as received for ${d.description}? You can then assign a contractor.`,
+  STARTED: (_d) => 'Start work? The assigned contractor will be notified.',
+  COMPLETE: () => 'Confirm the work is finished? The work order moves to billing.',
+  INVOICED: (d) => `${d.invoice ? `Invoice ${workOrderDate(d.invoice.dueDate)} recorded. ` : ''}Mark this work order as invoiced?`,
+};
+
 /**
- * Super-admin work order detail. The full state-machine UI lands incrementally
- * (action bar, RFQ/assign dialogs, notes; quotation + invoice panels in Plans 2–3);
- * every action is derived from the shared WORK_ORDER_TRANSITIONS map so the page
- * cannot offer a hop the service would reject.
+ * Super-admin work order detail. Every action button is derived from the shared
+ * WORK_ORDER_TRANSITIONS map (lib/work-order-state) — illegal states render no
+ * affordance, so the UI cannot ask for a hop the service would 409.
  */
 export default function WorkOrderDetailClient({ id }: { id: string }) {
   const [detail, setDetail] = useState<WorkOrderDetail | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const abortRef = useRef<AbortController | null>(null);
+
+  // Transition in flight — disables the whole action bar while a POST settles.
+  const [busyTo, setBusyTo] = useState<ActionDest | null>(null);
+  // Simple confirm dialog ("Start work on …?").
+  const [confirmTo, setConfirmTo] = useState<ActionDest | null>(null);
+  // Dedicated option dialogs (bodies land in Tasks 4–5).
+  const [rfqOpen, setRfqOpen] = useState(false);
+  const [assignOpen, setAssignOpen] = useState(false);
 
   const load = useCallback(async () => {
     abortRef.current?.abort();
@@ -81,6 +123,66 @@ export default function WorkOrderDetailClient({ id }: { id: string }) {
     return () => clearTimeout(timer);
   }, [error]);
 
+  /** Shared transition submit — refetches the full detail on success (quotes,
+   * invoice and state may all have changed server-side). */
+  const runTransition = async (to: ActionDest, payload: Record<string, unknown>) => {
+    setBusyTo(to);
+    try {
+      const res = await fetch(`/api/admin/work-orders/${id}/transition`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ to, ...payload }),
+      });
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}));
+        throw new Error(data.error || 'Transition failed');
+      }
+      // Closing the option dialogs; simpleConfirmTo already closes on confirm.
+      setRfqOpen(false);
+      setAssignOpen(false);
+      await load();
+    } catch (err) {
+      const message = err instanceof Error ? err.message : 'Transition failed';
+      console.error('Work order transition failed:', err);
+      logClientError(message, 'work-order-detail', 'transition');
+      setError(message);
+    } finally {
+      setBusyTo(null);
+    }
+  };
+
+  const handleAction = (to: ActionDest) => {
+    if (!detail || busyTo) return;
+    switch (to) {
+      case 'OUT_FOR_QUOTES':
+        setRfqOpen(true);
+        break;
+      case 'CONTRACTOR_ASSIGNED':
+        setAssignOpen(true);
+        break;
+      case 'FINISHED':
+        // Payment confirmation dialog.
+        setConfirmTo('FINISHED');
+        break;
+      default:
+        setConfirmTo(to);
+    }
+  };
+
+  const confirmMessage = (to: ActionDest): string => {
+    if (!detail) return '';
+    switch (to) {
+      case 'CLOSED':
+        return `Close this work order early? Open quotations will be closed and no further state changes are possible.`;
+      case 'FINISHED':
+        return `Confirm payment has been made and finish ${detail.description}? A receipt is emailed to the contractor. The work order is finished — no further changes are possible.`;
+      default: {
+        const fn = CONFIRM_TEXT[to];
+        return fn ? fn(detail) : `Move this work order to ${ACTION_LABELS[to]}?`;
+      }
+    }
+  };
+
   if (loading && !detail) {
     return <PageSkeleton rows={6} cols={4} />;
   }
@@ -100,6 +202,19 @@ export default function WorkOrderDetailClient({ id }: { id: string }) {
 
   const now = Date.now();
   const quotesOverdue = isQuoteOverdue(detail, now);
+
+  // Action set computed from the fetched state (not a client-side duplicate).
+  // No transition target is ever CREATED, so narrowing once here is safe.
+  let actions: Array<{ to: ActionDest; label: string }> = WORK_ORDER_TRANSITIONS[detail.state].map((to) => {
+    const dest = to as ActionDest;
+    return { to: dest, label: ACTION_LABELS[dest] };
+  });
+  // The service requires a recorded invoice for COMPLETE → INVOICED; hiding the
+  // button avoids a guaranteed 409 (the record form lands in Plan 3).
+  if (!detail.invoice) actions = actions.filter((a) => a.to !== 'INVOICED');
+  // Primary styling: the last listed transition is the state's forward step,
+  // except Close — it keeps the neutral danger-confirm style of incumbents.
+  const primaryTo = actions.length ? (actions[actions.length - 1].to === 'CLOSED' && actions.length > 1 ? null : actions[actions.length - 1].to) : null;
 
   return (
     <div className="space-y-6">
@@ -130,6 +245,32 @@ export default function WorkOrderDetailClient({ id }: { id: string }) {
         </div>
         <p className="mt-1 break-words text-sm" style={{ color: 'var(--color-slate-500)' }}>{detail.description}</p>
       </div>
+
+      {/* Action bar — derived from WORK_ORDER_TRANSITIONS[detail.state] */}
+      {actions.length > 0 && (
+        <div className="flex flex-wrap items-center gap-3">
+          {actions.map((a) => {
+            const Icon = ACTION_ICONS[a.to];
+            const isPrimary = a.to === primaryTo;
+            return (
+              <button
+                key={a.to}
+                onClick={() => handleAction(a.to)}
+                disabled={busyTo !== null}
+                className={`inline-flex items-center gap-1.5 rounded border px-3 py-2 text-sm font-medium transition-colors disabled:opacity-50 ${
+                  isPrimary ? 'border-transparent text-accent-ink hover:opacity-90' : 'hover:bg-slate-50'
+                }`}
+                style={isPrimary
+                  ? { backgroundColor: 'var(--color-accent)', borderColor: 'var(--color-accent)' }
+                  : { borderColor: 'var(--color-slate-200)', color: 'var(--color-navy-850)' }}
+              >
+                <Icon className="h-4 w-4" />
+                {busyTo === a.to ? `${a.label}…` : a.label}
+              </button>
+            );
+          })}
+        </div>
+      )}
 
       {/* Meta */}
       <SectionCard title="Details">
@@ -162,6 +303,39 @@ export default function WorkOrderDetailClient({ id }: { id: string }) {
       <SectionCard title="Invoice">
         <p className="py-1 text-sm text-slate-400">Invoice recording lands in Plan 3.</p>
       </SectionCard>
+
+      {/* Simple transition confirm (Start / Complete / Invoiced / Payment) */}
+      {confirmTo && (
+        <ConfirmDialog
+          isOpen
+          onClose={() => !busyTo && setConfirmTo(null)}
+          onConfirm={() => runTransition(confirmTo, confirmTo === 'FINISHED' ? { paid: true } : {})}
+          title={ACTION_LABELS[confirmTo]}
+          message={confirmMessage(confirmTo)}
+          confirmLabel={busyTo ? `${ACTION_LABELS[confirmTo]}…` : ACTION_LABELS[confirmTo]}
+          variant={confirmTo === 'CLOSED' ? 'danger' : 'default'}
+        />
+      )}
+
+      {/* Send-RFQ dialog (contractor multi-select + due date — Task 4) */}
+      <Modal isOpen={rfqOpen} onClose={() => !busyTo && setRfqOpen(false)} title="Send RFQ">
+        <p className="text-sm" style={{ color: 'var(--color-slate-500)' }}>Select the contractors to invite and a quotation deadline.</p>
+        <div className="flex justify-end gap-3 pt-4">
+          <button onClick={() => setRfqOpen(false)} disabled={busyTo !== null} className="rounded border px-4 py-2 text-sm font-medium transition-colors hover:bg-slate-50" style={{ borderColor: 'var(--color-slate-200)', color: 'var(--color-navy-850)' }}>
+            Cancel
+          </button>
+        </div>
+      </Modal>
+
+      {/* Assign-contractor dialog (quote comparison — Task 5) */}
+      <Modal isOpen={assignOpen} onClose={() => !busyTo && setAssignOpen(false)} title="Assign Contractor">
+        <p className="text-sm" style={{ color: 'var(--color-slate-500)' }}>Choose one received quotation — the chosen contractor is accepted, all others rejected.</p>
+        <div className="flex justify-end gap-3 pt-4">
+          <button onClick={() => setAssignOpen(false)} disabled={busyTo !== null} className="rounded border px-4 py-2 text-sm font-medium transition-colors hover:bg-slate-50" style={{ borderColor: 'var(--color-slate-200)', color: 'var(--color-navy-850)' }}>
+            Cancel
+          </button>
+        </div>
+      </Modal>
     </div>
   );
 }
