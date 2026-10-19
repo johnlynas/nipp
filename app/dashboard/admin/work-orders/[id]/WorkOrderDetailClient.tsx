@@ -248,8 +248,12 @@ export default function WorkOrderDetailClient({ id }: { id: string }) {
     switch (to) {
       case 'CLOSED':
         return `Close this work order early? Open quotations will be closed and no further state changes are possible.`;
-      case 'FINISHED':
-        return `Confirm payment has been made and finish ${detail.description}? A receipt is emailed to the contractor. The work order is finished — no further changes are possible.`;
+      case 'FINISHED': {
+        // Payment confirmation must name the amount and the payee (billing tail).
+        const amount = detail.invoice ? workOrderMoney(detail.invoice.price) : null;
+        const payee = detail.assignedContractor?.companyName ?? detail.contractorId ?? 'the contractor';
+        return `Payment of ${amount ?? 'the recorded invoice'} has been made to ${payee}. This closes the work order permanently — no further changes are possible.`;
+      }
       default: {
         const fn = CONFIRM_TEXT[to];
         return fn ? fn(detail) : `Move this work order to ${ACTION_LABELS[to]}?`;

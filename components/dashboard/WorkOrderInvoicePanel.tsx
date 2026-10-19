@@ -144,8 +144,6 @@ export function WorkOrderInvoicePanel({ detail, disabled = false, load, onFailed
               Invoice recorded — use Mark Invoiced above to advance the work order.
             </p>
           )}
-
-          {/* Plan 3 task 2+: record form zone lives here when there is no invoice (COMPLETE). */}
         </div>
       ) : showCreateForm ? (
         <div className="max-w-md space-y-4">
