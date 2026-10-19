@@ -8,12 +8,16 @@ import { PageSkeleton } from '@/components/dashboard/PageSkeleton';
 import { Modal } from '@/components/dashboard/Modal';
 import { ConfirmDialog } from '@/components/dashboard/ConfirmDialog';
 import { MultiSelect } from '@/components/dashboard/MultiSelect';
+import { QuoteTable } from '@/components/dashboard/QuoteTable';
 import { WorkOrderStateBadge } from '@/components/dashboard/WorkOrderStateBadge';
 import { WORK_ORDER_TRANSITIONS, type WorkOrderState } from '@/lib/work-order-state';
 import {
   type WorkOrderDetail,
+  type WorkOrderQuote,
   workOrderDate,
+  workOrderMoney,
   isQuoteOverdue,
+  quoteStateMeta,
   toLocalInputDate,
   localInputDateToIso,
 } from '@/components/dashboard/work-order-shared';
@@ -133,6 +137,15 @@ export default function WorkOrderDetailClient({ id }: { id: string }) {
     setRfqContractorIds([]);
   };
 
+  // Assign dialog — one quote selected for acceptance (server accepts it and
+  // rejects/closes the rest).
+  const [assignQuoteId, setAssignQuoteId] = useState<string | null>(null);
+
+  const closeAssignDialog = () => {
+    setAssignOpen(false);
+    setAssignQuoteId(null);
+  };
+
   const load = useCallback(async () => {
     abortRef.current?.abort();
     abortRef.current = new AbortController();
@@ -199,6 +212,11 @@ export default function WorkOrderDetailClient({ id }: { id: string }) {
       contractorIds: rfqContractorIds,
       quotesDue: localInputDateToIso(rfqDue).toISOString(),
     });
+  };
+
+  const handleAssignSubmit = () => {
+    if (!detail || !assignQuoteId) return;
+    runTransition('CONTRACTOR_ASSIGNED', { quoteId: assignQuoteId });
   };
 
   const handleAction = (to: ActionDest) => {
@@ -427,13 +445,50 @@ export default function WorkOrderDetailClient({ id }: { id: string }) {
         </div>
       </Modal>
 
-      {/* Assign-contractor dialog (quote comparison — Task 5) */}
-      <Modal isOpen={assignOpen} onClose={() => !busyTo && setAssignOpen(false)} title="Assign Contractor">
-        <p className="text-sm" style={{ color: 'var(--color-slate-500)' }}>Choose one received quotation — the chosen contractor is accepted, all others rejected.</p>
-        <div className="flex justify-end gap-3 pt-4">
-          <button onClick={() => setAssignOpen(false)} disabled={busyTo !== null} className="rounded border px-4 py-2 text-sm font-medium transition-colors hover:bg-slate-50" style={{ borderColor: 'var(--color-slate-200)', color: 'var(--color-navy-850)' }}>
-            Cancel
-          </button>
+      {/* Assign-contractor dialog — quote comparison, one accepted */}
+      <Modal isOpen={assignOpen} onClose={closeAssignDialog} title="Assign Contractor" size="lg">
+        <div className="space-y-4">
+          <p className="text-sm" style={{ color: 'var(--color-slate-500)' }}>
+            Choose one received quotation — the chosen contractor is accepted, all others rejected.
+          </p>
+
+          {detail.quotes.length === 0 ? (
+            <p className="py-4 text-sm" style={{ color: 'var(--color-slate-500)' }}>
+              No quotations have been recorded yet — send an RFQ to invite contractors, or close this work order.
+            </p>
+          ) : (() => {
+            const eligible = detail.quotes.filter((q) => q.price !== null && (q.state === 'OPENED' || q.state === 'ACCEPTED'));
+            return (
+              <>
+                <QuoteTable quotes={detail.quotes} selectedQuoteId={assignQuoteId} onSelect={setAssignQuoteId} />
+                {eligible.length === 0 && (
+                  <p className="text-sm" style={{ color: 'var(--color-slate-500)' }}>
+                    Quotations are out{detail.quotesDue ? ` at ${workOrderDate(detail.quotesDue)}` : ''} — no priced quotation has been recorded yet. Once a price is on file the row becomes selectable here; quote entry ships with the quotations panel.
+                  </p>
+                )}
+              </>
+            );
+          })()}
+
+          {detail.quotes.length > 0 && (
+            <p className="text-xs" style={{ color: 'var(--color-slate-500)' }}>
+              The chosen contractor will be notified by email; other quotations are marked rejected.
+            </p>
+          )}
+
+          <div className="flex justify-end gap-3 pt-2">
+            <button onClick={closeAssignDialog} disabled={busyTo !== null} className="rounded border px-4 py-2 text-sm font-medium transition-colors hover:bg-slate-50" style={{ borderColor: 'var(--color-slate-200)', color: 'var(--color-navy-850)' }}>
+              Cancel
+            </button>
+            <button
+              onClick={handleAssignSubmit}
+              disabled={busyTo !== null || !assignQuoteId}
+              className="rounded px-4 py-2 text-sm font-medium text-accent-ink transition-colors hover:opacity-90 disabled:opacity-50"
+              style={{ backgroundColor: 'var(--color-accent)' }}
+            >
+              {busyTo === 'CONTRACTOR_ASSIGNED' ? 'Assigning…' : 'Assign Contractor'}
+            </button>
+          </div>
         </div>
       </Modal>
     </div>
