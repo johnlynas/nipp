@@ -15,6 +15,7 @@
 
 import { Prisma, WorkOrder, WorkOrderState } from '@prisma/client';
 import tenantDb from '@/lib/tenant-db';
+import * as workOrderState from '@/lib/work-order-state';
 import { logger } from '@/lib/logger';
 import {
   ServiceContext,
@@ -31,31 +32,11 @@ import {
 // Phase 4 frontend imports the serializable WORK_ORDER_TRANSITIONS map)
 // ---------------------------------------------------------------------------
 
-/** Valid work order state values — mirrors the Prisma WorkOrderState enum. */
-export const WORK_ORDER_STATES = [
-  'CREATED',
-  'OUT_FOR_QUOTES',
-  'QUOTES_IN',
-  'CONTRACTOR_ASSIGNED',
-  'STARTED',
-  'COMPLETE',
-  'INVOICED',
-  'FINISHED',
-  'CLOSED',
-] as const;
-
-/** State machine: legal one-hop transitions (design doc §State Machine). */
-export const WORK_ORDER_TRANSITIONS: Record<WorkOrderState, WorkOrderState[]> = {
-  CREATED: ['OUT_FOR_QUOTES', 'CLOSED'],
-  OUT_FOR_QUOTES: ['QUOTES_IN', 'CONTRACTOR_ASSIGNED', 'CLOSED'],
-  QUOTES_IN: ['CONTRACTOR_ASSIGNED', 'CLOSED'],
-  CONTRACTOR_ASSIGNED: ['STARTED'],
-  STARTED: ['COMPLETE'],
-  COMPLETE: ['INVOICED'],
-  INVOICED: ['FINISHED'],
-  FINISHED: [],
-  CLOSED: [],
-};
+// Single source of truth lives in lib/work-order-state.ts (dependency-free so
+// client components import the SAME map — Phase 4). Re-exported here for the
+// server-side importers (routes, tests) which already take this path.
+export const WORK_ORDER_STATES = workOrderState.WORK_ORDER_STATES;
+export const WORK_ORDER_TRANSITIONS = workOrderState.WORK_ORDER_TRANSITIONS;
 
 const DEFAULT_QUOTES_DUE_DAYS = 7;
 

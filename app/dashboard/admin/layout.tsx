@@ -3,7 +3,7 @@
 import { useState, useEffect, useMemo } from 'react';
 import { useRouter, usePathname } from 'next/navigation';
 import Link from 'next/link';
-import { Menu, X, ChevronDown, UserRound, Building2, UsersRound, Houses, Drill, Shield, Key, Layers, LogOut, CalendarDays, Bell, XCircle, HeartPulse, ChartNoAxesCombined, ScrollText, Network, FileSearch, TerminalSquare, Map as MapIcon } from 'lucide-react';
+import { Menu, X, ChevronDown, UserRound, Building2, UsersRound, Houses, Drill, Shield, Key, Layers, LogOut, CalendarDays, Bell, XCircle, HeartPulse, ChartNoAxesCombined, ScrollText, Network, FileSearch, TerminalSquare, Map as MapIcon, ClipboardList } from 'lucide-react';
 import { authClient } from '@/lib/auth-client';
 import { RequireSuperAdmin } from '@/components/auth/RequireSuperAdmin';
 import { useNotifications, PRIORITY_COLORS, getPriorityIcon } from '@/hooks/useNotifications';
@@ -22,6 +22,7 @@ const navGroups: NavGroup[] = [
       { href: '/dashboard/admin/teams', label: 'Teams', icon: UsersRound },
       { href: '/dashboard/admin/units', label: 'Units', icon: Houses },
       { href: '/dashboard/admin/contractors', label: 'Contractors', icon: Drill },
+      { href: '/dashboard/admin/work-orders', label: 'Work Orders', icon: ClipboardList },
     ],
   },
   {

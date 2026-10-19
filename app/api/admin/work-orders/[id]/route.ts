@@ -48,15 +48,34 @@ export async function GET(
     return NextResponse.json({ error: 'Work order not found' }, { status: 404 });
   }
 
+  // Org name for the detail header (platform read — all orgs visible).
+  const org = await withPlatformContext(adminUserId, () =>
+    tenantDb.organization.findUnique({ where: { id: organizationId }, select: { name: true } }),
+  );
+
   try {
     return await withTenantAdminContext(adminUserId, organizationId, async () => {
       const workOrder = await WorkOrderService.getById(id, adminCtx(adminUserId));
       const [notes, quotes, invoice] = await Promise.all([
         tenantDb.workOrderNote.findMany({ where: { workOrderId: id }, orderBy: { createdAt: 'asc' } }),
-        tenantDb.quotation.findMany({ where: { workOrderId: id }, orderBy: { price: 'asc' } }),
-        tenantDb.invoice.findUnique({ where: { workOrderId: id } }),
+        tenantDb.quotation.findMany({
+          where: { workOrderId: id },
+          include: { contractor: { select: { name: true, companyName: true, email: true, phone: true, type: true } } },
+          orderBy: { price: 'asc' },
+        }),
+        tenantDb.invoice.findUnique({
+          where: { workOrderId: id },
+          include: { contractor: { select: { name: true, companyName: true, email: true, phone: true } } },
+        }),
       ]);
-      return NextResponse.json({ ...workOrder, notes, quotes, invoice });
+      // Assigned contractor record (join for the detail header; null pre-assignment).
+      const assignedContractor = workOrder.contractorId
+        ? await tenantDb.contractors.findUnique({
+            where: { contractorId: workOrder.contractorId },
+            select: { name: true, companyName: true, email: true, phone: true },
+          })
+        : null;
+      return NextResponse.json({ ...workOrder, organizationName: org?.name ?? null, notes, quotes, invoice, assignedContractor });
     });
   } catch (error) {
     return handleServiceError(error);
