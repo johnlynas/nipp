@@ -3,7 +3,7 @@
  */
 
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { QuotationService, type CreateQuotationInput } from '@/services/quote-service';
+import { QuotationService, type CreateQuotationInput, QUOTE_STATES } from '@/services/quote-service';
 import { ServiceContext, ForbiddenError, NotFoundError, ValidationError, ConflictError } from '@/lib/services/types';
 
 const { tx } = vi.hoisted(() => ({
@@ -14,6 +14,8 @@ const { tx } = vi.hoisted(() => ({
       create: vi.fn(),
       update: vi.fn(),
       delete: vi.fn(),
+      findMany: vi.fn(),
+      count: vi.fn(),
     },
     contractors: {
       findUnique: vi.fn(),
@@ -213,6 +215,70 @@ describe('QuotationService', () => {
     it('throws NotFound when the quote row does not exist', async () => {
       db.quotation.findUnique.mockResolvedValue(null);
       await expect(QuotationService.delete('missing', ctx('PLATFORM_ADMIN'))).rejects.toThrow(NotFoundError);
+    });
+  });
+
+  describe('list (admin + tenant reads)', () => {
+    it('returns a paginated slice with contractor + work order joins', async () => {
+      const rows = [quoteRow({ contractor: { name: 'Pat Byrne', companyName: 'Byrne Electrical Ltd' }, workOrder: { description: 'Boiler repair', state: 'OUT_FOR_QUOTES' } })];
+      db.quotation.findMany.mockResolvedValue(rows);
+      db.quotation.count.mockResolvedValue(17);
+
+      const result = await QuotationService.list({ search: undefined }, { page: 2, pageSize: 8 }, ctx('PLATFORM_ADMIN'));
+
+      expect(result.items).toHaveLength(1);
+      expect(result.pagination).toEqual({ page: 2, pageSize: 8, total: 17, totalPages: 3 });
+      // Pagination math reaches the query (skip = (page-1)*pageSize).
+      const args = db.quotation.findMany.mock.calls[0][0] as { skip: number; take: number };
+      expect(args.skip).toBe(8);
+      expect(args.take).toBe(8);
+    });
+
+    it('maps every filter onto the Prisma where clause (incl. nested contractor relation)', async () => {
+      db.quotation.findMany.mockResolvedValue([]);
+      db.quotation.count.mockResolvedValue(0);
+
+      await QuotationService.list(
+        { organizationId: 'org-1', workOrderId: 'wo-1', contractorId: 'c-1', state: 'ACCEPTED' },
+        {},
+        ctx('MEMBER', 'org-1'),
+      );
+
+      const where = (db.quotation.findMany.mock.calls[0][0] as { where: Record<string, unknown> }).where;
+      expect(where).toMatchObject({ organizationId: 'org-1', workOrderId: 'wo-1', contractorId: 'c-1', state: 'ACCEPTED' });
+    });
+
+    it('search fans out across contractor name/company, work order description and quote breakdown', async () => {
+      db.quotation.findMany.mockResolvedValue([]);
+      db.quotation.count.mockResolvedValue(0);
+
+      await QuotationService.list({ search: '  byrne  ' }, {}, ctx('PLATFORM_ADMIN'));
+
+      const where = (db.quotation.findMany.mock.calls[0][0] as { where: Record<string, unknown> }).where;
+      const ors = (where.OR as Array<Record<string, unknown>>) ?? [];
+      expect(ors).toHaveLength(4);
+      expect(ors[0]).toEqual({ contractor: { name: { contains: 'byrne', mode: 'insensitive' } } });
+      expect(ors[1]).toEqual({ contractor: { companyName: { contains: 'byrne', mode: 'insensitive' } } });
+    });
+
+    it('rejects an unknown quote state (400-class, not a silent drop)', async () => {
+      await expect(
+        QuotationService.list({ state: 'PENDING' as never }, {}, ctx('PLATFORM_ADMIN')),
+      ).rejects.toThrow(ValidationError);
+      expect(db.quotation.findMany).not.toHaveBeenCalled();
+    });
+
+    it('does not require super-admin for reads (RLS decides visibility at the route)', async () => {
+      db.quotation.findMany.mockResolvedValue([]);
+      db.quotation.count.mockResolvedValue(0);
+      await expect(QuotationService.list({}, {}, ctx('MEMBER', 'org-1'))).resolves.toEqual({
+        items: [],
+        pagination: { page: 1, pageSize: 20, total: 0, totalPages: 0 },
+      });
+    });
+
+    it('exports the Prisma enum mirror as QUOTE_STATES', () => {
+      expect(QUOTE_STATES).toEqual(['OPENED', 'ACCEPTED', 'REJECTED', 'CLOSED']);
     });
   });
 });

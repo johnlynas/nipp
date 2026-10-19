@@ -3,7 +3,7 @@
 import { useState, useMemo } from 'react';
 import { usePathname } from 'next/navigation';
 import Link from 'next/link';
-import { Menu, X, LogOut, CalendarDays, Network, UsersRound, Shield, Building2, XCircle, MapPin, ClipboardList } from 'lucide-react';
+import { Menu, X, LogOut, CalendarDays, Network, UsersRound, Shield, Building2, XCircle, MapPin, ClipboardList, FileText } from 'lucide-react';
 import { authClient } from '@/lib/auth-client';
 import { useNotifications, PRIORITY_COLORS, getPriorityIcon } from '@/hooks/useNotifications';
 import { TopBarNotificationBell } from '@/components/dashboard/TopBarNotificationBell';
@@ -34,7 +34,10 @@ const navGroups: NavGroup[] = [
   },
   {
     label: 'Work Orders',
-    items: [{ href: '/dashboard/tenant/work-orders', label: 'Work Orders', icon: ClipboardList }],
+    items: [
+      { href: '/dashboard/tenant/work-orders', label: 'Work Orders', icon: ClipboardList },
+      { href: '/dashboard/tenant/quotes', label: 'Quotations', icon: FileText },
+    ],
   },
 ];
 

@@ -18,10 +18,14 @@ import {
   NotFoundError,
   ValidationError,
   ConflictError,
+  PaginatedResult,
+  normalizePagination,
 } from '@/lib/services/types';
 
 /** Work order states that may solicit (create) new quotes. */
-const QUOTABLE_STATES: readonly string[] = ['CREATED', 'OUT_FOR_QUOTES', 'QUOTES_IN'];
+export const QUOTABLE_WORK_ORDER_STATES: readonly string[] = ['CREATED', 'OUT_FOR_QUOTES', 'QUOTES_IN'];
+/** Quotation lifecycle — mirrors the Prisma QuotationState enum (single source). */
+export const QUOTE_STATES = ['OPENED', 'ACCEPTED', 'REJECTED', 'CLOSED'] as const;
 /** Work order states after which a quote row is immutable-on-delete (409). */
 const DELETE_BLOCKED_STATES: readonly string[] = ['INVOICED', 'FINISHED', 'CLOSED'];
 
@@ -36,6 +40,39 @@ export interface UpdateQuotationInput {
   price?: number | string | null;
   description?: string | null;
   quoteLink?: string | null;
+}
+
+/** Filters for QuotationService.list (used by both admin + tenant read routes). */
+export interface QuotationListFilters {
+  organizationId?: string;
+  workOrderId?: string;
+  contractorId?: string;
+  state?: (typeof QUOTE_STATES)[number];
+  search?: string;
+}
+
+/** Translate filters into a Prisma where clause — shared by list() + route-side count queries. */
+export function buildQuotationWhere(filters: QuotationListFilters): Prisma.QuotationWhereInput {
+  const where: Prisma.QuotationWhereInput = {};
+  if (filters.organizationId !== undefined) where.organizationId = filters.organizationId;
+  if (filters.workOrderId !== undefined) where.workOrderId = filters.workOrderId;
+  if (filters.contractorId !== undefined) where.contractorId = filters.contractorId;
+  if (filters.state !== undefined) {
+    if (!(QUOTE_STATES as readonly string[]).includes(filters.state)) {
+      throw new ValidationError(`state must be one of: ${QUOTE_STATES.join(', ')}`);
+    }
+    where.state = filters.state;
+  }
+  if (filters.search) {
+    const q = filters.search.trim();
+    where.OR = [
+      { contractor: { name: { contains: q, mode: 'insensitive' } } },
+      { contractor: { companyName: { contains: q, mode: 'insensitive' } } },
+      { workOrder: { description: { contains: q, mode: 'insensitive' } } },
+      { description: { contains: q, mode: 'insensitive' } },
+    ];
+  }
+  return where;
 }
 
 // Neutral ctx for read-only parent/consistency lookups: the ROUTE runs under
@@ -66,7 +103,7 @@ export const QuotationService = {
 
     // Parent checks: work order exists (404) and is in a quotable state.
     const workOrder = await WorkOrderService.getById(data.workOrderId, READ_CTX);
-    if (!QUOTABLE_STATES.includes(workOrder.state)) {
+    if (!QUOTABLE_WORK_ORDER_STATES.includes(workOrder.state)) {
       throw new ValidationError(`Quotations cannot be opened on a ${workOrder.state} work order`);
     }
 
@@ -99,6 +136,34 @@ export const QuotationService = {
       'Quotation opened',
     );
     return quote;
+  },
+
+  /**
+   * Paginated quote list for admin + tenant read surfaces. Reads only —
+   * visibility is decided by the RLS context the route establishes (tenant
+   * org for members, platform for super admins), so this method enforces no
+   * extra auth. Joins contractor + parent work order (description/state) so
+   * one fetch renders the table; search matches contractor name/company,
+   * work order description and quote breakdown.
+   */
+  async list(
+    filters: QuotationListFilters = {},
+    paginationInput: { page?: number; pageSize?: number } = {},
+    _ctx: ServiceContext,
+  ): Promise<PaginatedResult<Quotation & { contractor: { name: string; companyName: string }; workOrder: { description: string; state: string } }>> {
+    const { page, pageSize } = normalizePagination(paginationInput);
+    const skip = (page - 1) * pageSize;
+
+    const where = buildQuotationWhere(filters);
+
+    const include = { contractor: { select: { name: true, companyName: true } }, workOrder: { select: { description: true, state: true } } };
+
+    const [rows, total] = await Promise.all([
+      tenantDb.quotation.findMany({ where, skip, take: pageSize, include, orderBy: { createdAt: 'desc', quoteId: 'asc' } }),
+      tenantDb.quotation.count({ where }),
+    ]);
+
+    return { items: rows, pagination: { page, pageSize, total, totalPages: Math.ceil(total / pageSize) } };
   },
 
   /**
