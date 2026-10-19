@@ -11,12 +11,33 @@
  */
 
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { render, screen, cleanup } from '@testing-library/react';
+import { render, screen, fireEvent, waitFor, cleanup } from '@testing-library/react';
 import { WorkOrderInvoicePanel } from '@/components/dashboard/WorkOrderInvoicePanel';
-import type { WorkOrderDetail, WorkOrderInvoice, WorkOrderStateValue } from '@/components/dashboard/work-order-shared';
+import { toLocalInputDate, type WorkOrderDetail, type WorkOrderInvoice, type WorkOrderStateValue } from '@/components/dashboard/work-order-shared';
 
 const now = Date.now();
 const iso = (offsetDays: number): string => new Date(now + offsetDays * 86400_000).toISOString();
+
+function callsWith(urlPart: string, method?: string): Array<{ body?: Record<string, unknown> }> {
+  const out: Array<{ body?: Record<string, unknown> }> = [];
+  for (const [u, i] of vi.mocked(fetch).mock.calls) {
+    if (String(u).includes(urlPart) && (!method || (i as RequestInit | undefined)?.method === method)) {
+      out.push({ body: i?.body ? JSON.parse(i.body as string) : undefined });
+    }
+  }
+  return out;
+}
+
+function json(status: number, payload: Record<string, unknown>, initMethod?: string): void {
+  vi.stubGlobal(
+    'fetch',
+    vi.fn(async (_input: RequestInfo | URL, reqInit?: RequestInit) => {
+      const method = reqInit?.method ?? 'GET';
+      if (initMethod && method === initMethod) return new Response(JSON.stringify(payload), { status });
+      return new Response('{}', { status: 404 });
+    }),
+  );
+}
 
 function baseInvoice(overrides: Partial<WorkOrderInvoice> = {}): WorkOrderInvoice {
   return {
@@ -139,6 +160,132 @@ describe('WorkOrderInvoicePanel — overdue + link treatment (incumbent vocabula
   it('omits the link row when no invoice link is set', () => {
     renderPanel(detail('INVOICED', { invoice: baseInvoice() }));
     expect(screen.queryByRole('link', { name: /view invoice/i })).toBeNull();
+  });
+});
+
+describe('WorkOrderInvoicePanel — record form (COMPLETE only)', () => {
+  function renderCreate(quotes: WorkOrderDetail['quotes'] = []) {
+    return renderPanel(
+      detail('COMPLETE', {
+        quotes,
+        assignedContractor: { name: 'Pat Byrne', companyName: 'Byrne Electrical Ltd' },
+      }),
+    );
+  }
+
+  it('renders the form zone with Price/Invoice date/Due date/link at COMPLETE and no invoice', () => {
+    renderCreate();
+    expect(screen.getByLabelText(/price/i)).toBeInTheDocument();
+    expect(screen.getByLabelText(/^invoice date$/i)).toBeInTheDocument();
+    expect(screen.getByLabelText(/due date/i)).toBeInTheDocument();
+    expect(screen.getByLabelText(/invoice link/i)).toBeInTheDocument();
+  });
+
+  it('hides the form in every other state (service gates create to COMPLETE)', () => {
+    for (const state of ['CREATED', 'OUT_FOR_QUOTES', 'QUOTES_IN', 'CONTRACTOR_ASSIGNED', 'STARTED'] as const) {
+      renderPanel(detail(state));
+      expect(screen.queryByRole('button', { name: /record invoice/i }), `${state}`).toBeNull();
+      cleanup();
+    }
+  });
+
+  it('prefills Price from the ACCEPTED quote and names the source, defaulting due date +14 days', () => {
+    renderCreate([{
+      quoteId: 'q-1',
+      workOrderId: 'wo-1',
+      contractorId: 'c-1',
+      quoteLink: null,
+      description: 'Labour + materials',
+      price: '2400.50',
+      dueDate: iso(-1),
+      state: 'ACCEPTED',
+      createdAt: iso(-20),
+      updatedAt: iso(-7),
+      contractor: { name: 'Pat Byrne', companyName: 'Byrne Electrical Ltd' },
+    }]);
+
+    expect(String((screen.getByLabelText(/price/i) as HTMLInputElement).value)).toBe('2400.5');
+    expect(screen.getByText(/from byrne electrical ltd’s accepted quote/i)).toBeInTheDocument();
+
+    // Due date defaults to today +14 days (local yyyy-mm-dd round-trip).
+    const expectedDue = toLocalInputDate(new Date(Date.now() + 14 * 86400_000));
+    expect((screen.getByLabelText(/due date/i) as HTMLInputElement).value).toBe(expectedDue);
+  });
+
+  it('disables Record Invoice until price > 0 and both dates are set', () => {
+    renderCreate();
+    const submit = screen.getByRole('button', { name: /record invoice/i }) as HTMLButtonElement;
+    expect(submit.disabled).toBe(true); // no price yet
+    fireEvent.change(screen.getByLabelText(/price/i), { target: { value: '100' } });
+    expect((screen.getByRole('button', { name: /record invoice/i }) as HTMLButtonElement).disabled).toBe(false);
+  });
+
+  it('POSTs the assigned contractor id and numeric price; omits an empty link key', async () => {
+    json(201, {}, 'POST');
+    const { load } = renderCreate();
+
+    fireEvent.change(screen.getByLabelText(/price/i), { target: { value: '950' } });
+    fireEvent.click(screen.getByRole('button', { name: /record invoice/i }));
+
+    await waitFor(() => {
+      const calls = callsWith('/api/admin/invoices', 'POST');
+      expect(calls).toHaveLength(1);
+      const body = calls[0].body!;
+      expect(body.workOrderId).toBe('wo-1');
+      expect(body.contractorId).toBe('c-1'); // always the assigned contractor — no picker
+      expect(body.price).toBe(950);
+      expect('invoiceLink' in body).toBe(false);
+      expect(String(body.invoiceDate)).toMatch(/^20\d{2}-\d{2}-\d{2}T12:00:00/); // local noon round-trip
+      expect(String(body.dueDate)).toMatch(/^20\d{2}-\d{2}-\d{2}T12:00:00/);
+    });
+    await waitFor(() => expect(load).toHaveBeenCalledTimes(1));
+  });
+
+  it('sends the trimmed link only when present', async () => {
+    json(201, {}, 'POST');
+    renderCreate();
+
+    fireEvent.change(screen.getByLabelText(/price/i), { target: { value: '950' } });
+    fireEvent.change(screen.getByLabelText(/invoice link/i), { target: { value: '  https://invoices.example/8  ' } });
+    fireEvent.click(screen.getByRole('button', { name: /record invoice/i }));
+
+    await waitFor(() => expect(callsWith('/api/admin/invoices', 'POST')[0]?.body?.invoiceLink).toBe('https://invoices.example/8'));
+  });
+
+  it('surfaces a 409 duplicate verbatim via onFailed and resyncs (load), keeping the form open', async () => {
+    json(409, { error: 'Invoice already exists for this work order' }, 'POST');
+    const { load, onFailed } = renderCreate();
+
+    fireEvent.change(screen.getByLabelText(/price/i), { target: { value: '950' } });
+    fireEvent.click(screen.getByRole('button', { name: /record invoice/i }));
+
+    await waitFor(() => expect(onFailed).toHaveBeenCalledWith('Invoice already exists for this work order'));
+    await waitFor(() => expect(load).toHaveBeenCalledTimes(1));
+    // Form stays open for retry — not collapsed.
+    expect(screen.getByRole('button', { name: /record invoice/i })).toBeInTheDocument();
+  });
+
+  it('surfaces a 422 state change verbatim and resyncs', async () => {
+    json(422, { error: 'Invoices can only be recorded for a COMPLETE work order (current: INVOICED)' }, 'POST');
+    const { load, onFailed } = renderCreate();
+
+    fireEvent.change(screen.getByLabelText(/price/i), { target: { value: '950' } });
+    fireEvent.click(screen.getByRole('button', { name: /record invoice/i }));
+
+    await waitFor(() => expect(onFailed).toHaveBeenCalledWith(expect.stringMatching(/current: INVOICED/)));
+    await waitFor(() => expect(load).toHaveBeenCalledTimes(1));
+  });
+
+  it('renders the muted note instead of a form when no contractor is assigned (defensive)', () => {
+    renderPanel(detail('COMPLETE', { contractorId: null, assignedContractor: null }));
+    expect(screen.getByText(/assign a contractor to record an invoice/i)).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /record invoice/i })).toBeNull();
+  });
+
+  it('never renders the form when terminal (disabled)', () => {
+    renderPanel(detail('FINISHED'));
+    expect(screen.queryByRole('button', { name: /record invoice/i })).toBeNull();
+    expect(screen.getByText(/no invoice recorded yet/i)).toBeInTheDocument();
   });
 });
 
