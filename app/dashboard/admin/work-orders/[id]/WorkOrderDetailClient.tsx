@@ -7,16 +7,19 @@ import { logClientError } from '@/lib/client-error-logger';
 import { PageSkeleton } from '@/components/dashboard/PageSkeleton';
 import { Modal } from '@/components/dashboard/Modal';
 import { ConfirmDialog } from '@/components/dashboard/ConfirmDialog';
+import { MultiSelect } from '@/components/dashboard/MultiSelect';
 import { WorkOrderStateBadge } from '@/components/dashboard/WorkOrderStateBadge';
 import { WORK_ORDER_TRANSITIONS, type WorkOrderState } from '@/lib/work-order-state';
 import {
   type WorkOrderDetail,
   workOrderDate,
   isQuoteOverdue,
+  toLocalInputDate,
+  localInputDateToIso,
 } from '@/components/dashboard/work-order-shared';
 
-const labelClass = 'mb-1 block text-sm font-medium';
-const labelStyle = { color: 'var(--color-navy-850)' } as const;
+const inputClass = 'w-full rounded border px-3 py-2 text-sm bg-white focus:outline-none';
+const inputStyle = { borderColor: 'var(--color-slate-200)', color: 'var(--color-navy-850)' } as const;
 
 /** Shared section shell — white card, slate rule, uppercase section heading. */
 function SectionCard({ title, children }: { title: string; children: React.ReactNode }) {
@@ -91,6 +94,45 @@ export default function WorkOrderDetailClient({ id }: { id: string }) {
   const [rfqOpen, setRfqOpen] = useState(false);
   const [assignOpen, setAssignOpen] = useState(false);
 
+  // Send-RFQ form — default deadline is +7 days (design D8: advisory, not enforced).
+  const [rfqContractorIds, setRfqContractorIds] = useState<string[]>([]);
+  const [rfqDue, setRfqDue] = useState(() => toLocalInputDate(new Date(Date.now() + 7 * 86400_000)));
+  // Contractor picker source — fetched lazily the first time the dialog opens.
+  const [contractorOptions, setContractorOptions] = useState<Array<{ id: string; label: string }>>([]);
+  const [contractorsLoading, setContractorsLoading] = useState(false);
+  const [contractorsError, setContractorsError] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!rfqOpen || contractorOptions.length > 0 || contractorsLoading) return;
+    let cancelled = false;
+    (async () => {
+      setContractorsLoading(true);
+      setContractorsError(null);
+      try {
+        const res = await fetch('/api/dashboard/admin/contractors?pageSize=100');
+        if (!res.ok) throw new Error('Could not load the contractor list');
+        const data = await res.json();
+        if (!cancelled) {
+          setContractorOptions((data.items || []).map((c: { contractorId: string; companyName: string; name: string }) => ({
+            id: c.contractorId,
+            label: `${c.companyName} — ${c.name}`,
+          })));
+        }
+      } catch (err) {
+        const message = err instanceof Error ? err.message : 'Could not load the contractor list';
+        if (!cancelled) setContractorsError(message);
+      } finally {
+        if (!cancelled) setContractorsLoading(false);
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [rfqOpen, contractorOptions.length, contractorsLoading]);
+
+  const closeRfqDialog = () => {
+    setRfqOpen(false);
+    setRfqContractorIds([]);
+  };
+
   const load = useCallback(async () => {
     abortRef.current?.abort();
     abortRef.current = new AbortController();
@@ -149,6 +191,14 @@ export default function WorkOrderDetailClient({ id }: { id: string }) {
     } finally {
       setBusyTo(null);
     }
+  };
+
+  const handleRfqSubmit = () => {
+    if (!detail || rfqContractorIds.length === 0) return;
+    runTransition('OUT_FOR_QUOTES', {
+      contractorIds: rfqContractorIds,
+      quotesDue: localInputDateToIso(rfqDue).toISOString(),
+    });
   };
 
   const handleAction = (to: ActionDest) => {
@@ -317,13 +367,63 @@ export default function WorkOrderDetailClient({ id }: { id: string }) {
         />
       )}
 
-      {/* Send-RFQ dialog (contractor multi-select + due date — Task 4) */}
-      <Modal isOpen={rfqOpen} onClose={() => !busyTo && setRfqOpen(false)} title="Send RFQ">
-        <p className="text-sm" style={{ color: 'var(--color-slate-500)' }}>Select the contractors to invite and a quotation deadline.</p>
-        <div className="flex justify-end gap-3 pt-4">
-          <button onClick={() => setRfqOpen(false)} disabled={busyTo !== null} className="rounded border px-4 py-2 text-sm font-medium transition-colors hover:bg-slate-50" style={{ borderColor: 'var(--color-slate-200)', color: 'var(--color-navy-850)' }}>
-            Cancel
-          </button>
+      {/* Send-RFQ dialog — contractor multi-select + due date */}
+      <Modal isOpen={rfqOpen} onClose={closeRfqDialog} title="Send RFQ" size="md">
+        <div className="space-y-4">
+          <p className="text-sm" style={{ color: 'var(--color-slate-500)' }}>
+            Select the contractors to invite and a quotation deadline.
+          </p>
+
+          {contractorsError ? (
+            <p className="rounded border border-danger-border bg-danger-tint p-3 text-sm text-danger-ink" role="alert">
+              {contractorsError}
+            </p>
+          ) : contractorsLoading ? (
+            <div className="h-[38px] animate-pulse rounded border px-3 py-2" style={{ borderColor: 'var(--color-slate-200)', backgroundColor: 'var(--color-canvas-subtle)' }} />
+          ) : (
+            <>
+              <div>
+                <label className="mb-1 block text-sm font-medium" style={{ color: 'var(--color-navy-850)' }}>Contractors</label>
+                <MultiSelect
+                  options={contractorOptions}
+                  selected={rfqContractorIds}
+                  onChange={setRfqContractorIds}
+                  placeholder={`Select contractors… (${rfqContractorIds.length} selected)`}
+                  searchPlaceholder="Search by company or name…"
+                  aria-label="Select contractors"
+                />
+              </div>
+              <div>
+                <label htmlFor="wo-rfq-due" className="mb-1 block text-sm font-medium" style={{ color: 'var(--color-navy-850)' }}>Quotes due</label>
+                <input
+                  id="wo-rfq-due"
+                  type="date"
+                  min={toLocalInputDate(new Date())}
+                  value={rfqDue}
+                  onChange={(e) => setRfqDue(e.target.value)}
+                  className={inputClass}
+                  style={inputStyle}
+                />
+              </div>
+              <p className="text-xs" style={{ color: 'var(--color-slate-500)' }}>
+                RFQ emails are sent to the selected contractors without portal links — they reply by phone or email. The deadline is advisory; work orders can be assigned at any time.
+              </p>
+            </>
+          )}
+
+          <div className="flex justify-end gap-3 pt-2">
+            <button onClick={closeRfqDialog} disabled={busyTo !== null} className="rounded border px-4 py-2 text-sm font-medium transition-colors hover:bg-slate-50" style={{ borderColor: 'var(--color-slate-200)', color: 'var(--color-navy-850)' }}>
+              Cancel
+            </button>
+            <button
+              onClick={handleRfqSubmit}
+              disabled={busyTo !== null || rfqContractorIds.length === 0 || contractorsLoading || !!contractorsError}
+              className="rounded px-4 py-2 text-sm font-medium text-accent-ink transition-colors hover:opacity-90 disabled:opacity-50"
+              style={{ backgroundColor: 'var(--color-accent)' }}
+            >
+              {busyTo === 'OUT_FOR_QUOTES' ? 'Sending…' : `Send RFQ to ${rfqContractorIds.length || ''} contractor${rfqContractorIds.length === 1 ? '' : 's'}`}
+            </button>
+          </div>
         </div>
       </Modal>
 
