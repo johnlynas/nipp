@@ -12,7 +12,7 @@ import { Modal } from '@/components/dashboard/Modal';
 import { ConfirmDialog } from '@/components/dashboard/ConfirmDialog';
 import { PaginationControls } from '@/components/admin/PaginationControls';
 import { quoteStateMeta, workOrderMoney, toLocalInputDate, localInputDateToIso } from '@/components/dashboard/work-order-shared';
-import { QUOTE_STATES, QUOTABLE_WORK_ORDER_STATES } from '@/services/quote-service';
+import { QUOTE_STATES, QUOTABLE_WORK_ORDER_STATES } from '@/lib/work-order-state';
 
 /** Quote row as returned by GET /api/admin/quotes (service list + org join). */
 interface QuoteRow {

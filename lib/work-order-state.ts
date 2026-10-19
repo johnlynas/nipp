@@ -39,6 +39,12 @@ export const WORK_ORDER_TRANSITIONS: Record<WorkOrderState, WorkOrderState[]> = 
 /** Terminal states — no notes, no further actions (design §State Machine). */
 export const WORK_ORDER_TERMINAL_STATES: WorkOrderState[] = ['FINISHED', 'CLOSED'];
 
+/** Quotation lifecycle — mirrors the Prisma QuotationState enum (single source). */
+export const QUOTE_STATES = ['OPENED', 'ACCEPTED', 'REJECTED', 'CLOSED'] as const;
+
+/** Work order states that may solicit (create) new quotes. */
+export const QUOTABLE_WORK_ORDER_STATES: readonly string[] = ['CREATED', 'OUT_FOR_QUOTES', 'QUOTES_IN'];
+
 /* ---------------------------------------------------------------------------
  * Presentation labels + state badge colors (incumbent token vocabulary)
  * ------------------------------------------------------------------------ */

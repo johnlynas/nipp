@@ -22,10 +22,17 @@ import {
   normalizePagination,
 } from '@/lib/services/types';
 
-/** Work order states that may solicit (create) new quotes. */
-export const QUOTABLE_WORK_ORDER_STATES: readonly string[] = ['CREATED', 'OUT_FOR_QUOTES', 'QUOTES_IN'];
+import {
+  QUOTE_STATES as SHARED_QUOTE_STATES,
+  QUOTABLE_WORK_ORDER_STATES as SHARED_QUOTABLE_WORK_ORDER_STATES,
+} from '@/lib/work-order-state';
+
+/** Work order states that may solicit (create) new quotes — re-exported from the
+ * dependency-free state lib so client code CAN import these constants WITHOUT
+ * pulling this server-only module (Prisma/logger) into its bundle. */
+export const QUOTABLE_WORK_ORDER_STATES: readonly string[] = SHARED_QUOTABLE_WORK_ORDER_STATES;
 /** Quotation lifecycle — mirrors the Prisma QuotationState enum (single source). */
-export const QUOTE_STATES = ['OPENED', 'ACCEPTED', 'REJECTED', 'CLOSED'] as const;
+export const QUOTE_STATES = SHARED_QUOTE_STATES;
 /** Work order states after which a quote row is immutable-on-delete (409). */
 const DELETE_BLOCKED_STATES: readonly string[] = ['INVOICED', 'FINISHED', 'CLOSED'];
 

@@ -9,7 +9,7 @@ import { DataTable } from '@/components/dashboard/DataTable';
 import { PageHeader } from '@/components/dashboard/PageHeader';
 import { PaginationControls } from '@/components/admin/PaginationControls';
 import { quoteStateMeta, workOrderMoney } from '@/components/dashboard/work-order-shared';
-import { QUOTE_STATES } from '@/services/quote-service';
+import { QUOTE_STATES } from '@/lib/work-order-state';
 
 /** Quote row as returned by GET /api/organizations/[orgId]/quotes (service list + joins). */
 interface QuoteRow {
