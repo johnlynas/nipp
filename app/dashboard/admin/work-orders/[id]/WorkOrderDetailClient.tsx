@@ -11,6 +11,7 @@ import { MultiSelect } from '@/components/dashboard/MultiSelect';
 import { QuoteTable } from '@/components/dashboard/QuoteTable';
 import { WorkOrderNotesPanel } from '@/components/dashboard/WorkOrderNotesPanel';
 import { WorkOrderQuotationsPanel } from '@/components/dashboard/WorkOrderQuotationsPanel';
+import { WorkOrderInvoicePanel } from '@/components/dashboard/WorkOrderInvoicePanel';
 import { WorkOrderStateBadge } from '@/components/dashboard/WorkOrderStateBadge';
 import { WORK_ORDER_TRANSITIONS, WORK_ORDER_TERMINAL_STATES, type WorkOrderState } from '@/lib/work-order-state';
 import {
@@ -390,9 +391,13 @@ export default function WorkOrderDetailClient({ id }: { id: string }) {
         onFailed={(msg) => { console.error(msg); logClientError(msg, 'work-order-detail', 'quotes'); setError(msg); }}
       />
 
-      <SectionCard title="Invoice">
-        <p className="py-1 text-sm text-slate-400">Invoice recording lands in Plan 3.</p>
-      </SectionCard>
+      {/* Invoice — billing tail (Plan 3); state-aware, terminal = read-only */}
+      <WorkOrderInvoicePanel
+        detail={detail}
+        disabled={WORK_ORDER_TERMINAL_STATES.includes(detail.state)}
+        load={load}
+        onFailed={(msg) => { console.error(msg); logClientError(msg, 'work-order-detail', 'invoice'); setError(msg); }}
+      />
 
       {/* Simple transition confirm (Start / Complete / Invoiced / Payment) */}
       {confirmTo && (
