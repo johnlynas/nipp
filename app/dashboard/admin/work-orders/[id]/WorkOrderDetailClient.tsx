@@ -10,6 +10,7 @@ import { ConfirmDialog } from '@/components/dashboard/ConfirmDialog';
 import { MultiSelect } from '@/components/dashboard/MultiSelect';
 import { QuoteTable } from '@/components/dashboard/QuoteTable';
 import { WorkOrderNotesPanel } from '@/components/dashboard/WorkOrderNotesPanel';
+import { WorkOrderQuotationsPanel } from '@/components/dashboard/WorkOrderQuotationsPanel';
 import { WorkOrderStateBadge } from '@/components/dashboard/WorkOrderStateBadge';
 import { WORK_ORDER_TRANSITIONS, WORK_ORDER_TERMINAL_STATES, type WorkOrderState } from '@/lib/work-order-state';
 import {
@@ -376,10 +377,15 @@ export default function WorkOrderDetailClient({ id }: { id: string }) {
         />
       </SectionCard>
 
-      {/* Quotation/invoice management in Plans 2–3 */}
-      <SectionCard title="Quotations">
-        <p className="py-1 text-sm text-slate-400">Quote entry lands in Plan 2.</p>
-      </SectionCard>
+      {/* Quotations — comparison table, inline row editing (Plan 2) */}
+      <WorkOrderQuotationsPanel
+        workOrderId={detail.workOrderId}
+        quotes={detail.quotes}
+        workOrderState={detail.state}
+        disabled={WORK_ORDER_TERMINAL_STATES.includes(detail.state)}
+        refetch={load}
+        onFailed={(msg) => { console.error(msg); logClientError(msg, 'work-order-detail', 'quotes'); setError(msg); }}
+      />
 
       <SectionCard title="Invoice">
         <p className="py-1 text-sm text-slate-400">Invoice recording lands in Plan 3.</p>
