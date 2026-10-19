@@ -9,8 +9,9 @@ import { Modal } from '@/components/dashboard/Modal';
 import { ConfirmDialog } from '@/components/dashboard/ConfirmDialog';
 import { MultiSelect } from '@/components/dashboard/MultiSelect';
 import { QuoteTable } from '@/components/dashboard/QuoteTable';
+import { WorkOrderNotesPanel } from '@/components/dashboard/WorkOrderNotesPanel';
 import { WorkOrderStateBadge } from '@/components/dashboard/WorkOrderStateBadge';
-import { WORK_ORDER_TRANSITIONS, type WorkOrderState } from '@/lib/work-order-state';
+import { WORK_ORDER_TRANSITIONS, WORK_ORDER_TERMINAL_STATES, type WorkOrderState } from '@/lib/work-order-state';
 import {
   type WorkOrderDetail,
   type WorkOrderQuote,
@@ -363,7 +364,19 @@ export default function WorkOrderDetailClient({ id }: { id: string }) {
         </div>
       </SectionCard>
 
-      {/* Notes land in Task 6; quotation/invoice management in Plans 2–3 */}
+      {/* Notes — interactive on active work orders, read-only once terminal */}
+      <SectionCard title="Notes">
+        <WorkOrderNotesPanel
+          notes={detail.notes}
+          interactive={!WORK_ORDER_TERMINAL_STATES.includes(detail.state)}
+          workOrderId={detail.workOrderId}
+          onAdded={() => { load(); }}
+          onDeleted={() => { load(); }}
+          onFailed={(msg) => { console.error(msg); logClientError(msg, 'work-order-detail', 'notes'); setError(msg); }}
+        />
+      </SectionCard>
+
+      {/* Quotation/invoice management in Plans 2–3 */}
       <SectionCard title="Quotations">
         <p className="py-1 text-sm text-slate-400">Quote entry lands in Plan 2.</p>
       </SectionCard>
