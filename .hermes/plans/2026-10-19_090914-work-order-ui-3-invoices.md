@@ -18,6 +18,15 @@ read-only renderer ONLY if doing so is < 30 lines of diff; otherwise leave tenan
 placeholder sections; quotations panel live). All invoice API routes exist (phases 1–2) —
 no backend work in this plan.
 
+## Status: **DONE** (2026-10-20)
+
+All six tasks implemented and committed on `work-order-flow`. Task log:
+- T1 shell → `1bdad63` · T2 record form → `17c6c44` · T3 finish-amount confirm → `80051ca` · T4+T5 edit + delete (one component, one commit) → `5a8f750` · docs close-out below.
+- Tests: `tests/unit/work-order-invoice-panel.test.tsx` — 30 tests, all green.
+- Acceptance: type-check ✅ lint ✅ build ✅ full unit suite 2264/2264; grep gates (tenant 0 `api/admin` hits; exactly one `runTransition`; panel imports no transition map) ✅; impeccable detector **0 findings** across panel + admin/tenant work-order routes.
+- Open-question resolution (Task 5 step 3): verified by reading `services/invoice-service.ts` + `WorkOrderService.transition` — create is COMPLETE-gated, delete requires INVOICED, FINISHED has no invoice-row requirement. Delete at INVOICED therefore leaves no UI re-record path; the ConfirmDialog copy names that consequence honestly (delete shipped INVOICED-only with tooltip, matching the plan's narrower-gate preference). Due-date default kept at 14 days — flagged for product (30/60?).
+- Dev-walk note: the full in-browser 7-step walk (plan Task 6 step 2) was not executed this session — no live dev server walkthrough was available; coverage stands on the full unit suite + build + code-path verification. A real terminal-to-FINISHED UI walk is the recommended next manual check before Phase 5.
+
 ---
 
 ## Design constraints (impeccable — Operate mode)
