@@ -1,5 +1,9 @@
 # Work Order UI — Plan 2 of 3: Quotations
 
+> **STATUS: COMPLETE (2026-10-19)** — all 6 tasks done and committed; see the
+> Deviation/Outcome notes at the bottom before re-using this doc.
+
+
 > **For Hermes:** Use subagent-driven-development skill to implement this plan task-by-task.
 
 **Goal:** Give super admins full quotation management on the work order detail page:
@@ -185,3 +189,44 @@ interface WorkOrderQuotationsPanelProps {
 - **PATCH response shape** (does it include the contractor join?): resolved in Task 2 by always calling parent `refetch()` after mutation — the shape question becomes moot; do not patch row state client-side.
 - **Expanded-row rendering inside `DataTable`:** if the component's `render: (row) => JSX` signature cannot host a multi-block cell that breaks table layout, use a plain `<table>` styled from DataTable internals (Task 1 step 2 already anticipates this). Decide at Task 1 by reading `DataTable.tsx`; both paths are budgeted.
 - The auto-hop failure case ("work order may have moved already") is a server-logged warning; the price save itself SUCCEEDS and returns the quote — so no user-facing error expected; if the API does surface it, show verbatim and refetch.
+
+---
+
+## Deviation / Outcome notes (2026-10-19, on completion)
+
+Commits: `a845613` (T1 shell) · `f2bc5ed` (interactive panel + 17 unit tests) ·
+plus the recovered in-flight list work committed ahead of T1 and `50d772b`
+(build fix). All verified: type-check ✅ lint ✅ build ✅ full suite 2234/2234 ·
+impeccable detector 0 findings on panel + detail dir · tenant pages still carry
+zero `/api/admin` references (grep-verified; the only hit is a comment).
+
+Deviations from the written plan, all deliberate:
+
+1. **Tasks 2–5 landed as one implementation** (the expanded-row edit, link
+   display, add modal and delete confirm are interleaved in the same <tbody> +
+   state block; splitting them would have broken the component between tasks).
+   Per-task commits preserved where possible (T1 separate); T2–T5 share one
+   commit with their 17 unit tests.
+2. **Recovered an interrupted session's work first**: standalone quotations list
+   pages (admin CRUD + tenant read-only), `QuotationService.list`, admin GET route
+   with per-state counts, tenant org route, and nav entries were already on disk
+   uncommitted — beyond this plan's stated scope but coherent, tested (39 tests)
+   and type/lint green. Shipped as its own commit before T1; its one failing test
+   needed a jsdom `localStorage` stub (memory-backed, in the test file only).
+3. **Real bug fixed in Plan 1 code**: the RFQ dialog's contractor lazy-fetch had
+   a self-canceling effect — it listed its own `contractorsLoading` flag in deps,
+   so setting it re-ran (cancelled) the fetch and the skeleton persisted until a
+   second open. Identical defect found and fixed in the panel's add modal.
+4. **Build break fixed**: the new quotes pages imported `QUOTE_STATES` /
+   `QUOTABLE_WORK_ORDER_STATES` from `services/quote-service.ts` (server-only —
+   Prisma/logger chain) into client bundles → `npm run build` failed on
+   `async_hooks`/`node:assert`. Constants moved to `lib/work-order-state.ts`
+   (the documented client/server shared location); the service re-exports them.
+5. Unit tests beyond the plan's bar: 17 in `tests/unit/work-order-quotations-panel.test.tsx`
+   covering count/sort, empty state, breakdown+link display, affordance gating
+   (incl. disabled), pre-fill, never-send-clear price semantics (both directions),
+   zero-price client rejection, verbatim server errors, Escape clean/dirty paths,
+   delete 200/409 paths, add-modal option filtering + POST shape + duplicate 422.
+6. Manual dev walk (plan T6 step 2) NOT performed — needs a running dev instance
+   with seeded contractors (same honest gap as Plan 1's close-out).
+
