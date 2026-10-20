@@ -47,13 +47,13 @@ const labelClass = 'mb-1 block text-sm font-medium';
 const labelStyle = { color: 'var(--color-navy-850)' } as const;
 
 /** Grouped stat tiles (semantic funnel — 9 raw states read worse than the story). */
-const STATE_GROUPS: Array<{ key: string; label: string; states: ReadonlyArray<(typeof WORK_ORDER_STATES)[number]> }> = [
-  { key: 'open', label: 'Open', states: ['CREATED', 'OUT_FOR_QUOTES'] },
+const STATE_GROUPS: Array<{ key: string; label: string; states: ReadonlyArray<(typeof WORK_ORDER_STATES)[number]>; color?: 'default' | 'success' | 'danger' | 'warning' }> = [
+  { key: 'open', label: 'Open', states: ['CREATED', 'OUT_FOR_QUOTES'], color: 'warning' },
   { key: 'quotes-in', label: 'Quotes In', states: ['QUOTES_IN'] },
-  { key: 'in-progress', label: 'In Progress', states: ['CONTRACTOR_ASSIGNED', 'STARTED'] },
-  { key: 'billing', label: 'Billing', states: ['COMPLETE', 'INVOICED'] },
+  { key: 'in-progress', label: 'In Progress', states: ['CONTRACTOR_ASSIGNED', 'STARTED'], color: 'success' },
+  { key: 'billing', label: 'Billing', states: ['COMPLETE', 'INVOICED'], color: 'warning' },
   { key: 'finished', label: 'Finished', states: ['FINISHED'] },
-  { key: 'closed', label: 'Closed', states: ['CLOSED'] },
+  { key: 'closed', label: 'Closed', states: ['CLOSED'], color: 'danger' },
 ];
 
 function formatDate(iso: string | null): string {
@@ -309,7 +309,7 @@ export default function AdminWorkOrdersPage() {
       <div className="mb-6 grid gap-4" style={{ gridTemplateColumns: 'repeat(auto-fill, minmax(150px, 1fr))' }}>
         <StatCard label="Total Work Orders" value={loading ? '…' : total} />
         {STATE_GROUPS.map((g) => (
-          <StatCard key={g.key} label={g.label} value={loading ? '…' : groupValue(g.states)} />
+          <StatCard key={g.key} label={g.label} value={loading ? '…' : groupValue(g.states)} color={g.color} />
         ))}
       </div>
 

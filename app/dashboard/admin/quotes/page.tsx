@@ -53,10 +53,10 @@ interface PaginationState {
 }
 
 /** State tiles — the quotation funnel (open → accepted, rejected/closed are outcomes). */
-const STATE_TILES: Array<{ key: (typeof QUOTE_STATES)[number]; label: string }> = [
-  { key: 'OPENED', label: 'Open' },
-  { key: 'ACCEPTED', label: 'Accepted' },
-  { key: 'REJECTED', label: 'Rejected' },
+const STATE_TILES: Array<{ key: (typeof QUOTE_STATES)[number]; label: string; color?: 'default' | 'success' | 'danger' | 'warning' }> = [
+  { key: 'OPENED', label: 'Open', color: 'warning' },
+  { key: 'ACCEPTED', label: 'Accepted', color: 'success' },
+  { key: 'REJECTED', label: 'Rejected', color: 'danger' },
   { key: 'CLOSED', label: 'Closed' },
 ];
 
@@ -377,7 +377,7 @@ export default function AdminQuotesPage() {
       <div className="mb-6 grid gap-4" style={{ gridTemplateColumns: 'repeat(auto-fill, minmax(150px, 1fr))' }}>
         <StatCard label="Total Quotations" value={loading ? '…' : totalFromCounts} />
         {STATE_TILES.map((t) => (
-          <StatCard key={t.key} label={t.label} value={loading ? '…' : counts[t.key] ?? 0} />
+          <StatCard key={t.key} label={t.label} value={loading ? '…' : counts[t.key] ?? 0} color={t.color} />
         ))}
       </div>
 
