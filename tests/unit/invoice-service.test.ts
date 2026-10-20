@@ -13,6 +13,8 @@ const { tx } = vi.hoisted(() => ({
       create: vi.fn(),
       update: vi.fn(),
       delete: vi.fn(),
+      findMany: vi.fn(),
+      count: vi.fn(),
     },
   },
 }));
@@ -30,6 +32,7 @@ vi.mock('@/lib/logger', () => ({
 }));
 
 import * as workOrderServiceModule from '@/services/work-order-service';
+import { buildInvoiceWhere } from '@/services/invoice-service';
 
 const db = tx as unknown as { invoice: Record<string, ReturnType<typeof vi.fn>> };
 const WORK_ORDER_GETID = workOrderServiceModule.WorkOrderService.getById as ReturnType<typeof vi.fn>;
@@ -120,6 +123,40 @@ describe('InvoiceService', () => {
 
     it('rejects non-super-admins', async () => {
       await expect(InvoiceService.create(validCreate(), ctx('TENANT_ADMIN', 'org-1'))).rejects.toThrow(ForbiddenError);
+    });
+  });
+
+  describe('list (admin listing)', () => {
+    it('paginates with contractor + work order joins, newest first', async () => {
+      db.invoice.findMany.mockResolvedValue([
+        invoiceRow({
+          contractor: { name: 'Pat Byrne', companyName: 'Byrne Electrical Ltd' },
+          workOrder: { description: 'Boiler replacement — Flat 4', state: 'INVOICED' },
+        }),
+      ]);
+      db.invoice.count.mockResolvedValue(1);
+
+      const result = await InvoiceService.list({}, { page: 2, pageSize: 8 }, ctx('MEMBER'));
+      expect(result.items[0].contractor).toEqual({ name: 'Pat Byrne', companyName: 'Byrne Electrical Ltd' });
+      expect(result.items[0].workOrder.state).toBe('INVOICED');
+      expect(result.pagination).toEqual({ page: 2, pageSize: 8, total: 1, totalPages: 1 });
+
+      const args = db.invoice.findMany.mock.calls[0][0] as { skip?: number; take?: number };
+      expect(args.skip).toBe(8); // (page-1) * pageSize
+      expect(args.take).toBe(8);
+    });
+
+    it('translates filters into a where clause (search, org, contractor, parent work order state)', async () => {
+      const where = buildInvoiceWhere({ search: 'byrne', organizationId: 'org-1', contractorId: 'c-7', workOrderState: 'INVOICED' });
+      expect(where.organizationId).toBe('org-1');
+      expect(where.contractorId).toBe('c-7');
+      expect(where.workOrder).toEqual({ state: 'INVOICED' });
+      // Search fans out across contractor name/company + work order description.
+      expect(where.OR?.length).toBe(3);
+    });
+
+    it('rejects an unknown work order state filter', () => {
+      expect(() => buildInvoiceWhere({ workOrderState: 'BOGUS' as never })).toThrow(ValidationError);
     });
   });
 

@@ -19,7 +19,11 @@ import {
   NotFoundError,
   ValidationError,
   ConflictError,
+  PaginatedResult,
+  normalizePagination,
 } from '@/lib/services/types';
+
+import { WORK_ORDER_STATES } from '@/lib/work-order-state';
 
 export interface CreateInvoiceInput {
   workOrderId: string;
@@ -36,6 +40,39 @@ export interface UpdateInvoiceInput {
   invoiceDate?: Date;
   dueDate?: Date;
   invoiceLink?: string | null;
+}
+
+/** Filters for InvoiceService.list (the admin list surface). */
+export interface InvoiceListFilters {
+  organizationId?: string;
+  workOrderId?: string;
+  contractorId?: string;
+  /** Parent work order state (invoicing follows the work order, not a lifecycle of its own). */
+  workOrderState?: (typeof WORK_ORDER_STATES)[number];
+  search?: string;
+}
+
+/** Translate filters into a Prisma where clause — shared by list() + route-side count queries. */
+export function buildInvoiceWhere(filters: InvoiceListFilters): Prisma.InvoiceWhereInput {
+  const where: Prisma.InvoiceWhereInput = {};
+  if (filters.organizationId !== undefined) where.organizationId = filters.organizationId;
+  if (filters.workOrderId !== undefined) where.workOrderId = filters.workOrderId;
+  if (filters.contractorId !== undefined) where.contractorId = filters.contractorId;
+  if (filters.workOrderState !== undefined) {
+    if (!(WORK_ORDER_STATES as readonly string[]).includes(filters.workOrderState)) {
+      throw new ValidationError(`workOrderState must be one of: ${WORK_ORDER_STATES.join(', ')}`);
+    }
+    where.workOrder = { state: filters.workOrderState };
+  }
+  if (filters.search) {
+    const q = filters.search.trim();
+    where.OR = [
+      { contractor: { name: { contains: q, mode: 'insensitive' } } },
+      { contractor: { companyName: { contains: q, mode: 'insensitive' } } },
+      { workOrder: { description: { contains: q, mode: 'insensitive' } } },
+    ];
+  }
+  return where;
 }
 
 const READ_CTX: ServiceContext = { userId: '', role: 'MEMBER' };
@@ -104,6 +141,33 @@ export const InvoiceService = {
       }
       throw err;
     }
+  },
+
+  /**
+   * Paginated invoice list for the admin surface. Reads only — visibility is
+   * decided by the RLS context the route establishes (platform for super
+   * admins), so this method enforces no extra auth. Joins contractor + parent
+   * work order (description/state) so one fetch renders the table; search
+   * matches contractor name/company and work order description.
+   */
+  async list(
+    filters: InvoiceListFilters = {},
+    paginationInput: { page?: number; pageSize?: number } = {},
+    _ctx: ServiceContext,
+  ): Promise<PaginatedResult<Invoice & { contractor: { name: string; companyName: string }; workOrder: { description: string; state: string } }>> {
+    const { page, pageSize } = normalizePagination(paginationInput);
+    const skip = (page - 1) * pageSize;
+
+    const where = buildInvoiceWhere(filters);
+
+    const include = { contractor: { select: { name: true, companyName: true } }, workOrder: { select: { description: true, state: true } } };
+
+    const [rows, total] = await Promise.all([
+      tenantDb.invoice.findMany({ where, skip, take: pageSize, include, orderBy: { createdAt: 'desc', invoiceId: 'asc' } }),
+      tenantDb.invoice.count({ where }),
+    ]);
+
+    return { items: rows, pagination: { page, pageSize, total, totalPages: Math.ceil(total / pageSize) } };
   },
 
   /**
