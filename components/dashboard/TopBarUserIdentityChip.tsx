@@ -1,15 +1,20 @@
 /**
- * TopBarUserIdentityChip — compact identity chip for the top bar.
+ * TopBarUserIdentityChip — identity chip + account menu for the top bar.
  *
  * Sits left of the notification bell on all admin pages: avatar with initials,
  * full name, and email underneath (hidden at narrow widths). Identity comes
  * straight from the BetterAuth session atom — no network round trip, so it is
- * available before /api/auth/me resolves.
+ * available before /api/auth/me resolves. Left-click opens a dropdown with a
+ * "User Info" modal action and logout; outside click / Escape close it. The
+ * menu mirrors TopBarNotificationBell's anchor + panel idiom.
  */
 
 'use client';
 
-import { useSession } from '@/lib/auth-client';
+import { useEffect, useRef, useState } from 'react';
+import { ChevronDown, LogOut, UserRound } from 'lucide-react';
+import { signOutUser, useSession } from '@/lib/auth-client';
+import { TopBarUserInfoModal } from '@/components/dashboard/TopBarUserInfoModal';
 
 function initialsOf(name: string | null | undefined, email: string | null | undefined): string {
   const source = (name && name.trim()) || (email || '').split('@')[0] || '?';
@@ -25,25 +30,121 @@ export function TopBarUserIdentityChip() {
   const name: string | undefined = user?.name ? String(user.name) : undefined;
   const email: string | undefined = user?.email ? String(user.email) : undefined;
 
-  if (!user) return null;
+  const [open, setOpen] = useState(false);
+  const [infoOpen, setInfoOpen] = useState(false);
+  const anchorRef = useRef<HTMLDivElement>(null);
+  const menuRef = useRef<HTMLDivElement>(null);
 
   // Name is display-first; email doubles as fallback and secondary line.
   const displayName = name || email || 'User';
+  const avatarInitials = initialsOf(name, email);
+
+  // Close on outside click / Escape — same idiom as the notification bell.
+  useEffect(() => {
+    if (!open) return;
+    const onMouseDown = (e: MouseEvent) => {
+      const target = e.target as Node;
+      if (anchorRef.current?.contains(target)) return;
+      if (menuRef.current?.contains(target)) return;
+      setOpen(false);
+    };
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') setOpen(false);
+    };
+    document.addEventListener('mousedown', onMouseDown);
+    document.addEventListener('keydown', onKey);
+    return () => {
+      document.removeEventListener('mousedown', onMouseDown);
+      document.removeEventListener('keydown', onKey);
+    };
+  }, [open]);
+
+  if (!user) return null;
+
+  const handleLogout = async () => {
+    setOpen(false);
+    const result = await signOutUser();
+    if (result.error) {
+      console.error('Logout failed:', result.error);
+      return;
+    }
+    // Full page reload clears SPA state and lands on the login screen.
+    window.location.replace('/login?t=' + Date.now());
+  };
 
   return (
-    <div className="flex items-center gap-2 pr-1" title={name ? `${name} · ${email}` : email}>
-      <span
-        aria-hidden="true"
-        className="flex h-8 w-8 items-center justify-center rounded-full bg-navy-850 text-xs font-semibold text-white shrink-0"
+    <div className="relative" ref={anchorRef}>
+      <button
+        type="button"
+        onClick={() => setOpen((o) => !o)}
+        aria-haspopup="true"
+        aria-expanded={open}
+        aria-label={`Account menu for ${displayName}`}
+        className={`flex items-center gap-2 rounded-md pr-1.5 transition-colors cursor-pointer ${
+          open ? 'bg-slate-100' : 'hover:bg-slate-100'
+        }`}
       >
-        {initialsOf(name, email)}
-      </span>
-      <div className="hidden sm:block leading-tight">
-        <p className="max-w-[140px] truncate text-sm font-medium text-slate-900">{displayName}</p>
-        {name && email ? (
-          <p className="max-w-[160px] truncate text-xs text-slate-500">{email}</p>
-        ) : null}
-      </div>
+        <span
+          aria-hidden="true"
+          className="flex h-8 w-8 items-center justify-center rounded-full bg-navy-850 text-xs font-semibold text-white shrink-0"
+        >
+          {avatarInitials}
+        </span>
+        <div className="hidden sm:block leading-tight text-left">
+          <p className="max-w-[140px] truncate text-sm font-medium text-slate-900">{displayName}</p>
+          {name && email ? (
+            <p className="max-w-[160px] truncate text-xs text-slate-500">{email}</p>
+          ) : null}
+        </div>
+        <ChevronDown
+          className={`hidden sm:block h-3.5 w-3.5 shrink-0 text-slate-400 transition-transform duration-200 ${
+            open ? 'rotate-180' : ''
+          }`}
+          aria-hidden="true"
+        />
+      </button>
+
+      {open && (
+        <div
+          ref={menuRef}
+          role="menu"
+          aria-label="Account menu"
+          className="absolute left-0 top-full z-50 mt-2 w-60 rounded-lg border bg-white shadow-lg"
+          style={{ borderColor: 'var(--color-slate-200)' }}
+        >
+          <div className="p-1">
+            <button
+              type="button"
+              role="menuitem"
+              onClick={() => {
+                setOpen(false);
+                setInfoOpen(true);
+              }}
+              className="flex w-full items-center gap-3 px-4 py-2.5 text-left text-sm font-medium text-slate-700 hover:bg-canvas-subtle transition-colors cursor-pointer"
+            >
+              <UserRound className="h-4 w-4 shrink-0 text-slate-400" />
+              User Info
+            </button>
+            <button
+              type="button"
+              role="menuitem"
+              onClick={handleLogout}
+              className="flex w-full items-center gap-3 px-4 py-2.5 text-left text-sm font-medium text-slate-700 hover:bg-danger-tint hover:text-danger-ink transition-colors cursor-pointer"
+            >
+              <LogOut className="h-4 w-4 shrink-0 text-slate-400" />
+              Log out
+            </button>
+          </div>
+        </div>
+      )}
+
+      <TopBarUserInfoModal
+        isOpen={infoOpen}
+        onClose={() => setInfoOpen(false)}
+        name={name}
+        email={email}
+        avatarInitials={avatarInitials}
+      />
     </div>
   );
 }
