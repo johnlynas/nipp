@@ -9,6 +9,7 @@ import { StatCard } from '@/components/dashboard/StatCard';
 import { Modal } from '@/components/dashboard/Modal';
 import { ConfirmDialog } from '@/components/dashboard/ConfirmDialog';
 import { PaginationControls } from '@/components/admin/PaginationControls';
+import { apiFetch } from '@/lib/api-client';
 
 interface ResourceRole {
   id: string;
@@ -64,13 +65,13 @@ export default function ResourcesPage() {
   // Fetch total counts (unfiltered)
   async function fetchCounts() {
     try {
-      const res = await fetch('/api/dashboard/admin/resources?pageSize=1');
+      const res = await apiFetch('/api/dashboard/admin/resources?pageSize=1');
       if (res.ok) {
         const data = await res.json();
         setTotalResourcesCount(data.pagination?.total ?? 0);
 
         // Calculate total role assignments from all resources
-        const rolesRes = await fetch('/api/dashboard/admin/resources?pageSize=100');
+        const rolesRes = await apiFetch('/api/dashboard/admin/resources?pageSize=100');
         if (rolesRes.ok) {
           const rolesData = await rolesRes.json();
           const totalRoles = (rolesData.items as Resource[] || []).reduce(
@@ -104,7 +105,7 @@ export default function ResourcesPage() {
       });
       if (search) params.set('search', search);
 
-      const res = await fetch(`/api/dashboard/admin/resources?${params}`, {
+      const res = await apiFetch(`/api/dashboard/admin/resources?${params}`, {
         signal: abortControllerRef.current.signal,
       });
       if (!res.ok) {
@@ -177,7 +178,7 @@ export default function ResourcesPage() {
     }
 
     try {
-      const res = await fetch('/api/dashboard/admin/resources', {
+      const res = await apiFetch('/api/dashboard/admin/resources', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ name: createForm.name, description: createForm.description || undefined }),
@@ -205,7 +206,7 @@ export default function ResourcesPage() {
     if (!editForm.name.trim() || !selectedResource) return;
 
     try {
-      const res = await fetch(`/api/dashboard/admin/resources/${selectedResource.id}`, {
+      const res = await apiFetch(`/api/dashboard/admin/resources/${selectedResource.id}`, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ name: editForm.name, description: editForm.description || undefined }),
@@ -232,7 +233,7 @@ export default function ResourcesPage() {
     if (!selectedResource) return;
 
     try {
-      const res = await fetch(`/api/dashboard/admin/resources/${selectedResource.id}`, {
+      const res = await apiFetch(`/api/dashboard/admin/resources/${selectedResource.id}`, {
         method: 'DELETE',
       });
 

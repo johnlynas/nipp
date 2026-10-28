@@ -7,6 +7,7 @@
  */
 
 import { importAesGcmKey } from './crypto-client';
+import { guardSessionExpired } from './session-guard';
 
 // ---------------------------------------------------------------------------
 // Types
@@ -106,6 +107,7 @@ async function fetchAndCacheKey(): Promise<PayloadKeyData> {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
   });
+  guardSessionExpired(response);
 
   if (!response.ok) {
     throw new Error(`Failed to fetch payload key: ${response.status} ${response.statusText}`);

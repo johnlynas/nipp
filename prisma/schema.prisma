@@ -258,6 +258,11 @@ model Organization {
   calendarEvents     CalendarEvent[]
   // Units: the properties managed by this organization (1:M)
   units              Units[]
+  // Work Orders: work tracked from request through paid (1:M)
+  workOrders         WorkOrder[]
+  workOrderNotes     WorkOrderNote[]
+  quotations         Quotation[]
+  invoices           Invoice[]
 }
 
 model Member {
@@ -684,6 +689,128 @@ model Units {
 }
 
 // ============================================================
+// Work Order Flow Models (org-scoped)
+// Design: documents/feature-planning-and-development/work-order-flow.md
+// ============================================================
+
+/** Work order lifecycle. CLOSED = early closure pre-assignment (no funding etc.). */
+enum WorkOrderState {
+  CREATED
+  OUT_FOR_QUOTES
+  QUOTES_IN
+  CONTRACTOR_ASSIGNED
+  STARTED
+  COMPLETE
+  INVOICED
+  FINISHED
+  CLOSED
+}
+
+/** Quotation lifecycle within a work order. */
+enum QuotationState {
+  OPENED
+  ACCEPTED
+  REJECTED
+  CLOSED
+}
+
+model WorkOrder {
+  workOrderId    String         @id @default(cuid())
+  description    String
+  /** Email of the person/super admin who opened the work order (brief requirement). */
+  openedBy       String
+  /** User.id of the opener for actor integrity (nullable — super admins may open on behalf of orgs). */
+  openedById     String?
+  /** FK to Contractors; null until CONTRACTOR_ASSIGNED. */
+  contractorId   String?
+  /** Set when RFQ is sent; default deadline +7 days, configurable at send time. */
+  quotesDue      DateTime?
+  /** Set when the overdue alert fired (idempotency for the deadline job). */
+  deadlineAlertAt DateTime?
+  state          WorkOrderState @default(CREATED)
+
+  organizationId String
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+
+  contractor Contractors? @relation(fields: [contractorId], references: [contractorId])
+
+  notes   WorkOrderNote[]
+  quotes  Quotation[]
+  invoice Invoice?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([organizationId, state])
+  @@index([organizationId, quotesDue])
+}
+
+model WorkOrderNote {
+  workOrderNoteId String  @id @default(cuid())
+  workOrderId     String
+  note            String
+  /** Super admin user id who wrote the note (notes are super-admin managed). */
+  createdById     String?
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  organizationId String
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+
+  workOrder WorkOrder @relation(fields: [workOrderId], references: [workOrderId], onDelete: Cascade)
+
+  @@index([workOrderId])
+}
+
+model Quotation {
+  quoteId      String         @id @default(cuid())
+  workOrderId  String
+  contractorId String
+  /** Remote file link to the quotation, null until received. */
+  quoteLink    String?
+  /** Breakdown of the quote; null until received. */
+  description  String?
+  /** Quoted amount; null until received (filling it auto-moves the work order to QUOTES_IN). */
+  price        Decimal?       @db.Decimal(12, 2)
+  dueDate      DateTime
+  state        QuotationState @default(OPENED)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  organizationId String
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+
+  workOrder  WorkOrder   @relation(fields: [workOrderId], references: [workOrderId], onDelete: Cascade)
+  contractor Contractors @relation(fields: [contractorId], references: [contractorId])
+
+  @@unique([workOrderId, contractorId])
+  @@index([organizationId])
+}
+
+model Invoice {
+  invoiceId    String   @id @default(cuid())
+  invoiceDate  DateTime
+  /** 1:1 with WorkOrder. */
+  workOrderId  String   @unique
+  contractorId String
+  invoiceLink  String?
+  price        Decimal  @db.Decimal(12, 2)
+  dueDate      DateTime
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  organizationId String
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+
+  workOrder  WorkOrder   @relation(fields: [workOrderId], references: [workOrderId])
+  contractor Contractors @relation(fields: [contractorId], references: [contractorId])
+
+  @@index([organizationId])
+}
+
+// ============================================================
 // Background Job Scheduler (job-scheduler-service)
 // Platform-organization only. A job run forks a Bree worker; operator code
 // (Phase 2) is stored in `code` and materialized to a tmp file at exec time
@@ -799,4 +926,8 @@ model Contractors {
   description   String?        // Optional; primarily used for type=OTHER, usable by all types
   createdAt     DateTime       @default(now())
   updatedAt     DateTime       @updatedAt
+
+  workOrders   WorkOrder[]
+  quotations   Quotation[]
+  invoices     Invoice[]
 }

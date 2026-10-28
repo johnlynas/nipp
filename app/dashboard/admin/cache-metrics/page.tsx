@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from 'react';
 import { PageSkeleton } from '@/components/dashboard/PageSkeleton';
+import { apiFetch } from '@/lib/api-client';
 
 interface CacheMetricsData {
   l1Hits: number;
@@ -40,7 +41,7 @@ export default function CacheMetricsPage() {
   useEffect(() => {
     const fetchMetrics = async () => {
       try {
-        const res = await fetch('/api/cache/metrics', { cache: 'no-store' });
+        const res = await apiFetch('/api/cache/metrics', { cache: 'no-store' });
         const data: CacheMetricsResponse = await res.json();
 
         if (data.success && data.data) {

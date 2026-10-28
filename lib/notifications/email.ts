@@ -7,14 +7,42 @@
 import { createTransport, type Transporter } from 'nodemailer';
 import { env } from '@/lib/env';
 
+/** Escapes plain text for safe HTML interpolation. */
+export function escapeHtml(s: string): string {
+  return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+}
+
+/** Authored HTML (e.g. the OIDC invitation with a styled button) must pass through untouched. Deliberately strict — < + tag letter + whitespace/> only, so field values like `A & B <Ltd>` cannot be mistaken for markup and escape the escaping path. */
+const HAS_HTML_TAG = /<\/?[A-Za-z][\s>]/;
+
+/**
+ * Render a message body for the branded template.
+ * - Authored HTML passes through verbatim (the OIDC invite owns its own markup,
+ *   buttons and all).
+ * - Plain text is escaped and laid out as real paragraphs: blank-line blocks
+ *   become &lt;p&gt;, single line breaks inside a block become &lt;br&gt;.
+ *   Without this, every \n collapses in HTML and multi-line bodies ship as one
+ *   run-on paragraph (the work order RFQ wall-of-text bug).
+ */
+export function renderBodyForTemplate(message: string): string {
+  if (HAS_HTML_TAG.test(message)) return message;
+  const paragraphs = escapeHtml(message.trim())
+    .split(/\n{2,}/)
+    .map((p) => p.replace(/\s*\n\s*/g, '<br>'))
+    .map((p) => `<p style="margin: 0 0 16px; color: #1e3a5f; font-size: 16px; line-height: 1.6;">${p}</p>`)
+    .join('');
+  return paragraphs;
+}
+
 /**
  * Email template with Property NI branding.
  */
-function createEmailTemplate(
+export function createEmailTemplate(
   subject: string,
   message: string,
   headerTitle = 'Property NI — Security Alert'
 ): { html: string; text: string } {
+  const bodyCell = renderBodyForTemplate(message);
   const html = `
 <!DOCTYPE html>
 <html>
@@ -33,7 +61,7 @@ function createEmailTemplate(
     <!-- Body -->
     <tr>
       <td style="padding: 32px; background-color: #ffffff;">
-        <p style="color: #1e3a5f; font-size: 16px; line-height: 1.6;">${message}</p>
+        ${bodyCell}
         <!-- Amber accent bar -->
         <div style="height: 4px; background-color: #F5A623; margin-top: 24px;"></div>
       </td>
@@ -42,7 +70,7 @@ function createEmailTemplate(
     <tr>
       <td style="background-color: #f8f9fa; padding: 16px 32px; text-align: center;">
         <p style="color: #6c757d; font-size: 12px; margin: 0;">
-          This is an automated notification from Property NI. Do not reply.
+          This is an automated notification from Property NI
         </p>
       </td>
     </tr>

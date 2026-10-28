@@ -4,6 +4,7 @@ import { useState, useEffect } from 'react';
 import { useParams } from 'next/navigation';
 import { RoleManager } from '@/components/admin/RoleManager';
 import { PageSkeleton } from '@/components/dashboard/PageSkeleton';
+import { apiFetch } from '@/lib/api-client';
 
 interface Role {
   id: string;
@@ -30,7 +31,7 @@ export default function OrgRolesPage() {
   async function fetchRoles() {
     setLoading(true);
     try {
-      const res = await fetch(`/api/roles?organizationId=${orgId}`);
+      const res = await apiFetch(`/api/roles?organizationId=${orgId}`);
       if (res.ok) {
         const data = await res.json();
         setRoles(data.roles || []);

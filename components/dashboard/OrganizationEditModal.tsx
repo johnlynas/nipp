@@ -3,6 +3,7 @@
 import { useState } from 'react';
 import { Modal } from '@/components/dashboard/Modal';
 import { logClientError } from '@/lib/client-error-logger';
+import { apiFetch } from '@/lib/api-client';
 
 export type OrganizationStatus = 'PENDING' | 'ACTIVE' | 'SUSPENDED' | 'ARCHIVED';
 
@@ -70,7 +71,7 @@ function OrganizationEditForm({
       setError(null);
       // Status changes delegate to /status so ban/unban logic fires.
       if (form.status && form.status !== org.status) {
-        const res = await fetch(`/api/dashboard/admin/organizations/${org.id}/status`, {
+        const res = await apiFetch(`/api/dashboard/admin/organizations/${org.id}/status`, {
           method: 'PATCH',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ status: form.status }),
@@ -83,7 +84,7 @@ function OrganizationEditForm({
         const nameChanged = form.name !== org.name;
         const descChanged = (form.description || '') !== (org.description || '');
         if (nameChanged || descChanged) {
-          const res2 = await fetch(`/api/dashboard/admin/organizations/${org.id}`, {
+          const res2 = await apiFetch(`/api/dashboard/admin/organizations/${org.id}`, {
             method: 'PATCH',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ name: form.name, description: form.description }),
@@ -94,7 +95,7 @@ function OrganizationEditForm({
           }
         }
       } else {
-        const res = await fetch(`/api/dashboard/admin/organizations/${org.id}`, {
+        const res = await apiFetch(`/api/dashboard/admin/organizations/${org.id}`, {
           method: 'PATCH',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ name: form.name, description: form.description }),

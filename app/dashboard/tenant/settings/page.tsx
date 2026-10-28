@@ -3,6 +3,7 @@
 import { useState, useEffect } from 'react';
 import { PageSkeleton } from '@/components/dashboard/PageSkeleton';
 import { StatusBadge } from '@/components/dashboard/StatusBadge';
+import { apiFetch } from '@/lib/api-client';
 
 interface OrgDetail {
   name: string;
@@ -36,7 +37,7 @@ export default function TenantSettingsPage() {
         // Active org from session, localStorage fallback.
         let orgId: string | null = null;
         try {
-          const meRes = await fetch('/api/auth/me');
+          const meRes = await apiFetch('/api/auth/me');
           if (meRes.ok) {
             const me = await meRes.json();
             if (me.activeOrganizationId) orgId = me.activeOrganizationId;
@@ -49,7 +50,7 @@ export default function TenantSettingsPage() {
           return;
         }
 
-        const res = await fetch(`/api/organizations/${orgId}/org-chart`);
+        const res = await apiFetch(`/api/organizations/${orgId}/org-chart`);
         if (!res.ok) {
           const body = await res.json().catch(() => ({}));
           throw new Error(body.error || `Failed to load organization (${res.status})`);

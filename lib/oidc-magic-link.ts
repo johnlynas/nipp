@@ -13,6 +13,7 @@
  * touches this module.
  */
 
+import os from 'os';
 import { generateRandomString } from 'better-auth/crypto';
 import { prisma } from '@/lib/db';
 import { env } from '@/lib/env';
@@ -75,7 +76,7 @@ export async function issueInviteLink(
   // (options.portalOrigin) so it works on LAN IP / tunnel host / public domain;
   // FRONTEND_URL only as the off-request-context fallback. Malformed origins are
   // rejected (fail closed to FRONTEND_URL — never emit an unparseable URL).
-  const base = normalizePortalOrigin(options.portalOrigin)?.replace(/\/$/, '') ?? env.FRONTEND_URL;
+  const base = resolveLinkBase(options.portalOrigin);
   const url = `${base}${VERIFY_PATH}?token=${token}`;
 
   try {
@@ -206,6 +207,57 @@ export function normalizePortalOrigin(origin: string | null | undefined): string
   } catch {
     return null;
   }
+}
+
+/**
+  * The machine's LAN IPv4 address (first non-internal IPv4 from
+  * os.networkInterfaces), or null when the server exposes no usable one
+  * (e.g. Docker-only networking). Server-side only — `os` needs system APIs.
+ */
+export function getMachineIPv4(): string | null {
+  const interfaces = os.networkInterfaces();
+  for (const networkInterface of Object.values(interfaces)) {
+    if (!networkInterface) continue;
+    for (const net of networkInterface) {
+      if (net.family === 'IPv4' && !net.internal)  {
+        return net.address;
+      }
+    }
+  }
+  return null;
+}
+
+
+/** Hosts behind which emails are unreachable from other machines. */
+function isLoopbackOrigin(origin: string): boolean {
+  try {
+    const host = new URL(origin).hostname.toLowerCase();
+    return host === 'localhost' || host === '127.0.0.1' || host === '[::1]' || host === '::1';
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Final link origin for the emailed magic link:
+ *  - explicit non-loopback portalOrigin → it (LAN IP / tunnel host / domain);
+ *  - loopback portalOrigin (admin inviting from their own browser) and a
+ *    machine LAN IPv4 → http://<machine-ip>:<request-port> — the same port the
+ *    port the request came in on, so the link points where the server is actually
+ *    reachable, not 127.0.0.1 (unreachable to the invited user);
+ *  - no origin / loopback origin with no LAN IPv4 → FRONTEND_URL (fail closed).
+ */
+function resolveLinkBase(portalOrigin: string | null | undefined): string {
+  const origin = normalizePortalOrigin(portalOrigin);
+  if (origin) {
+    if (!isLoopbackOrigin(origin)) return origin;
+    const ip = getMachineIPv4();
+    if (ip) {
+      const port = new URL(origin).port || '80';
+      return `${new URL(origin).protocol}//${ip}:${port}`;
+    }
+  }
+  return env.FRONTEND_URL.replace(/\/$/, '');
 }
 
 function escapeHtml(s: string): string {

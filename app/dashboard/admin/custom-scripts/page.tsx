@@ -12,6 +12,7 @@ import { Modal } from '@/components/dashboard/Modal';
 import { ConfirmDialog } from '@/components/dashboard/ConfirmDialog';
 import { PaginationControls } from '@/components/admin/PaginationControls';
 import { StatCard } from '@/components/dashboard/StatCard';
+import { apiFetch } from '@/lib/api-client';
 
 interface JobDefinition {
   id: string;
@@ -130,7 +131,7 @@ export default function ScriptsPage() {
       if (approvedFilter !== 'all') params.set('approved', approvedFilter === 'approved' ? 'true' : 'false');
       if (runStatusFilter !== 'all') params.set('lastRunStatus', runStatusFilter);
 
-      const res = await fetch(`/api/dashboard/admin/scripts?${params}`, {
+      const res = await apiFetch(`/api/dashboard/admin/scripts?${params}`, {
         signal: abortControllerRef.current.signal,
       });
       if (!res.ok) {
@@ -189,7 +190,7 @@ export default function ScriptsPage() {
   const handleViewExecutions = async (job: JobDefinition) => {
     setSelectedJob(job);
     try {
-      const res = await fetch(`/api/dashboard/admin/scripts/${job.id}`);
+      const res = await apiFetch(`/api/dashboard/admin/scripts/${job.id}`);
       if (res.ok) {
         const data = await res.json();
         setExecutions(data.executions || []);
@@ -228,7 +229,7 @@ export default function ScriptsPage() {
     if (!selectedJob) return;
 
     try {
-      const res = await fetch(`/api/dashboard/admin/scripts/${selectedJob.id}`, { method: 'DELETE' });
+      const res = await apiFetch(`/api/dashboard/admin/scripts/${selectedJob.id}`, { method: 'DELETE' });
       if (!res.ok) {
         const data = await res.json().catch(() => ({}));
         throw new Error(data.error || 'Failed to delete script');
@@ -249,7 +250,7 @@ export default function ScriptsPage() {
     if (!selectedJob) return;
 
     try {
-      const res = await fetch(`/api/dashboard/admin/scripts/${selectedJob.id}`, {
+      const res = await apiFetch(`/api/dashboard/admin/scripts/${selectedJob.id}`, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(editForm),
@@ -282,7 +283,7 @@ export default function ScriptsPage() {
     if (!selectedJob) return;
 
     try {
-      const res = await fetch(`/api/admin/jobs/${selectedJob.id}/approvals`, {
+      const res = await apiFetch(`/api/admin/jobs/${selectedJob.id}/approvals`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -324,7 +325,7 @@ export default function ScriptsPage() {
     try {
       const scheduleExpr = buildScheduleExpression(createForm);
 
-      const res = await fetch('/api/dashboard/admin/scripts', {
+      const res = await apiFetch('/api/dashboard/admin/scripts', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -373,7 +374,7 @@ export default function ScriptsPage() {
     if (!selectedJob) return;
 
     try {
-      const res = await fetch(`/api/dashboard/admin/scripts/${selectedJob.id}/trigger`, {
+      const res = await apiFetch(`/api/dashboard/admin/scripts/${selectedJob.id}/trigger`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ input: triggerInput ? JSON.parse(triggerInput) : undefined }),
@@ -406,7 +407,7 @@ export default function ScriptsPage() {
     }
 
     try {
-      const res = await fetch(`/api/dashboard/admin/scripts/${job.id}`, {
+      const res = await apiFetch(`/api/dashboard/admin/scripts/${job.id}`, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ enabled: !job.enabled }),

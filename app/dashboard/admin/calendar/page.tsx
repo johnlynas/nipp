@@ -3,6 +3,7 @@
 import { useState, useEffect, useRef } from "react";
 import Calendar from "@/components/calendar/Calendar";
 import { PageSkeleton } from '@/components/dashboard/PageSkeleton';
+import { apiFetch } from '@/lib/api-client';
 export default function CalendarPage() {
   const [orgId, setOrgId] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
@@ -17,7 +18,7 @@ export default function CalendarPage() {
       // Try to get active org from session first, then localStorage fallback
       let gotOrgFromApi = false;
       try {
-        const meRes = await fetch("/api/auth/me");
+        const meRes = await apiFetch("/api/auth/me");
         if (meRes.ok) {
           const me = await meRes.json();
           if (me.activeOrganizationId) {
@@ -42,7 +43,7 @@ export default function CalendarPage() {
       try {
         const urlOrg = new URL(window.location.href).searchParams.get('org');
         if (urlOrg && urlOrg !== orgIdRef.current) {
-          const listRes = await fetch('/api/admin/organizations/list');
+          const listRes = await apiFetch('/api/admin/organizations/list');
           if (listRes.ok) {
             const data = await listRes.json();
             const match = (data.organizations || []).find((o: { id: string }) => o.id === urlOrg);

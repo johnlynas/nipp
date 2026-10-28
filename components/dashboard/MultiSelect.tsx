@@ -29,10 +29,18 @@ export function MultiSelect({ options, selected, onChange, placeholder = 'Select
 
   return (
     <div className="relative">
-      {/* Selected tags */}
-      <button
-        type="button"
+      {/* Tags row — a div (not a button) so per-tag remove buttons may live inside */}
+      <div
+        role="button"
+        tabIndex={0}
         onClick={() => setOpen(!open)}
+        onKeyDown={(e) => {
+          if (e.key === 'Enter' || e.key === ' ') {
+            e.preventDefault();
+            // Space/Enter on a remove button must not toggle the dropdown.
+            if ((e.target as HTMLElement).tagName !== 'BUTTON') setOpen(!open);
+          }
+        }}
         className="flex min-h-[38px] flex-wrap items-center gap-1 rounded border border-slate-200 px-3 py-2 text-sm bg-white hover:bg-slate-50 transition-colors focus:outline-none"
         style={{ '--tw-ring-color': 'var(--color-accent)' } as React.CSSProperties}
         aria-label={placeholder}
@@ -61,7 +69,7 @@ export function MultiSelect({ options, selected, onChange, placeholder = 'Select
             </span>
           );
         })}
-      </button>
+      </div>
 
       {/* Dropdown */}
       {open && (
