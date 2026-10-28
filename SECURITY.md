@@ -570,6 +570,7 @@ Applied to security-critical route groups to prevent abuse of auth, admin, and c
 | `RATE_LIMIT_AUTH_MAX` / `_WINDOW` | Auth-route limit per IP — applied in `/api/auth/*` | 5 / 60s |
 | `RATE_LIMIT_ADMIN_MAX` / `_WINDOW` | Admin-write limit per session — `/api/admin/*`, `/api/dashboard/admin/*`, `/api/roles/*` mutations | 30 / 60s |
 | `RATE_LIMIT_CALENDAR_MAX` / `_WINDOW` | Calendar/team mutation limit per session | 30 / 60s |
+| `RATE_LIMIT_API_DOCS_MAX` / `_WINDOW` | API docs (/api-docs UI + spec + assets) limit per session | 10 / 60s |
 
 Stores are in-memory and cleaned up every 5 minutes (entries older than 2× the window).
 
@@ -606,6 +607,7 @@ All security-relevant routes are rate limited through the unified limiter (`lib/
 | `/api/organizations/[orgId]/*` calendar & team routes (mutations) | `checkCalendarRateLimit` | 30 req/60s per session (`RATE_LIMIT_CALENDAR_MAX/WINDOW`) |
 | `POST /api/security/payload-key` | `checkRateLimit` | 30 req/60s (`RATE_LIMIT_PAYLOAD_KEY_MAX/WINDOW`) |
 | `POST /api/security/payload-key/revoke` | `checkRevokeRateLimit` | 5 req/60s (`RATE_LIMIT_PAYLOAD_KEY_REVOKE_MAX/WINDOW`) |
+| `/api-docs`, `/api-docs/openapi`, `/api-docs/assets/*` (super-admin only) | `checkApiDocsRateLimit` | 10 req/60s per session (`RATE_LIMIT_API_DOCS_MAX/WINDOW`) |
 | Notification dispatcher (email sending) | Redis-backed per event-type/recipient | 5 per 24h (`RATE_LIMIT_NOTIFICATION_MAX/WINDOW_HOURS`) |
 
 Not rate limited: `POST /api/csp-report` (report ingestion — flagged for protection). See [Unified Rate Limiting Design](./openspec/changes/unified-rate-limiter/design.md) for the architecture.

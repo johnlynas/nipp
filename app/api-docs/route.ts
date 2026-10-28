@@ -1,3 +1,5 @@
+import { requireSuperAdmin } from './_guard';
+
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 export const revalidate = 0;
@@ -39,6 +41,8 @@ function docPage() {
 </html>`;
 }
 
-export function GET() {
+export async function GET(request: Request) {
+  const denied = await requireSuperAdmin(request);
+  if (denied) return denied;
   return new Response(docPage(), { headers: { 'content-type': 'text/html; charset=utf-8' } });
 }

@@ -1,5 +1,6 @@
 import { readFile } from 'node:fs/promises';
 import path from 'node:path';
+import { requireSuperAdmin } from '../../_guard';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -20,6 +21,8 @@ const MIME: Record<string, string> = {
 
 // /api-docs/assets/<file> — serves swagger-ui-dist static files.
 export async function GET(request: Request, { params }: { params: Promise<{ file: string }> }) {
+  const denied = await requireSuperAdmin(request);
+  if (denied) return denied;
   const { file } = await params;
   if (path.basename(file) !== file || path.extname(file) === '') {
     return new Response(JSON.stringify({ error: 'Not found' }), { status: 404, headers: { 'content-type': 'application/json' } });

@@ -125,6 +125,16 @@ export const envSchema = z.object({
   /** Calendar POST/PATCH/DELETE: window duration in seconds (default 60). */
   RATE_LIMIT_CALENDAR_WINDOW: z.string().regex(/^\d+$/).optional(),
 
+  // ---------------------------------------------------------------------------
+  // API docs rate limiting (/api-docs, by session ID)
+  // ---------------------------------------------------------------------------
+
+  /** /api-docs UI/spec/assets: max requests per window (default 10). */
+  RATE_LIMIT_API_DOCS_MAX: z.string().regex(/^\d+$/).optional(),
+
+  /** /api-docs UI/spec/assets: window duration in seconds (default 60). */
+  RATE_LIMIT_API_DOCS_WINDOW: z.string().regex(/^\d+$/).optional(),
+
    // ---------------------------------------------------------------------------
    // Background Job Scheduler (job-scheduler-service / Bree — platform-org only)
    // ---------------------------------------------------------------------------

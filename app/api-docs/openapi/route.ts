@@ -1,11 +1,14 @@
 import { readFile } from 'node:fs/promises';
 import path from 'node:path';
+import { requireSuperAdmin } from '../_guard';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 export const revalidate = 0;
 
-export async function GET() {
+export async function GET(request: Request) {
+  const denied = await requireSuperAdmin(request);
+  if (denied) return denied;
   try {
     const body = await readFile(
       path.join(process.cwd(), 'docs', 'openapi', 'generated', 'openapi.json'),

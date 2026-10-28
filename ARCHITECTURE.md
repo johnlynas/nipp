@@ -1701,7 +1701,7 @@ npm run dev                      # Start development server
 
 ## 16. API Reference (OpenAPI + Swagger UI)
 
-A browsable, auto-generated OpenAPI reference for every `app/api/**` route is served at **`/api-docs`** (public — it contains no secrets, only paths, methods, and descriptions). The spec is generated from the JSDoc header blocks that live next to each route handler, so the documentation ships with the code.
+A browsable, auto-generated OpenAPI reference for every `app/api/**` route is served at **`/api-docs`** (super-admin only — membership in the Platform organization, verified in `app/api-docs/_guard.ts`). The spec is generated from the JSDoc header blocks that live next to each route handler, so the documentation ships with the code.
 
 ### How the spec is generated
 
@@ -1712,12 +1712,13 @@ A browsable, auto-generated OpenAPI reference for every `app/api/**` route is se
 | Swagger UI page | `app/api-docs/route.ts` | HTML shell + UI configuration |
 | Spec endpoint | `app/api-docs/openapi/route.ts` | Serves the JSON (extensionless on purpose) |
 | Asset router | `app/api-docs/assets/[file]/route.ts` | Serves swagger-ui-dist from node_modules (whitelisted, fs-based to avoid the bundle's `self` crash in Node) |
+| Super-admin guard | `app/api-docs/_guard.ts` | Shared gate — page, spec and assets all require a verified Platform-org member; 401 without session, 403 otherwise (fail-closed), then rate-limited to 10 req/60s per session (429 + Retry-After beyond that) |
 
 The generator understands both export styles (`export function GET …` and `export const GET = …`, plus destructured/aliased exports) and normalizes JSDoc path params (`[orgId]`, `[…all]`, `:roleId`) to OpenAPI `{param}`. Request/response schemas are intentionally not modelled yet (operations carry a `default` response); adding them is a separate pass using zod + `zod-to-openapi`.
 
 ### Viewing the reference
 
-With the dev or production server running:
+With the dev or production server running, sign in as a super admin (the middleware redirects anonymous requests to `/login`, and the route handlers reject non-super-admins with 403):
 
 ```bash
 open http://localhost:3000/api-docs        # Swagger UI

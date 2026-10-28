@@ -62,12 +62,14 @@ flowchart TD
     B -->|Payload key revoke| E[checkRevokeRateLimit]
     B -->|Admin writes| F[checkAdminRateLimit]
     B -->|Calendar CRUD| G[checkCalendarRateLimit]
+    B -->|API docs /api-docs| O[checkApiDocsRateLimit]
     
     C --> H{Within limit?}
     D --> H
     E --> H
     F --> H
     G --> H
+    O --> H
     
     H -->|Yes| I[Process request]
     H -->|No| J[reportThrottle]
@@ -88,6 +90,7 @@ graph LR
         R3[Revoke route]
         R4[Admin routes]
         R5[Calendar routes]
+        R6[API docs /api-docs]
     end
     
     subgraph "Rate Limiter (lib/rate-limiter.ts)"
@@ -98,6 +101,7 @@ graph LR
         S3[auth store]
         S4[admin store]
         S5[calendar store]
+        S6[api-docs store]
     end
     
     subgraph "Alerting Pipeline"
@@ -115,6 +119,7 @@ graph LR
     R3 --> LR
     R4 --> LR
     R5 --> LR
+    R6 --> LR
     
     LR --> RT
     RT --> LOG
@@ -243,6 +248,7 @@ flowchart TD
 | **auth** | `checkAuthRateLimit()` | IP address | 5 req/min | 60s | `RATE_LIMIT_AUTH_*` | `rate-limit:auth` |
 | **admin** | `checkAdminRateLimit()` | Session ID | 30 req/min | 60s | `RATE_LIMIT_ADMIN_*` | `rate-limit:admin` |
 | **calendar** | `checkCalendarRateLimit()` | Session ID | 30 req/min | 60s | `RATE_LIMIT_CALENDAR_*` | `rate-limit:calendar` |
+| **api-docs** | `checkApiDocsRateLimit()` | Session ID | 10 req/min | 60s | `RATE_LIMIT_API_DOCS_*` | `rate-limit:api-docs` |
 
 ### Payload-Key Rate Limit
 
@@ -305,6 +311,15 @@ This limiter protects all admin POST, PATCH, and DELETE endpoints from bulk data
 
 This limiter protects calendar event CRUD endpoints from abuse. While less security-critical than auth or revoke, calendar spam can still degrade user experience and consume database resources.
 
+### API Docs Rate Limit
+
+- **Function**: `checkApiDocsRateLimit(sessionId: string): boolean`
+- **Store**: `apiDocsRateLimitStore` (Map)
+- **Default limit**: 10 requests per 60-second window
+- **Scope**: Per session ID, shared across the `/api-docs` UI page, spec endpoint, and asset routes (the Swagger UI load consumes several requests in one browse, hence the slightly lower ceiling than admin writes)
+
+This limiter guards the super-admin-only API reference against scraping or rapid-firing (each request also performs a Platform-org membership check). Unauthenticated traffic is stopped earlier by the middleware login redirect; this limit applies once the caller has a valid session.
+
 ---
 
 ## Configuration
@@ -325,6 +340,8 @@ All rate limits are configurable via environment variables with sensible default
 | `RATE_LIMIT_ADMIN_WINDOW` | number | 60 | Window in seconds for admin writes |
 | `RATE_LIMIT_CALENDAR_MAX` | number | 30 | Max calendar CRUD requests per window |
 | `RATE_LIMIT_CALENDAR_WINDOW` | number | 60 | Window in seconds for calendar CRUD |
+| `RATE_LIMIT_API_DOCS_MAX` | number | 10 | Max /api-docs requests per window (UI page, spec, and assets share the counter) |
+| `RATE_LIMIT_API_DOCS_WINDOW` | number | 60 | Window in seconds for /api-docs |
 
 ### Defaults
 
