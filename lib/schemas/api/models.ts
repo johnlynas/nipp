@@ -6,8 +6,10 @@ import {
   notificationPriority,
   notificationScope,
   orgStatus,
+  quotationState,
   recurrenceFrequency,
   ts,
+  workOrderState,
 } from './common';
 
 /**
@@ -1190,3 +1192,147 @@ export const userSearchRow = z
   .meta({ id: 'UserSearchRow' });
 
 export const userSearchResults = searchEnvelope(userSearchRow, 'UserRows');
+
+// ---------------------------------------------------------------------------
+// Work orders (admin surface) — mirror prisma WorkOrder / WorkOrderNote /
+// Quotation / Invoice rows. `price` is Prisma Decimal(12,2); Node's JSON
+// serializer renders it as a string. Relations flattened to the scalar subset
+// routes actually emit. Enums come from ./common (single source: prisma +
+// lib/work-order-state.ts).
+// ---------------------------------------------------------------------------
+
+/** Prisma Decimal(12,2) serializes to a JSON string in responses. */
+export const decimal = z.string().describe('Decimal amount (JSON string), e.g. "1500.50"');
+
+/** State enums re-exported from ./common for registry convenience (M.* access). */
+export const workOrderStateEnum = workOrderState;
+export const quotationStateEnum = quotationState;
+
+/** Bare WorkOrder row (as created/updated by the service — no relations). */
+export const workOrder = z
+  .object({
+    workOrderId: idField('Work order ID (cuid)'),
+    description: z.string(),
+    openedBy: z.string().email().describe("Email of the person who opened the work order"),
+    openedById: z.string().nullable().describe('User.id of the opener (null when opened on behalf of an org)'),
+    contractorId: z.string().nullable().describe('Assigned contractor (null until CONTRACTOR_ASSIGNED)'),
+    quotesDue: ts.nullable().describe('RFQ deadline (set with OUT_FOR_QUOTES; default +7 days)'),
+    deadlineAlertAt: ts.nullable(),
+    state: workOrderState,
+    organizationId: idField('Organization ID'),
+    createdAt: ts,
+    updatedAt: ts,
+  })
+  .meta({ id: 'WorkOrder' });
+
+/** Admin list row — gains the server-joined organization name. */
+export const workOrderListRow = z
+  .object({ ...workOrder.shape, organizationName: z.string() })
+  .meta({ id: 'WorkOrderListRow' });
+
+/** Admin list envelope — items + pagination + per-state counts (stat tiles). */
+export const adminWorkOrdersList = z
+  .object({
+    items: z.array(workOrderListRow),
+    pagination: z.object({ page: z.number(), pageSize: z.number(), total: z.number(), totalPages: z.number() }),
+    counts: z.record(z.string(), z.number()).describe('Per-state row counts (search-filtered) for the stat tiles'),
+  })
+  .meta({ id: 'AdminWorkOrdersList' });
+
+/** Work order note row. */
+export const workOrderNote = z
+  .object({
+    workOrderNoteId: idField('Note ID (cuid)'),
+    workOrderId: idField('Parent work order ID'),
+    note: z.string(),
+    createdById: z.string().nullable(),
+    organizationId: idField('Organization ID'),
+    createdAt: ts,
+    updatedAt: ts,
+  })
+  .meta({ id: 'WorkOrderNote' });
+
+/** Quotation row with the list/detail contractor projection. */
+export const quotationWithContractor = z
+  .object({
+    quoteId: idField('Quotation ID (cuid)'),
+    workOrderId: idField('Parent work order ID'),
+    contractorId: idField('Contractor ID'),
+    quoteLink: z.string().nullable(),
+    description: z.string().nullable().describe('Quote breakdown (null until received)'),
+    price: decimal.nullable(),
+    dueDate: ts,
+    state: quotationState,
+    organizationId: idField('Organization ID'),
+    createdAt: ts,
+    updatedAt: ts,
+  })
+  .meta({ id: 'Quotation' });
+
+export const adminQuotationRow = z
+  .object({
+    ...quotationWithContractor.shape,
+    contractor: z.object({ name: z.string(), companyName: z.string() }).describe('Directory join (list) / full projection (detail)'),
+  })
+  .meta({ id: 'AdminQuotationRow' });
+
+/** Admin quotes list — rows gain workOrder + organization joins and per-state counts. */
+export const adminQuotesList = z
+  .object({
+    items: z.array(
+      z.object({ ...adminQuotationRow.shape, workOrder: z.object({ description: z.string(), state: workOrderState }) }),
+    ),
+    pagination: z.object({ page: z.number(), pageSize: z.number(), total: z.number(), totalPages: z.number() }),
+    counts: z.record(z.string(), z.number()).describe("Per quote-state counts ('OPENED' etc., search-filtered) for the stat tiles"),
+  })
+  .meta({ id: 'AdminQuotesList' });
+
+/** Invoice row with the list/detail contractor projection (1:1 with WorkOrder). */
+export const invoiceWithContractor = z
+  .object({
+    invoiceId: idField('Invoice ID (cuid)'),
+    invoiceDate: ts,
+    workOrderId: idField('Parent work order ID (unique)'),
+    contractorId: idField('Contractor ID'),
+    invoiceLink: z.string().nullable(),
+    price: decimal,
+    dueDate: ts,
+    organizationId: idField('Organization ID'),
+    createdAt: ts,
+    updatedAt: ts,
+  })
+  .meta({ id: 'Invoice' });
+
+export const adminInvoiceRow = z
+  .object({
+    ...invoiceWithContractor.shape,
+    contractor: z.object({ name: z.string(), companyName: z.string() }),
+  })
+  .meta({ id: 'AdminInvoiceRow' });
+
+/** Admin invoices list — stat counts are grouped by the PARENT work order state. */
+export const adminInvoicesList = z
+  .object({
+    items: z.array(
+      z.object({ ...adminInvoiceRow.shape, workOrder: z.object({ description: z.string(), state: workOrderState }) }),
+    ),
+    pagination: z.object({ page: z.number(), pageSize: z.number(), total: z.number(), totalPages: z.number() }),
+    counts: z.record(z.string(), z.number()).describe("Invoice counts by parent work order state (Awaiting/Invoiced/Paid + Closed tiles)"),
+  })
+  .meta({ id: 'AdminInvoicesList' });
+
+/** Work order detail: row + organizationName + notes/quotes/invoice joins. */
+export const adminWorkOrderDetail = z
+  .object({
+    ...workOrder.shape,
+    organizationName: z.string().nullable(),
+    notes: z.array(workOrderNote).describe('All notes, oldest first'),
+    quotes: z.array(adminQuotationRow).describe('All quotations with contractor join (ascending by price)'),
+    invoice: adminInvoiceRow.nullable().describe('The 1:1 invoice (null while unbilled)'),
+    assignedContractor: z
+      .object({ name: z.string(), companyName: z.string(), email: z.string(), phone: z.string() })
+      .nullable()
+      .describe("Null pre-assignment; the contractor record's header projection"),
+  })
+  .meta({ id: 'AdminWorkOrderDetail' });
+
