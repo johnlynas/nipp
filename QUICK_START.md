@@ -224,7 +224,6 @@ npm cache clean --force
 rm -rf node_modules package-lock.json
 npm install
 rm -rf .next
-npm run dev
 ```
 
 Why it happens: Next.js 15's bundler builds shared `vendor-chunks`; after `lib/` changes, Hot Module Replacement sometimes fails to invalidate stale worker references. Clearing `.next` forces a clean rebuild.
