@@ -2975,6 +2975,1244 @@
         ],
         "additionalProperties": false
       },
+      "WorkOrderState": {
+        "type": "string",
+        "enum": [
+          "CREATED",
+          "OUT_FOR_QUOTES",
+          "QUOTES_IN",
+          "CONTRACTOR_ASSIGNED",
+          "STARTED",
+          "COMPLETE",
+          "INVOICED",
+          "FINISHED",
+          "CLOSED"
+        ]
+      },
+      "AdminWorkOrdersList": {
+        "type": "object",
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/WorkOrderListRow"
+            }
+          },
+          "pagination": {
+            "type": "object",
+            "properties": {
+              "page": {
+                "type": "number"
+              },
+              "pageSize": {
+                "type": "number"
+              },
+              "total": {
+                "type": "number"
+              },
+              "totalPages": {
+                "type": "number"
+              }
+            },
+            "required": [
+              "page",
+              "pageSize",
+              "total",
+              "totalPages"
+            ],
+            "additionalProperties": false
+          },
+          "counts": {
+            "type": "object",
+            "propertyNames": {
+              "type": "string"
+            },
+            "additionalProperties": {
+              "type": "number"
+            },
+            "description": "Per-state row counts (search-filtered) for the stat tiles"
+          }
+        },
+        "required": [
+          "items",
+          "pagination",
+          "counts"
+        ],
+        "additionalProperties": false
+      },
+      "WorkOrderListRow": {
+        "type": "object",
+        "properties": {
+          "workOrderId": {
+            "type": "string",
+            "description": "Work order ID (cuid)"
+          },
+          "description": {
+            "type": "string"
+          },
+          "openedBy": {
+            "type": "string",
+            "format": "email",
+            "pattern": "^(?:[A-Za-z0-9_'+\\-]+\\.)*[A-Za-z0-9_'+\\-]*[A-Za-z0-9_+-]@(?:[A-Za-z0-9][A-Za-z0-9\\-]*\\.)+[A-Za-z]{2,}$",
+            "description": "Email of the person who opened the work order"
+          },
+          "openedById": {
+            "description": "User.id of the opener (null when opened on behalf of an org)",
+            "type": "string",
+            "nullable": true
+          },
+          "contractorId": {
+            "description": "Assigned contractor (null until CONTRACTOR_ASSIGNED)",
+            "type": "string",
+            "nullable": true
+          },
+          "quotesDue": {
+            "anyOf": [
+              {
+                "type": "string",
+                "description": "ISO-8601 timestamp"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "RFQ deadline (set with OUT_FOR_QUOTES; default +7 days)"
+          },
+          "deadlineAlertAt": {
+            "anyOf": [
+              {
+                "type": "string",
+                "description": "ISO-8601 timestamp"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "state": {
+            "$ref": "#/components/schemas/WorkOrderState"
+          },
+          "organizationId": {
+            "type": "string",
+            "description": "Organization ID"
+          },
+          "createdAt": {
+            "type": "string",
+            "description": "ISO-8601 timestamp"
+          },
+          "updatedAt": {
+            "type": "string",
+            "description": "ISO-8601 timestamp"
+          },
+          "organizationName": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "workOrderId",
+          "description",
+          "openedBy",
+          "openedById",
+          "contractorId",
+          "quotesDue",
+          "deadlineAlertAt",
+          "state",
+          "organizationId",
+          "createdAt",
+          "updatedAt",
+          "organizationName"
+        ],
+        "additionalProperties": false
+      },
+      "CreateWorkOrderBody": {
+        "type": "object",
+        "properties": {
+          "description": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 500,
+            "description": "Work order description"
+          },
+          "organizationId": {
+            "type": "string",
+            "description": "Target organization"
+          },
+          "openedBy": {
+            "description": "Opener's email (defaults to the acting super admin's email)",
+            "type": "string",
+            "format": "email",
+            "pattern": "^(?:[A-Za-z0-9_'+\\-]+\\.)*[A-Za-z0-9_'+\\-]*[A-Za-z0-9_+-]@(?:[A-Za-z0-9][A-Za-z0-9\\-]*\\.)+[A-Za-z]{2,}$"
+          }
+        },
+        "required": [
+          "description",
+          "organizationId"
+        ],
+        "additionalProperties": false
+      },
+      "WorkOrder": {
+        "type": "object",
+        "properties": {
+          "workOrderId": {
+            "type": "string",
+            "description": "Work order ID (cuid)"
+          },
+          "description": {
+            "type": "string"
+          },
+          "openedBy": {
+            "type": "string",
+            "format": "email",
+            "pattern": "^(?:[A-Za-z0-9_'+\\-]+\\.)*[A-Za-z0-9_'+\\-]*[A-Za-z0-9_+-]@(?:[A-Za-z0-9][A-Za-z0-9\\-]*\\.)+[A-Za-z]{2,}$",
+            "description": "Email of the person who opened the work order"
+          },
+          "openedById": {
+            "description": "User.id of the opener (null when opened on behalf of an org)",
+            "type": "string",
+            "nullable": true
+          },
+          "contractorId": {
+            "description": "Assigned contractor (null until CONTRACTOR_ASSIGNED)",
+            "type": "string",
+            "nullable": true
+          },
+          "quotesDue": {
+            "anyOf": [
+              {
+                "type": "string",
+                "description": "ISO-8601 timestamp"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "RFQ deadline (set with OUT_FOR_QUOTES; default +7 days)"
+          },
+          "deadlineAlertAt": {
+            "anyOf": [
+              {
+                "type": "string",
+                "description": "ISO-8601 timestamp"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "state": {
+            "$ref": "#/components/schemas/WorkOrderState"
+          },
+          "organizationId": {
+            "type": "string",
+            "description": "Organization ID"
+          },
+          "createdAt": {
+            "type": "string",
+            "description": "ISO-8601 timestamp"
+          },
+          "updatedAt": {
+            "type": "string",
+            "description": "ISO-8601 timestamp"
+          }
+        },
+        "required": [
+          "workOrderId",
+          "description",
+          "openedBy",
+          "openedById",
+          "contractorId",
+          "quotesDue",
+          "deadlineAlertAt",
+          "state",
+          "organizationId",
+          "createdAt",
+          "updatedAt"
+        ],
+        "additionalProperties": false
+      },
+      "AdminWorkOrderDetail": {
+        "type": "object",
+        "properties": {
+          "workOrderId": {
+            "type": "string",
+            "description": "Work order ID (cuid)"
+          },
+          "description": {
+            "type": "string"
+          },
+          "openedBy": {
+            "type": "string",
+            "format": "email",
+            "pattern": "^(?:[A-Za-z0-9_'+\\-]+\\.)*[A-Za-z0-9_'+\\-]*[A-Za-z0-9_+-]@(?:[A-Za-z0-9][A-Za-z0-9\\-]*\\.)+[A-Za-z]{2,}$",
+            "description": "Email of the person who opened the work order"
+          },
+          "openedById": {
+            "description": "User.id of the opener (null when opened on behalf of an org)",
+            "type": "string",
+            "nullable": true
+          },
+          "contractorId": {
+            "description": "Assigned contractor (null until CONTRACTOR_ASSIGNED)",
+            "type": "string",
+            "nullable": true
+          },
+          "quotesDue": {
+            "anyOf": [
+              {
+                "type": "string",
+                "description": "ISO-8601 timestamp"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "RFQ deadline (set with OUT_FOR_QUOTES; default +7 days)"
+          },
+          "deadlineAlertAt": {
+            "anyOf": [
+              {
+                "type": "string",
+                "description": "ISO-8601 timestamp"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "state": {
+            "$ref": "#/components/schemas/WorkOrderState"
+          },
+          "organizationId": {
+            "type": "string",
+            "description": "Organization ID"
+          },
+          "createdAt": {
+            "type": "string",
+            "description": "ISO-8601 timestamp"
+          },
+          "updatedAt": {
+            "type": "string",
+            "description": "ISO-8601 timestamp"
+          },
+          "organizationName": {
+            "type": "string",
+            "nullable": true
+          },
+          "notes": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/WorkOrderNote"
+            },
+            "description": "All notes, oldest first"
+          },
+          "quotes": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/AdminQuotationRow"
+            },
+            "description": "All quotations with contractor join (ascending by price)"
+          },
+          "invoice": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/AdminInvoiceRow"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The 1:1 invoice (null while unbilled)"
+          },
+          "assignedContractor": {
+            "anyOf": [
+              {
+                "type": "object",
+                "properties": {
+                  "name": {
+                    "type": "string"
+                  },
+                  "companyName": {
+                    "type": "string"
+                  },
+                  "email": {
+                    "type": "string"
+                  },
+                  "phone": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "name",
+                  "companyName",
+                  "email",
+                  "phone"
+                ],
+                "additionalProperties": false
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Null pre-assignment; the contractor record's header projection"
+          }
+        },
+        "required": [
+          "workOrderId",
+          "description",
+          "openedBy",
+          "openedById",
+          "contractorId",
+          "quotesDue",
+          "deadlineAlertAt",
+          "state",
+          "organizationId",
+          "createdAt",
+          "updatedAt",
+          "organizationName",
+          "notes",
+          "quotes",
+          "invoice",
+          "assignedContractor"
+        ],
+        "additionalProperties": false
+      },
+      "WorkOrderNote": {
+        "type": "object",
+        "properties": {
+          "workOrderNoteId": {
+            "type": "string",
+            "description": "Note ID (cuid)"
+          },
+          "workOrderId": {
+            "type": "string",
+            "description": "Parent work order ID"
+          },
+          "note": {
+            "type": "string"
+          },
+          "createdById": {
+            "type": "string",
+            "nullable": true
+          },
+          "organizationId": {
+            "type": "string",
+            "description": "Organization ID"
+          },
+          "createdAt": {
+            "type": "string",
+            "description": "ISO-8601 timestamp"
+          },
+          "updatedAt": {
+            "type": "string",
+            "description": "ISO-8601 timestamp"
+          }
+        },
+        "required": [
+          "workOrderNoteId",
+          "workOrderId",
+          "note",
+          "createdById",
+          "organizationId",
+          "createdAt",
+          "updatedAt"
+        ],
+        "additionalProperties": false
+      },
+      "AdminQuotationRow": {
+        "type": "object",
+        "properties": {
+          "quoteId": {
+            "type": "string",
+            "description": "Quotation ID (cuid)"
+          },
+          "workOrderId": {
+            "type": "string",
+            "description": "Parent work order ID"
+          },
+          "contractorId": {
+            "type": "string",
+            "description": "Contractor ID"
+          },
+          "quoteLink": {
+            "type": "string",
+            "nullable": true
+          },
+          "description": {
+            "description": "Quote breakdown (null until received)",
+            "type": "string",
+            "nullable": true
+          },
+          "price": {
+            "anyOf": [
+              {
+                "type": "string",
+                "description": "Decimal amount (JSON string), e.g. \"1500.50\""
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "dueDate": {
+            "type": "string",
+            "description": "ISO-8601 timestamp"
+          },
+          "state": {
+            "$ref": "#/components/schemas/QuotationState"
+          },
+          "organizationId": {
+            "type": "string",
+            "description": "Organization ID"
+          },
+          "createdAt": {
+            "type": "string",
+            "description": "ISO-8601 timestamp"
+          },
+          "updatedAt": {
+            "type": "string",
+            "description": "ISO-8601 timestamp"
+          },
+          "contractor": {
+            "type": "object",
+            "properties": {
+              "name": {
+                "type": "string"
+              },
+              "companyName": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "name",
+              "companyName"
+            ],
+            "additionalProperties": false,
+            "description": "Directory join (list) / full projection (detail)"
+          }
+        },
+        "required": [
+          "quoteId",
+          "workOrderId",
+          "contractorId",
+          "quoteLink",
+          "description",
+          "price",
+          "dueDate",
+          "state",
+          "organizationId",
+          "createdAt",
+          "updatedAt",
+          "contractor"
+        ],
+        "additionalProperties": false
+      },
+      "QuotationState": {
+        "type": "string",
+        "enum": [
+          "OPENED",
+          "ACCEPTED",
+          "REJECTED",
+          "CLOSED"
+        ]
+      },
+      "AdminInvoiceRow": {
+        "type": "object",
+        "properties": {
+          "invoiceId": {
+            "type": "string",
+            "description": "Invoice ID (cuid)"
+          },
+          "invoiceDate": {
+            "type": "string",
+            "description": "ISO-8601 timestamp"
+          },
+          "workOrderId": {
+            "type": "string",
+            "description": "Parent work order ID (unique)"
+          },
+          "contractorId": {
+            "type": "string",
+            "description": "Contractor ID"
+          },
+          "invoiceLink": {
+            "type": "string",
+            "nullable": true
+          },
+          "price": {
+            "type": "string",
+            "description": "Decimal amount (JSON string), e.g. \"1500.50\""
+          },
+          "dueDate": {
+            "type": "string",
+            "description": "ISO-8601 timestamp"
+          },
+          "organizationId": {
+            "type": "string",
+            "description": "Organization ID"
+          },
+          "createdAt": {
+            "type": "string",
+            "description": "ISO-8601 timestamp"
+          },
+          "updatedAt": {
+            "type": "string",
+            "description": "ISO-8601 timestamp"
+          },
+          "contractor": {
+            "type": "object",
+            "properties": {
+              "name": {
+                "type": "string"
+              },
+              "companyName": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "name",
+              "companyName"
+            ],
+            "additionalProperties": false
+          }
+        },
+        "required": [
+          "invoiceId",
+          "invoiceDate",
+          "workOrderId",
+          "contractorId",
+          "invoiceLink",
+          "price",
+          "dueDate",
+          "organizationId",
+          "createdAt",
+          "updatedAt",
+          "contractor"
+        ],
+        "additionalProperties": false
+      },
+      "UpdateWorkOrderBody": {
+        "type": "object",
+        "properties": {
+          "description": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 500
+          },
+          "openedBy": {
+            "type": "string",
+            "format": "email",
+            "pattern": "^(?:[A-Za-z0-9_'+\\-]+\\.)*[A-Za-z0-9_'+\\-]*[A-Za-z0-9_+-]@(?:[A-Za-z0-9][A-Za-z0-9\\-]*\\.)+[A-Za-z]{2,}$"
+          }
+        },
+        "additionalProperties": false
+      },
+      "TransitionWorkOrderBody": {
+        "type": "object",
+        "properties": {
+          "to": {
+            "description": "Target state (legal one-hops per the state machine)",
+            "$ref": "#/components/schemas/WorkOrderState"
+          },
+          "contractorIds": {
+            "description": "Required for -> OUT_FOR_QUOTES: contractors invited by RFQ",
+            "minItems": 1,
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "quotesDue": {
+            "description": "ISO 8601 RFQ deadline (-> OUT_FOR_QUOTES; default +7 days)",
+            "type": "string",
+            "nullable": true
+          },
+          "quoteId": {
+            "description": "Required for -> CONTRACTOR_ASSIGNED: the accepted quotation",
+            "type": "string"
+          },
+          "paid": {
+            "description": "Must be true for -> FINISHED (invoice payment confirmed)",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "to"
+        ],
+        "additionalProperties": false
+      },
+      "AddWorkOrderNoteBody": {
+        "type": "object",
+        "properties": {
+          "workOrderId": {
+            "type": "string"
+          },
+          "note": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 2000
+          }
+        },
+        "required": [
+          "workOrderId",
+          "note"
+        ],
+        "additionalProperties": false
+      },
+      "UpdateWorkOrderNoteBody": {
+        "type": "object",
+        "properties": {
+          "note": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 2000
+          }
+        },
+        "required": [
+          "note"
+        ],
+        "additionalProperties": false
+      },
+      "AdminQuotesList": {
+        "type": "object",
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "quoteId": {
+                  "type": "string",
+                  "description": "Quotation ID (cuid)"
+                },
+                "workOrderId": {
+                  "type": "string",
+                  "description": "Parent work order ID"
+                },
+                "contractorId": {
+                  "type": "string",
+                  "description": "Contractor ID"
+                },
+                "quoteLink": {
+                  "type": "string",
+                  "nullable": true
+                },
+                "description": {
+                  "description": "Quote breakdown (null until received)",
+                  "type": "string",
+                  "nullable": true
+                },
+                "price": {
+                  "anyOf": [
+                    {
+                      "type": "string",
+                      "description": "Decimal amount (JSON string), e.g. \"1500.50\""
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "dueDate": {
+                  "type": "string",
+                  "description": "ISO-8601 timestamp"
+                },
+                "state": {
+                  "$ref": "#/components/schemas/QuotationState"
+                },
+                "organizationId": {
+                  "type": "string",
+                  "description": "Organization ID"
+                },
+                "createdAt": {
+                  "type": "string",
+                  "description": "ISO-8601 timestamp"
+                },
+                "updatedAt": {
+                  "type": "string",
+                  "description": "ISO-8601 timestamp"
+                },
+                "contractor": {
+                  "type": "object",
+                  "properties": {
+                    "name": {
+                      "type": "string"
+                    },
+                    "companyName": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "name",
+                    "companyName"
+                  ],
+                  "additionalProperties": false,
+                  "description": "Directory join (list) / full projection (detail)"
+                },
+                "workOrder": {
+                  "type": "object",
+                  "properties": {
+                    "description": {
+                      "type": "string"
+                    },
+                    "state": {
+                      "$ref": "#/components/schemas/WorkOrderState"
+                    }
+                  },
+                  "required": [
+                    "description",
+                    "state"
+                  ],
+                  "additionalProperties": false
+                }
+              },
+              "required": [
+                "quoteId",
+                "workOrderId",
+                "contractorId",
+                "quoteLink",
+                "description",
+                "price",
+                "dueDate",
+                "state",
+                "organizationId",
+                "createdAt",
+                "updatedAt",
+                "contractor",
+                "workOrder"
+              ],
+              "additionalProperties": false
+            }
+          },
+          "pagination": {
+            "type": "object",
+            "properties": {
+              "page": {
+                "type": "number"
+              },
+              "pageSize": {
+                "type": "number"
+              },
+              "total": {
+                "type": "number"
+              },
+              "totalPages": {
+                "type": "number"
+              }
+            },
+            "required": [
+              "page",
+              "pageSize",
+              "total",
+              "totalPages"
+            ],
+            "additionalProperties": false
+          },
+          "counts": {
+            "type": "object",
+            "propertyNames": {
+              "type": "string"
+            },
+            "additionalProperties": {
+              "type": "number"
+            },
+            "description": "Per quote-state counts ('OPENED' etc., search-filtered) for the stat tiles"
+          }
+        },
+        "required": [
+          "items",
+          "pagination",
+          "counts"
+        ],
+        "additionalProperties": false
+      },
+      "CreateQuotationBody": {
+        "type": "object",
+        "properties": {
+          "workOrderId": {
+            "type": "string"
+          },
+          "contractorId": {
+            "type": "string"
+          },
+          "dueDate": {
+            "type": "string",
+            "description": "ISO 8601 quote deadline"
+          }
+        },
+        "required": [
+          "workOrderId",
+          "contractorId",
+          "dueDate"
+        ],
+        "additionalProperties": false
+      },
+      "Quotation": {
+        "type": "object",
+        "properties": {
+          "quoteId": {
+            "type": "string",
+            "description": "Quotation ID (cuid)"
+          },
+          "workOrderId": {
+            "type": "string",
+            "description": "Parent work order ID"
+          },
+          "contractorId": {
+            "type": "string",
+            "description": "Contractor ID"
+          },
+          "quoteLink": {
+            "type": "string",
+            "nullable": true
+          },
+          "description": {
+            "description": "Quote breakdown (null until received)",
+            "type": "string",
+            "nullable": true
+          },
+          "price": {
+            "anyOf": [
+              {
+                "type": "string",
+                "description": "Decimal amount (JSON string), e.g. \"1500.50\""
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "dueDate": {
+            "type": "string",
+            "description": "ISO-8601 timestamp"
+          },
+          "state": {
+            "$ref": "#/components/schemas/QuotationState"
+          },
+          "organizationId": {
+            "type": "string",
+            "description": "Organization ID"
+          },
+          "createdAt": {
+            "type": "string",
+            "description": "ISO-8601 timestamp"
+          },
+          "updatedAt": {
+            "type": "string",
+            "description": "ISO-8601 timestamp"
+          }
+        },
+        "required": [
+          "quoteId",
+          "workOrderId",
+          "contractorId",
+          "quoteLink",
+          "description",
+          "price",
+          "dueDate",
+          "state",
+          "organizationId",
+          "createdAt",
+          "updatedAt"
+        ],
+        "additionalProperties": false
+      },
+      "UpdateQuotationBody": {
+        "type": "object",
+        "properties": {
+          "price": {
+            "description": "Must be > 0; can't be cleared once set",
+            "anyOf": [
+              {
+                "type": "number",
+                "exclusiveMinimum": 0
+              },
+              {
+                "type": "string"
+              }
+            ]
+          },
+          "description": {
+            "type": "string",
+            "nullable": true
+          },
+          "quoteLink": {
+            "type": "string",
+            "nullable": true
+          }
+        },
+        "additionalProperties": false
+      },
+      "AdminInvoicesList": {
+        "type": "object",
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "invoiceId": {
+                  "type": "string",
+                  "description": "Invoice ID (cuid)"
+                },
+                "invoiceDate": {
+                  "type": "string",
+                  "description": "ISO-8601 timestamp"
+                },
+                "workOrderId": {
+                  "type": "string",
+                  "description": "Parent work order ID (unique)"
+                },
+                "contractorId": {
+                  "type": "string",
+                  "description": "Contractor ID"
+                },
+                "invoiceLink": {
+                  "type": "string",
+                  "nullable": true
+                },
+                "price": {
+                  "type": "string",
+                  "description": "Decimal amount (JSON string), e.g. \"1500.50\""
+                },
+                "dueDate": {
+                  "type": "string",
+                  "description": "ISO-8601 timestamp"
+                },
+                "organizationId": {
+                  "type": "string",
+                  "description": "Organization ID"
+                },
+                "createdAt": {
+                  "type": "string",
+                  "description": "ISO-8601 timestamp"
+                },
+                "updatedAt": {
+                  "type": "string",
+                  "description": "ISO-8601 timestamp"
+                },
+                "contractor": {
+                  "type": "object",
+                  "properties": {
+                    "name": {
+                      "type": "string"
+                    },
+                    "companyName": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "name",
+                    "companyName"
+                  ],
+                  "additionalProperties": false
+                },
+                "workOrder": {
+                  "type": "object",
+                  "properties": {
+                    "description": {
+                      "type": "string"
+                    },
+                    "state": {
+                      "$ref": "#/components/schemas/WorkOrderState"
+                    }
+                  },
+                  "required": [
+                    "description",
+                    "state"
+                  ],
+                  "additionalProperties": false
+                }
+              },
+              "required": [
+                "invoiceId",
+                "invoiceDate",
+                "workOrderId",
+                "contractorId",
+                "invoiceLink",
+                "price",
+                "dueDate",
+                "organizationId",
+                "createdAt",
+                "updatedAt",
+                "contractor",
+                "workOrder"
+              ],
+              "additionalProperties": false
+            }
+          },
+          "pagination": {
+            "type": "object",
+            "properties": {
+              "page": {
+                "type": "number"
+              },
+              "pageSize": {
+                "type": "number"
+              },
+              "total": {
+                "type": "number"
+              },
+              "totalPages": {
+                "type": "number"
+              }
+            },
+            "required": [
+              "page",
+              "pageSize",
+              "total",
+              "totalPages"
+            ],
+            "additionalProperties": false
+          },
+          "counts": {
+            "type": "object",
+            "propertyNames": {
+              "type": "string"
+            },
+            "additionalProperties": {
+              "type": "number"
+            },
+            "description": "Invoice counts by parent work order state (Awaiting/Invoiced/Paid + Closed tiles)"
+          }
+        },
+        "required": [
+          "items",
+          "pagination",
+          "counts"
+        ],
+        "additionalProperties": false
+      },
+      "CreateInvoiceBody": {
+        "type": "object",
+        "properties": {
+          "workOrderId": {
+            "type": "string"
+          },
+          "contractorId": {
+            "type": "string",
+            "description": "Must equal the work order's assigned contractor"
+          },
+          "invoiceDate": {
+            "type": "string",
+            "description": "ISO 8601 date"
+          },
+          "price": {
+            "anyOf": [
+              {
+                "type": "number",
+                "exclusiveMinimum": 0
+              },
+              {
+                "type": "string"
+              }
+            ],
+            "description": "Must be a valid number > 0"
+          },
+          "dueDate": {
+            "type": "string",
+            "description": "ISO 8601 date"
+          },
+          "invoiceLink": {
+            "type": "string",
+            "nullable": true
+          }
+        },
+        "required": [
+          "workOrderId",
+          "contractorId",
+          "invoiceDate",
+          "price",
+          "dueDate"
+        ],
+        "additionalProperties": false
+      },
+      "Invoice": {
+        "type": "object",
+        "properties": {
+          "invoiceId": {
+            "type": "string",
+            "description": "Invoice ID (cuid)"
+          },
+          "invoiceDate": {
+            "type": "string",
+            "description": "ISO-8601 timestamp"
+          },
+          "workOrderId": {
+            "type": "string",
+            "description": "Parent work order ID (unique)"
+          },
+          "contractorId": {
+            "type": "string",
+            "description": "Contractor ID"
+          },
+          "invoiceLink": {
+            "type": "string",
+            "nullable": true
+          },
+          "price": {
+            "type": "string",
+            "description": "Decimal amount (JSON string), e.g. \"1500.50\""
+          },
+          "dueDate": {
+            "type": "string",
+            "description": "ISO-8601 timestamp"
+          },
+          "organizationId": {
+            "type": "string",
+            "description": "Organization ID"
+          },
+          "createdAt": {
+            "type": "string",
+            "description": "ISO-8601 timestamp"
+          },
+          "updatedAt": {
+            "type": "string",
+            "description": "ISO-8601 timestamp"
+          }
+        },
+        "required": [
+          "invoiceId",
+          "invoiceDate",
+          "workOrderId",
+          "contractorId",
+          "invoiceLink",
+          "price",
+          "dueDate",
+          "organizationId",
+          "createdAt",
+          "updatedAt"
+        ],
+        "additionalProperties": false
+      },
+      "UpdateInvoiceBody": {
+        "type": "object",
+        "properties": {
+          "price": {
+            "anyOf": [
+              {
+                "type": "number",
+                "exclusiveMinimum": 0
+              },
+              {
+                "type": "string"
+              }
+            ]
+          },
+          "invoiceDate": {
+            "description": "ISO 8601 date",
+            "type": "string"
+          },
+          "dueDate": {
+            "description": "ISO 8601 date",
+            "type": "string"
+          },
+          "invoiceLink": {
+            "type": "string",
+            "nullable": true
+          }
+        },
+        "additionalProperties": false
+      },
       "DashboardCreateOrganizationBody": {
         "type": "object",
         "properties": {
@@ -5483,6 +6721,452 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/CacheMetricsResponse"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "429",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "500",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/admin/invoices/{id}": {
+      "delete": {
+        "tags": [
+          "admin"
+        ],
+        "summary": "DELETE /api/admin/invoices/{id}",
+        "description": "order is INVOICED (409 once FINISHED/CLOSED, 422 otherwise). Super-admin only.\n\nRequires super admin session.\n\nHandler: `app/api/admin/invoices/[id]/route.ts`.",
+        "security": [
+          {
+            "cookieAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "200",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SuccessResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "401",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "403",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "404",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "409",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "422",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "500",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      },
+      "patch": {
+        "tags": [
+          "admin"
+        ],
+        "summary": "PATCH /api/admin/invoices/{id}",
+        "description": "is COMPLETE or INVOICED (corrections before payment). Super-admin only.\n\nRequires super admin session.\n\nHandler: `app/api/admin/invoices/[id]/route.ts`.",
+        "security": [
+          {
+            "cookieAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UpdateInvoiceBody"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "200",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Invoice"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "400",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "401",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "403",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "404",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "409",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "429",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "500",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/admin/invoices": {
+      "get": {
+        "tags": [
+          "admin"
+        ],
+        "summary": "GET /api/admin/invoices",
+        "description": "only; reads run under the verified platform context (RLS admits all rows for\nplatform admins). Rows gain `workOrder.description` + `workOrder.state` and\n`contractor` joins from InvoiceService.list. Filters: page, pageSize, search,\nworkOrderState, organizationId, workOrderId, contractorId. Stat counts are\ngrouped by the PARENT work order state (an invoice has no lifecycle of its\nown — it follows the billing tail) and returned as `counts` shaped for the\nadmin tiles: Awaiting Invoicing / Invoiced / Paid + Closed.\n\nRequires super admin session.\n\nHandler: `app/api/admin/invoices/route.ts`.",
+        "security": [
+          {
+            "cookieAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "page",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "description": "Page number (default 1)",
+              "type": "string"
+            }
+          },
+          {
+            "name": "pageSize",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "description": "Rows per page (default 20)",
+              "type": "string"
+            }
+          },
+          {
+            "name": "search",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "description": "Contractor name/company or work order description (case-insensitive)",
+              "type": "string"
+            }
+          },
+          {
+            "name": "workOrderState",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "description": "Filter by the PARENT work order state",
+              "$ref": "#/components/schemas/WorkOrderState"
+            }
+          },
+          {
+            "name": "organizationId",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "description": "Scope to one org",
+              "type": "string"
+            }
+          },
+          {
+            "name": "workOrderId",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "description": "Restrict to one work order",
+              "type": "string"
+            }
+          },
+          {
+            "name": "contractorId",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "description": "Restrict to one contractor",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "200",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdminInvoicesList"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "400",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "401",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "500",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "503",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "tags": [
+          "admin"
+        ],
+        "summary": "POST /api/admin/invoices",
+        "description": "Body: { workOrderId, contractorId, invoiceDate, price, dueDate, invoiceLink? }.\nSuper-admin only (409 on duplicate via service ValidationError).\n\nRequires super admin session.\n\nHandler: `app/api/admin/invoices/route.ts`.",
+        "security": [
+          {
+            "cookieAuth": []
+          }
+        ],
+        "parameters": [],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateInvoiceBody"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "201",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Invoice"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "400",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "401",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "403",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "404",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "409",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
                 }
               }
             }
@@ -8630,6 +10314,422 @@
         }
       }
     },
+    "/api/admin/quotes/{id}": {
+      "delete": {
+        "tags": [
+          "admin"
+        ],
+        "summary": "DELETE /api/admin/quotes/{id}",
+        "description": "FINISHED / CLOSED (409). Super-admin only.\n\nRequires super admin session.\n\nHandler: `app/api/admin/quotes/[id]/route.ts`.",
+        "security": [
+          {
+            "cookieAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "200",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SuccessResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "401",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "403",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "404",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "409",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "500",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      },
+      "patch": {
+        "tags": [
+          "admin"
+        ],
+        "summary": "PATCH /api/admin/quotes/{id}",
+        "description": "arrive (price fill auto-moves OUT_FOR_QUOTES → QUOTES_IN). Super-admin only.\n\nRequires super admin session.\n\nHandler: `app/api/admin/quotes/[id]/route.ts`.",
+        "security": [
+          {
+            "cookieAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UpdateQuotationBody"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "200",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Quotation"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "400",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "401",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "403",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "404",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "429",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "500",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/admin/quotes": {
+      "get": {
+        "tags": [
+          "admin"
+        ],
+        "summary": "GET /api/admin/quotes",
+        "description": "only; reads run under the verified platform context (RLS admits all rows for\nplatform admins). Rows gain `workOrder.description` + `workOrder.state` and\n`contractor` joins from QuotationService.list. Filters: page, pageSize,\nsearch, state, organizationId, workOrderId, contractorId. Per-quote-state\ncounts (search-filtered) power the stat tiles.\n\nRequires super admin session.\n\nHandler: `app/api/admin/quotes/route.ts`.",
+        "security": [
+          {
+            "cookieAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "page",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "description": "Page number (default 1)",
+              "type": "string"
+            }
+          },
+          {
+            "name": "pageSize",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "description": "Rows per page (default 20)",
+              "type": "string"
+            }
+          },
+          {
+            "name": "search",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "description": "Contractor name/company, work order description or quote breakdown (case-insensitive)",
+              "type": "string"
+            }
+          },
+          {
+            "name": "state",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "description": "Filter by quote state, e.g. 'OPENED'",
+              "$ref": "#/components/schemas/QuotationState"
+            }
+          },
+          {
+            "name": "organizationId",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "description": "Scope to one org",
+              "type": "string"
+            }
+          },
+          {
+            "name": "workOrderId",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "description": "Restrict to one work order",
+              "type": "string"
+            }
+          },
+          {
+            "name": "contractorId",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "description": "Restrict to one contractor",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "200",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdminQuotesList"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "400",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "401",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "500",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "503",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "tags": [
+          "admin"
+        ],
+        "summary": "POST /api/admin/quotes",
+        "description": "order. Body: { workOrderId, contractorId, dueDate }. Super-admin only.\n\nRequires super admin session.\n\nHandler: `app/api/admin/quotes/route.ts`.",
+        "security": [
+          {
+            "cookieAuth": []
+          }
+        ],
+        "parameters": [],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateQuotationBody"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "201",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Quotation"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "400",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "401",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "403",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "404",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "429",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "500",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/admin/roles/{roleId}": {
       "delete": {
         "tags": [
@@ -9777,6 +11877,852 @@
           },
           "503": {
             "description": "503",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/admin/work-order-notes/{id}": {
+      "delete": {
+        "tags": [
+          "admin"
+        ],
+        "summary": "delete a note. Super-admin only.",
+        "description": "DELETE — delete a note. Super-admin only.\n\nRequires super admin session.\n\nHandler: `app/api/admin/work-order-notes/[id]/route.ts`.",
+        "security": [
+          {
+            "cookieAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "200",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SuccessResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "401",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "403",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "404",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "500",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      },
+      "patch": {
+        "tags": [
+          "admin"
+        ],
+        "summary": "PATCH /api/admin/work-order-notes/{id}",
+        "description": "Requires super admin session.\n\nHandler: `app/api/admin/work-order-notes/[id]/route.ts`.",
+        "security": [
+          {
+            "cookieAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UpdateWorkOrderNoteBody"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "200",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WorkOrderNote"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "400",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "401",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "403",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "404",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "429",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "500",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/admin/work-order-notes": {
+      "post": {
+        "tags": [
+          "admin"
+        ],
+        "summary": "POST /api/admin/work-order-notes",
+        "description": "Body: { workOrderId, note }. Super-admin only.\n\nRequires super admin session.\n\nHandler: `app/api/admin/work-order-notes/route.ts`.",
+        "security": [
+          {
+            "cookieAuth": []
+          }
+        ],
+        "parameters": [],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AddWorkOrderNoteBody"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "201",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WorkOrderNote"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "400",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "401",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "403",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "404",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "429",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "500",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/admin/work-orders/{id}": {
+      "delete": {
+        "tags": [
+          "admin"
+        ],
+        "summary": "DELETE /api/admin/work-orders/{id}",
+        "description": "invoice cascade via FKs. Super-admin only.\n\nRequires super admin session.\n\nHandler: `app/api/admin/work-orders/[id]/route.ts`.",
+        "security": [
+          {
+            "cookieAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "200",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SuccessResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "401",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "403",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "404",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "500",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      },
+      "get": {
+        "tags": [
+          "admin"
+        ],
+        "summary": "GET /api/admin/work-orders/{id}",
+        "description": "Super-admin only; reads run under the row's own org tenant context (RLS).\n\nRequires super admin session.\n\nHandler: `app/api/admin/work-orders/[id]/route.ts`.",
+        "security": [
+          {
+            "cookieAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "200",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdminWorkOrderDetail"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "401",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "403",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "404",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "500",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      },
+      "patch": {
+        "tags": [
+          "admin"
+        ],
+        "summary": "PATCH /api/admin/work-orders/{id}",
+        "description": "(state goes through /transition). Super-admin only.\n\nRequires super admin session.\n\nHandler: `app/api/admin/work-orders/[id]/route.ts`.",
+        "security": [
+          {
+            "cookieAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UpdateWorkOrderBody"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "200",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WorkOrder"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "400",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "401",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "403",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "404",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "429",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "500",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/admin/work-orders/{id}/transition": {
+      "post": {
+        "tags": [
+          "admin"
+        ],
+        "summary": "POST /api/admin/work-orders/{id}/transition",
+        "description": "side effects (design §State Machine). Body:\n{ to, contractorIds?, quotesDue?, quoteId?, paid? }\nThe mutation runs under the row's own org tenant RLS context (policy WITH\nCHECK requires app.current_org_id; a pure platform context fails closed).\n\nRequires super admin session.\n\nHandler: `app/api/admin/work-orders/[id]/transition/route.ts`.",
+        "security": [
+          {
+            "cookieAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/TransitionWorkOrderBody"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "200",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WorkOrder"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "400",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "401",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "403",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "404",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "409",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "422",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "429",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "500",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/admin/work-orders": {
+      "get": {
+        "tags": [
+          "admin"
+        ],
+        "summary": "GET /api/admin/work-orders",
+        "description": "search filter. Super-admin only; reads run under the verified platform\ncontext (RLS admits all org rows for platform admins). The tenant-scoped\nread route (`/api/organizations/[orgId]/work-orders`) cannot serve this —\nit is path-bound to one org. Row objects gain `organizationName` (joined\nserver-side) so the admin table doesn't fetch a second list.\n\nRequires super admin session.\n\nHandler: `app/api/admin/work-orders/route.ts`.",
+        "security": [
+          {
+            "cookieAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "page",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "description": "Page number (default 1)",
+              "type": "string"
+            }
+          },
+          {
+            "name": "pageSize",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "description": "Rows per page (default 20)",
+              "type": "string"
+            }
+          },
+          {
+            "name": "search",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "description": "Description/openedBy substring, case-insensitive",
+              "type": "string"
+            }
+          },
+          {
+            "name": "state",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "description": "Filter by state, e.g. 'CONTRACTOR_ASSIGNED'",
+              "$ref": "#/components/schemas/WorkOrderState"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "200",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdminWorkOrdersList"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "400",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "401",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "403",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "500",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "tags": [
+          "admin"
+        ],
+        "summary": "POST /api/admin/work-orders",
+        "description": "Super-admin only; the write runs under the tenant RLS context pinned to the\ntarget organization (policy WITH CHECK requires app.current_org_id).\n\nRequires super admin session.\n\nHandler: `app/api/admin/work-orders/route.ts`.",
+        "security": [
+          {
+            "cookieAuth": []
+          }
+        ],
+        "parameters": [],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateWorkOrderBody"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "201",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WorkOrder"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "400",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "401",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "403",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "429",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "500",
             "content": {
               "application/json": {
                 "schema": {
@@ -16111,6 +19057,35 @@
         }
       }
     },
+    "/api/organizations/{orgId}/quotes": {
+      "get": {
+        "tags": [
+          "organizations"
+        ],
+        "summary": "GET /api/organizations/{orgId}/quotes",
+        "description": "Tenant quotation reads — /api/organizations/[orgId]/quotes\nGET -- List the organization's quotations (paginated, state/search filters).\nMembership OR super admin; rows are org-isolated by RLS. Read-only: tenants\nmanage quotes through their work orders on this surface — quote mutations\nlive only under /api/admin/quotes (super admin).\n\nRequires authenticated session (BetterAuth cookie).\n\nHandler: `app/api/organizations/[orgId]/quotes/route.ts`.",
+        "security": [
+          {
+            "cookieAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "orgId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "default": {
+            "description": "Unspecified — response schema not yet documented (add a registry entry in lib/schemas/api/ to fill this in)."
+          }
+        }
+      }
+    },
     "/api/organizations/{orgId}/roles": {
       "get": {
         "tags": [
@@ -17291,6 +20266,72 @@
                 }
               }
             }
+          }
+        }
+      }
+    },
+    "/api/organizations/{orgId}/work-orders/{id}": {
+      "get": {
+        "tags": [
+          "organizations"
+        ],
+        "summary": "GET /api/organizations/{orgId}/work-orders/{id}",
+        "description": "Tenant work order read — /api/organizations/[orgId]/work-orders/[id]\nGET -- Detail incl. notes, quotes (with contractor) and invoice. Membership\nOR super admin; RLS makes foreign-org ids a 404 for members.\n\nRequires authenticated session (BetterAuth cookie).\n\nHandler: `app/api/organizations/[orgId]/work-orders/[id]/route.ts`.",
+        "security": [
+          {
+            "cookieAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "orgId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "default": {
+            "description": "Unspecified — response schema not yet documented (add a registry entry in lib/schemas/api/ to fill this in)."
+          }
+        }
+      }
+    },
+    "/api/organizations/{orgId}/work-orders": {
+      "get": {
+        "tags": [
+          "organizations"
+        ],
+        "summary": "GET /api/organizations/{orgId}/work-orders",
+        "description": "Tenant work order reads — /api/organizations/[orgId]/work-orders\nGET -- List the organization's own work orders (paginated, state/search\nfilters). Membership OR super admin; rows are org-isolated by RLS.\n\nRequires authenticated session (BetterAuth cookie).\n\nHandler: `app/api/organizations/[orgId]/work-orders/route.ts`.",
+        "security": [
+          {
+            "cookieAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "orgId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "default": {
+            "description": "Unspecified — response schema not yet documented (add a registry entry in lib/schemas/api/ to fill this in)."
           }
         }
       }

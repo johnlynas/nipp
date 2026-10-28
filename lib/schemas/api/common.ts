@@ -67,6 +67,24 @@ export function idField(desc: string) {
 
 export const orgStatus = z.enum(['PENDING', 'ACTIVE', 'SUSPENDED', 'ARCHIVED']).meta({ id: 'OrgStatus' });
 
+/** WorkOrder.state — mirrors lib/work-order-state.ts WORK_ORDER_STATES. */
+export const workOrderState = z
+  .enum([
+    'CREATED',
+    'OUT_FOR_QUOTES',
+    'QUOTES_IN',
+    'CONTRACTOR_ASSIGNED',
+    'STARTED',
+    'COMPLETE',
+    'INVOICED',
+    'FINISHED',
+    'CLOSED',
+  ])
+  .meta({ id: 'WorkOrderState' });
+
+/** Quotation.state — mirrors lib/work-order-state.ts QUOTE_STATES. */
+export const quotationState = z.enum(['OPENED', 'ACCEPTED', 'REJECTED', 'CLOSED']).meta({ id: 'QuotationState' });
+
 export const notificationPriority = z.enum(['INFO', 'WARNING', 'ERROR', 'CRITICAL', 'CALENDAR', 'JOB']).meta({
   id: 'NotificationPriority',
 });

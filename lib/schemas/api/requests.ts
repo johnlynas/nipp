@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { calendarEventType, notificationPriority, orgStatus, recurrenceFrequency } from './common';
+import { calendarEventType, notificationPriority, orgStatus, recurrenceFrequency, workOrderState } from './common';
 
 /**
  * Request body schemas for API docs — mirror what each route actually
@@ -417,3 +417,89 @@ export const logErrorBody = z
     action: z.string().nullable().optional().describe('User action in progress'),
   })
   .meta({ id: 'LogErrorBody' });
+
+// ---------------------------------------------------------------------------
+// Work orders (admin surface) — super admin
+// ---------------------------------------------------------------------------
+
+export const createWorkOrderBody = z
+  .object({
+    description: z.string().min(1).max(500).describe('Work order description'),
+    organizationId: z.string().describe('Target organization'),
+    openedBy: z
+      .string()
+      .email()
+      .optional()
+      .describe("Opener's email (defaults to the acting super admin's email)"),
+  })
+  .meta({ id: 'CreateWorkOrderBody' });
+
+export const updateWorkOrderBody = z
+  .object({
+    description: z.string().min(1).max(500).optional(),
+    openedBy: z.string().email().optional(),
+  })
+  .meta({ id: 'UpdateWorkOrderBody' });
+
+/** One-hop state change — options depend on the target state (see service validation). */
+export const transitionWorkOrderBody = z
+  .object({
+    to: workOrderState.describe('Target state (legal one-hops per the state machine)'),
+    contractorIds: z
+      .array(z.string())
+      .min(1)
+      .optional()
+      .describe("Required for -> OUT_FOR_QUOTES: contractors invited by RFQ"),
+    quotesDue: z.string().nullable().optional().describe('ISO 8601 RFQ deadline (-> OUT_FOR_QUOTES; default +7 days)'),
+    quoteId: z.string().optional().describe('Required for -> CONTRACTOR_ASSIGNED: the accepted quotation'),
+    paid: z.boolean().optional().describe("Must be true for -> FINISHED (invoice payment confirmed)"),
+  })
+  .meta({ id: 'TransitionWorkOrderBody' });
+
+export const addWorkOrderNoteBody = z
+  .object({
+    workOrderId: z.string(),
+    note: z.string().min(1).max(2000),
+  })
+  .meta({ id: 'AddWorkOrderNoteBody' });
+
+export const updateWorkOrderNoteBody = z
+  .object({ note: z.string().min(1).max(2000) })
+  .meta({ id: 'UpdateWorkOrderNoteBody' });
+
+export const createQuotationBody = z
+  .object({
+    workOrderId: z.string(),
+    contractorId: z.string(),
+    dueDate: z.string().describe('ISO 8601 quote deadline'),
+  })
+  .meta({ id: 'CreateQuotationBody' });
+
+/** Price fill from null auto-advances an OUT_FOR_QUOTES work order to QUOTES_IN. */
+export const updateQuotationBody = z
+  .object({
+    price: z.union([z.number().positive(), z.string()]).optional().describe("Must be > 0; can't be cleared once set"),
+    description: z.string().nullable().optional(),
+    quoteLink: z.string().nullable().optional(),
+  })
+  .meta({ id: 'UpdateQuotationBody' });
+
+export const createInvoiceBody = z
+  .object({
+    workOrderId: z.string(),
+    contractorId: z.string().describe("Must equal the work order's assigned contractor"),
+    invoiceDate: z.string().describe('ISO 8601 date'),
+    price: z.union([z.number().positive(), z.string()]).describe('Must be a valid number > 0'),
+    dueDate: z.string().describe('ISO 8601 date'),
+    invoiceLink: z.string().nullable().optional(),
+  })
+  .meta({ id: 'CreateInvoiceBody' });
+
+export const updateInvoiceBody = z
+  .object({
+    price: z.union([z.number().positive(), z.string()]).optional(),
+    invoiceDate: z.string().optional().describe('ISO 8601 date'),
+    dueDate: z.string().optional().describe('ISO 8601 date'),
+    invoiceLink: z.string().nullable().optional(),
+  })
+  .meta({ id: 'UpdateInvoiceBody' });

@@ -74,7 +74,7 @@ export async function PATCH(
 }
 
 /**
- * DELETE /api/admin/work-order-notes/[id]. Super-admin only.
+ * DELETE /api/admin/work-order-notes/[id] -- delete a note. Super-admin only.
  */
 export async function DELETE(
   _request: NextRequest,

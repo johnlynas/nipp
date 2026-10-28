@@ -431,6 +431,128 @@ export const registry: Record<string, ApiEntry> = {
   },
 
   // ---------------------------------------------------------------------------
+  // Work orders (platform, super admin) — WorkOrderService + state machine.
+  // Reads run under the platform context; writes are pinned to the row's own org
+  // tenant RLS context (withTenantAdminContext). All handlers map service errors
+  // via handleServiceError: Validation → 400, NotFound → 404, Conflict → 409.
+  // Writes are per-user rate-limited (429); rows are bare Prisma results
+  // (Decimal prices arrive as JSON strings).
+  // ---------------------------------------------------------------------------
+  'GET /api/admin/work-orders': {
+    parameters: {
+      page: z.string().optional().describe('Page number (default 1)'),
+      pageSize: z.string().optional().describe('Rows per page (default 20)'),
+      search: z.string().optional().describe('Description/openedBy substring, case-insensitive'),
+      state: M.workOrderStateEnum.optional().describe("Filter by state, e.g. 'CONTRACTOR_ASSIGNED'"),
+    },
+    // Rows gain server-joined organizationName; `counts` are per-state stat tiles.
+    responses: { '200': M.adminWorkOrdersList, '400': E, '401': E, '403': E, '500': E },
+  },
+  'POST /api/admin/work-orders': {
+    requestBody: R.createWorkOrderBody,
+    // openedBy defaults to the acting super admin's email; bare WorkOrder row.
+    responses: { '201': M.workOrder, '400': E, '401': E, '403': E, '429': E, '500': E },
+  },
+  'GET /api/admin/work-orders/{id}': {
+    // Full detail: row + organizationName + notes/quotes (asc by price) + invoice + assignedContractor.
+    responses: { '200': M.adminWorkOrderDetail, '401': E, '403': E, '404': E, '500': E },
+  },
+  'PATCH /api/admin/work-orders/{id}': {
+    requestBody: R.updateWorkOrderBody,
+    // description/openedBy ONLY — state goes through /transition. Empty body → 400.
+    responses: { '200': M.workOrder, '400': E, '401': E, '403': E, '404': E, '429': E, '500': E },
+  },
+  // Notes/quotes/invoice cascade via FKs on delete.
+  'DELETE /api/admin/work-orders/{id}': {
+    responses: { '200': successResponse, '401': E, '403': E, '404': E, '500': E },
+  },
+  // One-hop state change with side effects (RFQ/accept/paid). Illegal hop → 409;
+  // missing per-transition options (contractorIds / quoteId / paid) → 422.
+  'POST /api/admin/work-orders/{id}/transition': {
+    requestBody: R.transitionWorkOrderBody,
+    responses: { '200': M.workOrder, '400': E, '401': E, '403': E, '404': E, '409': E, '422': E, '429': E, '500': E },
+  },
+
+  // ---------------------------------------------------------------------------
+  // Work order notes (super admin) — terminal work orders (FINISHED/CLOSED) reject writes (400).
+  // ---------------------------------------------------------------------------
+  'POST /api/admin/work-order-notes': {
+    requestBody: R.addWorkOrderNoteBody,
+    responses: { '201': M.workOrderNote, '400': E, '401': E, '403': E, '404': E, '429': E, '500': E },
+  },
+  'PATCH /api/admin/work-order-notes/{id}': {
+    requestBody: R.updateWorkOrderNoteBody,
+    responses: { '200': M.workOrderNote, '400': E, '401': E, '403': E, '404': E, '429': E, '500': E },
+  },
+  'DELETE /api/admin/work-order-notes/{id}': {
+    responses: { '200': successResponse, '401': E, '403': E, '404': E, '500': E },
+  },
+
+  // ---------------------------------------------------------------------------
+  // Quotations (super admin) — one per (workOrder, contractor). Filling price from
+  // null auto-moves an OUT_FOR_QUOTES work order to QUOTES_IN.
+  // ---------------------------------------------------------------------------
+  'GET /api/admin/quotes': {
+    parameters: {
+      page: z.string().optional().describe('Page number (default 1)'),
+      pageSize: z.string().optional().describe('Rows per page (default 20)'),
+      search: z.string().optional().describe("Contractor name/company, work order description or quote breakdown (case-insensitive)"),
+      state: M.quotationStateEnum.optional().describe("Filter by quote state, e.g. 'OPENED'"),
+      organizationId: z.string().optional().describe('Scope to one org'),
+      workOrderId: z.string().optional().describe('Restrict to one work order'),
+      contractorId: z.string().optional().describe('Restrict to one contractor'),
+    },
+    // Rows gain workOrder + org joins; per-quote-state `counts` power the stat tiles.
+    responses: { '200': M.adminQuotesList, '400': E, '401': E, '503': E, '500': E },
+  },
+
+  'POST /api/admin/quotes': {
+    requestBody: R.createQuotationBody,
+    // Quotable states only (CREATED/OUT_FOR_QUOTES/QUOTES_IN); duplicate per (workOrder, contractor) → 400.
+    responses: { '201': M.quotationWithContractor, '400': E, '401': E, '403': E, '404': E, '429': E, '500': E },
+  },
+  'PATCH /api/admin/quotes/{id}': {
+    requestBody: R.updateQuotationBody,
+    // Only OPEN quotes are editable (others → 400); price fill triggers the automatic QUOTES_IN hop.
+    responses: { '200': M.quotationWithContractor, '400': E, '401': E, '403': E, '404': E, '429': E, '500': E },
+  },
+  // Blocked once the work order is INVOICED/FINISHED/CLOSED (409).
+  'DELETE /api/admin/quotes/{id}': {
+    responses: { '200': successResponse, '401': E, '403': E, '404': E, '409': E, '500': E },
+  },
+
+  // ---------------------------------------------------------------------------
+  // Invoices (super admin) — 1:1 with WorkOrder; recorded once COMPLETE.
+  // Duplicate per work order → 409. Edits allowed COMPLETE/INVOICED (409 otherwise);
+  // delete ONLY while INVOICED (FINISHED/CLOSED → 409, other states → 422).
+  // ---------------------------------------------------------------------------
+  'GET /api/admin/invoices': {
+    parameters: {
+      page: z.string().optional().describe('Page number (default 1)'),
+      pageSize: z.string().optional().describe('Rows per page (default 20)'),
+      search: z.string().optional().describe('Contractor name/company or work order description (case-insensitive)'),
+      workOrderState: M.workOrderStateEnum.optional().describe("Filter by the PARENT work order state"),
+      organizationId: z.string().optional().describe('Scope to one org'),
+      workOrderId: z.string().optional().describe('Restrict to one work order'),
+      contractorId: z.string().optional().describe('Restrict to one contractor'),
+    },
+    // Stat `counts` are grouped by parent work order state (billing tail).
+    responses: { '200': M.adminInvoicesList, '400': E, '401': E, '503': E, '500': E },
+  },
+  'POST /api/admin/invoices': {
+    requestBody: R.createInvoiceBody,
+    // Work order must be COMPLETE with an assigned contractor; duplicate → 409.
+    responses: { '201': M.invoiceWithContractor, '400': E, '401': E, '403': E, '404': E, '409': E, '429': E, '500': E },
+  },
+  'PATCH /api/admin/invoices/{id}': {
+    requestBody: R.updateInvoiceBody,
+    responses: { '200': M.invoiceWithContractor, '400': E, '401': E, '403': E, '404': E, '409': E, '429': E, '500': E },
+  },
+  'DELETE /api/admin/invoices/{id}': {
+    responses: { '200': successResponse, '401': E, '403': E, '404': E, '409': E, '422': E, '500': E },
+  },
+
+  // ---------------------------------------------------------------------------
   // Dashboard orgs (super admin) + client error logger
   // Note: dashboard routes return BARE Prisma rows — no { organization } envelope.
   // ---------------------------------------------------------------------------
