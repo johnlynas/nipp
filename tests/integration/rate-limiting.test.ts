@@ -52,6 +52,14 @@ import {
   CALENDAR_RATE_LIMIT_WINDOW,
 } from '@/lib/rate-limiter';
 
+import {
+  checkApiDocsRateLimit,
+  resetApiDocsRateLimitStore,
+  apiDocsRateLimitStore,
+  API_DOCS_RATE_LIMIT_MAX,
+  API_DOCS_RATE_LIMIT_WINDOW,
+} from '@/lib/rate-limiter';
+
 // ---------------------------------------------------------------------------
 // Hoisted mock state — must be before any vi.mock() calls (which are hoisted).
 // ---------------------------------------------------------------------------
@@ -949,5 +957,63 @@ describe('Magic-link verify route — IP rate limiting (integration)', () => {
     // Same token stays fully reachable from the unthrottled IP (consumable or not).
     expect(fresh.headers.get('location')).toContain('/login?oidc=link-expired');
     await fresh.body?.cancel();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// API docs endpoint rate limiting (/api-docs, by session ID)
+// ---------------------------------------------------------------------------
+
+describe('API Docs Endpoint — Rate Limiting (integration)', () => {
+  beforeEach(() => {
+    resetApiDocsRateLimitStore();
+  });
+
+  it('should allow requests up to API_DOCS_RATE_LIMIT_MAX per window', async () => {
+    const results: boolean[] = [];
+
+    // API_DOCS_RATE_LIMIT_MAX is 10 per window
+    for (let i = 0; i < 10; i++) {
+      results.push(checkApiDocsRateLimit('session:test-user'));
+    }
+
+    // All 10 should be allowed
+    expect(results.every((r) => r === true)).toBe(true);
+
+    // The 11th should be rate limited
+    expect(checkApiDocsRateLimit('session:test-user')).toBe(false);
+  });
+
+  it('should expose correct api-docs rate limit constants', () => {
+    expect(API_DOCS_RATE_LIMIT_MAX).toBe(10);
+    expect(API_DOCS_RATE_LIMIT_WINDOW).toBe(60); // 60 seconds = 1 minute
+  });
+
+  it('should allow different sessions independently', () => {
+    // Exhaust session A's limit
+    for (let i = 0; i < 10; i++) {
+      checkApiDocsRateLimit('session:user-a');
+    }
+
+    // Session A should be rate limited
+    expect(checkApiDocsRateLimit('session:user-a')).toBe(false);
+
+    // Session B should still be allowed
+    expect(checkApiDocsRateLimit('session:user-b')).toBe(true);
+  });
+
+  it('should reset the counter after the window expires', () => {
+    for (let i = 0; i < 10; i++) {
+      checkApiDocsRateLimit('session:expiring');
+    }
+
+    expect(checkApiDocsRateLimit('session:expiring')).toBe(false);
+
+    // Age the window past its expiry so a fresh one opens
+    const entry = apiDocsRateLimitStore.get('session:expiring')!;
+    entry.windowStart = Math.floor(Date.now() / 1000) - API_DOCS_RATE_LIMIT_WINDOW - 1;
+
+    // A fresh window should be allowed again
+    expect(checkApiDocsRateLimit('session:expiring')).toBe(true);
   });
 });

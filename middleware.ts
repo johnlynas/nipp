@@ -7,9 +7,11 @@ const PUBLIC_PATTERNS = [
   '/api/auth',
   '/api/health',
   '/api/notifications/stream', // SSE stream — handles its own auth
-  '/api-docs',
   '/auth/magic-link/verify', // OIDC invite link destination — rate-limited in-route, never sets a session
 ];
+// NOTE: /api-docs is intentionally NOT public — unauthenticated requests are
+// redirected to /login here, and route handlers (app/api-docs/_guard.ts) then
+// deny anything that is not a verified super admin.
 
 function isPublicRoute(pathname: string): boolean {
   return PUBLIC_PATTERNS.some((pattern) =>

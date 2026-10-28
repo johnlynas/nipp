@@ -16,6 +16,8 @@
  *   RATE_LIMIT_ADMIN_WINDOW             — window in seconds for admin writes (default 60)
  *   RATE_LIMIT_CALENDAR_MAX             — max requests per window for calendar CRUD (default 30)
  *   RATE_LIMIT_CALENDAR_WINDOW          — window in seconds for calendar CRUD (default 60)
+ *   RATE_LIMIT_API_DOCS_MAX             — max requests per window for /api-docs (default 10)
+ *   RATE_LIMIT_API_DOCS_WINDOW          — window in seconds for /api-docs (default 60)
  */
 
 import { env } from '@/lib/env';
@@ -72,6 +74,9 @@ const ADMIN_WINDOW = Number(env.RATE_LIMIT_ADMIN_WINDOW ?? 60);
 
 const CALENDAR_MAX = Number(env.RATE_LIMIT_CALENDAR_MAX ?? 30);
 const CALENDAR_WINDOW = Number(env.RATE_LIMIT_CALENDAR_WINDOW ?? 60);
+
+const API_DOCS_MAX = Number(env.RATE_LIMIT_API_DOCS_MAX ?? 10);
+const API_DOCS_WINDOW = Number(env.RATE_LIMIT_API_DOCS_WINDOW ?? 60);
 
 // ---------------------------------------------------------------------------
 // Public API — payload key issuance
@@ -398,6 +403,75 @@ export function startCalendarRateLimitCleanup(): void {
 startCalendarRateLimitCleanup();
 
 // ---------------------------------------------------------------------------
+// API docs rate limiter (by session: 10 per minute)
+// ---------------------------------------------------------------------------
+
+/** API docs store — keyed by session ID. */
+export const apiDocsRateLimitStore = new Map<string, RateLimitEntry>();
+
+/** API docs window in seconds (read from env or default 60). */
+export const API_DOCS_RATE_LIMIT_WINDOW = API_DOCS_WINDOW;
+
+/** API docs max requests per window (read from env or default 10). */
+export const API_DOCS_RATE_LIMIT_MAX = API_DOCS_MAX;
+
+/**
+ * Check API docs rate limit by session — returns true if allowed, false if throttled.
+ * Applied to every /api-docs request (UI page, spec JSON, and assets) by the
+ * shared super-admin guard in app/api-docs/_guard.ts.
+ */
+export function checkApiDocsRateLimit(sessionId: string): boolean {
+  const now = Math.floor(Date.now() / 1000);
+
+  let entry = apiDocsRateLimitStore.get(sessionId);
+  if (!entry || now - entry.windowStart > API_DOCS_RATE_LIMIT_WINDOW) {
+    // New window
+    entry = { count: 1, windowStart: now };
+    apiDocsRateLimitStore.set(sessionId, entry);
+    return true;
+  }
+
+  if (entry.count >= API_DOCS_RATE_LIMIT_MAX) {
+    reportThrottle('api-docs', sessionId, entry.count);
+    return false; // Rate limited
+  }
+
+  entry.count++;
+  return true;
+}
+
+/** Reset the API docs rate limit store — used by tests. */
+export function resetApiDocsRateLimitStore(): void {
+  apiDocsRateLimitStore.clear();
+}
+
+// API docs cleanup (lazy)
+let apiDocsCleanupTimer: ReturnType<typeof setInterval> | null = null;
+
+/** Clean up stale entries from the API docs rate limit store. Exposed for testing. */
+export function cleanApiDocsRateLimitStore(now: number = Math.floor(Date.now() / 1000)): void {
+  for (const [sessionId, entry] of apiDocsRateLimitStore.entries()) {
+    if (now - entry.windowStart > API_DOCS_RATE_LIMIT_WINDOW * 2) {
+      apiDocsRateLimitStore.delete(sessionId);
+    }
+  }
+}
+
+export function startApiDocsRateLimitCleanup(): void {
+  if (apiDocsCleanupTimer) return;
+
+  apiDocsCleanupTimer = setInterval(() => {
+    cleanApiDocsRateLimitStore();
+  }, 5 * 60 * 1000);
+
+  if (typeof apiDocsCleanupTimer.unref === 'function') {
+    apiDocsCleanupTimer.unref();
+  }
+}
+
+startApiDocsRateLimitCleanup();
+
+// ---------------------------------------------------------------------------
 // Throttle reporting — pino critical log + SSE notification
 // ---------------------------------------------------------------------------
 
@@ -415,6 +489,7 @@ const CATEGORIES: Record<string, ThrottleCategory> = {
   'auth': { name: 'Authentication', sourceTag: 'rate-limit:auth', max: AUTH_RATE_LIMIT_MAX, window: AUTH_RATE_LIMIT_WINDOW },
   'admin': { name: 'Admin write', sourceTag: 'rate-limit:admin', max: ADMIN_RATE_LIMIT_MAX, window: ADMIN_RATE_LIMIT_WINDOW },
   'calendar': { name: 'Calendar CRUD', sourceTag: 'rate-limit:calendar', max: CALENDAR_RATE_LIMIT_MAX, window: CALENDAR_RATE_LIMIT_WINDOW },
+  'api-docs': { name: 'API docs', sourceTag: 'rate-limit:api-docs', max: API_DOCS_RATE_LIMIT_MAX, window: API_DOCS_RATE_LIMIT_WINDOW },
 };
 
 /**

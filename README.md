@@ -91,7 +91,7 @@ Super Admins run the whole platform from one console (`/dashboard/admin`): user 
 
 Every organization's staff sign in to the same portal, but each sees only their own organization — tenant users are isolated from every other organization's data. Their workspace includes the calendar, an organization chart of their people and teams, member and role listings, and a map page; tenant administrators can manage those, everyone else views. **Super Admins** belong to the Platform organization, which grants root access: they can view and update any tenant, anywhere. (An external-contractor workspace is planned — its data model already exists.)
 
-*Pages and routes: the `/api-docs` Swagger UI.*
+*Pages and routes: documented per feature; super admins can also browse the full `/api-docs` API reference.*
 
 ### Roles, permissions & teams
 
@@ -254,7 +254,7 @@ npx tsc --noEmit
 | [`CACHING_ARCHITECTURE.md`](./CACHING_ARCHITECTURE.md) | Cache layers in depth, tuning, cross-instance behaviour |
 | [`ISOLATION_TEST_STRATEGY.md`](./ISOLATION_TEST_STRATEGY.md) + [quick-start](./ISOLATION_TEST_QUICK_START.md) | How the "no tenant sees another's data" guarantee is tested |
 | [`SPECIFICATION_DESIGN_PROCESS.md`](./SPECIFICATION_DESIGN_PROCESS.md) | How features are proposed, reviewed, and shipped (OpenSpec) |
-| **`/api-docs`** (when the app is running) | Browsable OpenAPI reference for every API route — `http://localhost:3000/api-docs` |
+| **`/api-docs`** (when the app is running) | Browsable OpenAPI reference for every API route (super-admin only) — `http://localhost:3000/api-docs` |
 | [`scripts/README.md`](./scripts/README.md) | Utilities: cache benchmark, database setup, secret scanning |
 | `openspec/changes/` | One design proposal per feature |
 | `documents/` | Feature planning, business research, operations notes |
