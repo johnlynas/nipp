@@ -12,6 +12,7 @@ import { Modal } from '@/components/dashboard/Modal';
 import { ConfirmDialog } from '@/components/dashboard/ConfirmDialog';
 import { OrganizationEditModal } from '@/components/dashboard/OrganizationEditModal';
 import { PaginationControls } from '@/components/admin/PaginationControls';
+import { apiFetch } from '@/lib/api-client';
 
 interface Organization {
   id: string;
@@ -74,7 +75,7 @@ export default function OrganizationsPage() {
       if (search) params.set('search', search);
       if (statusFilter) params.set('status', statusFilter);
 
-      const res = await fetch(`/api/dashboard/admin/organizations?${params}`, {
+      const res = await apiFetch(`/api/dashboard/admin/organizations?${params}`, {
         signal: abortControllerRef.current.signal,
       });
       if (!res.ok) {
@@ -125,7 +126,7 @@ export default function OrganizationsPage() {
     if (!selectedOrg) return;
 
     try {
-      const res = await fetch(`/api/dashboard/admin/organizations/${selectedOrg.id}/status`, {
+      const res = await apiFetch(`/api/dashboard/admin/organizations/${selectedOrg.id}/status`, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ status: 'ARCHIVED' }),
@@ -149,7 +150,7 @@ export default function OrganizationsPage() {
   // Handle create org
   const handleCreate = async () => {
     try {
-      const res = await fetch('/api/dashboard/admin/organizations', {
+      const res = await apiFetch('/api/dashboard/admin/organizations', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(createForm),

@@ -13,6 +13,7 @@ import { ConfirmDialog } from '@/components/dashboard/ConfirmDialog';
 import { PaginationControls } from '@/components/admin/PaginationControls';
 import { quoteStateMeta, workOrderMoney, toLocalInputDate, localInputDateToIso } from '@/components/dashboard/work-order-shared';
 import { QUOTE_STATES, QUOTABLE_WORK_ORDER_STATES } from '@/lib/work-order-state';
+import { apiFetch } from '@/lib/api-client';
 
 /** Quote row as returned by GET /api/admin/quotes (service list + org join). */
 interface QuoteRow {
@@ -111,7 +112,7 @@ export default function AdminQuotesPage() {
     let cancelled = false;
     (async () => {
       try {
-        const res = await fetch('/api/admin/work-orders?pageSize=100');
+        const res = await apiFetch('/api/admin/work-orders?pageSize=100');
         if (res.ok) {
           const data = await res.json();
           const items: WorkOrderOption[] = (data.items || []).filter(
@@ -128,7 +129,7 @@ export default function AdminQuotesPage() {
     let cancelled = false;
     (async () => {
       try {
-        const res = await fetch('/api/dashboard/admin/contractors?pageSize=100');
+        const res = await apiFetch('/api/dashboard/admin/contractors?pageSize=100');
         if (res.ok) {
           const data = await res.json();
           if (!cancelled) setContractors((data.items || []) as ContractorOption[]);
@@ -149,7 +150,7 @@ export default function AdminQuotesPage() {
       if (stateFilter) params.set('state', stateFilter);
       if (workOrderFilter) params.set('workOrderId', workOrderFilter);
 
-      const res = await fetch(`/api/admin/quotes?${params}`, { signal: abortRef.current.signal });
+      const res = await apiFetch(`/api/admin/quotes?${params}`, { signal: abortRef.current.signal });
       if (!res.ok) {
         const data = await res.json().catch(() => ({}));
         throw new Error(data.error || 'Failed to load quotations');
@@ -182,7 +183,7 @@ export default function AdminQuotesPage() {
   async function loadContractorsIfNeeded(): Promise<ContractorOption[]> {
     if (contractors.length > 0) return contractors;
     try {
-      const res = await fetch('/api/dashboard/admin/contractors?pageSize=100');
+      const res = await apiFetch('/api/dashboard/admin/contractors?pageSize=100');
       if (res.ok) {
         const data = await res.json();
         const items = (data.items || []) as ContractorOption[];
@@ -208,7 +209,7 @@ export default function AdminQuotesPage() {
     }
     setCreateSaving(true);
     try {
-      const res = await fetch('/api/admin/quotes', {
+      const res = await apiFetch('/api/admin/quotes', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -260,7 +261,7 @@ export default function AdminQuotesPage() {
 
     setEditSaving(true);
     try {
-      const res = await fetch(`/api/admin/quotes/${editing.quoteId}`, {
+      const res = await apiFetch(`/api/admin/quotes/${editing.quoteId}`, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(payload),
@@ -285,7 +286,7 @@ export default function AdminQuotesPage() {
     if (!deleting) return;
     setDeleteBusy(true);
     try {
-      const res = await fetch(`/api/admin/quotes/${deleting.quoteId}`, { method: 'DELETE' });
+      const res = await apiFetch(`/api/admin/quotes/${deleting.quoteId}`, { method: 'DELETE' });
       if (!res.ok) {
         const data = await res.json().catch(() => ({}));
         throw new Error(data.error || 'Failed to delete quotation');

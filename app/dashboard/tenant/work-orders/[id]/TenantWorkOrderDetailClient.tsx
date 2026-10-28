@@ -14,6 +14,7 @@ import {
   workOrderMoney,
   isQuoteOverdue,
 } from '@/components/dashboard/work-order-shared';
+import { apiFetch } from '@/lib/api-client';
 
 function SectionCard({ title, children }: { title: string; children: React.ReactNode }) {
   return (
@@ -52,7 +53,7 @@ export default function TenantWorkOrderDetailClient({ id }: { id: string }) {
       // Active org from session first, then localStorage fallback.
       let orgId: string | null = null;
       try {
-        const meRes = await fetch('/api/auth/me');
+        const meRes = await apiFetch('/api/auth/me');
         if (meRes.ok) {
           const me = await meRes.json();
           if (me.activeOrganizationId) orgId = me.activeOrganizationId;
@@ -65,7 +66,7 @@ export default function TenantWorkOrderDetailClient({ id }: { id: string }) {
       }
 
       try {
-        const res = await fetch(`/api/organizations/${orgId}/work-orders/${id}`);
+        const res = await apiFetch(`/api/organizations/${orgId}/work-orders/${id}`);
         if (res.status === 404) {
           if (!cancelled) setNotFound(true);
           return;

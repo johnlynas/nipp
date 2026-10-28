@@ -7,7 +7,7 @@
  * any future signature drift honest).
  */
 
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 
 const { mockPrisma, mockSendEmail, mockLogger } = vi.hoisted(() => {
   const mockPrisma = {
@@ -28,8 +28,18 @@ vi.mock('nodemailer', () => ({})); // isolate from transporter machinery
 vi.mock('@/lib/notifications/email', () => ({ sendEmail: mockSendEmail }));
 vi.mock('@/lib/logger', () => ({ logger: mockLogger }));
 
-import { issueInviteLink, consumeInviteToken, normalizePortalOrigin } from '@/lib/oidc-magic-link';
+import os from 'os';
+import { issueInviteLink, consumeInviteToken, normalizePortalOrigin, getMachineIPv4 } from '@/lib/oidc-magic-link';
 import type { User } from '@prisma/client';
+
+/** LAN IPv4 the fake machine exposes; stub per-test to exercise edge cases. */
+function stubNetworkInterfaces(address: string | null) {
+  const interfaces: Record<string, Array<{ address: string; family: 'IPv4'; internal: boolean }>> = {
+    lo0: [{ address: '127.0.0.1', family: 'IPv4', internal: true }],
+  };
+  if (address) interfaces.en0 = [{ address, family: 'IPv4', internal: false }];
+  return vi.spyOn(os, 'networkInterfaces').mockReturnValue(interfaces as never);
+}
 
 function makeUser(overrides: Record<string, unknown> = {}): User & { oidcVerified?: boolean } {
   return {
@@ -51,8 +61,34 @@ function makeUser(overrides: Record<string, unknown> = {}): User & { oidcVerifie
   } as User;
 }
 
+describe('getMachineIPv4', () => {
+  afterEach(() => vi.restoreAllMocks());
+
+  it('returns the first non-internal IPv4 address', () => {
+    stubNetworkInterfaces('172.16.0.9');
+    expect(getMachineIPv4()).toBe('172.16.0.9');
+  });
+
+  it('skips loopback and IPv6 entries', () => {
+    vi.spyOn(os, 'networkInterfaces').mockReturnValue({
+      lo0: [{ address: '127.0.0.1', family: 'IPv4', internal: true }],
+      en0: [
+        { address: 'fe80::abc', family: 'IPv6', internal: false },
+        { address: '10.0.0.5', family: 'IPv4', internal: false },
+      ],
+    } as never);
+    expect(getMachineIPv4()).toBe('10.0.0.5');
+  });
+
+  it('returns null when no usable IPv4 exists', () => {
+    stubNetworkInterfaces(null);
+    expect(getMachineIPv4()).toBeNull();
+  });
+});
+
 describe('issueInviteLink', () => {
   beforeEach(() => vi.clearAllMocks());
+  afterEach(() => vi.restoreAllMocks());
 
   it('inserts a Verification row (identifier=token, kind oidc-invite, ~5min TTL) and returns url', async () => {
     mockPrisma.verification.create.mockResolvedValue({ id: 'v-1' });
@@ -109,6 +145,46 @@ describe('issueInviteLink', () => {
     void to;
     // The URL appears twice (link + button href), both on the LAN origin.
     expect(String(message).split('http://192.168.2.8:3000/auth/magic-link/verify').length - 1).toBeGreaterThanOrEqual(2);
+  });
+
+  it('resolves a loopback portalOrigin (admin in their own browser) to the machine LAN IPv4', async () => {
+    stubNetworkInterfaces('192.168.2.2');
+    mockPrisma.verification.create.mockResolvedValue({ id: 'v-lb' });
+    mockSendEmail.mockResolvedValue({ success: true });
+
+    const res = await issueInviteLink(makeUser(), { portalOrigin: 'http://localhost:3000' });
+    expect(res.ok).toBe(true);
+    if (!res.ok) return;
+    // The invited user must reach the server on its LAN address + request port.
+    expect(res.url.startsWith('http://192.168.2.2:3000/auth/magic-link/verify?token=')).toBe(true);
+    // Neither host form of loopback may leak into the email body.
+    const [, _subject, message] = mockSendEmail.mock.calls[0];
+    void _subject;
+    expect(String(message)).not.toContain('localhost');
+    expect(String(message)).not.toContain('127.0.0.1');
+  });
+
+  it('keeps the request port when resolving loopback (non-3000 dev servers too)', async () => {
+    stubNetworkInterfaces('192.168.2.2');
+    mockPrisma.verification.create.mockResolvedValue({ id: 'v-port' });
+    mockSendEmail.mockResolvedValue({ success: true });
+
+    const res = await issueInviteLink(makeUser(), { portalOrigin: 'http://127.0.0.1:3001' });
+    expect(res.ok).toBe(true);
+    if (!res.ok) return;
+    expect(res.url.startsWith('http://192.168.2.2:3001/auth/magic-link/verify?token=')).toBe(true);
+  });
+
+  it('falls back to FRONTEND_URL for a loopback origin when the machine has no LAN IPv4', async () => {
+    stubNetworkInterfaces(null);
+    mockPrisma.verification.create.mockResolvedValue({ id: 'v-nolans' });
+    mockSendEmail.mockResolvedValue({ success: true });
+
+    const res = await issueInviteLink(makeUser(), { portalOrigin: 'http://localhost:3000' });
+    expect(res.ok).toBe(true);
+    if (!res.ok) return;
+    // Fail closed — a pinned (if dead) origin beats an unparseable URL.
+    expect(res.url.startsWith('http://localhost:3000/auth/magic-link/verify?token=')).toBe(true);
   });
 
   it('drops a trailing slash from portalOrigin and keeps the token in the URL', async () => {

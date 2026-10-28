@@ -6,6 +6,7 @@ import OrgChartSidebar from '@/components/org-chart/OrgChartSidebar';
 import type { ChartTree } from '@/components/org-chart/types';
 import { PageSkeleton } from '@/components/dashboard/PageSkeleton';
 import { useTenantScope } from '@/hooks/useTenantScope';
+import { apiFetch } from '@/lib/api-client';
 
 /**
  * Tenant org chart — the same canvas + right slide-in panel as the admin
@@ -41,7 +42,7 @@ export default function TenantOrgChartPage() {
     async function init() {
       let gotOrgFromApi = false;
       try {
-        const meRes = await fetch('/api/auth/me');
+        const meRes = await apiFetch('/api/auth/me');
         if (meRes.ok) {
           const me = await meRes.json();
           if (me.activeOrganizationId) {
@@ -60,7 +61,7 @@ export default function TenantOrgChartPage() {
       if (!isReadOnly) {
         try {
           const urlOrg = new URL(window.location.href).searchParams.get('org');
-          const listRes = await fetch('/api/admin/organizations/list');
+          const listRes = await apiFetch('/api/admin/organizations/list');
           if (listRes.ok) {
             const data = await listRes.json();
             const orgs: { id: string; name: string }[] = data.organizations || [];
@@ -91,7 +92,7 @@ export default function TenantOrgChartPage() {
   const fetchTree = useCallback(async (targetOrgId: string) => {
     setError(null);
     try {
-      const res = await fetch(`/api/organizations/${targetOrgId}/org-chart`);
+      const res = await apiFetch(`/api/organizations/${targetOrgId}/org-chart`);
       if (!res.ok) {
         const body = await res.json().catch(() => ({}));
         setError(body.error || `Failed to load org chart (${res.status})`);

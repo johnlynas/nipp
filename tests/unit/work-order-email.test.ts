@@ -89,10 +89,9 @@ beforeEach(() => {
 // ---------------------------------------------------------------------------
 
 describe('work-order email templates', () => {
-  it('renderRfqSubject: names the work order and the organization, no URL', () => {
-    const subject = renderRfqSubject({ workOrder: workOrderFixture as never, organisationName: orgFixture.name });
-    expect(subject).toContain(orgFixture.name);
-    expect(subject.toLowerCase()).toContain('quotation');
+  it('renderRfqSubject: "Property NI — Quotation request for work order <id>", no URL', () => {
+    const subject = renderRfqSubject({ workOrder: workOrderFixture as never });
+    expect(subject).toBe('Property NI — Quotation request for work order wo-1');
     expect(NO_URL_RE.test(subject)).toBe(false);
   });
 
@@ -106,8 +105,21 @@ describe('work-order email templates', () => {
     expect(body).toContain(workOrderFixture.description);
     expect(body.toLowerCase()).toContain('quotation');
     expect(body).toContain(contractorFixture.name.split(' ')[0]!); // addressed to the contact name
+    expect(body).toContain('2026-10-24'); // the actual quotes due date from the row
     const refLine = body.split('\n').find((l) => l.includes('wo-1'));
     expect(refLine).toBeDefined();
+  });
+
+  it('renderRfqBody: falls back to a +7 day deadline when the row has no quotesDue', () => {
+    const body = renderRfqBody({
+      workOrder: { ...workOrderFixture, quotesDue: null } as never,
+      organisationName: orgFixture.name,
+      contractor: contractorFixture as never,
+    });
+    expect(body).not.toContain('as soon as possible');
+    // +7 days from now in UTC ISO form
+    const expected = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
+    expect(body).toContain(`Quotation due: ${expected}`);
   });
 
   it('renderAssignment: names the work, the organisation and the due date context', () => {
@@ -135,7 +147,7 @@ describe('work-order email templates', () => {
   it('NO URL appears in ANY template string (D7 — plain notification emails only)', () => {
     const rfq = renderRfqBody({ workOrder: workOrderFixture as never, organisationName: orgFixture.name, contractor: contractorFixture as never });
     expect(NO_URL_RE.test(rfq)).toBe(false);
-    const subject = renderRfqSubject({ workOrder: workOrderFixture as never, organisationName: orgFixture.name });
+    const subject = renderRfqSubject({ workOrder: workOrderFixture as never });
     expect(NO_URL_RE.test(subject)).toBe(false);
 
     const assigned = { ...workOrderFixture, contractorId: 'c-1' } as Pick<
@@ -174,9 +186,9 @@ describe('sendRfqToContractor', () => {
     expect(mockFns.sendEmail).toHaveBeenCalledTimes(1);
     const call = mockFns.sendEmail.mock.calls[0] as unknown as [string, string, string, string];
     expect(call[0]).toBe(contractorFixture.email);
-    expect(call[1]).toContain(orgFixture.name);
+    expect(call[1]).toBe('Property NI — Quotation request for work order wo-1');
     // Same branded pipeline/header shape as the OIDC invite email.
-    expect(call[3]).toBeTruthy();
+    expect(call[3]).toBe('Property NI — Quotation Request');
 
     const log = (tenantDbMock.notificationLog.create as ReturnType<typeof vi.fn>).mock.calls[0][0].data;
     expect(log.recipientEmail).toBe(contractorFixture.email);

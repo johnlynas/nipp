@@ -180,7 +180,7 @@ export function buildTodayEventsMessage(
     return {
       subject: 'Property NI — No Events Today',
       html: buildEmailHtml(todayStr, recipientName, events),
-      text: `Hi ${recipientName},\n\nYou have no events scheduled for today (${todayStr}).\n\n---\nThis is an automated notification from Property NI. Do not reply.`,
+      text: `Hi ${recipientName},\n\nYou have no events scheduled for today (${todayStr}).\n\n---\nThis is an automated notification from Property NI`,
     };
   }
 
@@ -249,7 +249,7 @@ function buildEmailHtml(
     <tr>
       <td style="background-color: #f8f9fa; padding: 16px 32px; text-align: center;">
         <p style="color: #6c757d; font-size: 12px; margin: 0;">
-          This is an automated notification from Property NI. Do not reply.
+          This is an automated notification from Property NI
         </p>
       </td>
     </tr>
@@ -281,7 +281,7 @@ function buildTextMessage(
   }
 
   lines.push('---');
-  lines.push('This is an automated notification from Property NI. Do not reply.');
+  lines.push('This is an automated notification from Property NI');
 
   return lines.join('\n');
 }

@@ -455,10 +455,7 @@ act on by replying to the email or calling.
 
 Messages:
 
-1. **RFQ** (per contractor): subject "Quotation request for {work order
-   description excerpt} from {org name}", body lists work-order reference
-   number, full description, quotation due date, and the organization's contact
-   details — telling the contractor to send their quotation by the due date.
+1. **RFQ** (per contractor): subject "Property NI — Quotation request for work order {workOrderId}", body lists work-order reference number, full description, quotation due date, and the organization's contact details — telling the contractor to send their quotation by the due date.
 2. **Assignment notice** (to winning contractor): work assigned + scope summary.
 3. **Invoice request** (when work is COMPLETE): ask the contractor to issue
    their invoice for the completed work, with a suggested due date.

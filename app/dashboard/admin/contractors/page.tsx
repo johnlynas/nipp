@@ -10,6 +10,7 @@ import { StatCard } from '@/components/dashboard/StatCard';
 import { Modal } from '@/components/dashboard/Modal';
 import { ConfirmDialog } from '@/components/dashboard/ConfirmDialog';
 import { PaginationControls } from '@/components/admin/PaginationControls';
+import { apiFetch } from '@/lib/api-client';
 
 type ContractorType =
   | 'PAINTER'
@@ -114,7 +115,7 @@ export default function ContractorsPage() {
       if (search) params.set('search', search);
       if (typeFilter) params.set('type', typeFilter);
 
-      const res = await fetch(`/api/dashboard/admin/contractors?${params}`, {
+      const res = await apiFetch(`/api/dashboard/admin/contractors?${params}`, {
         signal: abortControllerRef.current.signal,
       });
       if (!res.ok) {
@@ -183,7 +184,7 @@ export default function ContractorsPage() {
         body.description = createForm.description.trim();
       }
 
-      const res = await fetch('/api/dashboard/admin/contractors', {
+      const res = await apiFetch('/api/dashboard/admin/contractors', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(body),
@@ -220,7 +221,7 @@ export default function ContractorsPage() {
         description: editForm.description.trim(),
       };
 
-      const res = await fetch(`/api/dashboard/admin/contractors/${selectedContractor.contractorId}`, {
+      const res = await apiFetch(`/api/dashboard/admin/contractors/${selectedContractor.contractorId}`, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(body),
@@ -246,7 +247,7 @@ export default function ContractorsPage() {
     if (!selectedContractor) return;
 
     try {
-      const res = await fetch(`/api/dashboard/admin/contractors/${selectedContractor.contractorId}`, { method: 'DELETE' });
+      const res = await apiFetch(`/api/dashboard/admin/contractors/${selectedContractor.contractorId}`, { method: 'DELETE' });
       if (!res.ok) {
         const data = await res.json().catch(() => ({}));
         throw new Error(data.error || 'Failed to delete contractor');

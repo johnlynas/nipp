@@ -14,6 +14,7 @@ import { WorkOrderStateBadge } from '@/components/dashboard/WorkOrderStateBadge'
 import { PaginationControls } from '@/components/admin/PaginationControls';
 import { WORK_ORDER_STATES, WORK_ORDER_STATE_LABELS } from '@/lib/work-order-state';
 import { isQuoteOverdue } from '@/components/dashboard/work-order-shared';
+import { guardSessionExpired } from '@/lib/session-guard';
 
 interface OrgOption {
   id: string;
@@ -97,6 +98,7 @@ export default function AdminWorkOrdersPage() {
     (async () => {
       try {
         const res = await fetch('/api/admin/organizations/list');
+        guardSessionExpired(res);
         if (res.ok) {
           const data = await res.json();
           if (!cancelled) setOrgs((data.organizations || []).filter((o: OrgOption) => !o.isPlatform));
@@ -117,6 +119,7 @@ export default function AdminWorkOrdersPage() {
       if (stateFilter) params.set('state', stateFilter);
 
       const res = await fetch(`/api/admin/work-orders?${params}`, { signal: abortRef.current.signal });
+      guardSessionExpired(res);
       if (!res.ok) {
         const data = await res.json().catch(() => ({}));
         throw new Error(data.error || 'Failed to load work orders');
@@ -162,6 +165,7 @@ export default function AdminWorkOrdersPage() {
       if (createForm.openedBy.trim()) body.openedBy = createForm.openedBy.trim();
 
       const res = await fetch('/api/admin/work-orders', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+      guardSessionExpired(res);
       if (!res.ok) {
         const data = await res.json().catch(() => ({}));
         throw new Error(data.error || 'Failed to create work order');
@@ -200,6 +204,7 @@ export default function AdminWorkOrdersPage() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ description: editForm.description.trim(), openedBy: editForm.openedBy.trim() }),
       });
+      guardSessionExpired(res);
       if (!res.ok) {
         const data = await res.json().catch(() => ({}));
         throw new Error(data.error || 'Failed to update work order');
@@ -221,6 +226,7 @@ export default function AdminWorkOrdersPage() {
     setDeleteBusy(true);
     try {
       const res = await fetch(`/api/admin/work-orders/${deleting.workOrderId}`, { method: 'DELETE' });
+      guardSessionExpired(res);
       if (!res.ok) {
         const data = await res.json().catch(() => ({}));
         throw new Error(data.error || 'Failed to delete work order');
@@ -241,13 +247,13 @@ export default function AdminWorkOrdersPage() {
   const groupValue = (states: ReadonlyArray<string>) => states.reduce((sum, s) => sum + (counts[s] ?? 0), 0);
 
   const columns = [
-    { key: 'description', label: 'Work Order', render: (w: WorkOrderRow) => (
-      <div className="min-w-0 max-w-xs">
-        <Link href={`/dashboard/admin/work-orders/${w.workOrderId}`} className="block truncate font-medium hover:underline" style={{ color: 'var(--color-navy-850)' }} title={w.description}>
-          {w.description}
-        </Link>
-        <div className="mt-0.5 text-xs text-slate-500">Opened {formatDate(w.createdAt)} · {w.openedBy}</div>
-      </div>
+    { key: 'openedBy', label: 'Opened By', render: (w: WorkOrderRow) => (
+      <Link href={`/dashboard/admin/work-orders/${w.workOrderId}`} className="font-medium hover:underline" style={{ color: 'var(--color-navy-850)' }} title={w.openedBy}>
+        {w.openedBy}
+      </Link>
+    ) },
+    { key: 'description', label: 'Description', render: (w: WorkOrderRow) => (
+      <span className="max-w-md" style={{ color: 'var(--color-navy-850)' }}>{w.description}</span>
     ) },
     { key: 'organization', label: 'Organization', render: (w: WorkOrderRow) => (
       <span style={{ color: 'var(--color-navy-850)' }}>{w.organizationName ?? w.organizationId}</span>

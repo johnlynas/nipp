@@ -11,6 +11,7 @@ import { StatCard } from '@/components/dashboard/StatCard';
 import { Modal } from '@/components/dashboard/Modal';
 import { ConfirmDialog } from '@/components/dashboard/ConfirmDialog';
 import { PaginationControls } from '@/components/admin/PaginationControls';
+import { apiFetch } from '@/lib/api-client';
 
 interface Team {
   id: string;
@@ -59,7 +60,7 @@ export default function TeamsPage() {
   useEffect(() => {
     async function fetchOrganizations() {
       try {
-        const res = await fetch('/api/admin/organizations/list');
+        const res = await apiFetch('/api/admin/organizations/list');
         if (res.ok) {
           const data = await res.json();
           setOrganizations(data.organizations || []);
@@ -116,7 +117,7 @@ export default function TeamsPage() {
       if (orgFilter) params.set('organizationId', orgFilter);
       if (search) params.set('search', search);
 
-      const res = await fetch(`/api/dashboard/admin/teams?${params}`, {
+      const res = await apiFetch(`/api/dashboard/admin/teams?${params}`, {
         signal: abortControllerRef.current.signal,
       });
       if (!res.ok) {
@@ -163,7 +164,7 @@ export default function TeamsPage() {
     if (!selectedTeam) return;
 
     try {
-      const res = await fetch(`/api/dashboard/admin/teams/${selectedTeam.id}`, {
+      const res = await apiFetch(`/api/dashboard/admin/teams/${selectedTeam.id}`, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(editForm),
@@ -189,7 +190,7 @@ export default function TeamsPage() {
     if (!selectedTeam) return;
 
     try {
-      const res = await fetch(`/api/dashboard/admin/teams/${selectedTeam.id}`, { method: 'DELETE' });
+      const res = await apiFetch(`/api/dashboard/admin/teams/${selectedTeam.id}`, { method: 'DELETE' });
       if (!res.ok) {
         const data = await res.json().catch(() => ({}));
         throw new Error(data.error || 'Failed to delete team');
@@ -214,7 +215,7 @@ export default function TeamsPage() {
     }
 
     try {
-      const res = await fetch('/api/dashboard/admin/teams', {
+      const res = await apiFetch('/api/dashboard/admin/teams', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ ...createForm, organizationId: createOrgId }),

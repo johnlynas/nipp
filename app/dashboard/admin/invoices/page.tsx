@@ -13,6 +13,7 @@ import { ConfirmDialog } from '@/components/dashboard/ConfirmDialog';
 import { PaginationControls } from '@/components/admin/PaginationControls';
 import { workOrderMoney, toLocalInputDate, localInputDateToIso } from '@/components/dashboard/work-order-shared';
 import { WORK_ORDER_STATE_LABELS, workOrderStateTone, type WorkOrderState } from '@/lib/work-order-state';
+import { apiFetch } from '@/lib/api-client';
 
 /** Invoice row as returned by GET /api/admin/invoices (service list + org join). */
 interface InvoiceRow {
@@ -35,7 +36,15 @@ interface WorkOrderOption {
   workOrderId: string;
   description: string;
   organizationName?: string;
+  /** Assigned contractor — invoices must record for exactly this one (service rule). */
+  contractorId: string | null;
   state: string;
+}
+
+interface ContractorOption {
+  contractorId: string;
+  companyName: string;
+  name: string;
 }
 
 interface PaginationState {
@@ -79,8 +88,14 @@ export default function AdminInvoicesPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
-  // Dropdown source (lazy, cached once).
+  // Dropdown sources (lazy, cached once).
   const [workOrders, setWorkOrders] = useState<WorkOrderOption[]>([]);
+  const [contractors, setContractors] = useState<ContractorOption[]>([]);
+
+  // Create modal.
+  const [createOpen, setCreateOpen] = useState(false);
+  const [createForm, setCreateForm] = useState({ workOrderId: '', price: '', invoiceDate: toLocalInputDate(new Date()), dueDate: toLocalInputDate(new Date(Date.now() + 14 * 86400_000)), invoiceLink: '' });
+  const [createSaving, setCreateSaving] = useState(false);
 
   // Edit modal.
   const [editOpen, setEditOpen] = useState(false);
@@ -99,12 +114,12 @@ export default function AdminInvoicesPage() {
     setPagination((p) => ({ ...p, page: 1 }));
   }, [search, stateFilter, workOrderFilter]);
 
-  // Work orders (dropdown for the table filter).
+  // Work orders (dropdown for the create form + the table filter).
   useEffect(() => {
     let cancelled = false;
     (async () => {
       try {
-        const res = await fetch('/api/admin/work-orders?pageSize=100');
+        const res = await apiFetch('/api/admin/work-orders?pageSize=100');
         if (res.ok) {
           const data = await res.json();
           const items: WorkOrderOption[] = (data.items || []).filter(
@@ -113,6 +128,21 @@ export default function AdminInvoicesPage() {
           if (!cancelled) setWorkOrders(items);
         }
       } catch { /* non-critical — filter falls back to no options */ }
+    })();
+    return () => { cancelled = true; };
+  }, []);
+
+  // Contractor directory (dropdown for the table filter + create form, cached once).
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const res = await apiFetch('/api/dashboard/admin/contractors?pageSize=100');
+        if (res.ok) {
+          const data = await res.json();
+          if (!cancelled) setContractors((data.items || []) as ContractorOption[]);
+        }
+      } catch { /* non-critical */ }
     })();
     return () => { cancelled = true; };
   }, []);
@@ -128,7 +158,7 @@ export default function AdminInvoicesPage() {
       if (stateFilter) params.set('workOrderState', stateFilter);
       if (workOrderFilter) params.set('workOrderId', workOrderFilter);
 
-      const res = await fetch(`/api/admin/invoices?${params}`, { signal: abortRef.current.signal });
+      const res = await apiFetch(`/api/admin/invoices?${params}`, { signal: abortRef.current.signal });
       if (!res.ok) {
         const data = await res.json().catch(() => ({}));
         throw new Error(data.error || 'Failed to load invoices');
@@ -173,6 +203,59 @@ export default function AdminInvoicesPage() {
   /** Deletability follows the service rule — INVOICED only (correction = delete + re-record). */
   const isDeletable = (row: InvoiceRow) => row.workOrder.state === 'INVOICED';
 
+  /** The WO's assigned contractor (service rule — invoices record for exactly this one). */
+  const selectedWorkOrder = workOrders.find((w) => w.workOrderId === createForm.workOrderId);
+
+  const openCreate = () => {
+    setCreateForm({ workOrderId: '', price: '', invoiceDate: toLocalInputDate(new Date()), dueDate: toLocalInputDate(new Date(Date.now() + 14 * 86400_000)), invoiceLink: '' });
+    setCreateOpen(true);
+  };
+
+  const handleCreate = async () => {
+    if (!selectedWorkOrder?.contractorId) {
+      const message = 'Pick a completed work order with an assigned contractor';
+      logClientError(message, 'invoices', 'create');
+      setError(message);
+      return;
+    }
+    const price = Number(createForm.price);
+    if (createForm.price.trim() === '' || !Number.isFinite(price) || price <= 0) {
+      const message = 'Price must be greater than zero';
+      logClientError(message, 'invoices', 'create');
+      setError(message);
+      return;
+    }
+
+    setCreateSaving(true);
+    try {
+      const res = await apiFetch('/api/admin/invoices', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          workOrderId: selectedWorkOrder.workOrderId,
+          contractorId: selectedWorkOrder.contractorId,
+          invoiceDate: localInputDateToIso(createForm.invoiceDate).toISOString(),
+          dueDate: localInputDateToIso(createForm.dueDate).toISOString(),
+          price,
+          ...(createForm.invoiceLink.trim() ? { invoiceLink: createForm.invoiceLink.trim() } : {}),
+        }),
+      });
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}));
+        throw new Error(data.error || 'Failed to record invoice');
+      }
+      setCreateOpen(false);
+      fetchData();
+    } catch (err) {
+      const message = err instanceof Error ? err.message : 'Failed to record invoice';
+      console.error('Failed to record invoice:', err);
+      logClientError(message, 'invoices', 'create');
+      setError(message);
+    } finally {
+      setCreateSaving(false);
+    }
+  };
+
   const openEdit = (row: InvoiceRow) => {
     setEditing(row);
     setEditForm({
@@ -196,7 +279,7 @@ export default function AdminInvoicesPage() {
 
     setEditSaving(true);
     try {
-      const res = await fetch(`/api/admin/invoices/${editing.invoiceId}`, {
+      const res = await apiFetch(`/api/admin/invoices/${editing.invoiceId}`, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -226,7 +309,7 @@ export default function AdminInvoicesPage() {
     if (!deleting) return;
     setDeleteBusy(true);
     try {
-      const res = await fetch(`/api/admin/invoices/${deleting.invoiceId}`, { method: 'DELETE' });
+      const res = await apiFetch(`/api/admin/invoices/${deleting.invoiceId}`, { method: 'DELETE' });
       if (!res.ok) {
         const data = await res.json().catch(() => ({}));
         throw new Error(data.error || 'Failed to delete invoice');
@@ -341,6 +424,15 @@ export default function AdminInvoicesPage() {
       <PageHeader
         title="Invoices"
         description="Contractor invoices across all work orders — recorded once work is complete; corrections allowed before payment"
+        primaryAction={
+          <button
+            onClick={openCreate}
+            className="w-full sm:w-auto rounded px-4 py-2 text-center text-sm font-medium text-accent-ink transition-colors hover:opacity-90 disabled:opacity-50"
+            style={{ backgroundColor: 'var(--color-accent)' }}
+          >
+            + New Invoice
+          </button>
+        }
       />
 
       {/* Filters */}
@@ -373,7 +465,7 @@ export default function AdminInvoicesPage() {
       </div>
 
       {/* Table */}
-      <DataTable<InvoiceRow> columns={columns} data={rows} loading={loading} emptyMessage="No invoices found — record one from a work order's detail page when it moves to Complete" rowKey={(q) => q.invoiceId} />
+      <DataTable<InvoiceRow> columns={columns} data={rows} loading={loading} emptyMessage="No invoices found — record one with the button above when a work order moves to Complete" rowKey={(q) => q.invoiceId} />
 
       {/* Pagination */}
       <PaginationControls
@@ -383,6 +475,103 @@ export default function AdminInvoicesPage() {
         pageSize={pagination.pageSize}
         onPageChange={(page) => setPagination((p) => ({ ...p, page }))}
       />
+
+      {/* Create modal */}
+      <Modal isOpen={createOpen} onClose={() => !createSaving && setCreateOpen(false)} title="New Invoice" size="md">
+        <div className="space-y-4">
+          <div>
+            <label htmlFor="inv-new-wo" className={labelClass} style={labelStyle}>Work Order</label>
+            <select
+              id="inv-new-wo"
+              value={createForm.workOrderId}
+              onChange={(e) => setCreateForm((f) => ({ ...f, workOrderId: e.target.value }))}
+              className={inputClass}
+              style={inputStyle}
+            >
+              <option value="">Select a work order…</option>
+              {workOrders.map((w) => (
+                <option key={w.workOrderId} value={w.workOrderId}>{w.description}{w.organizationName ? ` — ${w.organizationName}` : ''}</option>
+              ))}
+            </select>
+            <p className="mt-1 text-xs" style={{ color: 'var(--color-slate-500)' }}>Only completed work orders can be invoiced. The invoice is recorded for the work order's assigned contractor.</p>
+          </div>
+          {selectedWorkOrder?.contractorId && (
+            <div>
+              <label className={labelClass} style={labelStyle}>Contractor</label>
+              <input
+                value={contractors.find((c) => c.contractorId === selectedWorkOrder.contractorId)?.companyName ?? 'Assigned contractor'}
+                disabled
+                className={inputClass}
+                style={{ ...inputStyle, backgroundColor: 'var(--color-slate-50)', color: 'var(--color-slate-500)' }}
+              />
+            </div>
+          )}
+          <div>
+            <label htmlFor="inv-new-price" className={labelClass} style={labelStyle}>Total (£)</label>
+            <input
+              id="inv-new-price"
+              type="number"
+              step="0.01"
+              min="0.01"
+              placeholder="0.00"
+              value={createForm.price}
+              onChange={(e) => setCreateForm((f) => ({ ...f, price: e.target.value }))}
+              className={inputClass}
+              style={inputStyle}
+            />
+          </div>
+          <div>
+            <label htmlFor="inv-new-date" className={labelClass} style={labelStyle}>Invoice Date</label>
+            <input
+              id="inv-new-date"
+              type="date"
+              value={createForm.invoiceDate}
+              onChange={(e) => setCreateForm((f) => ({ ...f, invoiceDate: e.target.value }))}
+              className={inputClass}
+              style={inputStyle}
+            />
+          </div>
+          <div>
+            <label htmlFor="inv-new-due" className={labelClass} style={labelStyle}>Due Date</label>
+            <input
+              id="inv-new-due"
+              type="date"
+              value={createForm.dueDate}
+              onChange={(e) => setCreateForm((f) => ({ ...f, dueDate: e.target.value }))}
+              className={inputClass}
+              style={inputStyle}
+            />
+          </div>
+          <div>
+            <label htmlFor="inv-new-link" className={labelClass} style={labelStyle}>Invoice Link (optional)</label>
+            <input
+              id="inv-new-link"
+              type="url"
+              value={createForm.invoiceLink}
+              onChange={(e) => setCreateForm((f) => ({ ...f, invoiceLink: e.target.value }))}
+              placeholder="https://…"
+              className={inputClass}
+              style={inputStyle}
+            />
+          </div>
+          <p className="text-xs" style={{ color: 'var(--color-slate-500)' }}>
+            Recording the invoice does not move the work order — once the row exists, advance it with the Mark Invoiced action on the work order's detail page.
+          </p>
+          <div className="flex justify-end gap-3 pt-2">
+            <button onClick={() => setCreateOpen(false)} disabled={createSaving} className="rounded border px-4 py-2 text-sm font-medium transition-colors hover:bg-slate-50" style={{ borderColor: 'var(--color-slate-200)', color: 'var(--color-navy-850)' }}>
+              Cancel
+            </button>
+            <button
+              onClick={handleCreate}
+              disabled={createSaving || !createForm.workOrderId || createForm.price.trim() === ''}
+              className="rounded px-4 py-2 text-sm font-medium text-accent-ink transition-colors hover:opacity-90 disabled:opacity-50"
+              style={{ backgroundColor: 'var(--color-accent)' }}
+            >
+              {createSaving ? 'Creating…' : 'Record Invoice'}
+            </button>
+          </div>
+        </div>
+      </Modal>
 
       {/* Edit modal */}
       <Modal isOpen={editOpen} onClose={() => !editSaving && setEditOpen(false)} title={`Edit Invoice — ${editing?.contractor.companyName ?? ''}`} size="md">

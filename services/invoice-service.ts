@@ -163,7 +163,7 @@ export const InvoiceService = {
     const include = { contractor: { select: { name: true, companyName: true } }, workOrder: { select: { description: true, state: true } } };
 
     const [rows, total] = await Promise.all([
-      tenantDb.invoice.findMany({ where, skip, take: pageSize, include, orderBy: { createdAt: 'desc', invoiceId: 'asc' } }),
+      tenantDb.invoice.findMany({ where, skip, take: pageSize, include, orderBy: [{ createdAt: 'desc' }, { invoiceId: 'asc' }] }),
       tenantDb.invoice.count({ where }),
     ]);
 

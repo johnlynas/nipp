@@ -4,6 +4,7 @@ import { useState, useEffect } from 'react';
 import OrgMap from '@/components/maps/OrgMap';
 import { PageSkeleton } from '@/components/dashboard/PageSkeleton';
 import { Building2 } from 'lucide-react';
+import { apiFetch } from '@/lib/api-client';
 
 /**
  * Admin map — Google Maps of an organization's location. Uses the same
@@ -34,7 +35,7 @@ export default function AdminMapPage() {
     async function init() {
       let gotOrgFromApi = false;
       try {
-        const meRes = await fetch('/api/auth/me');
+        const meRes = await apiFetch('/api/auth/me');
         if (meRes.ok) {
           const me = await meRes.json();
           if (me.activeOrganizationId) {
@@ -52,7 +53,7 @@ export default function AdminMapPage() {
       // Admin org switcher: ?org= selects which tenant's map to show.
       try {
         const urlOrg = new URL(window.location.href).searchParams.get('org');
-        const listRes = await fetch('/api/admin/organizations/list');
+        const listRes = await apiFetch('/api/admin/organizations/list');
         if (listRes.ok) {
           const data = await listRes.json();
           const orgs: { id: string; name: string }[] = data.organizations || [];
@@ -84,7 +85,7 @@ export default function AdminMapPage() {
       setZoom(null);
       setOrgName('');
       try {
-        const res = await fetch(`/api/organizations/${orgId}/location`);
+        const res = await apiFetch(`/api/organizations/${orgId}/location`);
         if (!res.ok) {
           const body = await res.json().catch(() => ({}));
           throw new Error(body.error || `Failed to load location (${res.status})`);

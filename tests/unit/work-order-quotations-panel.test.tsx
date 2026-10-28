@@ -148,7 +148,7 @@ describe('WorkOrderQuotationsPanel — read-only shell', () => {
 
 describe('WorkOrderQuotationsPanel — edit affordances', () => {
   it('shows edit/delete only on OPENED rows, never on decided or disabled ones', () => {
-    const { } = renderPanel({
+    renderPanel({
       quotes: [
         quote({ state: 'OPENED' }),
         quote({ quoteId: 'q-2', contractorId: 'c-2', state: 'ACCEPTED', contractor: { name: 'Jane Doherty', companyName: 'Doherty Plumbing' } }),

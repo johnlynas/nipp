@@ -11,6 +11,7 @@ import { StatCard } from '@/components/dashboard/StatCard';
 import { Modal } from '@/components/dashboard/Modal';
 import { ConfirmDialog } from '@/components/dashboard/ConfirmDialog';
 import { PaginationControls } from '@/components/admin/PaginationControls';
+import { apiFetch } from '@/lib/api-client';
 
 interface User {
   id: string;
@@ -90,7 +91,7 @@ export default function UsersPage() {
   useEffect(() => {
     async function fetchOrganizations() {
       try {
-        const res = await fetch('/api/dashboard/admin/organizations?page=1&pageSize=8');
+        const res = await apiFetch('/api/dashboard/admin/organizations?page=1&pageSize=8');
         if (res.ok) {
           const data = await res.json();
           setOrganizations(data.organizations || []);
@@ -164,7 +165,7 @@ export default function UsersPage() {
       if (teamFilter) params.set('teamId', teamFilter);
       if (statusFilter) params.set('status', statusFilter);
 
-      const res = await fetch(`/api/dashboard/admin/users?${params}`, {
+      const res = await apiFetch(`/api/dashboard/admin/users?${params}`, {
         signal: abortControllerRef.current.signal,
       });
       if (!res.ok) {
@@ -224,7 +225,7 @@ export default function UsersPage() {
     if (!selectedUser) return;
 
     try {
-      const res = await fetch(`/api/dashboard/admin/users/${selectedUser.id}/ban`, {
+      const res = await apiFetch(`/api/dashboard/admin/users/${selectedUser.id}/ban`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ banned: banAction === 'ban', banReason }),
@@ -251,7 +252,7 @@ export default function UsersPage() {
     if (!selectedUser) return;
 
     try {
-      const res = await fetch(`/api/dashboard/admin/users/${selectedUser.id}`, { method: 'DELETE' });
+      const res = await apiFetch(`/api/dashboard/admin/users/${selectedUser.id}`, { method: 'DELETE' });
       if (!res.ok) {
         const data = await res.json().catch(() => ({}));
         throw new Error(data.error || 'Failed to delete user');
@@ -296,7 +297,7 @@ export default function UsersPage() {
         body.teamId = createTeamId;
       }
 
-      const res = await fetch('/api/dashboard/admin/users', {
+      const res = await apiFetch('/api/dashboard/admin/users', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(body),
@@ -332,7 +333,7 @@ export default function UsersPage() {
     if (!selectedUser) return;
 
     try {
-      const res = await fetch(`/api/dashboard/admin/users/${selectedUser.id}/invite`, {
+      const res = await apiFetch(`/api/dashboard/admin/users/${selectedUser.id}/invite`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({}),
@@ -364,7 +365,7 @@ export default function UsersPage() {
     if (!selectedUser) return;
 
     try {
-      const res = await fetch(`/api/dashboard/admin/users/${selectedUser.id}`, {
+      const res = await apiFetch(`/api/dashboard/admin/users/${selectedUser.id}`, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(editForm),

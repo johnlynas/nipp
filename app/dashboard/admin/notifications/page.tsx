@@ -11,7 +11,7 @@ import { useState, useEffect, useCallback } from 'react';
 import { Check, Trash2 } from 'lucide-react';
 import { useNotifications } from '@/hooks/useNotifications';
 import { PaginationControls } from '@/components/admin/PaginationControls';
-import { encryptedFetch } from '@/lib/api-client';
+import { encryptedFetch, apiFetch } from '@/lib/api-client';
 import { ConfirmDialog } from '@/components/dashboard/ConfirmDialog';
 import { StatCard } from '@/components/dashboard/StatCard';
 import { DataTable } from '@/components/dashboard/DataTable';
@@ -141,7 +141,7 @@ export default function NotificationsLogPage() {
       if (acknowledgedFilter) params.set('acknowledged', acknowledgedFilter);
       if (searchQuery.trim()) params.set('search', searchQuery.trim());
 
-      const res = await fetch(`/api/admin/notifications?${params}`);
+      const res = await apiFetch(`/api/admin/notifications?${params}`);
 
       // Guard against non-JSON responses (auth redirects, 500 error pages, etc.)
       const contentType = res.headers.get('content-type');
@@ -196,7 +196,7 @@ export default function NotificationsLogPage() {
     if (!selectedNotification) return;
 
     try {
-      const res = await fetch(`/api/admin/notifications?id=${encodeURIComponent(selectedNotification.id)}`, {
+      const res = await apiFetch(`/api/admin/notifications?id=${encodeURIComponent(selectedNotification.id)}`, {
         method: 'DELETE',
       });
 
@@ -216,7 +216,7 @@ export default function NotificationsLogPage() {
   // Handle acknowledge — call API and refresh the list so acknowledged field updates
   const handleAcknowledge = async (n: NotificationItem) => {
     try {
-      const res = await fetch(`/api/admin/notifications?id=${encodeURIComponent(n.id)}`, {
+      const res = await apiFetch(`/api/admin/notifications?id=${encodeURIComponent(n.id)}`, {
         method: 'PATCH',
       });
 

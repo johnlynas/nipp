@@ -12,6 +12,7 @@
  */
 
 import { useEffect, useCallback, useSyncExternalStore } from 'react';
+import { apiFetch } from '@/lib/api-client';
 
 // ---------------------------------------------------------------------------
 // Types
@@ -115,7 +116,7 @@ function startConnection() {
 
   const connect = async () => {
     try {
-      const response = await fetch('/api/notifications/stream', { credentials: 'include' });
+      const response = await apiFetch('/api/notifications/stream', { credentials: 'include' });
 
       if (!response.ok) {
         console.warn(`[useNotifications] SSE connection failed: ${response.status}`);

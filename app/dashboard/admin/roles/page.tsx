@@ -11,6 +11,7 @@ import { StatCard } from '@/components/dashboard/StatCard';
 import { Modal } from '@/components/dashboard/Modal';
 import { ConfirmDialog } from '@/components/dashboard/ConfirmDialog';
 import { PaginationControls } from '@/components/admin/PaginationControls';
+import { apiFetch } from '@/lib/api-client';
 
 interface Role {
   id: string;
@@ -61,7 +62,7 @@ export default function RolesPage() {
   useEffect(() => {
     async function fetchOrganizations() {
       try {
-        const res = await fetch('/api/dashboard/admin/organizations?page=1&pageSize=8');
+        const res = await apiFetch('/api/dashboard/admin/organizations?page=1&pageSize=8');
         if (res.ok) {
           const data = await res.json();
           setOrganizations(data.organizations || []);
@@ -105,7 +106,7 @@ export default function RolesPage() {
       if (typeFilter === 'default') params.set('isDefault', 'true');
       else if (typeFilter === 'custom') params.set('isDefault', 'false');
 
-      const res = await fetch(`/api/dashboard/admin/roles?${params}`, {
+      const res = await apiFetch(`/api/dashboard/admin/roles?${params}`, {
         signal: abortControllerRef.current.signal,
       });
       if (!res.ok) {
@@ -156,7 +157,7 @@ export default function RolesPage() {
     if (!selectedRole) return;
 
     try {
-      const res = await fetch(`/api/dashboard/admin/roles/${selectedRole.id}?organizationId=${selectedRole.organizationId}`, { method: 'DELETE' });
+      const res = await apiFetch(`/api/dashboard/admin/roles/${selectedRole.id}?organizationId=${selectedRole.organizationId}`, { method: 'DELETE' });
       if (!res.ok) {
         const data = await res.json().catch(() => ({}));
         throw new Error(data.error || 'Failed to delete role');
@@ -176,7 +177,7 @@ export default function RolesPage() {
     if (!selectedRole) return;
 
     try {
-      const res = await fetch(`/api/dashboard/admin/roles/${selectedRole.id}?organizationId=${selectedRole.organizationId}`, {
+      const res = await apiFetch(`/api/dashboard/admin/roles/${selectedRole.id}?organizationId=${selectedRole.organizationId}`, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(editForm),
@@ -207,7 +208,7 @@ export default function RolesPage() {
     }
 
     try {
-      const res = await fetch('/api/dashboard/admin/roles', {
+      const res = await apiFetch('/api/dashboard/admin/roles', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ ...createForm, organizationId: createOrgId }),

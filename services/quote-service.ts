@@ -166,7 +166,7 @@ export const QuotationService = {
     const include = { contractor: { select: { name: true, companyName: true } }, workOrder: { select: { description: true, state: true } } };
 
     const [rows, total] = await Promise.all([
-      tenantDb.quotation.findMany({ where, skip, take: pageSize, include, orderBy: { createdAt: 'desc', quoteId: 'asc' } }),
+      tenantDb.quotation.findMany({ where, skip, take: pageSize, include, orderBy: [{ createdAt: 'desc' }, { quoteId: 'asc' }] }),
       tenantDb.quotation.count({ where }),
     ]);
 

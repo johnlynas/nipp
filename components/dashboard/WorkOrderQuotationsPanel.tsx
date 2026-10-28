@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { Pencil, Trash2, Plus, ExternalLink } from 'lucide-react';
 import { Modal } from './Modal';
 import { ConfirmDialog } from './ConfirmDialog';
@@ -14,6 +14,7 @@ import {
   toLocalInputDate,
   localInputDateToIso,
 } from './work-order-shared';
+import { apiFetch } from '@/lib/api-client';
 
 /**
  * Quotations section on the super-admin work order detail page. Compact
@@ -84,10 +85,10 @@ export function WorkOrderQuotationsPanel({
     setInitial(next);
   };
 
-  const cancelEdit = () => {
+  const cancelEdit = useCallback(() => {
     if (saving) return;
     setEditingId(null);
-  };
+  }, [saving]);
 
   // Escape closes editing — with a discard confirm only when the form is dirty.
   const [discardOpen, setDiscardOpen] = useState(false);
@@ -103,7 +104,7 @@ export function WorkOrderQuotationsPanel({
     };
     window.addEventListener('keydown', onKey, true);
     return () => window.removeEventListener('keydown', onKey, true);
-  }, [editingRow, discardOpen, form, initial]);
+  }, [editingRow, discardOpen, form, initial, cancelEdit]);
 
   const handleSave = async () => {
     if (!editingRow) return;
@@ -127,7 +128,7 @@ export function WorkOrderQuotationsPanel({
       if (priceText !== '' || editingRow.price !== null) {
         payload.price = priceText === '' ? Number(editingRow.price) : Number(priceText);
       }
-      const res = await fetch(`/api/admin/quotes/${editingRow.quoteId}`, {
+      const res = await apiFetch(`/api/admin/quotes/${editingRow.quoteId}`, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(payload),
@@ -153,7 +154,7 @@ export function WorkOrderQuotationsPanel({
     if (!deleteTarget) return;
     setDeleteBusy(true);
     try {
-      const res = await fetch(`/api/admin/quotes/${deleteTarget.quoteId}`, { method: 'DELETE' });
+      const res = await apiFetch(`/api/admin/quotes/${deleteTarget.quoteId}`, { method: 'DELETE' });
       if (!res.ok) {
         const data = await res.json().catch(() => ({}));
         // 409-class (work order moved on): surface verbatim and resync states.
@@ -192,7 +193,7 @@ export function WorkOrderQuotationsPanel({
     (async () => {
       setContractorsLoading(true);
       try {
-        const res = await fetch('/api/dashboard/admin/contractors?pageSize=100');
+        const res = await apiFetch('/api/dashboard/admin/contractors?pageSize=100');
         if (!res.ok) throw new Error('Could not load the contractor list');
         const data = await res.json();
         if (!cancelled) {
@@ -231,7 +232,7 @@ export function WorkOrderQuotationsPanel({
     setAddSaving(true);
     setAddError(null);
     try {
-      const res = await fetch('/api/admin/quotes', {
+      const res = await apiFetch('/api/admin/quotes', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({

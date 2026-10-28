@@ -4,6 +4,7 @@ import { useState, useEffect, useCallback, useRef } from 'react';
 import Link from 'next/link';
 import { ArrowLeft, CalendarClock, Mail, Play, Send, UserCheck, XCircle, CheckCircle2 } from 'lucide-react';
 import { logClientError } from '@/lib/client-error-logger';
+import { guardSessionExpired } from '@/lib/session-guard';
 import { PageSkeleton } from '@/components/dashboard/PageSkeleton';
 import { Modal } from '@/components/dashboard/Modal';
 import { ConfirmDialog } from '@/components/dashboard/ConfirmDialog';
@@ -117,6 +118,7 @@ export default function WorkOrderDetailClient({ id }: { id: string }) {
       setContractorsError(null);
       try {
         const res = await fetch('/api/dashboard/admin/contractors?pageSize=100');
+        guardSessionExpired(res);
         if (!res.ok) throw new Error('Could not load the contractor list');
         const data = await res.json();
         if (!cancelled) {
@@ -159,6 +161,7 @@ export default function WorkOrderDetailClient({ id }: { id: string }) {
     setError(null);
     try {
       const res = await fetch(`/api/admin/work-orders/${id}`, { signal: abortRef.current.signal });
+      guardSessionExpired(res);
       if (!res.ok) {
         const data = await res.json().catch(() => ({}));
         throw new Error(data.error || 'Failed to load work order');
@@ -194,6 +197,7 @@ export default function WorkOrderDetailClient({ id }: { id: string }) {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ to, ...payload }),
       });
+      guardSessionExpired(res);
       if (!res.ok) {
         const data = await res.json().catch(() => ({}));
         throw new Error(data.error || 'Transition failed');

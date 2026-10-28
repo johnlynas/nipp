@@ -5,6 +5,7 @@ import { Plus, Trash2 } from 'lucide-react';
 import { logClientError } from '@/lib/client-error-logger';
 import { ConfirmDialog } from '@/components/dashboard/ConfirmDialog';
 import { type WorkOrderNote, workOrderDate } from './work-order-shared';
+import { apiFetch } from '@/lib/api-client';
 
 const NOTE_MAX = 2000;
 
@@ -52,7 +53,7 @@ export function WorkOrderNotesPanel({
     if (!workOrderId || !draft.trim()) return;
     setSaving(true);
     try {
-      const res = await fetch('/api/admin/work-order-notes', {
+      const res = await apiFetch('/api/admin/work-order-notes', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ workOrderId, note: draft.trim() }),
@@ -74,7 +75,7 @@ export function WorkOrderNotesPanel({
     if (!deletingNote) return;
     setDeleteBusy(true);
     try {
-      const res = await fetch(`/api/admin/work-order-notes/${deletingNote.workOrderNoteId}`, { method: 'DELETE' });
+      const res = await apiFetch(`/api/admin/work-order-notes/${deletingNote.workOrderNoteId}`, { method: 'DELETE' });
       if (!res.ok) {
         const data = await res.json().catch(() => ({}));
         throw new Error(data.error || 'Failed to delete note');

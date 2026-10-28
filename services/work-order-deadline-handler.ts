@@ -23,7 +23,7 @@ import { withEnvPlatformContext } from '@/lib/rls-transaction';
 import { withTenantAdminContext } from '@/lib/platform-db';
 import { pushNotification } from '@/lib/notification-push';
 import { logger } from '@/lib/logger';
-import type { JobHandler, JobRunContext } from '@/services/job-scheduler-service';
+import type { JobHandler } from '@/services/job-scheduler-service';
 
 export interface DeadlineScanResult {
   scanned: number;

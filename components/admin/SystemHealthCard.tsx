@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from 'react';
 import { PageSkeleton } from '@/components/dashboard/PageSkeleton';
+import { apiFetch } from '@/lib/api-client';
 
 // Sources emitted by lib/notification-push.ts — any of these means the
 // monitored services changed state and the health card must re-fetch.
@@ -39,7 +40,7 @@ export default function SystemHealthCard() {
 
     const fetchHealth = async () => {
       try {
-        const res = await fetch('/api/health', { cache: 'no-store' });
+        const res = await apiFetch('/api/health', { cache: 'no-store' });
         const data = await res.json();
         if (cancelled) return;
         setHealth(data);

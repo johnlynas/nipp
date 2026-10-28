@@ -12,6 +12,7 @@
 
 import { getPayloadKey, refreshPayloadKey } from './payload-key-manager';
 import { encryptWithAad, decryptWithAad } from './crypto-client';
+import { guardSessionExpired } from './session-guard';
 import {
   HEADER_PAYLOAD_ENCRYPTION,
   HEADER_PAYLOAD_KEY_ID,
@@ -31,6 +32,25 @@ import { isPiiRoute } from './pii-routes';
 export interface EncryptedFetchOptions extends RequestInit {
   /** Explicit opt-in for PII encryption. Must be true to encrypt/decrypt. */
   pii?: boolean;
+}
+
+/**
+ * Shared client-side fetch for `/api/*` calls that adds the session-expired
+ * guard: an expired session makes the root middleware serve the login page's
+ * HTML (200) at any API URL, so a response whose content-type is not JSON gets
+ * detected and the browser is bounced to /login. Callers still run their own
+ * `res.ok` checks — this helper never throws on application errors.
+ *
+ * Plain JSON endpoints should use apiFetch(url, opts) in place of fetch();
+ * encryptedFetch() routes through it automatically for its pass-through paths.
+ */
+export async function apiFetch(
+  url: string | URL | Request,
+  options: RequestInit = {},
+): Promise<Response> {
+  const res = await fetch(url, options);
+  guardSessionExpired(res);
+  return res;
 }
 
 // ---------------------------------------------------------------------------
@@ -92,9 +112,9 @@ export async function encryptedFetch(
 ): Promise<Response> {
   const { pii = false, ...fetchOptions } = options;
 
-  // If not a PII request, use normal fetch
+  // If not a PII request, use the plain guarded fetch
   if (!pii) {
-    return fetch(url, fetchOptions);
+    return apiFetch(url, fetchOptions);
   }
 
   const request = new Request(url, fetchOptions);
@@ -103,7 +123,7 @@ export async function encryptedFetch(
 
   // Only apply encryption to known PII routes
   if (!isPiiRoute(pathname)) {
-    return fetch(request);
+    return apiFetch(request);
   }
 
   // Check for unsupported body types
@@ -163,8 +183,8 @@ export async function encryptedFetch(
     [HEADER_PAYLOAD_NONCE]: requestNonce,
   };
 
-  // Make the request
-  let response = await fetch(new Request(urlObj, modifiedOptions));
+  // Make the request (guarded — an expired session would return HTML)
+  let response = await apiFetch(new Request(urlObj, modifiedOptions));
 
   // Detect server-side encryption disabled: if the response is plaintext JSON
   // (not octet-stream), the server isn't expecting encrypted payloads. Retry
@@ -178,7 +198,7 @@ export async function encryptedFetch(
       if (hasBody) {
         retryOptions.body = fetchOptions.body;
       }
-      response = await fetch(new Request(urlObj, retryOptions));
+      response = await apiFetch(new Request(urlObj, retryOptions));
     }
   }
 
@@ -233,7 +253,7 @@ export async function encryptedFetch(
           requestNonce = retryNonce;
           timestamp = retryTimestamp;
 
-          response = await fetch(new Request(urlObj, retryOptions));
+          response = await apiFetch(new Request(urlObj, retryOptions));
 
           // Log a warning if the retried response also failed.
           if (!response.ok) {

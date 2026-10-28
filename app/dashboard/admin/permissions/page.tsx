@@ -12,6 +12,7 @@ import { StatCard } from '@/components/dashboard/StatCard';
 import { Modal } from '@/components/dashboard/Modal';
 import { ConfirmDialog } from '@/components/dashboard/ConfirmDialog';
 import { PaginationControls } from '@/components/admin/PaginationControls';
+import { apiFetch } from '@/lib/api-client';
 
 interface Permission {
   id: string;
@@ -79,7 +80,7 @@ export default function PermissionsPage() {
   useEffect(() => {
     async function fetchTotalCount() {
       try {
-        const res = await fetch('/api/dashboard/admin/permissions?pageSize=1');
+        const res = await apiFetch('/api/dashboard/admin/permissions?pageSize=1');
         if (res.ok) {
           const data = await res.json();
           setTotalPermissionsCount(data.pagination?.total ?? 0);
@@ -96,7 +97,7 @@ export default function PermissionsPage() {
     let cancelled = false;
     async function fetchResourceNames() {
       try {
-        const res = await fetch('/api/dashboard/admin/resources/names');
+        const res = await apiFetch('/api/dashboard/admin/resources/names');
         if (!res.ok) throw new Error('Failed to fetch resource names');
         const data = await res.json();
         // De-duplicate defensively and keep the DB's ascending sort order
@@ -136,7 +137,7 @@ export default function PermissionsPage() {
       if (typeFilter === 'default') params.set('isDefault', 'true');
       else if (typeFilter === 'custom') params.set('isDefault', 'false');
 
-      const res = await fetch(`/api/dashboard/admin/permissions?${params}`, {
+      const res = await apiFetch(`/api/dashboard/admin/permissions?${params}`, {
         signal: abortControllerRef.current.signal,
       });
       if (!res.ok) {
@@ -202,7 +203,7 @@ export default function PermissionsPage() {
     if (!selectedPermission) return;
 
     try {
-      const res = await fetch(`/api/dashboard/admin/permissions/${selectedPermission.id}`, {
+      const res = await apiFetch(`/api/dashboard/admin/permissions/${selectedPermission.id}`, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(editForm),
@@ -228,7 +229,7 @@ export default function PermissionsPage() {
     if (!selectedPermission) return;
 
     try {
-      const res = await fetch(`/api/dashboard/admin/permissions/${selectedPermission.id}`, { method: 'DELETE' });
+      const res = await apiFetch(`/api/dashboard/admin/permissions/${selectedPermission.id}`, { method: 'DELETE' });
       if (!res.ok) {
         const data = await res.json().catch(() => ({}));
         throw new Error(data.error || 'Failed to delete permission');
@@ -257,7 +258,7 @@ export default function PermissionsPage() {
       if (!createForm.resource || !createForm.action) return;
 
       const key = `${createForm.resource}:${createForm.action}`;
-      const res = await fetch('/api/dashboard/admin/permissions', {
+      const res = await apiFetch('/api/dashboard/admin/permissions', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ key, resource: createForm.resource, action: createForm.action, description: createForm.description, isDefault: createForm.isDefault }),

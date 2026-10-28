@@ -4,6 +4,7 @@ import { useState, useEffect, useRef } from 'react';
 import Calendar from '@/components/calendar/Calendar';
 import { PageSkeleton } from '@/components/dashboard/PageSkeleton';
 import { useTenantScope } from '@/hooks/useTenantScope';
+import { apiFetch } from '@/lib/api-client';
 
 /**
  * Tenant calendar — the same component family as the admin dashboard.
@@ -26,7 +27,7 @@ export default function TenantCalendarPage() {
       // Active org from session first, then localStorage fallback.
       let gotOrgFromApi = false;
       try {
-        const meRes = await fetch('/api/auth/me');
+        const meRes = await apiFetch('/api/auth/me');
         if (meRes.ok) {
           const me = await meRes.json();
           if (me.activeOrganizationId) {
@@ -50,7 +51,7 @@ export default function TenantCalendarPage() {
         try {
           const urlOrg = new URL(window.location.href).searchParams.get('org');
           if (urlOrg && urlOrg !== orgIdRef.current) {
-            const listRes = await fetch('/api/admin/organizations/list');
+            const listRes = await apiFetch('/api/admin/organizations/list');
             if (listRes.ok) {
               const data = await listRes.json();
               const match = (data.organizations || []).find((o: { id: string }) => o.id === urlOrg);

@@ -54,8 +54,8 @@ function mockListResponse(overrides: Record<string, unknown> = {}): void {
         return new Response(
           JSON.stringify({
             items: [
-              { workOrderId: 'wo-1', description: 'Boiler replacement — Flat 4', organizationName: 'Ashvale Housing', state: 'INVOICED' },
-              { workOrderId: 'wo-2', description: 'Roof repair, block B', organizationName: 'Ashvale Housing', state: 'STARTED' },
+              { workOrderId: 'wo-1', description: 'Boiler replacement — Flat 4', organizationName: 'Ashvale Housing', contractorId: 'c-7', state: 'INVOICED' },
+              { workOrderId: 'wo-2', description: 'Roof repair, block B', organizationName: 'Ashvale Housing', contractorId: null, state: 'STARTED' },
             ],
             pagination: { page: 1, pageSize: 100, total: 2, totalPages: 1 },
           }),
@@ -190,6 +190,131 @@ describe('AdminInvoicesPage', () => {
     // wo-2 is STARTED — filtered out by the page.
     expect(woSelect.options.length).toBe(2); // placeholder + one eligible WO
     expect(Array.from(woSelect.options).map((o) => o.value)).toEqual(['', 'wo-1']);
+  });
+
+  it('shows the New Invoice CTA and only lists invoice-eligible WOs in the create dropdown', async () => {
+    mockListResponse();
+    render(<AdminInvoicesPage />);
+
+    // Header CTA (PageHeader duplicates the node).
+    const createButtons = screen.getAllByRole('button', { name: /new invoice/i });
+    expect(createButtons.length).toBeGreaterThanOrEqual(1);
+    fireEvent.click(createButtons[0]);
+    await waitFor(() => {
+      expect(screen.getByRole('heading', { name: 'New Invoice' })).toBeInTheDocument();
+    });
+
+    const woSelect = document.getElementById('inv-new-wo') as HTMLSelectElement;
+    // wo-2 is STARTED — filtered out by the page.
+    expect(woSelect.options.length).toBe(2); // placeholder + one eligible WO
+    expect(Array.from(woSelect.options).map((o) => o.value)).toEqual(['', 'wo-1']);
+
+    // Submit stays disabled until a work order is picked.
+    const disabledSubmit = screen.getAllByRole('button', { name: /record invoice/i }).find((b) => (b as HTMLButtonElement).disabled);
+    expect(disabledSubmit).toBeDefined();
+  });
+
+  it('opens the create modal and posts workOrder/contractor/dates (ISO) locking to the assigned contractor', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+        const url = String(input);
+        if (init?.method === 'POST') {
+          return new Response(JSON.stringify(invoiceRow({ invoiceId: 'inv-new' })), { status: 201 });
+        }
+        if (url.includes('/api/admin/invoices')) {
+          return new Response(JSON.stringify({ items: [], pagination: { page: 1, pageSize: 8, total: 0, totalPages: 1 }, counts: {} }), { status: 200 });
+        }
+        if (url.includes('/api/admin/work-orders')) {
+          return new Response(JSON.stringify({ items: [{ workOrderId: 'wo-1', description: 'Boiler replacement — Flat 4', organizationName: 'Ashvale Housing', contractorId: 'c-7', state: 'COMPLETE' }], pagination: { page: 1, pageSize: 100, total: 1, totalPages: 1 } }), { status: 200 });
+        }
+        if (url.includes('/api/dashboard/admin/contractors')) {
+          return new Response(JSON.stringify({ items: [{ contractorId: 'c-7', companyName: 'Byrne Electrical Ltd', name: 'Pat Byrne' }], pagination: { page: 1, pageSize: 100, total: 1, totalPages: 1 } }), { status: 200 });
+        }
+        return new Response('{}', { status: 404 });
+      }),
+    );
+
+    render(<AdminInvoicesPage />);
+    fireEvent.click(screen.getAllByRole('button', { name: /new invoice/i })[0]);
+    await waitFor(() => {
+      expect(screen.getByRole('heading', { name: 'New Invoice' })).toBeInTheDocument();
+    });
+
+    // The contractor field mirrors the work order's assigned contractor.
+    fireEvent.change(document.getElementById('inv-new-wo') as HTMLSelectElement, { target: { value: 'wo-1' } });
+    expect(screen.getByDisplayValue('Byrne Electrical Ltd')).toBeDisabled();
+
+    fireEvent.change(document.getElementById('inv-new-price') as HTMLInputElement, { target: { value: '1500.50' } });
+    fireEvent.change(document.getElementById('inv-new-date') as HTMLInputElement, { target: { value: '2026-11-03' } });
+    fireEvent.change(document.getElementById('inv-new-due') as HTMLInputElement, { target: { value: '2026-11-17' } });
+
+    fireEvent.click(screen.getByRole('button', { name: /record invoice/i }));
+
+    await waitFor(() => {
+      const postCall = fetchMock().mock.calls.find(([u, i]) => String(u) === '/api/admin/invoices' && (i as RequestInit)?.method === 'POST');
+      expect(postCall).toBeDefined();
+      const body = JSON.parse((postCall?.[1] as RequestInit).body as string);
+      expect(body.workOrderId).toBe('wo-1');
+      expect(body.contractorId).toBe('c-7'); // server rule: the WO's assigned contractor
+      expect(body.price).toBe(1500.5);
+      expect(body.invoiceDate).toContain('2026-11-03T12:00:00'); // local noon round-trip
+      expect(body.dueDate).toContain('2026-11-17T12:00:00');
+    });
+  });
+
+  it('create surfaces the server duplicate (409) error verbatim and keeps the modal open', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+        const url = String(input);
+        if (init?.method === 'POST') {
+          return new Response(JSON.stringify({ error: 'Invoice already exists for this work order' }), { status: 409 });
+        }
+        if (url.includes('/api/admin/invoices')) {
+          return new Response(JSON.stringify({ items: [], pagination: { page: 1, pageSize: 8, total: 0, totalPages: 1 }, counts: {} }), { status: 200 });
+        }
+        if (url.includes('/api/admin/work-orders')) {
+          return new Response(JSON.stringify({ items: [{ workOrderId: 'wo-1', description: 'Boiler replacement — Flat 4', organizationName: 'Ashvale Housing', contractorId: 'c-7', state: 'COMPLETE' }], pagination: { page: 1, pageSize: 100, total: 1, totalPages: 1 } }), { status: 200 });
+        }
+        if (url.includes('/api/dashboard/admin/contractors')) {
+          return new Response(JSON.stringify({ items: [{ contractorId: 'c-7', companyName: 'Byrne Electrical Ltd', name: 'Pat Byrne' }], pagination: { page: 1, pageSize: 100, total: 1, totalPages: 1 } }), { status: 200 });
+        }
+        return new Response('{}', { status: 404 });
+      }),
+    );
+
+    render(<AdminInvoicesPage />);
+    fireEvent.click(screen.getAllByRole('button', { name: /new invoice/i })[0]);
+    await waitFor(() => {
+      expect(screen.getByRole('heading', { name: 'New Invoice' })).toBeInTheDocument();
+    });
+
+    fireEvent.change(document.getElementById('inv-new-wo') as HTMLSelectElement, { target: { value: 'wo-1' } });
+    fireEvent.change(document.getElementById('inv-new-price') as HTMLInputElement, { target: { value: '250' } });
+    fireEvent.click(screen.getByRole('button', { name: /record invoice/i }));
+
+    await screen.findByRole('alert');
+    expect(screen.getByRole('alert')).toHaveTextContent(/invoice already exists for this work order/i);
+    // Modal stays open on failure.
+    expect(screen.getByRole('heading', { name: 'New Invoice' })).toBeInTheDocument();
+  });
+
+  it('create rejects a zero price client-side without calling the API', async () => {
+    mockListResponse();
+    render(<AdminInvoicesPage />);
+    fireEvent.click(screen.getAllByRole('button', { name: /new invoice/i })[0]);
+    await waitFor(() => {
+      expect(screen.getByRole('heading', { name: 'New Invoice' })).toBeInTheDocument();
+    });
+
+    fireEvent.change(document.getElementById('inv-new-wo') as HTMLSelectElement, { target: { value: 'wo-1' } });
+    fireEvent.change(document.getElementById('inv-new-price') as HTMLInputElement, { target: { value: '0' } });
+    fireEvent.click(screen.getByRole('button', { name: /record invoice/i }));
+
+    await screen.findByText(/price must be greater than zero/i);
+    // No invoice POST (the logger may beacon its own report post — not the same URL).
+    expect(fetchMock().mock.calls.some(([u, i]) => String(u) === '/api/admin/invoices' && (i as RequestInit)?.method === 'POST')).toBe(false);
   });
 
   it('requests page 2 when pagination Next is clicked', async () => {

@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { ExternalLink, Pencil, Trash2 } from 'lucide-react';
 import { ConfirmDialog } from './ConfirmDialog';
 import {
@@ -10,6 +10,7 @@ import {
   toLocalInputDate,
   localInputDateToIso,
 } from './work-order-shared';
+import { apiFetch } from '@/lib/api-client';
 
 /**
  * Invoice section on the super-admin work order detail page — the billing tail
@@ -85,10 +86,10 @@ export function WorkOrderInvoicePanel({ detail, disabled = false, load, onFailed
     setEditInitial(next);
   };
 
-  const cancelEdit = () => {
+  const cancelEdit = useCallback(() => {
     if (editSaving) return;
     setEditForm(null);
-  };
+  }, [editSaving]);
 
   // Escape exits editing — discard-confirm only when dirty (quotations panel pattern).
   useEffect(() => {
@@ -108,7 +109,7 @@ export function WorkOrderInvoicePanel({ detail, disabled = false, load, onFailed
     };
     window.addEventListener('keydown', onKey, true);
     return () => window.removeEventListener('keydown', onKey, true);
-  }, [editForm, editInitial, discardOpen, editSaving]);
+  }, [editForm, editInitial, discardOpen, cancelEdit]);
 
   const handleEditSave = async () => {
     if (!invoice || !editForm) return;
@@ -119,7 +120,7 @@ export function WorkOrderInvoicePanel({ detail, disabled = false, load, onFailed
     }
     setEditSaving(true);
     try {
-      const res = await fetch(`/api/admin/invoices/${invoice.invoiceId}`, {
+      const res = await apiFetch(`/api/admin/invoices/${invoice.invoiceId}`, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -153,7 +154,7 @@ export function WorkOrderInvoicePanel({ detail, disabled = false, load, onFailed
     if (!invoice) return;
     setDeleteBusy(true);
     try {
-      const res = await fetch(`/api/admin/invoices/${invoice.invoiceId}`, { method: 'DELETE' });
+      const res = await apiFetch(`/api/admin/invoices/${invoice.invoiceId}`, { method: 'DELETE' });
       if (!res.ok) {
         const data = await res.json().catch(() => ({}));
         onFailed(data.error || 'Failed to delete invoice');
@@ -173,7 +174,7 @@ export function WorkOrderInvoicePanel({ detail, disabled = false, load, onFailed
     if (!canSubmit || !detail.contractorId) return;
     setSaving(true);
     try {
-      const res = await fetch('/api/admin/invoices', {
+      const res = await apiFetch('/api/admin/invoices', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({

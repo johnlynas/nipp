@@ -3,6 +3,7 @@
 import { useState, useEffect } from 'react';
 import { PageSkeleton } from '@/components/dashboard/PageSkeleton';
 import { initialsOf, slugLabel } from '@/components/org-chart/panel-utils';
+import { apiFetch } from '@/lib/api-client';
 
 interface MemberRow {
   userId: string;
@@ -31,7 +32,7 @@ export default function TenantMembersPage() {
         // Active org from session, localStorage fallback.
         let orgId: string | null = null;
         try {
-          const meRes = await fetch('/api/auth/me');
+          const meRes = await apiFetch('/api/auth/me');
           if (meRes.ok) {
             const me = await meRes.json();
             if (me.activeOrganizationId) orgId = me.activeOrganizationId;
@@ -44,7 +45,7 @@ export default function TenantMembersPage() {
           return;
         }
 
-        const res = await fetch(`/api/organizations/${orgId}/org-chart`);
+        const res = await apiFetch(`/api/organizations/${orgId}/org-chart`);
         if (!res.ok) {
           const body = await res.json().catch(() => ({}));
           throw new Error(body.error || `Failed to load members (${res.status})`);

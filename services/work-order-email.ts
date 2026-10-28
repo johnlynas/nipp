@@ -18,13 +18,15 @@ import { sendEmail } from '@/lib/notifications/email';
 import tenantDb from '@/lib/tenant-db';
 import { withEnvPlatformContext } from '@/lib/rls-transaction';
 import { logger } from '@/lib/logger';
-import type { Contractors, WorkOrder } from '@prisma/client';
+import type { WorkOrder } from '@prisma/client';
 import type { WorkOrderEmailEvent } from './work-order-service';
 
 /** No emailed URL is ever produced by a work order email (design D7). */
 export const NO_URL_RE = /https?:\/\//i;
 
-const HEADER_TITLE = 'Property NI — Work Order Enquiry';
+const HEADER_RFQ = 'Property NI — Quotation Request';
+const HEADER_ASSIGNMENT = 'Property NI — Work Assigned';
+const HEADER_INVOICE = 'Property NI — Invoice Request';
 const DEFAULT_INVOICE_DUE_DAYS = 7;
 
 type SendFn = (to: string, subject: string, message: string, headerTitle?: string) => Promise<{ success: boolean; error?: string }>;
@@ -58,34 +60,38 @@ function firstName(name: string): string {
 // Template rendering (pure — unit-testable, no I/O)
 // ---------------------------------------------------------------------------
 
-/** RFQ subject: "Quotation request for <work> from <org>" (design §Email 1). */
-export function renderRfqSubject(args: { workOrder: Pick<WorkOrder, 'description' | 'workOrderId'>; organisationName: string }): string {
-  const subject = `Quotation request — ${args.workOrder.description} (${args.workOrder.workOrderId}) from ${args.organisationName}`;
+/** RFQ subject (design §Email 1): "Property NI — Quotation request for work order <id>". */
+export function renderRfqSubject(args: { workOrder: Pick<WorkOrder, 'workOrderId'> }): string {
+  const subject = `Property NI — Quotation request for work order ${args.workOrder.workOrderId}`;
   assertNoUrl('rfq subject', subject);
   return subject;
 }
 
-/** RFQ body: reference, full description, due date, organisation contact (design §Email 1). */
+/** No explicit deadline on the row (legacy data) → RFQs default to +7 days, matching the send-time default. */
+const RFQ_DEFAULT_DUE_DAYS = 7;
+
+/** RFQ body: direct quotation request — reference, full description, due date, organisation contact (design §Email 1). */
 export function renderRfqBody(args: {
   workOrder: Pick<WorkOrder, 'description' | 'workOrderId' | 'quotesDue'>;
   organisationName: string;
   contractor: ContractorRef;
   openedBy?: string;
 }): string {
-  const due = formatDay(args.workOrder.quotesDue);
+  const dueDate = args.workOrder.quotesDue ?? new Date(Date.now() + RFQ_DEFAULT_DUE_DAYS * 24 * 60 * 60 * 1000);
+  const due = formatDay(dueDate);
   const contactLine = args.openedBy ? `Contact point: ${args.organisationName} — ${args.openedBy}` : `Contact point: ${args.organisationName}`;
   const body = [
     `Dear ${firstName(args.contractor.name)},`,
     '',
-    `${args.organisationName} is seeking a quotation for the following work.`,
+    `${args.organisationName} would like to request your quotation for the following work:`,
     '',
     `Work order reference: ${args.workOrder.workOrderId}`,
     `Description: ${args.workOrder.description}`,
     `Quotation due: ${due}`,
     contactLine,
     '',
-    'Please send your quotation (amount and brief breakdown) by the due date above.',
-    'If you are unable to quote, a short reply letting us know is appreciated.',
+    'To proceed, please reply with your total amount and a brief breakdown of the quoted price, by the due date above.',
+    'If you are unable to submit a quotation for this work, a short reply letting us know is appreciated.',
     '',
     `Regards`,
     args.organisationName,
@@ -183,13 +189,15 @@ async function sendAndRecord(args: {
   eventType: string;
   organizationId: string | null;
   workOrderId: string;
+  /** Branded header strip (per event type). */
+  headerTitle?: string;
   sendFn?: SendFn;
 }): Promise<boolean> {
   const send = args.sendFn ?? (sendEmail as SendFn);
   let success = false;
   let error: unknown;
   try {
-    const result = await send(args.to, args.subject, args.message, HEADER_TITLE);
+    const result = await send(args.to, args.subject, args.message, args.headerTitle);
     success = result.success;
     if (!result.success) error = result.error;
   } catch (err) {
@@ -228,7 +236,7 @@ export async function sendRfqToContractor(args: {
   openedBy?: string;
   sendFn?: SendFn;
 }): Promise<{ sent: boolean }> {
-  const subject = renderRfqSubject({ workOrder: args.workOrder, organisationName: args.organisationName });
+  const subject = renderRfqSubject({ workOrder: args.workOrder });
   const body = renderRfqBody({
     workOrder: args.workOrder,
     organisationName: args.organisationName,
@@ -242,6 +250,7 @@ export async function sendRfqToContractor(args: {
     eventType: 'work_order_rfq',
     organizationId: args.workOrder.organizationId,
     workOrderId: args.workOrder.workOrderId,
+    headerTitle: HEADER_RFQ,
     sendFn: args.sendFn,
   });
   return { sent };
@@ -310,6 +319,7 @@ export async function sendWorkOrderEmailEvent(evt: WorkOrderEmailEvent): Promise
         eventType: EVENT_TYPES.assignment,
         organizationId: row.organizationId,
         workOrderId: row.workOrderId,
+        headerTitle: HEADER_ASSIGNMENT,
       });
     } else {
       // invoice_request (COMPLETE): suggested due date = +7 days from dispatch.
@@ -322,6 +332,7 @@ export async function sendWorkOrderEmailEvent(evt: WorkOrderEmailEvent): Promise
         eventType: EVENT_TYPES.invoice_request,
         organizationId: row.organizationId,
         workOrderId: row.workOrderId,
+        headerTitle: HEADER_INVOICE,
       });
     }
     if (ok) sent++;

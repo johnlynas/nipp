@@ -10,6 +10,7 @@ import { PageHeader } from '@/components/dashboard/PageHeader';
 import { PaginationControls } from '@/components/admin/PaginationControls';
 import { quoteStateMeta, workOrderMoney } from '@/components/dashboard/work-order-shared';
 import { QUOTE_STATES } from '@/lib/work-order-state';
+import { apiFetch } from '@/lib/api-client';
 
 /** Quote row as returned by GET /api/organizations/[orgId]/quotes (service list + joins). */
 interface QuoteRow {
@@ -63,7 +64,7 @@ export default function TenantQuotesPage() {
     (async () => {
       let gotOrgFromApi = false;
       try {
-        const meRes = await fetch('/api/auth/me');
+        const meRes = await apiFetch('/api/auth/me');
         if (meRes.ok) {
           const me = await meRes.json();
           if (me.activeOrganizationId && !cancelled) {
@@ -96,7 +97,7 @@ export default function TenantQuotesPage() {
       if (search) params.set('search', search);
       if (stateFilter) params.set('state', stateFilter);
 
-      const res = await fetch(`/api/organizations/${orgId}/quotes?${params}`, { signal: abortRef.current.signal });
+      const res = await apiFetch(`/api/organizations/${orgId}/quotes?${params}`, { signal: abortRef.current.signal });
       if (!res.ok) {
         const data = await res.json().catch(() => ({}));
         throw new Error(data.error || 'Failed to load quotations');

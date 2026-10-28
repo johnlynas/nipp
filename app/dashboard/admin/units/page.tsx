@@ -11,6 +11,7 @@ import { StatCard } from '@/components/dashboard/StatCard';
 import { Modal } from '@/components/dashboard/Modal';
 import { ConfirmDialog } from '@/components/dashboard/ConfirmDialog';
 import { PaginationControls } from '@/components/admin/PaginationControls';
+import { apiFetch } from '@/lib/api-client';
 
 interface Unit {
   unitId: string;
@@ -78,7 +79,7 @@ export default function UnitsPage() {
   useEffect(() => {
     async function fetchOrganizations() {
       try {
-        const res = await fetch('/api/dashboard/admin/organizations?page=1&pageSize=8');
+        const res = await apiFetch('/api/dashboard/admin/organizations?page=1&pageSize=8');
         if (res.ok) {
           const data = await res.json();
           setOrganizations(data.organizations || []);
@@ -120,7 +121,7 @@ export default function UnitsPage() {
       if (rentedFilter) params.set('rented', rentedFilter);
       if (typeFilter) params.set('type', typeFilter);
 
-      const res = await fetch(`/api/dashboard/admin/units?${params}`, {
+      const res = await apiFetch(`/api/dashboard/admin/units?${params}`, {
         signal: abortControllerRef.current.signal,
       });
       if (!res.ok) {
@@ -194,7 +195,7 @@ export default function UnitsPage() {
         organizationId: createOrgId,
       };
 
-      const res = await fetch('/api/dashboard/admin/units', {
+      const res = await apiFetch('/api/dashboard/admin/units', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(body),
@@ -220,7 +221,7 @@ export default function UnitsPage() {
     if (!selectedUnit) return;
 
     try {
-      const res = await fetch(`/api/dashboard/admin/units/${selectedUnit.unitId}`, {
+      const res = await apiFetch(`/api/dashboard/admin/units/${selectedUnit.unitId}`, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(editForm),
@@ -246,7 +247,7 @@ export default function UnitsPage() {
     if (!selectedUnit) return;
 
     try {
-      const res = await fetch(`/api/dashboard/admin/units/${selectedUnit.unitId}`, { method: 'DELETE' });
+      const res = await apiFetch(`/api/dashboard/admin/units/${selectedUnit.unitId}`, { method: 'DELETE' });
       if (!res.ok) {
         const data = await res.json().catch(() => ({}));
         throw new Error(data.error || 'Failed to delete unit');

@@ -14,6 +14,7 @@ import CalendarEventModal from './CalendarEventModal';
 import CalendarContextMenu from './CalendarContextMenu';
 import { ConfirmDialog } from '@/components/dashboard/ConfirmDialog';
 import { PageSkeleton } from '@/components/dashboard/PageSkeleton';
+import { apiFetch } from '@/lib/api-client';
 
 // ---------------------------------------------------------------------------
 // Props
@@ -101,7 +102,7 @@ export default function Calendar({
   const fetchCalendars = useCallback(async (orgId: string) => {
     console.log('[Calendar] fetchCalendars called for org:', orgId);
     try {
-      const res = await fetch(`/api/organizations/${orgId}/calendar`);
+      const res = await apiFetch(`/api/organizations/${orgId}/calendar`);
       console.log('[Calendar] Calendars fetch status:', res.status, 'for org:', orgId);
       if (!res.ok) {
         const errText = await res.text();
@@ -210,7 +211,7 @@ export default function Calendar({
       // it feeds is hidden from them, so skip the fetch entirely.
       if (readOnly) return;
       try {
-        const res = await fetch('/api/admin/organizations/list');
+        const res = await apiFetch('/api/admin/organizations/list');
         if (!res.ok) return;
         const data = await res.json();
         const orgs: { id: string; name: string; isPlatform?: boolean }[] = data.organizations || [];
@@ -536,7 +537,7 @@ export default function Calendar({
       // Try to fetch calendars again
       try {
         console.log('[Calendar] Fetching calendars for org:', effectiveOrgId);
-        const calRes = await fetch(`/api/organizations/${effectiveOrgId}/calendar`);
+        const calRes = await apiFetch(`/api/organizations/${effectiveOrgId}/calendar`);
         console.log('[Calendar] Calendars fetch status:', calRes.status);
         if (calRes.ok) {
           const calendars = await calRes.json();
@@ -561,7 +562,7 @@ export default function Calendar({
     if (!targetCalendarId) {
       // No calendar ID known — try to create a default one
       console.log('[Calendar] Creating default calendar for org:', effectiveOrgId);
-      const calRes = await fetch(`/api/organizations/${effectiveOrgId}/calendar`, {
+      const calRes = await apiFetch(`/api/organizations/${effectiveOrgId}/calendar`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ name: 'Main Calendar', description: 'Default calendar' }),
@@ -573,7 +574,7 @@ export default function Calendar({
         setDefaultCalendarId(newCal.id);
       } else {
         // Calendar may already exist — re-fetch to find it
-        const listRes = await fetch(`/api/organizations/${effectiveOrgId}/calendar`);
+        const listRes = await apiFetch(`/api/organizations/${effectiveOrgId}/calendar`);
         if (listRes.ok) {
           const calendars = await listRes.json();
           const def = calendars.find((c: { isDefault: boolean }) => c.isDefault);
@@ -619,7 +620,7 @@ export default function Calendar({
           throw new Error(err.error || 'Failed to update event');
         }
 
-        const createRes = await fetch(`/api/organizations/${effectiveOrgId}/calendar-events`, {
+        const createRes = await apiFetch(`/api/organizations/${effectiveOrgId}/calendar-events`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
@@ -696,7 +697,7 @@ export default function Calendar({
       }
     } else {
       // Create new event via POST
-      const res = await fetch(`/api/organizations/${effectiveOrgId}/calendar-events`, {
+      const res = await apiFetch(`/api/organizations/${effectiveOrgId}/calendar-events`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
