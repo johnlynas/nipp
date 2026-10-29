@@ -40,6 +40,7 @@ interface Organization {
 interface Team {
   id: string;
   name: string;
+  slug?: string | null;
   organizationId: string;
 }
 
@@ -59,6 +60,7 @@ export default function UsersPage() {
   const [orgFilter, setOrgFilter] = useState('');
   const [teamFilter, setTeamFilter] = useState('');
   const [statusFilter, setStatusFilter] = useState('');
+  const [userTypeFilter, setUserTypeFilter] = useState('');
   const [counts, setCounts] = useState<{ emailVerifiedCount: number; bannedCount: number; activeCount: number }>({ emailVerifiedCount: 0, bannedCount: 0, activeCount: 0 });
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -127,7 +129,7 @@ export default function UsersPage() {
   // Reset to page 1 when filters change
   useEffect(() => {
     setPagination((p) => ({ ...p, page: 1 }));
-  }, [search, statusFilter]);
+  }, [search, statusFilter, userTypeFilter]);
 
   // Clear team filter when org changes (teams are scoped to org)
   useEffect(() => {
@@ -164,6 +166,7 @@ export default function UsersPage() {
       if (orgFilter) params.set('organizationId', orgFilter);
       if (teamFilter) params.set('teamId', teamFilter);
       if (statusFilter) params.set('status', statusFilter);
+      if (userTypeFilter) params.set('userType', userTypeFilter);
 
       const res = await apiFetch(`/api/dashboard/admin/users?${params}`, {
         signal: abortControllerRef.current.signal,
@@ -198,7 +201,7 @@ export default function UsersPage() {
     } finally {
       setLoading(false);
     }
-  }, [pagination.page, pagination.pageSize, search, orgFilter, teamFilter, statusFilter]);
+  }, [pagination.page, pagination.pageSize, search, orgFilter, teamFilter, statusFilter, userTypeFilter]);
 
   useEffect(() => {
     fetchData();
@@ -523,6 +526,17 @@ export default function UsersPage() {
       <div className="mb-4 flex flex-wrap items-center gap-3">
         <SearchBar value={search} onChange={setSearch} placeholder="Search users by name or email..." aria-label="Search users" />
         <select
+          value={userTypeFilter}
+          onChange={(e) => setUserTypeFilter(e.target.value)}
+          className="rounded border px-3 py-2 text-sm bg-white hover:bg-slate-50 transition-colors focus:outline-none"
+          style={{ borderColor: 'var(--color-slate-200)', color: 'var(--color-navy-850)' }}
+          aria-label="Filter by user type"
+        >
+          <option value="">All User Types</option>
+          <option value="local">Local</option>
+          <option value="oidc">OIDC</option>
+        </select>
+        <select
           value={orgFilter}
           onChange={(e) => setOrgFilter(e.target.value)}
           className="rounded border px-3 py-2 text-sm bg-white hover:bg-slate-50 transition-colors focus:outline-none"
@@ -739,6 +753,10 @@ export default function UsersPage() {
               <option value="">Default "Members" team</option>
               {teams
                 .filter((team) => !createOrgId || team.organizationId === createOrgId)
+                // The default Members team is auto-enrolled on every user creation
+                // (lib/org-default-team) — offering it here 409s with "User is already
+                // a member of this team", so keep the selection to non-Members teams.
+                .filter((team) => team.slug !== 'members')
                 .map((team) => (
                   <option key={team.id} value={team.id}>{team.name}</option>
                 ))}

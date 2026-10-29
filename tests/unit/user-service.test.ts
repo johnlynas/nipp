@@ -300,6 +300,34 @@ describe('UserService', () => {
       );
     });
 
+    it('treats an explicit default "Members" teamId as a no-op (no 409 from addTeamMember)', async () => {
+      vi.mocked(globalDb.user.findUnique).mockResolvedValue(null);
+      vi.mocked(globalDb.user.create).mockResolvedValue(castUser(mockUser({ id: 'idemp-user' })) as never);
+      vi.mocked(globalDb.member.create).mockResolvedValue({ id: 'm-1' } as never);
+
+      // The requested teamId resolves to the org's default Members team (slug
+      // 'members') — auto-enrollment in addMembership already covers it.
+      vi.mocked(globalDb.team.findUnique).mockResolvedValue({
+        id: 'members-team', slug: 'members', organizationId: 'org-t2',
+      } as never);
+      vi.mocked(globalDb.team.findFirst).mockResolvedValue({ id: 'members-team', slug: 'members' } as never);
+      vi.mocked(globalDb.teamMember.findFirst).mockResolvedValue(null as never);
+      vi.mocked(globalDb.teamMember.create).mockResolvedValue({ id: 'tm-1' } as never);
+      vi.mocked(globalDb.memberRole.findFirst).mockResolvedValue(null as never);
+
+      // Must NOT throw ConflictError ('User is already a member of this team').
+      const result = await UserService.create(
+        { email: 'idemp@example.com', name: 'Idempotent User', organizationId: 'org-t2', teamId: 'members-team' },
+        mockCtx('PLATFORM_ADMIN'),
+      );
+      expect(result.id).toBe('idemp-user');
+
+      // Exactly ONE membership write: the auto-enrollment. addTeamMember's
+      // transaction (a second create) is skipped for the default team.
+      const creates = vi.mocked(globalDb.teamMember.create).mock.calls.map((c) => (c[0] as { data: { teamId: string } }).data.teamId);
+      expect(creates).toEqual(['members-team']);
+    });
+
     it('rejects a team from a DIFFERENT organization (cross-org teamId) and persists nothing', async () => {
       vi.mocked(globalDb.user.findUnique).mockResolvedValue(null);
       // Foreign team exists but lives in org-b.
@@ -413,6 +441,28 @@ describe('UserService', () => {
             ],
           }),
         }),
+      );
+    });
+
+    it('applies userType oidc — only Users with oidcVerified = true', async () => {
+      vi.mocked(globalDb.user.findMany).mockResolvedValue([]);
+      vi.mocked(globalDb.user.count).mockResolvedValue(0);
+
+      await UserService.list({ userType: 'oidc' }, { page: 1, pageSize: 20 }, mockCtx('PLATFORM_ADMIN'));
+
+      expect(vi.mocked(globalDb.user.findMany).mock.calls[0][0]).toEqual(
+        expect.objectContaining({ where: expect.objectContaining({ oidcVerified: true }) }),
+      );
+    });
+
+    it('applies userType local — only Users with oidcVerified = false', async () => {
+      vi.mocked(globalDb.user.findMany).mockResolvedValue([]);
+      vi.mocked(globalDb.user.count).mockResolvedValue(0);
+
+      await UserService.list({ userType: 'local' }, { page: 1, pageSize: 20 }, mockCtx('PLATFORM_ADMIN'));
+
+      expect(vi.mocked(globalDb.user.findMany).mock.calls[0][0]).toEqual(
+        expect.objectContaining({ where: expect.objectContaining({ oidcVerified: false }) }),
       );
     });
 

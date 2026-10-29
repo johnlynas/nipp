@@ -19,7 +19,7 @@ import { env } from '@/lib/env';
 import { requireAnyAdmin, logFailedAuth } from '@/lib/services/base-service';
 import { normalizePagination, PaginatedResult, UserFilters } from '@/lib/services/types';
 import { hashPassword } from 'better-auth/crypto';
-import { enrollInDefaultMembersTeam } from '@/lib/org-default-team';
+import { enrollInDefaultMembersTeam, DEFAULT_MEMBERS_TEAM_SLUG } from '@/lib/org-default-team';
 import { TeamService } from './team-service';
 
 // ---------------------------------------------------------------------------
@@ -35,7 +35,9 @@ export interface CreateUserInput {
    * Optional ADDITIONAL team to enroll the user in, on top of the org's
    * default "Members" team (which is ALWAYS attached at creation). Must belong
    * to the target org — enforced here, so a cross-org teamId is rejected before
-   * any rows are written.
+   * any rows are written. Requesting the default Members team explicitly is an
+   * accepted no-op: enrollment in it already happened, so re-adding would only
+   * 409 with "User is already a member of this team".
    */
   teamId?: string;
 }
@@ -98,10 +100,10 @@ export const UserService = {
     // A requested team must belong to the same organization as the membership
     // being created — checked BEFORE any rows are written (cross-org teamId
     // attack surface stays closed, per plan risk #2).
-    let targetTeam: { id: string; organizationId: string } | null = null;
+    let targetTeam: { id: string; slug: string | null; organizationId: string } | null = null;
     if (data.teamId) {
       targetTeam = await runWithTenant(orgForUser, () =>
-        tenantDb.team.findUnique({ where: { id: data.teamId! }, select: { id: true, organizationId: true } }),
+        tenantDb.team.findUnique({ where: { id: data.teamId! }, select: { id: true, slug: true, organizationId: true } }),
       );
       if (!targetTeam) {
         throw new ValidationError('Team not found');
@@ -161,10 +163,17 @@ export const UserService = {
         // applies TeamRole inheritance. Pin the (already cross-checked) org on
         // the ctx so its internal contextOrgId fallback never reaches for an
         // unset platform-org env in edge cases.
-        await TeamService.addTeamMember(targetTeam.id, { userId: user.id }, {
-          ...ctx,
-          organizationId: targetTeam.organizationId,
-        });
+        //
+        // Idempotency guard: if the picked team IS the default Members team,
+        // the enrollment above already added the user to it — calling
+        // addTeamMember would 409 ("User is already a member of this team").
+        // Skip it so an explicit request for the default team is a no-op.
+        if (targetTeam.slug !== DEFAULT_MEMBERS_TEAM_SLUG) {
+          await TeamService.addTeamMember(targetTeam.id, { userId: user.id }, {
+            ...ctx,
+            organizationId: targetTeam.organizationId,
+          });
+        }
       }
     };
 
@@ -309,6 +318,14 @@ export const UserService = {
       where.banned = true;
     } else if (filters.status === 'active') {
       where.banned = false;
+    }
+
+    // User type: OIDC users completed magic-link verification (User.oidcVerified);
+    // everything else is a Local credential account.
+    if (filters.userType === 'oidc') {
+      where.oidcVerified = true;
+    } else if (filters.userType === 'local') {
+      where.oidcVerified = false;
     }
 
     const [users, total] = await Promise.all([

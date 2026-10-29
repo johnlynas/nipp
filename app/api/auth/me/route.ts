@@ -10,7 +10,9 @@ export const runtime = 'nodejs';
 
 /**
  * GET /api/auth/me
- * Returns the current user's session info including active organization ID.
+ * Returns the current user's session info: active organization ID + name and
+ * userType ('OIDC' when User.oidcVerified is true, i.e. a verified Google
+ * identity; 'Local' otherwise) for the account menu's User Info modal.
  */
 export async function GET(req: NextRequest) {
   const session = await auth.api.getSession({ headers: req.headers });
@@ -33,30 +35,28 @@ export async function GET(req: NextRequest) {
     '[/api/auth/me] activeOrganizationId from session',
   );
 
-  // Fallback: read from User model (where we set it via databaseHooks)
+  // The DB read serves two fields: activeOrganizationId (session carries it on
+  // most sign-ins; DB is the fallback) and oidcVerified (exists ONLY in the
+  // User table — drives the "User Type" row of the account menu's User Info
+  // modal). One indexed PK lookup, merged with the session value above.
+  const user = await withPlatformContext(session.user.id, () =>
+    tenantDb.user.findUnique({
+      where: { id: session.user.id },
+      select: { activeOrganizationId: true, oidcVerified: true },
+    }),
+  );
+
   if (!activeOrgId) {
-    logger.info(
-      { userId: session.user.id },
-      '[/api/auth/me] Not in session — reading from User model',
-    );
-
-    const user = await withPlatformContext(session.user.id, () =>
-      tenantDb.user.findUnique({
-        where: { id: session.user.id },
-        select: { activeOrganizationId: true },
-      }),
-    );
-
     activeOrgId = user?.activeOrganizationId ?? null;
-
-    logger.info(
-      { userId: session.user.id, fromUserModel: activeOrgId },
-      '[/api/auth/me] activeOrganizationId from User model',
-    );
   }
 
+  // Design §4.3: OIDC users complete magic-link verification which sets the
+  // flag at consumption (lib/oidc-magic-link.ts). Everything else — local
+  // credential accounts, invite-pending Google identities — is "Local".
+  const userType: 'OIDC' | 'Local' = user?.oidcVerified === true ? 'OIDC' : 'Local';
+
   logger.info(
-    { userId: session.user.id, finalActiveOrgId: activeOrgId },
+    { userId: session.user.id, finalActiveOrgId: activeOrgId, userType },
     '[/api/auth/me] Returning response',
   );
 
@@ -68,11 +68,24 @@ export async function GET(req: NextRequest) {
         tenantDb.organization.findUnique({ where: { id: activeOrgId }, select: { name: true } }))
     : null;
 
+  // hasPassword feeds the account menu's "Change Password" item: only users
+  // with a local email/password credential can change it. Checked against the
+  // credential Account row (same source of truth /api/auth/password uses),
+  // never User.passwordHash — legacy rows may differ.
+  const credential = await withPlatformContext(session.user.id, () =>
+    tenantDb.account.findFirst({
+      where: { userId: session.user.id, providerId: 'credential' },
+      select: { id: true },
+    }),
+  );
+
   return NextResponse.json({
     userId: session.user.id,
     email: session.user.email,
     name: session.user.name,
     activeOrganizationId: activeOrgId,
     organizationName: organization?.name || '',
+    userType,
+    hasPassword: !!credential,
   });
 }
