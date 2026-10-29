@@ -19,15 +19,25 @@
 
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 
-const { mockSendEmail, mockLogger } = vi.hoisted(() => ({
+const { mockPrisma, mockSendEmail, mockLogger } = vi.hoisted(() => ({
+  mockPrisma: {
+    verification: {},
+    account: { findMany: vi.fn() },
+  },
   mockSendEmail: vi.fn(),
   mockLogger: { info: vi.fn(), warn: vi.fn(), error: vi.fn() },
 }));
 
 vi.mock('nodemailer', () => ({})); // isolate from transporter machinery
-vi.mock('@/lib/db', () => ({ prisma: { verification: {} } }));
+vi.mock('@/lib/db', () => ({ prisma: mockPrisma }));
 vi.mock('@/lib/env', () => ({ env: { FRONTEND_URL: 'http://localhost:3000' } }));
 vi.mock('@/lib/logger', () => ({ logger: mockLogger }));
+// Unit tests exercise route logic against mocked prisma — pass the op straight
+// through. The verified-RLS wrapper itself is covered by rls-transaction.test.ts
+// (same convention as tenant-mgmt-* / org-status-ban tests).
+vi.mock('@/lib/platform-db', () => ({
+  withPlatformContext: vi.fn(async (_userId: string, fn: () => Promise<unknown>) => fn()),
+}));
 vi.mock('@/lib/notifications/email', () => ({
   sendEmail: mockSendEmail,
   // Pure function — replicate the real implementation so escaping is exercised
@@ -41,7 +51,7 @@ vi.mock('@/lib/notifications/email', () => ({
 }));
 
 import os from 'os';
-import { issueResetEmail, resolveResetLinkOrigin } from '@/lib/forgot-password';
+import { issueResetEmail, resolveResetLinkOrigin, hasCredentialAccount, AUDIT_ACTION } from '@/lib/forgot-password';
 
 /** LAN IPv4 the fake machine exposes; stub per-test for loopback resolution. */
 function stubNetworkInterfaces(address: string | null) {
@@ -206,5 +216,40 @@ describe('issueResetEmail', () => {
     });
     expect(res.emailSent).toBe(false);
     expect(mockLogger.error).toHaveBeenCalled();
+  });
+});
+
+describe('hasCredentialAccount', () => {
+  beforeEach(() => vi.clearAllMocks());
+
+  it('returns true when a credential Account row exists (local user, incl. dual-door)', async () => {
+    mockPrisma.account.findMany.mockResolvedValue([
+      { providerId: 'credential' },
+      { providerId: 'google' },
+    ]);
+    await expect(hasCredentialAccount('u1')).resolves.toBe(true);
+    // The read is scoped to the exact userId passed in.
+    expect(mockPrisma.account.findMany).toHaveBeenCalledWith({
+      where: { userId: 'u1' },
+      select: { providerId: true },
+    });
+  });
+
+  it('returns false for an OIDC-only account (google row, no credential)', async () => {
+    mockPrisma.account.findMany.mockResolvedValue([{ providerId: 'google' }]);
+    await expect(hasCredentialAccount('u1')).resolves.toBe(false);
+  });
+
+  it('returns false for a user with no Account rows at all', async () => {
+    mockPrisma.account.findMany.mockResolvedValue([]);
+    await expect(hasCredentialAccount('u1')).resolves.toBe(false);
+  });
+});
+
+describe('AUDIT_ACTION constants (DRY — Phase 3 routes import, never inline)', () => {
+  it('exposes the three design §7 action names verbatim', () => {
+    expect(AUDIT_ACTION.PASSWORD_RESET_REQUESTED).toBe('user.password-reset-requested');
+    expect(AUDIT_ACTION.PASSWORD_RESET_LINK_OPENED).toBe('user.password-reset-link-opened');
+    expect(AUDIT_ACTION.PASSWORD_RESET_SUCCESS).toBe('user.password-reset-success');
   });
 });

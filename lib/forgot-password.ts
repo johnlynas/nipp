@@ -10,6 +10,7 @@
  *                                    does NOT create the Verification row —
  *                                    BetterAuth's requestPasswordReset handler owns
  *                                    token generation and row creation single-sourced)
+ *   - `hasCredentialAccount`        (server-side mirror of /api/auth/password's guard, design T5)
  *
  * Token ownership: this module never mints reset tokens. The Phase 2 wiring
  * passes the token BetterAuth generated into issueResetEmail; the emailed URL is
@@ -18,6 +19,8 @@
  * this repo (would 404).
  */
 
+import { prisma } from '@/lib/db';
+import { withPlatformContext } from '@/lib/platform-db';
 import { resolveLinkBase as magicLinkResolveOrigin } from '@/lib/oidc-magic-link';
 import { sendEmail, escapeHtml } from '@/lib/notifications/email';
 import { logger } from '@/lib/logger';
@@ -127,3 +130,29 @@ export async function issueResetEmail(
     return { emailSent: false };
   }
 }
+
+// ─── Credential guard ─────────────────────────────────────────────────────────
+
+/**
+ * Server-side credential-account guard (design T5). Mirrors the /api/auth/password
+ * route's check so a hand-built request cannot force-reset an OIDC-only account.
+ * Returns true iff at least one Account row for userId has providerId='credential'.
+ * Runs in withPlatformContext(userId) — same idiom as that route — so the read is
+ * scoped to the user being checked, never request input (fail-closed on empty id).
+ */
+export async function hasCredentialAccount(userId: string): Promise<boolean> {
+  const providers = await withPlatformContext(userId, () =>
+    prisma.account.findMany({ where: { userId }, select: { providerId: true } }),
+  );
+  return providers.some((p) => p.providerId === 'credential');
+}
+
+// ─── Audit action constants (Phase 3 imports these — no inline strings in routes) ──
+
+export const AUDIT_ACTION = {
+  PASSWORD_RESET_REQUESTED: 'user.password-reset-requested',
+  PASSWORD_RESET_LINK_OPENED: 'user.password-reset-link-opened',
+  PASSWORD_RESET_SUCCESS: 'user.password-reset-success',
+} as const;
+
+export type AuditActionName = (typeof AUDIT_ACTION)[keyof typeof AUDIT_ACTION];
