@@ -9,6 +9,7 @@ import tenantDb from '@/lib/tenant-db';
 import { createAuthMiddleware, APIError } from 'better-auth/api';
 import { logger } from './logger';
 import { issueInviteLink } from './oidc-magic-link';
+import { issueResetEmail, PASSWORD_RESET_TOKEN_TTL_SECS } from './forgot-password';
 
 interface ExtendedUser {
   permissions: string[];
@@ -285,6 +286,38 @@ export const auth = betterAuth({
     enabled: true,
     requireEmailVerification: false,
     disableSignUp: true, // Block public registration
+    resetPasswordTokenExpiresIn: PASSWORD_RESET_TOKEN_TTL_SECS,
+    // Build OUR OWN link (app-root /auth/reset-password page) — BetterAuth's stock
+    // url points at baseURL + /reset-password/:token which has no page in this repo
+    // (would 404). issueResetEmail is catch-and-log by contract (never throws), so
+    // SMTP failures cannot take the request down; the token row stays valid for
+    // retry — same resilience as the OIDC invitation link.
+    // Origin precedence: THIS request's origin wins (reset requests happen outside
+    // a session, so lastRequest is frequently stale/absent); the session-captured
+    // origin is only the off-request fallback.
+    sendResetPassword: async ({ user, token }, request) => {
+      try {
+        await issueResetEmail(user, token, {
+          portalOrigin: request ? new URL(request.url).origin : getLastRequestOrigin(),
+        });
+      } catch (err) {
+        // Paranoia: the lib never throws by contract, but a throw here would
+        // 500 the request after the token row is already written. Log + swallow.
+        logger.error({ err, userId: user.id }, '[Auth] sendResetPassword hook failed (token remains valid)');
+      }
+    },
+    // Observer hook — fires after BetterAuth has hashed + written the password and
+    // deleted the Verification row atomically (design §7.3). Session revocation is
+    // deliberately OUT of scope today (design §13 Q3); this is the audit point a
+    // future extension wires to. Best-effort: must not break the reset response.
+    onPasswordReset: async ({ user }) => {
+      try {
+        logger.info({ userId: user.id }, '[Auth] Password reset completed (local user)');
+      } catch {
+        // never — informational only, kept defensive so a logging outage can't 500
+        // the endpoint whose happy path has already committed.
+      }
+    },
   },
 
   // OAuth callback API errors (incl. the signup-disabled rejection for uninvited

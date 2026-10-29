@@ -25,6 +25,7 @@ const {
   mockGetPlatformOrgId,
   mockIsSuperAdmin,
   mockLogger,
+  mockIssueResetEmail,
 } = vi.hoisted(() => {
   const capturedAuth: { options: Record<string, unknown> | null } = { options: null };
 
@@ -45,6 +46,7 @@ const {
     mockGetPlatformOrgId: vi.fn(),
     mockIsSuperAdmin: vi.fn(),
     mockLogger: { info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn() },
+    mockIssueResetEmail: vi.fn(async (_user: Record<string, unknown>, _token: string, _opts?: { portalOrigin?: string | null }) => ({ emailSent: true })),
   };
 });
 
@@ -97,6 +99,14 @@ vi.mock('@/lib/env', () => ({
 
 vi.mock('@/lib/logger', () => ({ logger: mockLogger }));
 
+// Password reset wiring (Phase 2): lib/auth imports issueResetEmail + the TTL
+// constant. The seam is mocked; the TTL assertion compares against the REAL
+// constant below (a plain env snapshot — no DB/mail involved in loading it).
+vi.mock('@/lib/forgot-password', async (importOriginal) => {
+  const original = await importOriginal<typeof import('@/lib/forgot-password')>();
+  return { ...original, issueResetEmail: mockIssueResetEmail };
+});
+
 // Dynamic imports inside the session callback.
 vi.mock('@/lib/permissions/resolver', () => ({
   resolvePermissions: (...args: unknown[]) => mockResolvePermissions(...args),
@@ -107,7 +117,8 @@ vi.mock('@/lib/authz', () => ({
   isSuperAdmin: (...args: unknown[]) => mockIsSuperAdmin(...args),
 }));
 
-import { auth } from '@/lib/auth';
+import { auth, getLastRequestOrigin } from '@/lib/auth';
+import { PASSWORD_RESET_TOKEN_TTL_SECS } from '@/lib/forgot-password';
 import { APIError } from 'better-auth/api';
 
 // ---------------------------------------------------------------------------
@@ -214,6 +225,89 @@ describe('auth configuration (options)', () => {
     expect(typeof options().databaseHooks.session.create.after).toBe('function');
     expect(typeof options().hooks.before).toBe('function');
     expect(typeof options().callbacks.session).toBe('function');
+  });
+
+  // ---------------------------------------------------------------------------
+  // Password reset wiring (forgot-password plan Phase 2, design §7/§11)
+  // ---------------------------------------------------------------------------
+
+  describe('emailAndPassword password-reset wiring', () => {
+    const eap = options().emailAndPassword as Record<string, any>;
+
+    /** Drive the module's lastRequest state through its real capture point
+     *  (databaseHooks.session.create.before) — no private-state manipulation. */
+    async function setLastRequestOrigin(origin: string | null) {
+      const before = options().databaseHooks.session.create.before as (
+        session: Record<string, unknown>,
+        ctx?: { request?: Request } | null,
+      ) => Promise<unknown>;
+      mockPrisma.user.findUnique.mockResolvedValue(null);
+      await before({ userId: 'u_origin' }, origin === null ? undefined : { request: new Request(origin) } as never);
+    }
+
+    it('enables a positive reset-token TTL (>300s) sourced from the shared constant', () => {
+      expect(Number(eap.resetPasswordTokenExpiresIn)).toBeGreaterThan(300);
+      // Single-sourced to lib/forgot-password (also feeds the email copy), env-overridable.
+      expect(Number(eap.resetPasswordTokenExpiresIn)).toBe(PASSWORD_RESET_TOKEN_TTL_SECS);
+    });
+
+    it('wires sendResetPassword that builds OUR link via issueResetEmail (never the stock url)', async () => {
+      expect(typeof eap.sendResetPassword).toBe('function');
+      await eap.sendResetPassword(
+        { user: { id: 'u1', email: 'john@example.com', name: '' }, token: 'tok123', url: 'http://ignored/reset-password/tok123' },
+        new Request('http://portal.example.com/login'),
+      );
+      expect(mockIssueResetEmail).toHaveBeenCalledTimes(1);
+      const [user, token, opts] = mockIssueResetEmail.mock.calls[0] as [
+        Record<string, unknown>, string, { portalOrigin?: string | null },
+      ];
+      expect(user).toEqual({ id: 'u1', email: 'john@example.com', name: '' });
+      expect(token).toBe('tok123');
+      // THE incoming request's origin wins — a stale lastRequest (e.g. localhost
+      // from an earlier session) must never shadow where THIS user is reaching.
+      expect(opts.portalOrigin).toBe('http://portal.example.com');
+    });
+
+    it('falls back to the last session-request origin only when there is no request', async () => {
+      await setLastRequestOrigin('http://192.168.0.5:3000/login');
+      expect(getLastRequestOrigin()).toBe('http://192.168.0.5:3000');
+
+      await eap.sendResetPassword(
+        { user: { id: 'u1', email: 'john@example.com', name: '' }, token: 't', url: 'x' },
+        undefined,
+      );
+      expect(mockIssueResetEmail).toHaveBeenCalledTimes(1);
+      const [, , opts] = mockIssueResetEmail.mock.calls[0] as [
+        Record<string, unknown>, string, { portalOrigin?: string | null },
+      ];
+      expect(opts.portalOrigin).toBe('http://192.168.0.5:3000');
+    });
+
+    it('passes null origin when neither source exists (lib falls back to FRONTEND_URL)', async () => {
+      await setLastRequestOrigin(null);
+      expect(getLastRequestOrigin()).toBeNull();
+
+      await eap.sendResetPassword(
+        { user: { id: 'u1', email: 'john@example.com', name: '' }, token: 't2', url: 'x' },
+        undefined,
+      );
+      expect(mockIssueResetEmail).toHaveBeenCalledTimes(1);
+      const [, , opts] = mockIssueResetEmail.mock.calls[0] as [
+        Record<string, unknown>, string, { portalOrigin?: string | null },
+      ];
+      expect(opts.portalOrigin).toBeNull();
+    });
+
+    it('swallows a sendResetPassword failure — the token row must stay valid for retry', async () => {
+      mockIssueResetEmail.mockRejectedValueOnce(new Error('smtp down'));
+      await expect(
+        eap.sendResetPassword({ user: { id: 'u1', email: 'john@example.com' }, token: 't3', url: 'x' }, undefined),
+      ).resolves.toBeUndefined();
+    });
+
+    it('wires an onPasswordReset observer (session revocation is out of scope — design §13 Q3)', () => {
+      expect(typeof eap.onPasswordReset).toBe('function');
+    });
   });
 
   it('exports the auth instance with handler + api surfaces', () => {
