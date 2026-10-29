@@ -32,6 +32,8 @@ export async function GET(request: NextRequest) {
     const organizationId = url.searchParams.get('organizationId') || undefined;
     const teamId = url.searchParams.get('teamId') || undefined;
     const status = url.searchParams.get('status') as 'active' | 'banned' | undefined;
+    const userTypeParam = url.searchParams.get('userType');
+    const userType = (userTypeParam === 'oidc' || userTypeParam === 'local') ? userTypeParam : undefined;
 
     // One verified platform context for the whole listing (cross-org reads).
     return await withPlatformContext(auth.session!.user.id, async () => {
@@ -84,9 +86,15 @@ export async function GET(request: NextRequest) {
         where.banned = false;
       }
 
+      // User type filter on the shared where clause too, so stat-card counts
+      // stay consistent with the filtered table.
+      if (userType) {
+        where.oidcVerified = userType === 'oidc';
+      }
+
       // Fetch paginated items for the table (UserService runs in this context)
       const result = await UserService.list(
-        { search, role, organizationId, teamId, status },
+        { search, role, organizationId, teamId, status, userType },
         { page, pageSize },
         { userId: auth.session!.user.id, role: 'PLATFORM_ADMIN' }
       );

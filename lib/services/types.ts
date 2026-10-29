@@ -147,6 +147,7 @@ export interface UserFilters extends BaseFilters {
   organizationId?: string; // filter users belonging to a specific organization (Platform Admin only)
   teamId?: string; // filter users belonging to a specific team (Platform Admin only)
   status?: 'active' | 'banned'; // filter by ban status (Platform Admin only)
+  userType?: 'local' | 'oidc'; // filter by account type: oidc = User.oidcVerified, local = not (Platform Admin only)
 }
 
 /** Filters for Role list queries. */

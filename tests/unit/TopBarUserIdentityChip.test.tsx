@@ -20,6 +20,22 @@ const replaceSpy = vi.fn();
 const mockLocation = { href: '', replace: replaceSpy };
 Object.defineProperty(window, 'location', { value: mockLocation, writable: true });
 
+/** Stub /api/auth/me with a chosen credential-account flag (chip's dropdown state). */
+function stubMe(hasPassword: boolean) {
+  vi.stubGlobal(
+    'fetch',
+    vi.fn(async (url: string | URL | Request) => {
+      if (String(url).includes('/api/auth/me')) {
+        return new Response(JSON.stringify({ organizationName: '', hasPassword }), {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' },
+        });
+      }
+      return new Response('{}', { status: 404, headers: { 'Content-Type': 'application/json' } });
+    }),
+  );
+}
+
 function renderChip(name = 'Jane Doe', email = 'jane@example.com') {
   mockUseSession.mockReturnValue({
     data: { user: { name, email } },
@@ -29,11 +45,18 @@ function renderChip(name = 'Jane Doe', email = 'jane@example.com') {
   return { ...utils, trigger: screen.getByRole('button', { name: /account menu for jane doe/i }) };
 }
 
+function getChangePw() {
+  return screen.getByRole('menuitem', { name: /change password/i });
+}
+
 describe('TopBarUserIdentityChip', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     vi.unstubAllGlobals();
     mockSignOutUser.mockResolvedValue({ success: true });
+    // The chip fetches /api/auth/me for the Change Password state — default to a
+    // Google-only account so only explicit tests enable it.
+    stubMe(false);
   });
 
   it('renders the avatar, name and email', () => {
@@ -57,11 +80,49 @@ describe('TopBarUserIdentityChip', () => {
     expect(screen.getByRole('menu')).toBeInTheDocument();
     expect(trigger).toHaveAttribute('aria-expanded', 'true');
     expect(screen.getByRole('menuitem', { name: /user info/i })).toBeInTheDocument();
+    // Change Password sits between User Info and Log out for every account —
+    // greyed out (aria-disabled) until /api/auth/me proves a credential.
+    const changePw = screen.getByRole('menuitem', { name: /change password/i });
+    expect(changePw).toBeInTheDocument();
     expect(screen.getByRole('menuitem', { name: /log out/i })).toBeInTheDocument();
+    // Ordering: User Info → Change Password → Log out.
+    const items = screen.getAllByRole('menuitem');
+    expect(items.map((i) => i.textContent)).toEqual(['User Info', 'Change Password', 'Log out']);
+    expect(changePw).toHaveAttribute('aria-disabled', 'true');
 
     // Clicking the trigger again closes it.
     fireEvent.click(trigger);
     expect(screen.queryByRole('menu')).not.toBeInTheDocument();
+  });
+
+  it('keeps Change Password disabled for a Google-only account and opens nothing on click', async () => {
+    stubMe(false);
+    const { trigger } = renderChip();
+    // Wait for the /me fetch to land, then open the menu — the item only
+    // exists once the dropdown is rendered.
+    await vi.waitFor(() => {
+      fireEvent.click(trigger);
+      expect(getChangePw()).toHaveAttribute('aria-disabled', 'true');
+    });
+
+    fireEvent.click(getChangePw());
+
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+  });
+
+  it('enables Change Password for a local account and opens the modal', async () => {
+    stubMe(true);
+    const { trigger } = renderChip();
+    await vi.waitFor(() => {
+      fireEvent.click(trigger);
+      expect(getChangePw()).toHaveAttribute('aria-disabled', 'false');
+    });
+
+    fireEvent.click(getChangePw());
+
+    expect(screen.queryByRole('menu')).not.toBeInTheDocument();
+    const modal = await screen.findByText('Change Password');
+    expect(modal).toBeInTheDocument();
   });
 
   it('closes on Escape and on outside click', async () => {
@@ -80,7 +141,7 @@ describe('TopBarUserIdentityChip', () => {
   });
 
   it('User Info opens a modal with the user details', async () => {
-    vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ ok: true, json: () => Promise.resolve({ organizationName: 'Acme Drilling Ltd' }) }));
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ ok: true, json: () => Promise.resolve({ organizationName: 'Acme Drilling Ltd', userType: 'OIDC' }) }));
     const { trigger } = renderChip();
     fireEvent.click(trigger);
     fireEvent.click(screen.getByRole('menuitem', { name: /user info/i }));
@@ -93,6 +154,30 @@ describe('TopBarUserIdentityChip', () => {
 
     fireEvent.click(screen.getAllByRole('button', { name: /close modal/i })[0]);
     expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+  });
+
+  it('shows User Type OIDC between Email and Organization for a verified Google identity', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ ok: true, json: () => Promise.resolve({ organizationName: '', userType: 'OIDC' }) }));
+    const { trigger } = renderChip();
+    fireEvent.click(trigger);
+    fireEvent.click(screen.getByRole('menuitem', { name: /user info/i }));
+
+    const modal = await screen.findByRole('dialog');
+    expect(await screen.findByText('OIDC')).toBeInTheDocument();
+
+    // Row order inside the modal's <dl>: Email → User Type → Organization.
+    const rows = Array.from(modal.querySelectorAll('dt')).map((dt) => dt.textContent);
+    expect(rows).toEqual(['Name', 'Email', 'User Type', 'Organization']);
+  });
+
+  it('shows User Type Local for a local credential account', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ ok: true, json: () => Promise.resolve({ organizationName: '', userType: 'Local' }) }));
+    const { trigger } = renderChip();
+    fireEvent.click(trigger);
+    fireEvent.click(screen.getByRole('menuitem', { name: /user info/i }));
+
+    await screen.findByRole('dialog');
+    expect(await screen.findByText('Local')).toBeInTheDocument();
   });
 
   it('shows the organization from /api/auth/me in the modal when present', async () => {

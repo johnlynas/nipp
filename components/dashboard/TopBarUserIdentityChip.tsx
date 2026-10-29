@@ -4,17 +4,19 @@
  * Sits left of the notification bell on all admin pages: avatar with initials,
  * full name, and email underneath (hidden at narrow widths). Identity comes
  * straight from the BetterAuth session atom — no network round trip, so it is
- * available before /api/auth/me resolves. Left-click opens a dropdown with a
- * "User Info" modal action and logout; outside click / Escape close it. The
- * menu mirrors TopBarNotificationBell's anchor + panel idiom.
+ * available before /api/auth/me resolves. Left-click opens a dropdown with
+ * "User Info", "Change Password" (local users only) and logout; outside click
+ * / Escape close it. The menu mirrors TopBarNotificationBell's anchor + panel
+ * idiom.
  */
 
 'use client';
 
 import { useEffect, useRef, useState } from 'react';
-import { ChevronDown, LogOut, UserRound } from 'lucide-react';
+import { ChevronDown, ChevronUp, KeyRound, LogOut, UserRound } from 'lucide-react';
 import { signOutUser, useSession } from '@/lib/auth-client';
 import { TopBarUserInfoModal } from '@/components/dashboard/TopBarUserInfoModal';
+import { TopBarChangePasswordModal } from '@/components/dashboard/TopBarChangePasswordModal';
 
 function initialsOf(name: string | null | undefined, email: string | null | undefined): string {
   const source = (name && name.trim()) || (email || '').split('@')[0] || '?';
@@ -32,8 +34,30 @@ export function TopBarUserIdentityChip() {
 
   const [open, setOpen] = useState(false);
   const [infoOpen, setInfoOpen] = useState(false);
+  const [passwordOpen, setPasswordOpen] = useState(false);
+  // null = unknown (fetch pending/failed) — "Change Password" stays disabled
+  // until /api/auth/me proves this is a credential account. Safe default:
+  // never expose the action to a user it would refuse anyway.
+  const [hasPassword, setHasPassword] = useState<boolean | null>(null);
   const anchorRef = useRef<HTMLDivElement>(null);
   const menuRef = useRef<HTMLDivElement>(null);
+
+  // Best-effort credential check for the dropdown (same source of truth as
+  // /api/auth/password). One fetch per mount; failure leaves the item off.
+  useEffect(() => {
+    let cancelled = false;
+    fetch('/api/auth/me', { cache: 'no-store' })
+      .then((res) => (res.ok ? res.json() : null))
+      .then((data: { hasPassword?: boolean } | null) => {
+        if (!cancelled && typeof data?.hasPassword === 'boolean') setHasPassword(data.hasPassword);
+      })
+      .catch(() => {
+        // Leave unknown — item stays disabled.
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   // Name is display-first; email doubles as fallback and secondary line.
   const displayName = name || email || 'User';
@@ -96,12 +120,11 @@ export function TopBarUserIdentityChip() {
             <p className="max-w-[160px] truncate text-xs text-slate-500">{email}</p>
           ) : null}
         </div>
-        <ChevronDown
-          className={`hidden sm:block h-3.5 w-3.5 shrink-0 text-slate-400 transition-transform duration-200 ${
-            open ? 'rotate-180' : ''
-          }`}
-          aria-hidden="true"
-        />
+        {open ? (
+          <ChevronDown className={`hidden sm:block h-3.5 w-3.5 shrink-0 text-slate-400 transition-transform duration-200`} aria-hidden="true" />
+        ) : (
+          <ChevronUp className={`hidden sm:block h-3.5 w-3.5 shrink-0 text-slate-400 transition-transform duration-200`} aria-hidden="true" />
+        )}
       </button>
 
       {open && (
@@ -128,6 +151,25 @@ export function TopBarUserIdentityChip() {
             <button
               type="button"
               role="menuitem"
+              aria-disabled={!hasPassword}
+              title={hasPassword ? undefined : 'Not available for Google sign-in accounts'}
+              onClick={() => {
+                if (!hasPassword) return; // disabled row — no action for OIDC users
+                setOpen(false);
+                setPasswordOpen(true);
+              }}
+              className={`flex w-full items-center gap-3 px-4 py-2.5 text-left text-sm font-medium transition-colors ${
+                hasPassword
+                  ? 'text-slate-700 hover:bg-canvas-subtle cursor-pointer'
+                  : 'cursor-not-allowed text-slate-300'
+              }`}
+            >
+              <KeyRound className="h-4 w-4 shrink-0 text-slate-400" />
+              Change Password
+            </button>
+            <button
+              type="button"
+              role="menuitem"
               onClick={handleLogout}
               className="flex w-full items-center gap-3 px-4 py-2.5 text-left text-sm font-medium text-slate-700 hover:bg-danger-tint hover:text-danger-ink transition-colors cursor-pointer"
             >
@@ -143,8 +185,8 @@ export function TopBarUserIdentityChip() {
         onClose={() => setInfoOpen(false)}
         name={name}
         email={email}
-        avatarInitials={avatarInitials}
       />
+      <TopBarChangePasswordModal isOpen={passwordOpen} onClose={() => setPasswordOpen(false)} />
     </div>
   );
 }

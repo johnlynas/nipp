@@ -12788,7 +12788,7 @@
           "auth"
         ],
         "summary": "GET /api/auth/me",
-        "description": "Returns the current user's session info including active organization ID.\n\nPart of the BetterAuth integration (driven by session cookie).\n\nHandler: `app/api/auth/me/route.ts`.",
+        "description": "Returns the current user's session info: active organization ID + name and\nuserType ('OIDC' when User.oidcVerified is true, i.e. a verified Google\nidentity; 'Local' otherwise) for the account menu's User Info modal.\n\nPart of the BetterAuth integration (driven by session cookie).\n\nHandler: `app/api/auth/me/route.ts`.",
         "security": [],
         "parameters": [],
         "responses": {
@@ -12811,6 +12811,22 @@
                 }
               }
             }
+          }
+        }
+      }
+    },
+    "/api/auth/password": {
+      "post": {
+        "tags": [
+          "auth"
+        ],
+        "summary": "POST /api/auth/password",
+        "description": "Change the signed-in user's OWN email/password credential. The new password\nis hashed (better-auth scrypt) and written to both places the credential\nlives — User.passwordHash (catalog display/admin tooling) and the\nproviderId='credential' Account row that BetterAuth actually verifies at\nsign-in. Mirrors what UserService.create does in reverse.\nGoogle-OIDC-only accounts are rejected server-side too (403) so a hand-built\nrequest cannot bypass the chip's disabled menu item. Uses the same IP rate\nlimiter as the sign-in door — password changes are rare and legitimate, so\n5/min per IP leaves ample h\n\nPart of the BetterAuth integration (driven by session cookie).\n\nHandler: `app/api/auth/password/route.ts`.",
+        "security": [],
+        "parameters": [],
+        "responses": {
+          "default": {
+            "description": "Unspecified — response schema not yet documented (add a registry entry in lib/schemas/api/ to fill this in)."
           }
         }
       }
