@@ -147,6 +147,43 @@ export async function hasCredentialAccount(userId: string): Promise<boolean> {
   return providers.some((p) => p.providerId === 'credential');
 }
 
+// ─── Token pre-flight (verify + reset routes, design §7.2) ─────────────────────
+
+/**
+ * Read-only pre-flight for a reset token: returns the owning userId when a
+ * `reset-password:<token>` Verification row exists and is unexpired, else null.
+ *
+ * Deliberately does NOT delete — consumption stays single-sourced in
+ * BetterAuth's consumeVerificationValue during the reset handler (atomic
+ * claim; replay → INVALID_TOKEN 400). The verify route uses this to tell the
+ * client "form can render" without spending the token.
+ */
+export async function preFlightResetToken(
+  token: string,
+): Promise<{ userId: string; expiresAt: Date } | null> {
+  const row = await prisma.verification.findFirst({
+    where: { identifier: `reset-password:${token}` },
+  });
+  if (!row || row.expiresAt <= new Date()) return null;
+  // value is the userId (BetterAuth createVerificationValue shape).
+  const userId = typeof row.value === 'string' ? row.value : '';
+  if (!userId) return null;
+  return { userId, expiresAt: row.expiresAt };
+}
+
+/**
+ * Resolve a reset token owner's email for audit metadata / the ban re-check.
+ * Lives here (not in the routes) so the app tree keeps its no-`@/lib/db` rule:
+ * User is RLS-exempt global auth data, same class as Verification and Account
+ * reads above. Returns null once the row is gone (route answers invalid-link).
+ */
+export async function resetTokenOwnerEmail(userId: string): Promise<string | null> {
+  const user = await withPlatformContext(userId, () =>
+    prisma.user.findUnique({ where: { id: userId }, select: { email: true } }),
+  );
+  return user?.email ?? null;
+}
+
 // ─── Audit action constants (Phase 3 imports these — no inline strings in routes) ──
 
 export const AUDIT_ACTION = {

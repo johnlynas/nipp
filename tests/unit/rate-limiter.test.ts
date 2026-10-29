@@ -21,6 +21,10 @@ import {
   resetAuthRateLimitStore,
   AUTH_RATE_LIMIT_MAX,
   AUTH_RATE_LIMIT_WINDOW,
+  checkPasswordResetRateLimit,
+  resetPasswordResetRateLimitStore,
+  PASSWORD_RESET_RATE_LIMIT_MAX,
+  PASSWORD_RESET_RATE_LIMIT_WINDOW,
   checkAdminRateLimit,
   resetAdminRateLimitStore,
   ADMIN_RATE_LIMIT_MAX,
@@ -47,6 +51,7 @@ describe('rate-limiter.ts — Core Functions', () => {
     resetRateLimitStore();
     resetRevokeRateLimitStore();
     resetAuthRateLimitStore();
+    resetPasswordResetRateLimitStore();
     resetAdminRateLimitStore();
     resetCalendarRateLimitStore();
   });
@@ -56,6 +61,7 @@ describe('rate-limiter.ts — Core Functions', () => {
     resetRateLimitStore();
     resetRevokeRateLimitStore();
     resetAuthRateLimitStore();
+    resetPasswordResetRateLimitStore();
     resetAdminRateLimitStore();
     resetCalendarRateLimitStore();
   });
@@ -360,6 +366,62 @@ describe('rate-limiter.ts — Core Functions', () => {
 
       const blocked = results.filter((r) => r === false).length;
       expect(blocked).toBe(15); // 20 - 5 = 15
+    });
+  });
+
+  // -----------------------------------------------------------------------
+  // checkPasswordResetRateLimit — IP-based reset-flow tier (5/min)
+  // -----------------------------------------------------------------------
+
+  describe('checkPasswordResetRateLimit', () => {
+    it('should allow exactly PASSWORD_RESET_RATE_LIMIT_MAX requests per IP', () => {
+      for (let i = 0; i < PASSWORD_RESET_RATE_LIMIT_MAX; i++) {
+        expect(checkPasswordResetRateLimit('10.0.0.1')).toBe(true);
+      }
+    });
+
+    it('should block on the (PASSWORD_RESET_RATE_LIMIT_MAX + 1)th request', () => {
+      for (let i = 0; i < PASSWORD_RESET_RATE_LIMIT_MAX; i++) {
+        checkPasswordResetRateLimit('10.0.0.2');
+      }
+      expect(checkPasswordResetRateLimit('10.0.0.2')).toBe(false);
+    });
+
+    it('should handle different IPs independently', () => {
+      for (let i = 0; i < PASSWORD_RESET_RATE_LIMIT_MAX; i++) {
+        checkPasswordResetRateLimit('192.168.1.1');
+      }
+      expect(checkPasswordResetRateLimit('192.168.1.1')).toBe(false);
+      expect(checkPasswordResetRateLimit('192.168.1.2')).toBe(true);
+    });
+
+    it('should keep its own counter separate from the auth tier', () => {
+      // Exhaust the AUTH tier for one IP — the reset tier must be unaffected
+      // (the two guards intentionally do NOT share a store: /api/auth/password
+      // keeps the auth tier, the reset routes get this dedicated tier).
+      for (let i = 0; i < AUTH_RATE_LIMIT_MAX; i++) {
+        checkAuthRateLimit('10.1.2.3');
+      }
+      expect(checkAuthRateLimit('10.1.2.3')).toBe(false);
+      expect(checkPasswordResetRateLimit('10.1.2.3')).toBe(true);
+    });
+
+    it('should reset the store (test seam)', () => {
+      for (let i = 0; i < PASSWORD_RESET_RATE_LIMIT_MAX; i++) {
+        checkPasswordResetRateLimit('10.9.8.7');
+      }
+      expect(checkPasswordResetRateLimit('10.9.8.7')).toBe(false);
+      resetPasswordResetRateLimitStore();
+      expect(checkPasswordResetRateLimit('10.9.8.7')).toBe(true);
+    });
+
+    it('should default to 5 requests per 60s window', () => {
+      expect(PASSWORD_RESET_RATE_LIMIT_MAX).toBe(5);
+      expect(PASSWORD_RESET_RATE_LIMIT_WINDOW).toBe(60);
+    });
+
+    it('should return boolean type', () => {
+      expect(typeof checkPasswordResetRateLimit('10.0.0.99')).toBe('boolean');
     });
   });
 

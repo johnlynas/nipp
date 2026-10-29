@@ -16,21 +16,21 @@
 
 ```mermaid
 flowchart LR
-    P0[Phase 0<br/>Read-only recon & branch] --> P1[Phase 1<br/>Core lib + unit tests]
-    P1 --> P2[Phase 2<br/>BetterAuth wiring in lib/auth.ts]
-    P2 --> P3[Phase 3<br/>API endpoints + rate limit tier]
+    P0[✅ Phase 0<br/>Read-only recon & branch] --> P1[✅ Phase 1<br/>Core lib + unit tests]
+    P1 --> P2[✅ Phase 2<br/>BetterAuth wiring in lib/auth.ts]
+    P2 --> P3[✅ Phase 3<br/>API endpoints + rate limit tier]
     P3 --> P4[Phase 4<br/>UI pages + login link + top-bar entry]
     P4 --> P5[Phase 5<br/>ARCHITECTURE.md update]
     P5 --> P6[Phase 6<br/>SECURITY.md update]
     P6 --> FIN[Final validation gate<br/>test · lint · build]
 ```
 
-| Phase | Deliverable | TDD? |
-|---|---|---|
-| 0 | Verified assumptions (BetterAuth surface, redactor convention), clean branch `feat/forgot-password` from `user-forgot-password` | — |
-| 1 | `lib/forgot-password.ts` + `tests/unit/forgot-password.test.ts` | ✅ per function |
-| 2 | `lib/auth.ts`: `sendResetPassword`, TTL option, `onPasswordReset`; env var | ✅ config test |
-| 3 | 3 route files + new rate-limit tier in `lib/rate-limiter.ts` + integration tests | ✅ per endpoint |
+| Phase | Deliverable | TDD? | Status |
+|---|---|---|---|
+| 0 | Verified assumptions (BetterAuth surface, redactor convention), clean branch `feat/forgot-password` from `user-forgot-password` | — | ✅ Complete (2026-10-29) |
+| 1 | `lib/forgot-password.ts` + `tests/unit/forgot-password.test.ts` | ✅ per function | ✅ Complete (2026-10-29) |
+| 2 | `lib/auth.ts`: `sendResetPassword`, TTL option, `onPasswordReset`; env var | ✅ config test | ✅ Complete (2026-10-29) |
+| 3 | 3 route files + new rate-limit tier in `lib/rate-limiter.ts` + integration tests + OpenAPI docs (JSDoc headers, registry schemas, regenerated spec) | ✅ per endpoint | ✅ Complete (2026-10-29) |
 | 4 | 2 pages, login-link rewire, top-bar menu item; unit tests for page components | ✅ per component |
 | 5 | `ARCHITECTURE.md` §3 subsection + TOC + mermaid diagram | docs |
 | 6 | `SECURITY.md` §2 subsection + rate-limit table rows + Appendix A row + env table | docs |
@@ -47,7 +47,9 @@ Key existing anchors (verified on branch `user-forgot-password`):
 
 ---
 
-## Phase 0 — Read-only recon & branch setup
+## Phase 0 — Read-only recon & branch setup — ✅ COMPLETED (2026-10-29)
+
+**Status:** All three steps verified — branch `feat/forgot-password` created from `user-forgot-password`, Q5 masking convention resolved, baseline green (`npm run test`: 2330 passed / 110 files; `npx tsc --noEmit` clean). Details recorded under Task 0.1 below.
 
 ### Task 0.1: Verify assumptions, create branch
 
@@ -72,9 +74,17 @@ Expected: all unit tests pass; type-check clean. If red, STOP and fix before pro
 
 Commit: none (no changes in this phase except branch creation).
 
+### Task 0.1 outcome (complete — recorded during Phase 0 execution on 2026-10-29)
+
+- **Branch:** `feat/forgot-password` created off `user-forgot-password` ✅
+- **Q5 masking convention (design §13 Q5):** resolved — `lib/logger.ts` redacts PII at any depth via `redactLogObject` / pino `redact` paths (`*.email`, `*.password`, `*.token`, … → `'***REDACTED***'`); audit-log writes go through `recordAuditLog` → tenantDb with email handled by pino redaction. **Decision for Phase 1:** implement `maskEmail` in `lib/forgot-password.ts` as `firstchar + '***@' + domain` (e.g. `j***@example.com`) for audit metadata, complementing — not duplicating — the logger pipeline.
+- **Baseline green:** `npm run test` → **2330 passed / 110 files** ✅ (4 pre-existing unhandled-rejection teardown noise in `rate-limiter.test.ts` — not failures). `npx tsc --noEmit` → clean ✅.
+
 ---
 
-## Phase 1 — Core library: `lib/forgot-password.ts` (TDD)
+## Phase 1 — Core library: `lib/forgot-password.ts` (TDD) — ✅ COMPLETED (2026-10-29)
+
+**Status:** All four tasks landed under TDD (RED → GREEN each), hermetic unit suite, no DB/SMTP side effects. Details recorded as "Task 1.x outcome" below the task specs.
 
 Design doc §7/§9 define the contract; implement it as pure(ish) functions over injected seams so each unit test can stub DB/mail — mirroring `issueInviteLink`'s injectable `sendFn`.
 
@@ -130,6 +140,12 @@ export function maskEmail(email: string): string {
 **Step 4: Run test to verify pass** — same command, expected: 3 passed.
 
 **Step 5: Commit** `git add lib/forgot-password.ts tests/unit/forgot-password.test.ts && git commit -m "feat(auth): forgot-password lib scaffold (maskEmail + TTL)"`
+
+### Task 1.1 outcome (complete — recorded during Phase 1 execution on 2026-10-29)
+
+- **Commit:** `6221bba feat(auth): forgot-password lib scaffold (maskEmail + TTL)` ✅
+- Tests: `npx vitest run tests/unit/forgot-password.test.ts` → **5 passed**. Added one case beyond the plan's spec: `maskEmail('not-an-email')` → `'***'` (no-@ input).
+- Impl matches the plan's snippet verbatim (env-overridable TTL constant + split-at-@ masking).
 
 ### Task 1.2: `issueResetEmail(user, request?, sendFn?)` — request-side helper (TDD)
 
@@ -204,17 +220,42 @@ Use the local `escapeHtml` (same implementation as in both existing modules — 
 
 **Step 4: Run** → PASS. **Step 5: Commit** `feat(auth): forgot-password email issuance helper`.
 
+### Task 1.2 outcome (complete — recorded during Phase 1 execution on 2026-10-29)
+
+- **Commit:** `2fcd9be feat(auth): forgot-password email issuance helper` ✅
+- TDD: RED confirmed first (`issueResetEmail` / `resolveResetLinkOrigin` missing — 11 failing), then GREEN (17 in file).
+- DRY call from the plan's Step 3 executed as preferred: **exported** the private `resolveLinkBase` from `lib/oidc-magic-link.ts` (one-line visibility change, doc comment updated) and re-export it here as `resolveResetLinkOrigin` — no duplication of the loopback/LAN/front-end-URL logic.
+- `escapeHtml`: imported from `@/lib/notifications/email` (already exported there) — no third copy.
+- Subject pinned to the plan's copy: `'Property NI — Reset your password'`; headerTitle passed through `sendEmail`'s 4th arg per the invite precedent.
+- Tests cover: origin build + trailing-slash strip, lower-cased recipient, greeting fallback (empty name / BetterAuth's default `"User"` → local part), HTML-escaping of the greeting, loopback→LAN-IPv4 link resolution, expiry copy derived from TTL, `emailSent:false` on both failure shapes (result and throw — no propagation).
+
 ### Task 1.3: `hasCredentialAccount(userId)` guard (TDD)
 
 Mirrors `app/api/auth/password/route.ts:71-80` so the reset endpoint can reject OIDC-only accounts server-side (design T5). Test with a mocked `tenantDb.account.findMany`: expect `true` when `providerId='credential'` present, `false` otherwise; runs inside `withPlatformContext(userId, …)`. Commit after.
+
+### Task 1.3 outcome (complete — recorded during Phase 1 execution on 2026-10-29)
+
+- Implemented in the same file commit as 1.4: `848d8a3 feat(auth): forgot-password credential guard + audit action names` ✅
+- Deliberate deviation from the task's "mocked `tenantDb.account.findMany`" wording: uses **global `prisma` from `@/lib/db` + `withPlatformContext(userId, …)`** — exactly what the Final Validation Gate mandates for lib modules ("MUST use @/lib/db + withPlatformContext like sibling libs, never tenantDb directly"). Sibling precedent: `lib/oidc-magic-link.ts` is global-prisma throughout.
+- Tests (mocked prisma + passthrough platform-context stub, same convention as tenant-mgmt-* tests): credential row present → true (incl. dual-door user, and asserts the read is scoped to the exact userId); google-only → false; no rows → false.
 
 ### Task 1.4: Audit action constants + final unit pass
 
 Add exported constants for the three audit actions used in Phase 3 (`user.password-reset-requested`, `user.password-reset-link-opened`, `user.password-reset-success`) so routes never inline strings (DRY). Run full unit suite `npm run test` → all green. Commit `feat(auth): forgot-password credential guard + audit action names`.
 
+### Task 1.4 outcome (complete — recorded during Phase 1 execution on 2026-10-29)
+
+- **Commit:** `848d8a3 feat(auth): forgot-password credential guard + audit action names` ✅
+- Audit constants exported as an `AUDIT_ACTION` frozen object (+ `AuditActionName` union) — one DRY import point for Phase 3 routes; a unit test pins the three strings verbatim.
+- Full unit suite: `npm run test` → **2351 passed / 111 files** ✅ (baseline was 2330/110 at Phase 0; the delta is exactly the 21 tests in the new file + its one file). Only residual noise: the same pre-existing `rate-limiter.test.ts` teardown unhandled-rejection recorded in Task 0.1 (not a failure).
+- `npx tsc --noEmit` → clean ✅.
+- **Lint discovery + fix:** `npm run lint` initially flagged `lib/forgot-password.ts:22` — the new `@/lib/db` import trips the tenant-isolation carve-out that whitelists sibling auth libs by filename (`eslint.config.mjs`). Resolution: added `lib/forgot-password.ts` to the same ignore list as `lib/oidc-magic-link.ts` ("auth-domain … plumbing, not tenant-scoped data"), matching the Final Validation Gate's requirement ("MUST use @/lib/db + withPlatformContext like sibling libs"). Commit `chore(lint): carve lib/forgot-password.ts out of @/lib/db restriction`. Re-verified: ESLint 0 errors, guardrails OK.
+
 ---
 
-## Phase 2 — BetterAuth wiring in `lib/auth.ts` (TDD)
+## Phase 2 — BetterAuth wiring in `lib/auth.ts` (TDD) — ✅ COMPLETED (2026-10-29)
+
+**Status:** Both tasks complete under TDD. Details recorded as "Task 2.x outcome" below the task specs.
 
 ### Task 2.1: Failing config test for `sendResetPassword` + TTL
 
@@ -258,21 +299,47 @@ emailAndPassword: {
 
 **Step 4: Run** → PASS. **Step 5: Commit** `feat(auth): enable better-auth password reset email hook + TTL`.
 
+### Task 2.1 outcome (complete — recorded during Phase 2 execution on 2026-10-29)
+
+- **Commit:** `553855e feat(auth): enable better-auth password reset email hook + TTL` ✅
+- TDD: RED confirmed first (6 new assertions failing), then GREEN (`tests/unit/auth-config.test.ts` → 34 passed).
+- Assertions follow the existing captured-options style in the file (no `$context` introspection — the test's `betterAuth` factory mock captures options at load, same as every assertion there). Six tests cover: TTL > 300s **and** equal to the real `PASSWORD_RESET_TOKEN_TTL_SECS` constant (single-sourced; test imports it from the real module while only `issueResetEmail` is mocked via an `importOriginal` pass-through mock); `sendResetPassword` calls `issueResetEmail(user, token, {portalOrigin})` with **this request's origin winning** (stock `url` arg never used — pinning the anti-404 decision); fallback to `getLastRequestOrigin()` only when there is no request (lastRequest state driven through the real capture point — `databaseHooks.session.create.before` — no private-state manipulation); `null` when neither source exists; hook swallows a failure (token row must stay valid for retry); `onPasswordReset` observer wired.
+- **Intentional deviations from Step 3's snippet, recorded:**
+  - Origin precedence **inverted** to request-first (`request ?? lastRequest`). Rationale: reset requests arrive unauthenticated — the session-captured `lastRequest` is frequently stale (another user's sign-in origin) or null; BetterAuth invokes the hook with `ctx.request`, so trusting it is strictly safer. Documented in a code comment at `lib/auth.ts`.
+  - `onPasswordReset` is wired (plan deliverable) but only as an audit/observability observer — session revocation stays out of scope per design §13 Q3, noted in the code comment and test name.
+  - Plan's Step 3 listed "env var" in the Phase 2 deliverable — no new env wiring needed here: `PASSWORD_RESET_TOKEN_TTL_SECS` is read at constant-load time in `lib/forgot-password.ts` (Phase 1) and flows into `resetPasswordTokenExpiresIn`; the env table doc entry lands in Phase 6 as planned.
+
 ### Task 2.2: Verify no route conflict & type-check (no new code)
 
 Run: `npx tsc --noEmit` and check `node_modules/better-auth/dist/api/routes/password.mjs` endpoints are not shadowed by the app's `/api/auth/[...all]` handler — they pass straight through to `auth.handler(req)` (see catch-all route), so no conflict; document this one-liner in the Phase 6 SECURITY.md note. Expected: clean. No commit needed (fold into Task 2.1 if a fix was required).
 
+### Task 2.2 outcome (complete — recorded during Phase 2 execution on 2026-10-29)
+
+- `npx tsc --noEmit` → clean ✅, no fixes required (nothing folded into 2.1).
+- Route-conflict check confirmed by reading both sides: BetterAuth's stock endpoints (`POST /request-password-reset`, `GET /reset-password/:token` callback, `POST /reset-password`, `POST /verify-password`) are all served **via** the app's `app/api/auth/[...all]/route.ts` → `auth.handler(req)` pass-through (the catch-all only pre-filters POSTs with `checkAuthRateLimit` and intercepts organization creation), so no page/route in this repo shadows them. The Phase 3 routes `/api/auth/password-reset{,/verify,/reset}` are **different pathnames** (no conflict with each other either — exact match beats catch-all).
+- Gate verification for the phase as a whole: `npm run test` → **2357 passed / 111 files, exit 0**; `npm run lint` → 0 ESLint errors + guardrails OK. (One transient vitest worker-teardown unhandled-rejection in `rate-limiter.test.ts` appeared once and did not reproduce — same class of noise recorded in Task 0.1.)
+- One-liner reserved for the Phase 6 SECURITY.md note: "The three new routes are distinct pathnames; BetterAuth's stock password endpoints reach the handler only through the `[...all]` catch-all, which forwards untouched (its auth-tier rate limit still applies to those stock paths — see R2 for the double-count exception added in Phase 3)."
+
 ---
 
-## Phase 3 — API endpoints + rate-limit tier (TDD)
+## Phase 3 — API endpoints + rate-limit tier (TDD) — ✅ COMPLETED (2026-10-29)
 
-The three routes follow `app/api/auth/password/route.ts` conventions: `runtime='nodejs'`, force-dynamic, try/catch with DB-unavailable 503 distinction, pino logging with masked email, audit-log fire-and-forget.
+**Status:** All four tasks landed; gate green (`npm run test`: **2370 passed / 111 files**; `npm run test:integration`: **471 passed / 32 files, exit 0**; `npx tsc --noEmit` clean; `npm run lint` 0 ESLint errors + guardrails OK). OpenAPI docs added for all three routes (JSDoc headers + registry schemas; regenerated spec: 185 operations, 0 undocumented). Details recorded as "Task 3.x outcome" below the task specs.
+
+R1 decision resolved during implementation (see Task 3.2): the routes call `auth.api.requestPasswordReset` / `auth.api.resetPassword` **in-process** — no internal fetch fallback needed, so R2's double-counting never materialises and the `[...all]` catch-all stays untouched.
 
 ### Task 3.1: New named rate-limit tier in `lib/rate-limiter.ts` (TDD)
 
 Add `checkPasswordResetRateLimit(ip)` + `resetPasswordResetRateLimitStore()` following the existing per-category store pattern exactly (5/min default via new env names `RATE_LIMIT_PASSWORD_RESET_MAX` / `_WINDOW`, plus a CATEGORIES entry named `'password-reset'`). Unit test: allow first 5 calls, reject 6th within window; reset store restores.
 
 Run: `npx vitest run tests/unit/rate-limiter.test.ts -v` (extend existing file if present) → PASS after implementation. Commit.
+
+### Task 3.1 outcome (complete — recorded during Phase 3 execution on 2026-10-29)
+
+- Added to `lib/rate-limiter.ts`: `passwordResetRateLimitStore`, exports `PASSWORD_RESET_RATE_LIMIT_MAX` / `_WINDOW` (defaults **5 / 60s** via env `RATE_LIMIT_PASSWORD_RESET_MAX` / `_WINDOW`), `checkPasswordResetRateLimit(ip)` + `resetPasswordResetRateLimitStore()`, lazy cleanup timer, and the CATEGORIES entry `'password-reset'` (`rate-limit:password-reset`) — exact mirror of the auth-tier block. Env var names match the plan's spec exactly.
+- `lib/env-schema.ts`: both new vars as optional `\d+` strings (documented section). `.env.example`: both documented lines under RATE LIMITING.
+- TDD: RED confirmed (4 missing-export LSP errors + runtime import failure), then GREEN — 7 new cases in `tests/unit/rate-limiter.test.ts` (max-exactly, block-on-(max+1), per-IP independence, **counter kept separate from the auth tier**, reset-store seam, defaults pinned 5/60s, boolean type). File: **140 passed**.
+- No commit split per task — the whole phase lands as one commit (recorded under Task 3.4 outcome) to keep the branch diff atomic.
 
 ### Task 3.2: `POST /api/auth/password-reset` — request route (TDD, integration)
 
@@ -311,9 +378,25 @@ Important: before committing to `auth.api.*` call ergonomics, run a 5-minute rea
 
 **Step 4: Run** → PASS (5 cases). **Step 5: Commit** `feat(auth): POST /api/auth/password-reset endpoint`.
 
+### Task 3.2 outcome (complete — recorded during Phase 3 execution on 2026-10-29)
+
+- **Created `app/api/auth/password-reset/route.ts`** following `app/api/auth/password/route.ts` conventions (`runtime='nodejs'`, force-dynamic, pino logging, DB-unavailable → 503 distinction).
+- **R1 ergonomic decision (recorded in the file-top comment as planned):** verified against `node_modules/@better-auth/core/dist/api/index.d.mts` that `auth.api.requestPasswordReset({ body: { email }, headers })` is a server-callable endpoint accepting exactly a `body` + `headers` context — so the route calls it **in-process**. No internal fetch fallback was needed, which means R2's double-counting scenario never arises and the `[...all]` catch-all stays untouched (no exception line required there either).
+- **Order as specced (design T4/Q1):** tier rate-limit first (429 carries `Retry-After: 60`, touches nothing) → body parse → email shape validation → `enforceBanStatus` BEFORE BetterAuth (active ban → 401 surfacing BA's own `Access denied…` copy; expired ban lifted in the gate itself) → `auth.api.requestPasswordReset` → fire-and-forget audit (`AUDIT_ACTION.PASSWORD_RESET_REQUESTED`, masked email + IP only) → pass BA's idempotent `{status:true, message}` through verbatim (no-oracle copy preserved).
+- **Integration tests (mock-boundary convention of `user-invite-flow.test.ts`, not live Postgres — the stock BA handler is the seam since the route calls it in-process):** 7 cases — known active user → 200 pass-through + body/host-header passthrough assertions + audit with `l***@propni.example.com` masking; **unknown email → identical 200 shape** (no oracle, still hands to BA for its built-in timing equalisation); banned → 401 with exact banner copy and BA never reached; invalid/missing email → 400 before any guard; malformed JSON → 400; 429 → zero downstream work; DB outage → 503.
+- **Pitfall found:** `NextResponse.json(body, init)` **without** `init.status` defaults to **200** — an early-return rejection path silently shipped a 200 in the first run (caught by the integration test: expected 400, received 200 with the error body). All explicit-status returns now pass `status` deliberately.
+
 ### Task 3.3: `GET /api/auth/password-reset/verify` — read-only token pre-flight (TDD)
 
 Route semantics per design §7.2: rate limit first (token untouched on 429, same as magic-link verify); missing token → redirect `/auth/forgot-password?expired=1`; read row via `prisma.verification.findFirst({where:{identifier:`reset-password:${token}`}})` — do NOT delete; respond `{valid:true}` / `{valid:false, reason}`; audit `user.password-reset-link-opened` only when valid (we know userId then). Unit- or integration-test per repo convention for GET routes (mirror `tests/integration/auth.test.ts` handling of the magic-link verify route if one exists — check and match). Commit after.
+
+### Task 3.3 outcome (complete — recorded during Phase 3 execution on 2026-10-29)
+
+- **Created `app/api/auth/password-reset/verify/route.ts`:** tier rate-limit first (429 + `Retry-After: 60`, token untouched) → missing `?token=` → `{valid:false, reason:"missing"}`, no DB read → `preFlightResetToken` (NEW shared helper in `lib/forgot-password.ts`, deliberately READ-ONLY — see below) → valid path resolves the owner email for a fire-and-forget `user.password-reset-link-opened` audit (masked email only) and responds `{valid:true, expiresInSeconds}`; invalid/expired → `{valid:false, reason:"invalid-or-expired"}`. All responses `no-store`. DB outage → 503.
+- **Shared helper + unit tests:** `preFlightResetToken(token)` added to `lib/forgot-password.ts` (single source for the identifier shape `reset-password:<token>` + expiry check, used by BOTH verify and reset routes — DRY). 4 new cases in `tests/unit/forgot-password.test.ts`: resolves unexpired row; **null on missing WITHOUT deleting** (pins the read-only contract — consumption stays in BA's `consumeVerificationValue`); null when expired; identifier-shape assertion. File: **25 passed**.
+- **Deliberate deviation from the plan snippet, recorded:** spec said "missing token → redirect `/auth/forgot-password?expired=1`". The route returns JSON instead because it is an API endpoint called by the Phase 4 page (which owns the redirect decision in its own invalid-state branch — `*Email me a new link* → /auth/forgot-password`). A server-side redirect to a Phase-4 page that didn't exist yet would have been untestable coupling; both failure paths collapse to `{valid:false, reason}` and the spec's §7.2 contract (JSON `{valid:true}/{valid:false, reason}`) is preserved exactly.
+- **Integration tests:** 6 cases in `tests/integration/forgot-password.test.ts` — valid → 200 `{valid:true, expiresInSeconds∈(0,TTL]}` + link-opened audit with owner id/masked email; **read-only pinned explicitly** (no `deleteMany`, exact `{where:{identifier:"reset-password:<token>"}}` read shape); replayed (row consumed) → 200 `{valid:false, reason:"invalid-or-expired"}`, no audit; expired row → same invalid shape; missing token → `{reason:"missing"}` with zero DB reads; 429 → token untouched.
+- **Lint-guardrail adaptation:** the original design read `prisma.user.findUnique` (via `@/lib/db`) directly in the route for the audit email — but the app tree's `no-restricted-imports` rule forbids `@/lib/db` from app routes (tenant-isolation carve-out covers only lib files). Moved the owner-email lookup into `lib/forgot-password.ts` as `resetTokenOwnerEmail(userId)` (inside `withPlatformContext`, same RLS-exempt class as the Verification/Account reads) — route stays compliant, helper is unit-tested (2 cases).
 
 ### Task 3.4: `POST /api/auth/password-reset/reset` — complete reset (TDD)
 
@@ -321,7 +404,31 @@ Order (design §7.3): parse body → rate limit → resolve row (missing/expired
 
 Integration tests: full happy loop (reset works, `/api/auth/sign-in/email` succeeds with new password, old password 401s, Verification row gone), replay → 400, banned user → 401, OIDC-only forged → 403. Commit after.
 
-**Phase-3 gate:** `npm run test:integration && npm run test` green.
+### Task 3.4 outcome (complete — recorded during Phase 3 execution on 2026-10-29)
+
+- **Created `app/api/auth/password-reset/reset/route.ts`** with the exact design §7.3 order: tier rate-limit → body parse → shape validation (`newPassword`, `token` required; >72 chars pre-rejected with `/api/auth/password`'s verbatim scrypt-ceiling copy, before any DB read) → `preFlightResetToken` (missing/expired → **400** 'Invalid or expired reset link.') → owner-email lookup (`resetTokenOwnerEmail`; vanished row → same 400, no 500) → `hasCredentialAccount` (OIDC-only forged body → **403**) → `enforceBanStatus(email)` at mutation time (→ **401**) → `auth.api.resetPassword({body:{newPassword, token}, headers})` in-process (scrypt hash + credential Account write + atomic Verification delete + onPasswordReset observer all stay single-sourced in BetterAuth) → success audit `user.password-reset-success` (masked email + userId) → `{success:true, message:'Password updated'}` with the same no-store header as today's change-password route.
+- **BA error surfacing:** `APIError.statusCode` is mapped straight through and its own copy surfaced verbatim (e.g. `PASSWORD_TOO_SHORT` 400 "Password must be at least 8 characters."); DB-unavailable → 503; everything else → 500 generic.
+- **Integration tests (mock-boundary, 9 cases):** full happy path (BA called with exact `{newPassword, token}`, success audit + no-store); replayed/unknown → 400 + BA never reached + no success audit; expired → same 400 copy (no oracle between expired vs invalid); OIDC-only forged → 403 guard, BA never reached; banned-at-mutation → 401, BA never reached; >72 chars → 400 with exact scrypt copy before any DB read; missing token/newPassword → 400; **BA validation failure surfaced verbatim** (min-length); DB outage → 503; rate-limited → 429 nothing downstream.
+- **Honest scope note vs the plan bullet:** this suite drives the **real route handlers with mocked seams** at module boundaries — the repo's established integration convention (`user-invite-flow.test.ts` uses exactly this shape; there is no generic live-Postgres reset harness in the tree). Consequently the "sign-in succeeds with new password / old password 401s" tail of the specced full happy loop is not reproduced here end-to-end; it rests on BetterAuth's stock `resetPassword` + sign-in handlers, whose config wiring (TTL, `sendResetPassword`, credential Account hash) is pinned by `tests/unit/auth-config.test.ts` and exercised by the existing `auth.test.ts`/`password-change.test.ts`. A live Postgres full-loop spec is a natural add for the Final Validation Gate's manual smoke. All four specced failure branches (replay 400, banned 401, OIDC-only 403, invalid 400) ARE covered.
+- **Commit (single atomic commit for the whole phase):** see below in the gate section.
+
+### OpenAPI docs for the three new routes (added this session)
+
+- Each route's file-top `/** … */` JSDoc already uses a scanner-readable `METHOD /path -- description` first line, so all three surface as documented operations with correct summaries (`request a password reset email`, `read-only token pre-flight`, `complete the password reset`) — **no per-route JSDoc rewrite was needed** (verified in generated spec).
+- Added a "Password reset flow" block to `lib/schemas/api/registry.ts` with real schemas via zod (document-only, not runtime validation, matching the registry contract):
+  - `POST /api/auth/password-reset` — body `{email}`; 200 idempotent ack + 400/401/429/503.
+  - `GET /api/auth/password-reset/verify` — query param `token`; 200 a **discriminated union** (`valid:true expiresInSeconds` | `valid:false reason∈{missing,invalid-or-expired}`) + 429/503.
+  - `POST /api/auth/password-reset/reset` — body `{newPassword, token}`; 200 `{success,message}` + 400/401/403/429/503 (one-line rationale per status in the registry comment).
+- **Regenerated** with `npm run docs:generate`: `routes: 108 | operations: 185 | documented: 108 | undocumented: 0`, **167 schema-registered**. Integrity cross-check passed — three new components registered (`PasswordResetRequestBody`, `…Requested`, `…VerifyValid`, `…VerifyInvalid`, `…CompleteBody`, `…Complete`), no non-`/api/` paths leaked, all request-body/response schemas resolve to real `$ref`s.
+
+### Phase-3 gate outcome (complete — 2026-10-29)
+
+- `npm run test` → **2370 passed / 111 files** ✅
+- `npm run test:integration` → **471 passed / 32 files, exit 0** ✅ (no regressions in `auth.test.ts` / `password-change.test.ts`)
+- `npx tsc --noEmit` → clean ✅
+- `npm run lint` → **0 ESLint errors + lint-guardrails OK** ✅ (the two route files needed the owner-email read moved to `lib/forgot-password.ts` under the app-tree `@/lib/db` restriction — see Task 3.3)
+- `npm run docs:generate` → spec regenerated, 0 undocumented routes ✅
+
 
 ---
 

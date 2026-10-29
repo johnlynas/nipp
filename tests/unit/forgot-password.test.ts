@@ -21,8 +21,10 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 
 const { mockPrisma, mockSendEmail, mockLogger } = vi.hoisted(() => ({
   mockPrisma: {
-    verification: {},
+    // Index map — tests attach the specific model methods they exercise per-block.
+    verification: {} as Record<string, unknown>,
     account: { findMany: vi.fn() },
+    user: {} as Record<string, unknown>,
   },
   mockSendEmail: vi.fn(),
   mockLogger: { info: vi.fn(), warn: vi.fn(), error: vi.fn() },
@@ -246,10 +248,73 @@ describe('hasCredentialAccount', () => {
   });
 });
 
+describe('resetTokenOwnerEmail', () => {
+  beforeEach(() => vi.clearAllMocks());
+
+  it('returns the owner email from a prisma.user.findUnique scoped to the userId', async () => {
+    mockPrisma.user = { findUnique: vi.fn().mockResolvedValue({ email: 'owner@propni.example.com' }) } as never;
+    const res = await import('@/lib/forgot-password').then((m) => m.resetTokenOwnerEmail('u-9'));
+    expect(res).toBe('owner@propni.example.com');
+    expect(mockPrisma.user.findUnique).toHaveBeenCalledWith({ where: { id: 'u-9' }, select: { email: true } });
+  });
+
+  it('returns null when the owner row is gone (route answers invalid-link)', async () => {
+    mockPrisma.user = { findUnique: vi.fn().mockResolvedValue(null) } as never;
+    const res = await import('@/lib/forgot-password').then((m) => m.resetTokenOwnerEmail('ghost'));
+    expect(res).toBeNull();
+  });
+});
+
 describe('AUDIT_ACTION constants (DRY — Phase 3 routes import, never inline)', () => {
   it('exposes the three design §7 action names verbatim', () => {
     expect(AUDIT_ACTION.PASSWORD_RESET_REQUESTED).toBe('user.password-reset-requested');
     expect(AUDIT_ACTION.PASSWORD_RESET_LINK_OPENED).toBe('user.password-reset-link-opened');
     expect(AUDIT_ACTION.PASSWORD_RESET_SUCCESS).toBe('user.password-reset-success');
+  });
+});
+
+describe('preFlightResetToken (read-only token check for verify/reset routes)', () => {
+  beforeEach(() => vi.clearAllMocks());
+
+  it('resolves the row when a non-expired reset-password:<token> exists', async () => {
+    mockPrisma.verification.findFirst = vi.fn().mockResolvedValue({
+      identifier: 'reset-password:tok123',
+      value: 'u-reset-1',
+      expiresAt: new Date(Date.now() + 60_000),
+    });
+    const res = await import('@/lib/forgot-password').then((m) => m.preFlightResetToken('tok123'));
+    expect(res).toEqual({ userId: 'u-reset-1', expiresAt: expect.any(Date) });
+    expect(mockPrisma.verification.findFirst).toHaveBeenCalledWith({
+      where: { identifier: 'reset-password:tok123' },
+    });
+  });
+
+  it('returns null for a missing token, WITHOUT deleting anything', async () => {
+    mockPrisma.verification.findFirst = vi.fn().mockResolvedValue(null);
+    mockPrisma.verification.deleteMany = vi.fn();
+    const res = await import('@/lib/forgot-password').then((m) => m.preFlightResetToken('gone'));
+    expect(res).toBeNull();
+    // READ-ONLY contract: no delete may happen here — consumption belongs to
+    // BetterAuth's consumeVerificationValue at reset time.
+    expect(mockPrisma.verification.deleteMany).not.toHaveBeenCalled();
+  });
+
+  it('returns null (reason expired) for a past expiresAt', async () => {
+    mockPrisma.verification.findFirst = vi.fn().mockResolvedValue({
+      identifier: 'reset-password:tok123',
+      value: 'u-reset-1',
+      expiresAt: new Date(Date.now() - 1000),
+    });
+    const res = await import('@/lib/forgot-password').then((m) => m.preFlightResetToken('tok123'));
+    expect(res).toBeNull();
+  });
+
+  it('returns null for a token whose identifier shape is not reset-password (no delete)', async () => {
+    mockPrisma.verification.findFirst = vi.fn().mockResolvedValue(null); // nothing under this exact identifier
+    const res = await import('@/lib/forgot-password').then((m) => m.preFlightResetToken('some-oidc-invite-token'));
+    expect(res).toBeNull();
+    expect(mockPrisma.verification.findFirst).toHaveBeenCalledWith({
+      where: { identifier: 'reset-password:some-oidc-invite-token' },
+    });
   });
 });
