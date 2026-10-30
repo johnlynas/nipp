@@ -19,7 +19,7 @@ flowchart LR
     P0[✅ Phase 0<br/>Read-only recon & branch] --> P1[✅ Phase 1<br/>Core lib + unit tests]
     P1 --> P2[✅ Phase 2<br/>BetterAuth wiring in lib/auth.ts]
     P2 --> P3[✅ Phase 3<br/>API endpoints + rate limit tier]
-    P3 --> P4[Phase 4<br/>UI pages + login link + top-bar entry]
+    P3 --> P4[✅ Phase 4<br/>UI pages + login link + top-bar entry]
     P4 --> P5[Phase 5<br/>ARCHITECTURE.md update]
     P5 --> P6[Phase 6<br/>SECURITY.md update]
     P6 --> FIN[Final validation gate<br/>test · lint · build]
@@ -31,7 +31,7 @@ flowchart LR
 | 1 | `lib/forgot-password.ts` + `tests/unit/forgot-password.test.ts` | ✅ per function | ✅ Complete (2026-10-29) |
 | 2 | `lib/auth.ts`: `sendResetPassword`, TTL option, `onPasswordReset`; env var | ✅ config test | ✅ Complete (2026-10-29) |
 | 3 | 3 route files + new rate-limit tier in `lib/rate-limiter.ts` + integration tests + OpenAPI docs (JSDoc headers, registry schemas, regenerated spec) | ✅ per endpoint | ✅ Complete (2026-10-29) |
-| 4 | 2 pages, login-link rewire, top-bar menu item; unit tests for page components | ✅ per component |
+| 4 | 2 pages, login-link rewire, top-bar menu item; unit tests for page components | ✅ per component | ✅ Complete (2026-10-29) |
 | 5 | `ARCHITECTURE.md` §3 subsection + TOC + mermaid diagram | docs |
 | 6 | `SECURITY.md` §2 subsection + rate-limit table rows + Appendix A row + env table | docs |
 
@@ -432,13 +432,17 @@ Integration tests: full happy loop (reset works, `/api/auth/sign-in/email` succe
 
 ---
 
-## Phase 4 — UI (TDD where practical)
+## Phase 4 — UI (TDD where practical) — ✅ COMPLETED (2026-10-29)
 
 Pages live in the App Router as client components in the login visual family (right-panel 380px, split-screen branding on lg+; import a minimal slice of the brand block — see risk R4). Accessibility: `aria-live="assertive"` banners, Eye/EyeOff toggles with aria-label/aria-pressed, focus-ring classes copied from `app/login/page.tsx`.
 
 ### Task 4.1: Add pages to middleware public list (tiny, no test)
 
 Modify `middleware.ts:5-11` → prepend `/auth/forgot-password`, `/auth/reset-password` (a single `/auth` prefix entry would also cover them but is broader than needed — YAGNI vs. simplicity: use the two explicit entries with a comment "password reset flow — rate-limited in-route, never sets a session", matching the magic-link line's phrasing). Run `npx tsc --noEmit`. Commit.
+
+### Task 4.1 outcome (complete — recorded during Phase 4 execution on 2026-10-29)
+
+- Two explicit entries added after `/auth/magic-link/verify` with the specced comment; `tsc --noEmit` clean.
 
 ### Task 4.2: `/auth/forgot-password` page (TDD component test)
 
@@ -453,21 +457,62 @@ Modify `middleware.ts:5-11` → prepend `/auth/forgot-password`, `/auth/reset-pa
 
 **Step 2: Run** → FAIL. **Step 3: Implement** plain client component calling `fetch('/api/auth/password-reset', {method:'POST', body: JSON.stringify({email})})`; banner tones reuse login page class strings (`border-danger-border bg-danger-tint …` etc.). **Step 4: PASS. Step 5: Commit** `feat(ui): forgot-password request page`.
 
+### Task 4.2 outcome (complete — recorded during Phase 4 execution on 2026-10-29)
+
+- **Brand extraction (resolves R4 properly instead of duplication):** the login page's `SkylineField`/`BrandMark`/`Wordmark` were lifted verbatim into a new shared `components/auth/AuthBrand.tsx` (SSR-safe, deterministic SVG — no behavioural change to `/login`, which now imports from it). Both new pages import the same slice.
+- **Created `app/auth/forgot-password/page.tsx`** — login visual family exactly: split-screen brand panel (`lg:w-[46%]`, `rounded-r-[28px]`), 380px form column (`max-w-[380px]`, `login-rise`), identical input/CTA class strings (h-12, rounded-lg, accent bg + accent-ink text, amber focus ring), "User ID" label mirroring the login field.
+- **Copy discipline pinned by tests:** success card is role=status with "If this account exists…" — identical for known/unknown emails (no-oracle, matching Phase 3.2); banned → danger banner reusing the login ban layout; 401/429/server errors → warning tone like other non-ban rejections.
+- **Resend cooldown:** 60s disabled button with live `Resend in Ns` countdown (matches the 5/60s tier); a second successful send restarts it.
+- **Expired variant:** `?expired=1` renders a warning status on load and strips the param via `router.replace` (one-shot idiom) — matches the Phase 3.3 contract where the page owns this redirect decision.
+- **Test file `tests/unit/forgot-password-page.test.tsx`: 9 cases** — heading/form render; empty+invalid email blocked client-side (zero fetches); POST success card + Back-to-sign-in push + lower-cased body pin; cooldown disable→countdown→re-enable→second POST; expired variant + param strip; 401/429/network banners; banner cleared on a fresh success. All green.
+
 ### Task 4.3: `/auth/reset-password` page (TDD component test)
 
 On mount: read `?token=` + strip it after verify with `router.replace` (login-page one-shot param pattern, prevents token persisting in history/UI — T12). Call GET verify; render states: loading → invalid ('Link no longer valid' + *Email me a new link* → `/auth/forgot-password`) → form (new password + confirm, mismatch inline error like `TopBarChangePasswordModal`, length hints 8–72 chars). Submit POST reset; success state for ~900ms then `router.push('/login?password_reset=1')`.
 
 Component tests: token-less page renders invalid state after verify 4xx/{valid:false}; mismatch blocks submit; success navigates to `/login?password_reset=1`; error copy on 401/403 surfaces server message. Commit after.
 
+### Task 4.3 outcome (complete — recorded during Phase 4 execution on 2026-10-29)
+
+- **Created `app/auth/reset-password/page.tsx`** as a four-state machine (loading → invalid/form → success), same visual family: identical brand panels, header scale (`text-[28px] tracking-tight`), field/CTA class strings, Eye/EyeOff toggles with aria-label + aria-pressed copied from the login page.
+- **Token hygiene (T12):** token read exactly once at mount into a ref; verify fetch runs **once** per load (`[router]` dep — a param-strip re-render must not re-issue the pre-flight, which would double-fire `user.password-reset-link-opened`); `router.replace('/auth/reset-password')` strips it from history immediately. The token persists in state only for the POST body.
+- **Client guards mirror the server's order:** empty → >72 (exact scrypt copy) → <8 ("Password must be at least 8 characters." — same as BA min) → mismatch ("Passwords do not match." — TopBarChangePasswordModal's verbatim copy); each block sets nothing in flight. Typing either field clears the error (modal idiom).
+- Expiry hint derived from verify's `expiresInSeconds` (~minute phrasing), success card for 900ms then `router.push('/login?password_reset=1')`.
+- **Deliberate copy note:** the plan bullet said "error copy on 401/403 surfaces server message" — implemented as: ALL non-ok server messages surface verbatim in the danger alert (BA's own wording, e.g. ban / OIDC-only guard), matching Phase 3's surfacing contract; tests pin both 401 and 400 cases verbatim.
+- **Test file `tests/unit/reset-password-page.test.tsx`: 9 cases** — no token → invalid (verify called exactly once); expired/invalid → "Link no longer valid" + CTA push; verified → form + toggles + token-stripped replace pin; mismatch blocks POST; <8 blocks client-side; success → exact `{newPassword, token}` body + 900ms window + login push (real timers — fake timers starve React's act() flushing in this env); 400 replay verbatim; 401 ban verbatim; network failure recovery copy. All green.
+
 ### Task 4.4: Rewire login page "Forgot password?" link + success banner (TDD)
 
 Modify `app/login/page.tsx`: replace `onClick={() => setSsoNote(SSO_NOTES.reset)}` (line 542) with `router.push('/auth/forgot-password')`; extend the mount effect's one-shot param consumption to handle `password_reset=1` → success banner 'Password updated — sign in with your new password.' (auto-dismiss 10s, same as oidcBanner); delete `reset` key from `SSO_NOTES` **only if** Apple note no longer references it — keep the Apple entry (line 239) untouched. Extend `tests/unit/login-messages.test.ts` with: forgot-password link navigates; password_reset banner appears then auto-clears. Run → PASS. Commit `feat(ui): login page links to reset flow + success banner`.
+
+### Task 4.4 outcome (complete — recorded during Phase 4 execution on 2026-10-29)
+
+- **Link rewire:** "Forgot password?" is now an anchor (`<a href="#">`, preventDefault → `router.push('/auth/forgot-password')`) styled as an inline text link consistent with the login page's "Contact your portal administrator" affordance — distinct from a `<button>` so it visually reads as navigation. Removed the `reset` key from `SSO_NOTES`; the Apple entry (line 239) is untouched (not referenced elsewhere).
+- **Success banner:** added a `?password_reset=1` branch to the mount effect's one-shot param consumption — sets `{ tone:'success', text: PASSWORD_RESET_BANNER_TEXT }` into the existing `oidcBanner` state (which already auto-dismisses after 10s), and strips the param in the same `router.replace` call. The banner copy is single-sourced as `PASSWORD_RESET_BANNER_TEXT` exported from `lib/oidc-login-ui.ts`.
+- **Test file rename: `tests/unit/login-messages.test.ts` → `.tsx`** (the page-rendering additions require JSX). Renamed via `mv`; no other test references it. Two behaviour tests added: (1) "Forgot password?" → push to `/auth/forgot-password`, no fetch, admin note gone; (2) `?password_reset=1` banner appears then auto-dismisses after ~10s with the param stripped in a single replace call. Pure-helper suite (`classifyGateMessage`/`oidcParamBanner`/`resolveSameOriginTarget`) untouched and still green.
 
 ### Task 4.5: Top-bar menu "Reset password" entry (small, no unit test required — verify by build/lint)
 
 Locate the account-menu dropdown built in Phase #43 (search for the component containing `TopBarChangePasswordModal` usage — likely `components/dashboard/TopBar*`). Add a "Reset password" item shown **for local users** (presence of credential door is known to clients via the same gate the chip uses for enabling Change Password — reuse that exact condition), linking `/auth/forgot-password`. Commit after.
 
+### Task 4.5 outcome (complete — recorded during Phase 4 execution on 2026-10-29)
+
+- **Component found:** `components/dashboard/TopBarUserIdentityChip.tsx` — the account-menu dropdown built in Phase #43 that references `TopBarChangePasswordModal`.
+- **"Reset password" menu item added** between "Change Password" and "Log out". Gated by the exact same `hasPassword` state (fetched from `/api/auth/me`) that enables Change Password: for OIDC-only accounts it renders as `aria-disabled="true"` with `cursor-not-allowed` + a `title="Not available for Google sign-in accounts"` tooltip, matching the neighbouring row. For local users clicking it closes the menu and `router.push('/auth/forgot-password')`. Icon: `KeyRound` (reused, consistent with Change Password).
+- Test coverage: `tests/unit/TopBarUserIdentityChip.test.tsx` extended to pin the new item's aria-disabled gating + navigation (two new cases) and a router-mock added for the chip. Verified by build/lint per plan; no separate unit-test file required.
+
 **Phase-4 gate:** `npm run test && npx tsc --noEmit` green. Manual smoke (optional, if dev server available): full click-through with maildev/SMTP sink.
+
+### Phase-4 gate outcome (complete — 2026-10-29)
+
+- `npm run test` → **2392 passed / 113 files** ✅ (baseline at Phase 0: 2330/110; delta = new page component suites + extended chip/login-message tests).
+- `npx tsc --noEmit` → clean ✅.
+- `npm run lint` → **0 ESLint errors + 0 warnings** (one transient `react-hooks/exhaustive-deps` unused-directive warning was fixed before the gate) + guardrails OK ✅.
+- `npm run build` → **exit 0**; both new pages present in the route table as static (`○ 3.14 kB / 109 kB` and `○ 3.58 kB / 110 kB`) — confirming they prerender without a session (as `middleware.ts` expects) ✅.
+- Impeccable mechanical detector: `/Users/johnlynas/.hermes/skills/impeccable/scripts/impeccable detect --json app/auth/forgot-password/page.tsx app/auth/reset-password/page.tsx app/login/page.tsx components/dashboard/TopBarUserIdentityChip.tsx` → `[]` (empty finding set) ✅.
+- Visual-family confirmation: rendered both pages at 1628×745 in a real browser; sampled computed styles — CTA button `rgb(245, 166, 35)` bg / `rgb(30, 41, 59)` ink / 8px radius / 48px height (identical to login's accent CTA), input border `rgb(203, 213, 225)` slate-300 / 48px height, aside brand panel `rgb(18, 28, 48)` navy. Tokens all match `/login` (design-taste locked by the shared `AuthBrand.tsx` extraction — risk R4 resolved).
+- Manual smoke (limited): dev server launched, both routes return 200; a live POST to `/api/auth/password-reset` from the page's own origin returned `200 { status: true, message: "If this email exists…" }`. A full SMTP-sink click-through of the email→link→reset loop is left for the Final Validation Gate (needs maildev + a real reset link in the inbox), which is explicitly deferred by the plan to that gate.
+**Commit:** `feat(ui): forgot-password + reset-password pages, login link rewire, top-bar menu entry` — single atomic commit for the whole phase (recorded under this section).
 
 ---
 

@@ -53,6 +53,12 @@ export const OIDC_LINK_FAILED_TEXT =
   'That invite link has expired or is invalid — ask your administrator to send a new one.';
 
 /**
+ * Copy for the one-shot /login?password_reset=1 banner (Phase 4.3 reset flow:
+ * a local user just completed a self-serve password reset and lands back here).
+ */
+export const PASSWORD_RESET_BANNER_TEXT = 'Password updated — sign in with your new password.';
+
+/**
  * Map the one-shot `?oidc=` query param (set by the magic-link verify route)
  * to a banner. Exactly two tones: success for `link-verified`, info for every
  * other value (`link-expired` and any unknown value). Null when the param is

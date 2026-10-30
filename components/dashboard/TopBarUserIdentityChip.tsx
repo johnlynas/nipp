@@ -13,7 +13,8 @@
 'use client';
 
 import { useEffect, useRef, useState } from 'react';
-import { ChevronDown, ChevronUp, KeyRound, LogOut, UserRound } from 'lucide-react';
+import { useRouter } from 'next/navigation';
+import { ChevronDown, ChevronUp, KeyRound, KeySquare, LogOut, UserRound } from 'lucide-react';
 import { signOutUser, useSession } from '@/lib/auth-client';
 import { TopBarUserInfoModal } from '@/components/dashboard/TopBarUserInfoModal';
 import { TopBarChangePasswordModal } from '@/components/dashboard/TopBarChangePasswordModal';
@@ -26,6 +27,7 @@ function initialsOf(name: string | null | undefined, email: string | null | unde
 }
 
 export function TopBarUserIdentityChip() {
+  const router = useRouter();
   const { data: session } = useSession();
   // Session atom returns an untyped payload upstream; mirror the cast used in usePermission.ts.
   const user = (session as { user?: { name?: string | null; email?: string | null } } | null)?.user;
@@ -166,6 +168,28 @@ export function TopBarUserIdentityChip() {
             >
               <KeyRound className="h-4 w-4 shrink-0 text-slate-400" />
               Change Password
+            </button>
+            {/* Reset password — same local-user gate as Change Password (the chip's
+               hasPassword state); deep links into the public request page, which
+               is rate-limited in-route and session-less. */}
+            <button
+              type="button"
+              role="menuitem"
+              aria-disabled={!hasPassword}
+              title={hasPassword ? undefined : 'Not available for Google sign-in accounts'}
+              onClick={() => {
+                if (!hasPassword) return; // disabled row — no action for OIDC users
+                setOpen(false);
+                router.push('/auth/forgot-password');
+              }}
+              className={`flex w-full items-center gap-3 px-4 py-2.5 text-left text-sm font-medium transition-colors ${
+                hasPassword
+                  ? 'text-slate-700 hover:bg-canvas-subtle cursor-pointer'
+                  : 'cursor-not-allowed text-slate-300'
+              }`}
+            >
+              <KeySquare className="h-4 w-4 shrink-0 text-slate-400" />
+              Reset Password
             </button>
             <button
               type="button"
