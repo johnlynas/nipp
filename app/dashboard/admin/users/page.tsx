@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useEffect, useCallback, useRef } from 'react';
-import { Eye, Pencil, ShieldBan, ShieldCheck, Ban, Trash2, Mail } from 'lucide-react';
+import { Eye, Pencil, ShieldBan, ShieldCheck, Ban, Trash2, Mail, KeyRound } from 'lucide-react';
 import { logClientError } from '@/lib/client-error-logger';
 import { SearchBar } from '@/components/dashboard/SearchBar';
 import { StatusBadge } from '@/components/dashboard/StatusBadge';
@@ -22,6 +22,8 @@ interface User {
   oidcVerified?: boolean;
   /** Derived on the server (passwordHash is never shipped to the client). */
   passwordHashPresent?: boolean;
+  /** Derived on the server — a live (unexpired) reset token for this user exists. */
+  passwordResetPending?: boolean;
   banned?: boolean | null;
   createdAt: string;
   _count?: { members: number };
@@ -223,6 +225,23 @@ export default function UsersPage() {
   // Is a user waiting for their magic link to activate Google sign-in?
   const isInvitePending = (u: User) => !u.passwordHashPresent && u.oidcVerified === false;
 
+  // Auto-refresh while any row on this page awaits an emailed link — either its
+  // activation magic link (verification happens in the invited user's own browser,
+  // /auth/magic-link/verify sets oidcVerified server-side) or a password-reset
+  // token (the Verification row is deleted by BetterAuth when the user completes
+  // it). Nothing pushes to this table, so poll every 15s until nothing is
+  // pending, then stop (each tick goes through fetchData, which reuses the abort
+  // controller and the normal list response).
+  const hasPendingInvite = users.some(isInvitePending);
+  const hasPendingPasswordReset = users.some((u) => u.passwordResetPending);
+  useEffect(() => {
+    if (!hasPendingInvite && !hasPendingPasswordReset) return;
+    const timer = setTimeout(() => {
+      void fetchData();
+    }, 15000);
+    return () => clearTimeout(timer);
+  }, [hasPendingInvite, hasPendingPasswordReset, fetchData, users]);
+
   // Handle ban/unban
   const handleBanToggle = async () => {
     if (!selectedUser) return;
@@ -363,6 +382,38 @@ export default function UsersPage() {
     }
   };
 
+  // Handle admin-initiated password reset — emails the user a self-service
+  // link (single-use, expiring). The admin never sets the password; the user
+  // chooses it through the same flow as "Forgot password?".
+  const handleResetPassword = async () => {
+    if (!selectedUser) return;
+
+    try {
+      const res = await apiFetch(`/api/dashboard/admin/users/${selectedUser.id}/reset-password`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({}),
+      });
+
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}));
+        throw new Error(data.error || 'Failed to send password reset');
+      }
+
+      setNotice(
+        `A password reset link has been sent to ${selectedUser.email} — they'll choose their new password from that email.`,
+      );
+      // Refresh the row so the "PW reset" pill shows immediately (and kicks off
+      // the auto-refresh polling that clears it once the token is consumed).
+      fetchData();
+    } catch (err) {
+      const message = err instanceof Error ? err.message : 'Failed to send password reset';
+      console.error('Failed to send password reset:', err);
+      logClientError(message, 'users', 'reset-password');
+      setError(message);
+    }
+  };
+
   // Handle edit user
   const handleEditUser = async () => {
     if (!selectedUser) return;
@@ -428,6 +479,17 @@ export default function UsersPage() {
             Invite pending
           </span>
         )}
+        {u.passwordResetPending && (
+          // A reset link was emailed and is still live — clears itself once the
+          // user completes the reset (the token row is deleted on consume).
+          <span
+            className="rounded-full px-2 py-0.5 text-[11px] font-medium"
+            style={{ backgroundColor: 'var(--color-warning-tint)', color: 'var(--color-warning-ink)' }}
+            title="Password reset link sent — waiting for the user to use it"
+          >
+            PW reset
+          </span>
+        )}
       </div>
     )},
     { key: 'actions', label: 'Actions', render: (u: User) => (
@@ -467,7 +529,7 @@ export default function UsersPage() {
             <ShieldBan className="h-4 w-4" />
           </button>
         )}
-        {isInvitePending(u) && (
+        {!u.passwordHashPresent && (
           <button
             onClick={() => { setSelectedUser(u); handleResendInvite(); }}
             title={`Resend activation link to ${u.name || u.email}`}
@@ -475,6 +537,16 @@ export default function UsersPage() {
             aria-label={`Resend activation link to ${u.name || u.email}`}
           >
             <Mail className="h-4 w-4" />
+          </button>
+        )}
+        {u.passwordHashPresent && (
+          <button
+            onClick={() => { setSelectedUser(u); handleResetPassword(); }}
+            title={`Email ${u.name || u.email} a password reset link`}
+            className="rounded p-1.5 text-slate-400 hover:bg-slate-100 hover:text-navy-850 transition-colors"
+            aria-label={`Send password reset link to ${u.name || u.email}`}
+          >
+            <KeyRound className="h-4 w-4" />
           </button>
         )}
         <button

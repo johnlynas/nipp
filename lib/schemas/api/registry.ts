@@ -72,6 +72,61 @@ export const registry: Record<string, ApiEntry> = {
   },
 
   // ---------------------------------------------------------------------------
+  // Password reset flow — public, session-less; IP-tier limited (password-reset).
+  // ---------------------------------------------------------------------------
+  'POST /api/auth/password-reset': {
+    requestBody: z.object({ email: z.string().email() }).meta({ id: 'PasswordResetRequestBody' }),
+    responses: {
+      // Identical idempotent acknowledgement for known and unknown emails — no oracle.
+      '200': z
+        .object({ status: z.literal(true), message: z.string().describe('Idempotent copy — identical for unknown emails') })
+        .meta({ id: 'PasswordResetRequested' }),
+      '400': E,
+      // Banned local user (enforceBanStatus upstream of BetterAuth).
+      '401': E,
+      '429': E,
+      '503': E,
+    },
+  },
+  'GET /api/auth/password-reset/verify': {
+    parameters: { token: z.string().describe('Reset token from the emailed link (?token=…; missing → valid:false)') },
+    responses: {
+      '200': z.discriminatedUnion('valid', [
+        z
+          .object({
+            valid: z.literal(true),
+            expiresInSeconds: z.number().describe('Seconds until the token itself expires (server is authoritative)'),
+          })
+          .meta({ id: 'PasswordResetVerifyValid' }),
+        z
+          .object({
+            valid: z.literal(false),
+            reason: z.enum(['missing', 'invalid-or-expired']),
+          })
+          .meta({ id: 'PasswordResetVerifyInvalid' }),
+      ]),
+      '429': E,
+      '503': E,
+    },
+  },
+  'POST /api/auth/password-reset/reset': {
+    requestBody: z
+      .object({ newPassword: z.string(), token: z.string().describe('Reset token (single-use; replay → 400)') })
+      .meta({ id: 'PasswordResetCompleteBody' }),
+    responses: {
+      '200': z.object({ success: z.literal(true), message: z.literal('Password updated') }).meta({ id: 'PasswordResetComplete' }),
+      // INVALID_TOKEN / PASSWORD_TOO_SHORT / missing fields / owner vanished — all one 400 shape.
+      '400': E,
+      // Ban re-checked at mutation time.
+      '401': E,
+      // Forged body: token owner has no credential (email/password) account.
+      '403': E,
+      '429': E,
+      '503': E,
+    },
+  },
+
+  // ---------------------------------------------------------------------------
   // Notifications (admin) + SSE stream
   // ---------------------------------------------------------------------------
   'GET /api/admin/notifications': {

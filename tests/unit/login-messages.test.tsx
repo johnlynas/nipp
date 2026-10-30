@@ -1,10 +1,90 @@
 /**
- * Unit tests: /login banner classification for the Google-OIDC
- * pre-registration flow (Phase 3, Task 7). Pins that the ban-banner detector
- * does NOT swallow the two new provisioning-gate messages, and that the
- * callbackUrl guard only accepts same-origin relative paths.
+ * @vitest-environment jsdom
  */
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { render, screen, fireEvent, waitFor } from '@testing-library/react';
+
+// ── /login page behaviour (Phase 4.4: forgot-password link + reset banner) ──
+// The page component is rendered here with its network-facing modules stubbed;
+// the pure-helper tests below don't need them.
+import LoginPage from '@/app/login/page';
+import { PASSWORD_RESET_BANNER_TEXT } from '@/lib/oidc-login-ui';
+
+const loginNav = vi.hoisted(() => ({
+  search: '',
+  push: vi.fn(),
+  replace: vi.fn(),
+}));
+const LOGIN_ROUTER = { push: loginNav.push, replace: loginNav.replace };
+
+// Cache the URLSearchParams per search-string — a fresh object on every hook
+// call lands in an effect deps array and re-runs the mount effect forever.
+let cachedSearch: string | null = null;
+let cachedParams: URLSearchParams | null = null;
+function makeSearchParams(): URLSearchParams {
+  if (cachedParams === null || cachedSearch !== loginNav.search) {
+    cachedSearch = loginNav.search;
+    cachedParams = new URLSearchParams(cachedSearch);
+  }
+  return cachedParams;
+}
+
+vi.mock('next/navigation', () => ({
+  useRouter: () => LOGIN_ROUTER,
+  useSearchParams: makeSearchParams,
+}));
+vi.mock('@/lib/auth-client', () => ({
+  authClient: { signIn: { social: vi.fn() } },
+  signInEmail: vi.fn(async () => { throw new Error('not used in these tests'); }),
+}));
+
+describe('/login page (Phase 4.4)', () => {
+  beforeEach(() => {
+    vi.unstubAllGlobals();
+    vi.clearAllMocks();
+    loginNav.search = '';
+  });
+
+  it('“Forgot password?” navigates to the reset request page (no admin note, no fetch)', async () => {
+    const fetchMock = vi.fn(async () => new Response('{}', { status: 404 }));
+    vi.stubGlobal('fetch', fetchMock);
+    render(<LoginPage />);
+
+    fireEvent.click(screen.getByText('Forgot password?'));
+    expect(loginNav.push).toHaveBeenCalledWith('/auth/forgot-password');
+    // The old dead-end admin note is gone — nothing was sent, nothing announced.
+    expect(fetchMock).not.toHaveBeenCalled();
+    expect(screen.queryByText(/handled by your portal administrator/i)).not.toBeInTheDocument();
+  });
+
+  it('?password_reset=1 shows the success banner (auto-dismisses after 10s)', async () => {
+    // Real timers: the mount effect clears the param and sets a 10s dismissal.
+    loginNav.search = 'password_reset=1';
+    render(<LoginPage />);
+
+    expect(
+      await screen.findByText(PASSWORD_RESET_BANNER_TEXT),
+    ).toBeInTheDocument();
+
+    // Param stripped by the one-shot consumption (no re-announce on refresh).
+    const replaces = loginNav.replace.mock.calls.map((c: string[]) => String(c[0]));
+    expect(replaces.every((u) => !u.includes('password_reset='))).toBe(true);
+  });
+
+  it('the password-reset banner auto-dismisses after ~10s (real clock)', async () => {
+    loginNav.search = 'password_reset=1';
+    render(<LoginPage />);
+    await screen.findByText(PASSWORD_RESET_BANNER_TEXT);
+
+    // One honest wall-clock wait — the page's documented 10s auto-dismiss.
+    // Needs a per-test timeout: this is one of the suite's slow-pokes (10s).
+    await waitFor(() => expect(screen.queryByText(PASSWORD_RESET_BANNER_TEXT)).not.toBeInTheDocument(), {
+      timeout: 13_000,
+    });
+  }, 20_000);
+});
+
+// The original file header (pure-helper suite) follows below.
 import {
   classifyGateMessage,
   NOT_INVITED_MSG,

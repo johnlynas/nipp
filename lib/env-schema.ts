@@ -106,6 +106,16 @@ export const envSchema = z.object({
   RATE_LIMIT_AUTH_WINDOW: z.string().regex(/^\d+$/).optional(),
 
   // ---------------------------------------------------------------------------
+  // Password reset flow rate limiting (by IP address) — /api/auth/password-reset*
+  // ---------------------------------------------------------------------------
+
+  /** Password reset request/verify/reset: max requests per window (default 5). */
+  RATE_LIMIT_PASSWORD_RESET_MAX: z.string().regex(/^\d+$/).optional(),
+
+  /** Password reset request/verify/reset: window duration in seconds (default 60). */
+  RATE_LIMIT_PASSWORD_RESET_WINDOW: z.string().regex(/^\d+$/).optional(),
+
+  // ---------------------------------------------------------------------------
   // Admin write rate limiting (by session ID)
   // ---------------------------------------------------------------------------
 

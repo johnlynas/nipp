@@ -18,6 +18,8 @@
  *   RATE_LIMIT_CALENDAR_WINDOW          — window in seconds for calendar CRUD (default 60)
  *   RATE_LIMIT_API_DOCS_MAX             — max requests per window for /api-docs (default 10)
  *   RATE_LIMIT_API_DOCS_WINDOW          — window in seconds for /api-docs (default 60)
+ *   RATE_LIMIT_PASSWORD_RESET_MAX       — max requests per window for password reset flow (default 5)
+ *   RATE_LIMIT_PASSWORD_RESET_WINDOW    — window in seconds for password reset flow (default 60)
  */
 
 import { env } from '@/lib/env';
@@ -68,6 +70,9 @@ const REVOKE_WINDOW = Number(env.RATE_LIMIT_PAYLOAD_KEY_REVOKE_WINDOW ?? 60);
 
 const AUTH_MAX = Number(env.RATE_LIMIT_AUTH_MAX ?? 5);
 const AUTH_WINDOW = Number(env.RATE_LIMIT_AUTH_WINDOW ?? 60);
+
+const PASSWORD_RESET_MAX = Number(env.RATE_LIMIT_PASSWORD_RESET_MAX ?? 5);
+const PASSWORD_RESET_WINDOW = Number(env.RATE_LIMIT_PASSWORD_RESET_WINDOW ?? 60);
 
 const ADMIN_MAX = Number(env.RATE_LIMIT_ADMIN_MAX ?? 30);
 const ADMIN_WINDOW = Number(env.RATE_LIMIT_ADMIN_WINDOW ?? 60);
@@ -265,6 +270,73 @@ function startAuthRateLimitCleanup(): void {
 }
 
 startAuthRateLimitCleanup();
+
+// ---------------------------------------------------------------------------
+// Password-reset flow rate limiter (by IP, stricter: 5 per minute)
+// Applied by the three public reset routes (/api/auth/password-reset{,/verify,/reset}).
+// Kept separate from the auth tier so the sign-in door and the inbox-proven
+// flow are throttled independently and the documented limits stay truthful.
+// ---------------------------------------------------------------------------
+
+/** Password-reset store — keyed by client IP address. */
+export const passwordResetRateLimitStore = new Map<string, RateLimitEntry>();
+
+/** Password-reset window in seconds (read from env or default 60). */
+export const PASSWORD_RESET_RATE_LIMIT_WINDOW = PASSWORD_RESET_WINDOW;
+
+/** Password-reset max requests per window (read from env or default 5). */
+export const PASSWORD_RESET_RATE_LIMIT_MAX = PASSWORD_RESET_MAX;
+
+/**
+ * Check password-reset rate limit by IP address — returns true if allowed, false if throttled.
+ * A 429 must leave any token untouched (magic-link precedent): clients retry after the window.
+ */
+export function checkPasswordResetRateLimit(ipAddress: string): boolean {
+  const now = Math.floor(Date.now() / 1000);
+
+  let entry = passwordResetRateLimitStore.get(ipAddress);
+  if (!entry || now - entry.windowStart > PASSWORD_RESET_RATE_LIMIT_WINDOW) {
+    // New window
+    entry = { count: 1, windowStart: now };
+    passwordResetRateLimitStore.set(ipAddress, entry);
+    return true;
+  }
+
+  if (entry.count >= PASSWORD_RESET_RATE_LIMIT_MAX) {
+    reportThrottle('password-reset', ipAddress, entry.count);
+    return false; // Rate limited
+  }
+
+  entry.count++;
+  return true;
+}
+
+/** Reset the password-reset rate limit store — used by tests. */
+export function resetPasswordResetRateLimitStore(): void {
+  passwordResetRateLimitStore.clear();
+}
+
+// Password-reset cleanup (lazy)
+let passwordResetCleanupTimer: ReturnType<typeof setInterval> | null = null;
+
+function startPasswordResetRateLimitCleanup(): void {
+  if (passwordResetCleanupTimer) return;
+
+  passwordResetCleanupTimer = setInterval(() => {
+    const now = Math.floor(Date.now() / 1000);
+    for (const [ip, entry] of passwordResetRateLimitStore.entries()) {
+      if (now - entry.windowStart > PASSWORD_RESET_RATE_LIMIT_WINDOW * 2) {
+        passwordResetRateLimitStore.delete(ip);
+      }
+    }
+  }, 5 * 60 * 1000);
+
+  if (typeof passwordResetCleanupTimer.unref === 'function') {
+    passwordResetCleanupTimer.unref();
+  }
+}
+
+startPasswordResetRateLimitCleanup();
 
 // ---------------------------------------------------------------------------
 // Admin write rate limiter (by session: 30 per minute)
@@ -487,6 +559,7 @@ const CATEGORIES: Record<string, ThrottleCategory> = {
   'payload-key': { name: 'Payload key issuance', sourceTag: 'rate-limit:payload-key', max: RATE_LIMIT_MAX, window: RATE_LIMIT_WINDOW },
   'revoke': { name: 'Payload key revocation', sourceTag: 'rate-limit:revoke', max: REVOKE_RATE_LIMIT_MAX, window: REVOKE_RATE_LIMIT_WINDOW },
   'auth': { name: 'Authentication', sourceTag: 'rate-limit:auth', max: AUTH_RATE_LIMIT_MAX, window: AUTH_RATE_LIMIT_WINDOW },
+  'password-reset': { name: 'Password reset flow', sourceTag: 'rate-limit:password-reset', max: PASSWORD_RESET_RATE_LIMIT_MAX, window: PASSWORD_RESET_RATE_LIMIT_WINDOW },
   'admin': { name: 'Admin write', sourceTag: 'rate-limit:admin', max: ADMIN_RATE_LIMIT_MAX, window: ADMIN_RATE_LIMIT_WINDOW },
   'calendar': { name: 'Calendar CRUD', sourceTag: 'rate-limit:calendar', max: CALENDAR_RATE_LIMIT_MAX, window: CALENDAR_RATE_LIMIT_WINDOW },
   'api-docs': { name: 'API docs', sourceTag: 'rate-limit:api-docs', max: API_DOCS_RATE_LIMIT_MAX, window: API_DOCS_RATE_LIMIT_WINDOW },

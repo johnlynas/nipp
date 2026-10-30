@@ -239,7 +239,8 @@ function isLoopbackOrigin(origin: string): boolean {
 }
 
 /**
- * Final link origin for the emailed magic link:
+ * Final link origin for an emailed link (magic link AND password reset —
+ * lib/forgot-password.ts re-exports it as resolveResetLinkOrigin):
  *  - explicit non-loopback portalOrigin → it (LAN IP / tunnel host / domain);
  *  - loopback portalOrigin (admin inviting from their own browser) and a
  *    machine LAN IPv4 → http://<machine-ip>:<request-port> — the same port the
@@ -247,7 +248,7 @@ function isLoopbackOrigin(origin: string): boolean {
  *    reachable, not 127.0.0.1 (unreachable to the invited user);
  *  - no origin / loopback origin with no LAN IPv4 → FRONTEND_URL (fail closed).
  */
-function resolveLinkBase(portalOrigin: string | null | undefined): string {
+export function resolveLinkBase(portalOrigin: string | null | undefined): string {
   const origin = normalizePortalOrigin(portalOrigin);
   if (origin) {
     if (!isLoopbackOrigin(origin)) return origin;

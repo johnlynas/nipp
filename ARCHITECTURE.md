@@ -26,6 +26,7 @@ A full-stack, multi-tenant property management system. It provides a secure, rol
 - [1. Technology Stack](#1-technology-stack)
 - [2. High-Level Architecture](#2-high-level-architecture)
 - [3. Authentication & Session Management](#3-authentication--session-management)
+  - [Password Reset for Local Users (inbox-proven, single-use token)](#password-reset-for-local-users-inbox-proven-single-use-token)
 - [4. Authorization (RBAC)](#4-authorization-rbac)
 - [5. Multi-Tenant Architecture](#5-multi-tenant-architecture)
 - [6. Service Layer](#6-service-layer)
@@ -153,6 +154,7 @@ Authentication is provided by **BetterAuth v1.6**. Two doors are live:
 
 - **Email/password** — admin creates the user (into an organization, with a password); the user signs in via the existing form at `/api/auth/sign-in/email`.
 - **Google OIDC** — invite-only (see the dedicated subsection below). The Google provider's implicit sign-up is disabled, so an identity can only obtain a session if an administrator pre-created it; magic-link verification then proves inbox ownership before the first session.
+- **Password reset (local users)** — self-service recovery for email/password accounts only: request → single-use one-hour token emailed via Gmail → inbox-proven page sets the new password, no session minted anywhere in the flow (see the dedicated subsection below). OIDC-only users keep the admin-assisted "contact your administrator" behaviour.
 
 The in-process flow for both doors:
 
@@ -265,6 +267,64 @@ stateDiagram-v2
 **Local-user invariant:** email/password sign-in keeps its exact code path — the provisioning gate returns immediately for any user without a Google `Account` row, verified by the integration suite.
 
 **Phase 1 deviations from the original implementation plan:** five build-level surprises were worked around (provider registration as a plain options object, a JSON-body sign-in response instead of a 302, a `Verification` table that had to be added for PKCE state, ban enforcement moved into the session-creation hook, and the error redirect landing on `/login?error=…`). Each was behavior-pinned in `tests/integration/google-oidc.test.ts`; design context: [google-oidc-design.md](./documents/feature-planning-and-development/google-oidc-design.md).
+
+### Password Reset for Local Users (inbox-proven, single-use token)
+
+**Shipped.** A local (email/password) user who cannot sign in recovers self-service from a browser they don't trust: "Forgot password?" on the login page → email request → a **single-use, one-hour token** lands in their inbox (Gmail SMTP) → an inbox-proven public page sets the new password. OIDC-only users are out of scope — they have no portal credential to reset and keep the admin-assisted "contact your administrator" behaviour (the top-bar menu entry renders disabled for them). No session is minted at any point in the flow: only the final POST mutates data, consumed as exactly one BetterAuth `resetPassword` call plus an atomic token delete.
+
+```mermaid
+flowchart TB
+    subgraph Browser["Browser (all three surfaces public — no session anywhere)"]
+        L["/login — Forgot-password link + one-shot ?password_reset=1 success banner"]
+        FP["/auth/forgot-password<br/>request page, idempotent success copy, resend cooldown"]
+        RP["/auth/reset-password?token=TOKEN<br/>pre-flight → form → auto-redirect back to /login"]
+    end
+
+    subgraph Portal["Portal (Next.js, Node runtime)"]
+        R1["POST /api/auth/password-reset<br/>public · password-reset IP tier · ban gate up front · never leaks account existence"]
+        RV["GET /api/auth/password-reset/verify?token=…<br/>read-only pre-flight — row NOT deleted here"]
+        RR["POST /api/auth/password-reset/reset<br/>tier → guard (credential-only, OIDC 403) → ban re-check (401) → in-process BA call"]
+        LIB["lib/forgot-password.ts<br/>issueResetEmail · preFlightResetToken · hasCredentialAccount · maskEmail · AUDIT_ACTION"]
+        BA["BetterAuth core (lib/auth.ts)<br/>token row, scrypt hash write + atomic consume single-sourced here"]
+        MAIL["lib/notifications/email.ts — Gmail SMTP"]
+    end
+
+    subgraph DB["PostgreSQL (same RLS-exempt global models as /api/auth/password)"]
+        V[("Verification rows — identifier reset-password:TOKEN<br/>value = userId, expiresAt = now + TTL")]
+        U[("User + credential Account<br/>password hash updated at consume")]
+    end
+
+    L -- "Forgot password?" --> FP
+    L -. "post-success banner (?password_reset=1)" .- RP
+    FP -- "POST {email} → always 200 (no oracle, unknown-email dummy path in BA)" --> R1
+    R1 --> LIB
+    LIB --> BA
+    BA -- "sendResetPassword hook" --> MAIL
+    MAIL -. "reset link <origin>/auth/reset-password?token=… (host-independent, email-only PII)" .-> RP
+    RP -- "GET verify on mount, token stripped from URL/history" --> RV
+    RV -- "read only: fresh row or invalid/expired" --> V
+    RP -- "POST {newPassword, token}" --> RR
+    RR -- "in-process auth.api.resetPassword" --> BA
+    BA -- "scrypt hash + atomic Verification delete (same transaction)" --> U
+    BA -. "Verification row deleted — replay 400s" .- V
+```
+
+**Component inventory (shipped shape):**
+
+| Piece | Where | Role |
+|-------|-------|------|
+| Request route | `POST /api/auth/password-reset` (`app/api/auth/password-reset/route.ts`) | Public, IP-rate-limited (dedicated `password-reset` tier, 5/min default), ban gate **before** BetterAuth, then in-process `auth.api.requestPasswordReset`; always replies `200 {status:true}` with non-distinguishing copy — no account-existence oracle; audit entry records the masked email + IP only |
+| Verify route | `GET /api/auth/password-reset/verify` (public in `middleware.ts`) | Read-only pre-flight so the page can decide what to render: `{valid:true, expiresInSeconds}` or `{valid:false, reason}` — deliberately **deletes nothing** (a link opened on one device stays completable on another); audit on valid opens only |
+| Reset route | `POST /api/auth/password-reset/reset` (`app/api/auth/password-reset/reset/route.ts`) | Tier rate-limit → shape/length pre-checks (≤72, scrypt ceiling) → `preFlightResetToken` (missing/expired → 400) → `hasCredentialAccount` guard (OIDC-only forged request → 403) → `enforceBanStatus` re-check at mutation time (→ 401) → in-process `auth.api.resetPassword` — scrypt hash write and atomic token delete single-sourced in BetterAuth; success audit + the same no-store headers as `/api/auth/password` |
+| Shared library | `lib/forgot-password.ts` | `issueResetEmail` (branded HTML, host-independent link via `resolveResetLinkOrigin` — the OIDC magic-link origin helper, DRY), `preFlightResetToken`, `hasCredentialAccount`, `maskEmail` (`j***@…` audit convention), `AUDIT_ACTION` constants; global `prisma` + `withPlatformContext` like sibling auth libs |
+| BetterAuth wiring | `lib/auth.ts` | `emailAndPassword.sendResetPassword` hook (request origin wins over stale session-captured origin — reset requests arrive unauthenticated) + `resetPasswordTokenExpiresIn = PASSWORD_RESET_TOKEN_TTL_SECS` (env-overridable, default 3600 s); `onPasswordReset` wired as an observer only |
+| Login UI | `app/login/page.tsx`, `components/dashboard/TopBarUserIdentityChip.tsx` | "Forgot password?" re-wired from a dead-end note to `/auth/forgot-password`; one-shot `?password_reset=1` success banner (auto-dismiss 10 s); top-bar account menu gains "Reset password" for local users, disabled with tooltip for Google-only accounts |
+| Pages | `app/auth/forgot-password/page.tsx`, `app/auth/reset-password/page.tsx` | Login visual family (shared brand slice in `components/auth/AuthBrand.tsx`); reset page strips `?token=` from history after the one-mount pre-flight (T12) and redirects to `/login?password_reset=1` on success |
+| Rate-limit tier | `lib/rate-limiter.ts` | Named `password-reset` tier (`checkPasswordResetRateLimit`, 5/60 s defaults, env-tunable via `RATE_LIMIT_PASSWORD_RESET_MAX` / `_WINDOW`) — separate counter from the auth tier so ops can tune each independently; CRITICAL log + SSE via the existing `reportThrottle` path |
+
+**Local-user invariant:** email/password sign-in keeps its exact code path. BetterAuth's stock password endpoints (`/request-password-reset`, `/reset-password…`) remain reachable only through the `[...all]` catch-all pass-through, untouched; the three new routes are distinct pathnames (exact match wins over the catch-all), so no route rewrites and no middleware changes beyond the two public page entries.
+
+Full design — threat table T1–T12, API contract, token state machine: [forgot-password-design.md](./.hermes/plans/2026-10-29_forgot-password-design.md); security model & threat table: [SECURITY.md §2 Password Reset (local users)](./SECURITY.md#password-reset-local-users).
 
 ### Bearer-Token Access & Public Reachability
 

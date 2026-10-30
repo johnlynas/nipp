@@ -11,6 +11,13 @@ vi.mock('@/lib/auth-client', () => ({
   signOutUser: vi.fn(),
 }));
 
+const chipPush = vi.fn();
+// Stable router (fresh objects per call would re-run effects); push is spied
+// for the "Reset password" menu item's deep link.
+vi.mock('next/navigation', () => ({
+  useRouter: () => ({ push: chipPush, replace: vi.fn() }),
+}));
+
 const mockUseSession = vi.mocked(authClientModule.useSession);
 const mockSignOutUser = vi.mocked(authClientModule.signOutUser);
 
@@ -80,14 +87,15 @@ describe('TopBarUserIdentityChip', () => {
     expect(screen.getByRole('menu')).toBeInTheDocument();
     expect(trigger).toHaveAttribute('aria-expanded', 'true');
     expect(screen.getByRole('menuitem', { name: /user info/i })).toBeInTheDocument();
-    // Change Password sits between User Info and Log out for every account —
-    // greyed out (aria-disabled) until /api/auth/me proves a credential.
+    // Change Password + Reset password sit between User Info and Log out for
+    // every account — greyed out (aria-disabled) until /api/auth/me proves a credential.
     const changePw = screen.getByRole('menuitem', { name: /change password/i });
     expect(changePw).toBeInTheDocument();
+    expect(screen.getByRole('menuitem', { name: /reset password/i })).toBeInTheDocument();
     expect(screen.getByRole('menuitem', { name: /log out/i })).toBeInTheDocument();
-    // Ordering: User Info → Change Password → Log out.
+    // Ordering: User Info → Change Password → Reset Password → Log out.
     const items = screen.getAllByRole('menuitem');
-    expect(items.map((i) => i.textContent)).toEqual(['User Info', 'Change Password', 'Log out']);
+    expect(items.map((i) => i.textContent)).toEqual(['User Info', 'Change Password', 'Reset Password', 'Log out']);
     expect(changePw).toHaveAttribute('aria-disabled', 'true');
 
     // Clicking the trigger again closes it.
@@ -123,6 +131,20 @@ describe('TopBarUserIdentityChip', () => {
     expect(screen.queryByRole('menu')).not.toBeInTheDocument();
     const modal = await screen.findByText('Change Password');
     expect(modal).toBeInTheDocument();
+  });
+
+  it('enables Reset Password for a local account and links to the request page', async () => {
+    stubMe(true);
+    const { trigger } = renderChip();
+    await vi.waitFor(() => {
+      fireEvent.click(trigger);
+      expect(screen.getByRole('menuitem', { name: /reset password/i })).toHaveAttribute('aria-disabled', 'false');
+    });
+
+    chipPush.mockClear();
+    fireEvent.click(screen.getByRole('menuitem', { name: /reset password/i }));
+
+    expect(chipPush).toHaveBeenCalledWith('/auth/forgot-password');
   });
 
   it('closes on Escape and on outside click', async () => {

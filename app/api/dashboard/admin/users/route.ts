@@ -108,9 +108,29 @@ export async function GET(request: NextRequest) {
       // Never ship passwordHash to the client — replace it with a derived
       // boolean so the UI can tell invite-pending (passwordless, unverified)
       // users from regular ones.
-      const safeItems = result.items.map((u) => {
+      const items = result.items;
+
+      // Per-user "PW reset" pill: one query for unexpired reset-password tokens
+      // owned by a user on this page. The Verification row is created when the
+      // reset link is emailed and atomically deleted by BetterAuth the moment
+      // it's consumed, so presence here == link sent, not yet used. (Expired
+      // rows are ignored — the token can no longer be completed.)
+      const now = new Date();
+      const verificationRows = await tenantDb.verification.findMany({
+        where: {
+          identifier: { startsWith: 'reset-password:' },
+          expiresAt: { gt: now },
+          value: { in: items.map((u) => u.id) },
+        },
+        select: { value: true },
+      });
+      const resetPendingUserIds = new Set(
+        verificationRows.filter((r) => typeof r.value === 'string').map((r) => r.value),
+      );
+
+      const safeItems = items.map((u) => {
         const { passwordHash, ...rest } = u;
-        return { ...rest, passwordHashPresent: Boolean(passwordHash) };
+        return { ...rest, passwordHashPresent: Boolean(passwordHash), passwordResetPending: resetPendingUserIds.has(u.id) };
       });
 
       return NextResponse.json({

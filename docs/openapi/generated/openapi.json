@@ -282,6 +282,112 @@
         ],
         "additionalProperties": false
       },
+      "PasswordResetRequestBody": {
+        "type": "object",
+        "properties": {
+          "email": {
+            "type": "string",
+            "format": "email",
+            "pattern": "^(?:[A-Za-z0-9_'+\\-]+\\.)*[A-Za-z0-9_'+\\-]*[A-Za-z0-9_+-]@(?:[A-Za-z0-9][A-Za-z0-9\\-]*\\.)+[A-Za-z]{2,}$"
+          }
+        },
+        "required": [
+          "email"
+        ],
+        "additionalProperties": false
+      },
+      "PasswordResetRequested": {
+        "type": "object",
+        "properties": {
+          "status": {
+            "type": "boolean",
+            "const": true
+          },
+          "message": {
+            "type": "string",
+            "description": "Idempotent copy — identical for unknown emails"
+          }
+        },
+        "required": [
+          "status",
+          "message"
+        ],
+        "additionalProperties": false
+      },
+      "PasswordResetVerifyValid": {
+        "type": "object",
+        "properties": {
+          "valid": {
+            "type": "boolean",
+            "const": true
+          },
+          "expiresInSeconds": {
+            "type": "number",
+            "description": "Seconds until the token itself expires (server is authoritative)"
+          }
+        },
+        "required": [
+          "valid",
+          "expiresInSeconds"
+        ],
+        "additionalProperties": false
+      },
+      "PasswordResetVerifyInvalid": {
+        "type": "object",
+        "properties": {
+          "valid": {
+            "type": "boolean",
+            "const": false
+          },
+          "reason": {
+            "type": "string",
+            "enum": [
+              "missing",
+              "invalid-or-expired"
+            ]
+          }
+        },
+        "required": [
+          "valid",
+          "reason"
+        ],
+        "additionalProperties": false
+      },
+      "PasswordResetCompleteBody": {
+        "type": "object",
+        "properties": {
+          "newPassword": {
+            "type": "string"
+          },
+          "token": {
+            "type": "string",
+            "description": "Reset token (single-use; replay → 400)"
+          }
+        },
+        "required": [
+          "newPassword",
+          "token"
+        ],
+        "additionalProperties": false
+      },
+      "PasswordResetComplete": {
+        "type": "object",
+        "properties": {
+          "success": {
+            "type": "boolean",
+            "const": true
+          },
+          "message": {
+            "type": "string",
+            "const": "Password updated"
+          }
+        },
+        "required": [
+          "success",
+          "message"
+        ],
+        "additionalProperties": false
+      },
       "AdminNotificationsList": {
         "type": "object",
         "properties": {
@@ -12827,6 +12933,230 @@
         "responses": {
           "default": {
             "description": "Unspecified — response schema not yet documented (add a registry entry in lib/schemas/api/ to fill this in)."
+          }
+        }
+      }
+    },
+    "/api/auth/password-reset/reset": {
+      "post": {
+        "tags": [
+          "auth"
+        ],
+        "summary": "complete the password reset (design §7.3)",
+        "description": "POST — complete the password reset (design §7.3)\n\nPublic, session-less mutation: body { newPassword, token }. Order is a\ncontract — rate limit → shape validation → pre-flight row lookup (the single\nplace we learn the ownerId BEFORE BetterAuth; gives us userId/email for the\nguard + ban re-check + audit when BetterAuth's INVALID_TOKEN error has none)\n→ credential-only guard (T5: a forged body cannot re-arm an OIDC-only account)\n→ ban re-check at mutation time (a ban issued after the token was emailed\nmust not go stale) → BetterAuth's stock `resetPassword` IN-PROCESS via\nauth.api.resetPassword (plan R1): scrypt hash, credential Account row write,\nonPasswordReset observer and the atomic Verification delete all stay\nsingle-sourced there.\nLength rules: >72 chars is pre-rejected with /api/auth/password's exact copy\nso the scrypt ceiling can never surface as a raw BetterAuth error; the floor\n(minPasswordLength) comes from BetterAuth itself, surfaced verbatim (400).\nReplay of a consumed token → 400 'Invalid or expired reset link.' (no 4xx\ndistinction between invalid and replay — no oracle). Response is no-store.\n\nPart of the BetterAuth integration (driven by session cookie).\n\nHandler: `app/api/auth/password-reset/reset/route.ts`.",
+        "security": [],
+        "parameters": [],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PasswordResetCompleteBody"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "200",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PasswordResetComplete"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "400",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "401",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "403",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "429",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "503",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/auth/password-reset": {
+      "post": {
+        "tags": [
+          "auth"
+        ],
+        "summary": "request a password reset email (local users)",
+        "description": "POST — request a password reset email (local users)\n\nPublic, session-less, IP-rate-limited on the dedicated `password-reset` tier\n(5/min — separate store from the sign-in auth tier). Wraps BetterAuth's stock\n`requestPasswordReset` handler IN-PROCESS via `auth.api.requestPasswordReset`\n(plan R1 decision: no internal fetch to the catch-all, so there is no double\nrate-limit count; token generation + Verification row + the sendResetPassword\nemail hook all stay single-sourced in BetterAuth).\nCopy discipline (design §7.1): both unknown and known emails get the IDENTICAL\n200 `{ status: true, message }` pass-through — no account oracle. BetterAuth\nalso equalises timing for unknown emails built-in. The ban gate runs BEFORE\nhanding to BetterAuth (T4/Q1): an active ban is a hard 401 with the login\nbanner's copy. Audit uses maskEmail output only (Q5).\n\nPart of the BetterAuth integration (driven by session cookie).\n\nHandler: `app/api/auth/password-reset/route.ts`.",
+        "security": [],
+        "parameters": [],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PasswordResetRequestBody"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "200",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PasswordResetRequested"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "400",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "401",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "429",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "503",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/auth/password-reset/verify": {
+      "get": {
+        "tags": [
+          "auth"
+        ],
+        "summary": "read-only token pre-flight (design §7.2)",
+        "description": "GET — read-only token pre-flight (design §7.2)\n\nThe public reset page (/auth/reset-password, Phase 4) calls this on mount to\ndecide loading → form vs invalid state. READ-ONLY by contract: the row is\nNEVER deleted here — single-use consumption stays in BetterAuth's atomic\nconsumeVerificationValue at reset time (a second POST with the same token\nstill gets INVALID_TOKEN 400). A 429 leaves the token untouched, so a network\nretry after the window succeeds (magic-link verify precedent).\nAudit `user.password-reset-link-opened` fires ONLY when valid — that is the\none moment we know the token owner's userId; invalid/expired attempts are\nunattributable by design (no oracle, T10 accepted).\n\nPart of the BetterAuth integration (driven by session cookie).\n\nHandler: `app/api/auth/password-reset/verify/route.ts`.",
+        "security": [],
+        "parameters": [
+          {
+            "name": "token",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "description": "Reset token from the emailed link (?token=…; missing → valid:false)"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "200",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "oneOf": [
+                    {
+                      "$ref": "#/components/schemas/PasswordResetVerifyValid"
+                    },
+                    {
+                      "$ref": "#/components/schemas/PasswordResetVerifyInvalid"
+                    }
+                  ],
+                  "type": "object",
+                  "discriminator": {
+                    "propertyName": "valid",
+                    "mapping": {
+                      "true": "#/components/schemas/PasswordResetVerifyValid",
+                      "false": "#/components/schemas/PasswordResetVerifyInvalid"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "429",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "503",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
           }
         }
       }
