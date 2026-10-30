@@ -190,6 +190,8 @@ export const AUDIT_ACTION = {
   PASSWORD_RESET_REQUESTED: 'user.password-reset-requested',
   PASSWORD_RESET_LINK_OPENED: 'user.password-reset-link-opened',
   PASSWORD_RESET_SUCCESS: 'user.password-reset-success',
+  /** Admin-initiated reset from the Users dashboard (follow-on feature, not self-service). */
+  PASSWORD_RESET_REQUESTED_BY_ADMIN: 'user.password-reset-requested-by-admin',
 } as const;
 
 export type AuditActionName = (typeof AUDIT_ACTION)[keyof typeof AUDIT_ACTION];

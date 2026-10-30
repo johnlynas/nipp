@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useEffect, useCallback, useRef } from 'react';
-import { Eye, Pencil, ShieldBan, ShieldCheck, Ban, Trash2, Mail } from 'lucide-react';
+import { Eye, Pencil, ShieldBan, ShieldCheck, Ban, Trash2, Mail, KeyRound } from 'lucide-react';
 import { logClientError } from '@/lib/client-error-logger';
 import { SearchBar } from '@/components/dashboard/SearchBar';
 import { StatusBadge } from '@/components/dashboard/StatusBadge';
@@ -363,6 +363,35 @@ export default function UsersPage() {
     }
   };
 
+  // Handle admin-initiated password reset — emails the user a self-service
+  // link (single-use, expiring). The admin never sets the password; the user
+  // chooses it through the same flow as "Forgot password?".
+  const handleResetPassword = async () => {
+    if (!selectedUser) return;
+
+    try {
+      const res = await apiFetch(`/api/dashboard/admin/users/${selectedUser.id}/reset-password`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({}),
+      });
+
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}));
+        throw new Error(data.error || 'Failed to send password reset');
+      }
+
+      setNotice(
+        `A password reset link has been sent to ${selectedUser.email} — they'll choose their new password from that email.`,
+      );
+    } catch (err) {
+      const message = err instanceof Error ? err.message : 'Failed to send password reset';
+      console.error('Failed to send password reset:', err);
+      logClientError(message, 'users', 'reset-password');
+      setError(message);
+    }
+  };
+
   // Handle edit user
   const handleEditUser = async () => {
     if (!selectedUser) return;
@@ -475,6 +504,16 @@ export default function UsersPage() {
             aria-label={`Resend activation link to ${u.name || u.email}`}
           >
             <Mail className="h-4 w-4" />
+          </button>
+        )}
+        {u.passwordHashPresent && (
+          <button
+            onClick={() => { setSelectedUser(u); handleResetPassword(); }}
+            title={`Email ${u.name || u.email} a password reset link`}
+            className="rounded p-1.5 text-slate-400 hover:bg-slate-100 hover:text-navy-850 transition-colors"
+            aria-label={`Send password reset link to ${u.name || u.email}`}
+          >
+            <KeyRound className="h-4 w-4" />
           </button>
         )}
         <button
