@@ -21,7 +21,7 @@ flowchart LR
     P2 --> P3[✅ Phase 3<br/>API endpoints + rate limit tier]
     P3 --> P4[✅ Phase 4<br/>UI pages + login link + top-bar entry]
     P4 --> P5[✅ Phase 5<br/>ARCHITECTURE.md update]
-    P5 --> P6[Phase 6<br/>SECURITY.md update]
+    P5 --> P6[✅ Phase 6<br/>SECURITY.md update]
     P6 --> FIN[Final validation gate<br/>test · lint · build]
 ```
 
@@ -33,7 +33,7 @@ flowchart LR
 | 3 | 3 route files + new rate-limit tier in `lib/rate-limiter.ts` + integration tests + OpenAPI docs (JSDoc headers, registry schemas, regenerated spec) | ✅ per endpoint | ✅ Complete (2026-10-29) |
 | 4 | 2 pages, login-link rewire, top-bar menu item; unit tests for page components | ✅ per component | ✅ Complete (2026-10-29) |
 | 5 | `ARCHITECTURE.md` §3 subsection + TOC + mermaid diagram | docs | ✅ Complete (2026-10-30) |
-| 6 | `SECURITY.md` §2 subsection + rate-limit table rows + Appendix A row + env table | docs |
+| 6 | `SECURITY.md` §2 subsection + rate-limit table rows + Appendix A row + env table | docs | ✅ Complete (2026-10-30) |
 
 Key existing anchors (verified on branch `user-forgot-password`):
 
@@ -548,7 +548,9 @@ Commit: `docs: ARCHITECTURE.md — password reset flow for local users`.
 
 ---
 
-## Phase 6 — SECURITY.md update
+## Phase 6 — SECURITY.md update — ✅ COMPLETED (2026-10-30)
+
+**Status:** All six plan items landed at their live locations (line numbers in the spec had drifted from the doc's current state — placed by reading surrounding headers, per the spec's own note); the new mermaid verified with the real parser (2/2 blocks OK). Details recorded as "Phase-6 outcome" below.
 
 **Files:** Modify `SECURITY.md`
 
@@ -560,6 +562,20 @@ Commit: `docs: ARCHITECTURE.md — password reset flow for local users`.
 6. **§8 PII Field List**: confirm `password`/email masking already covers reset logs; add one line stating reset-flow audit entries use `maskEmail` output only.
 
 Commit: `docs: SECURITY.md — password reset security model + rate-limit/env tables`.
+
+### Phase-6 outcome (complete — recorded during Phase 6 execution on 2026-10-30)
+
+- **§2 placement:** new `### Password Reset (local users)` subsection inserted between **User Ban System** and the Google OIDC section — reads as a direct extension of the ban-gate text it follows (`enforceBanStatus` is called out by name in both), and keeps §2's flow: auth config → session lifecycle → ban → recovery → OIDC door. (Plan said "final placement at implementation time by reading surrounding headers" — this was that read.) House style matched from the OIDC section (*Shipped* lead → mermaid → "Security-relevant shape" bullets → threat table → operational requirement).
+- **Mermaid:** `flowchart TD` of the three routes with the security decision points inline — tier 429 (nothing downstream), ban-gate 401s at request **and** completion, no-oracle always-200, read-only verify (dotted edge, "row never deleted here"), credential-guard 403, atomic hash-write+delete with replay-400. Verified with `diagram-render-debugging` harness: **2/2 blocks OK, 0 FAILED** (no fixes needed — no quotes-in-labels this time).
+- **Threat table:** T1–T12 in full (not abridged) — the design doc is in `.hermes/plans/`, so keeping the whole table inline makes SECURITY.md self-contained; each row cross-references its T-number. CSRF rationale spelled out per plan item 2 (no session on mutation paths + CSP form-action).
+- **Item 3 (route-gate table):** `RATE_LIMIT_PASSWORD_RESET_MAX` / `_WINDOW` row added after the auth row with the separate-counter note (R2 mitigation, documented for ops).
+- **Item 3b ("Rate Limiting Across API Routes" table) — bonus beyond spec:** row for `/api/auth/password-reset*` with gate + default, so the two §9 rate-limit tables both carry the tier (otherwise a reader of only the second table would miss it). Spec'd Appendix A row added as well.
+- **Item 4 (env table):** `PASSWORD_RESET_TOKEN_TTL_SECS` row (purpose + read-by + No/defaults-to-3600) added after `GOOGLE_CLIENT_SECRET` — keeping the BetterAuth-cluster of vars together; the two rate-limit vars live in the Route-Gate Limits table per that table's purpose ("configurable via environment variables"), consistent with how every other tier is documented.
+- **Item 5/6 (§8 PII Field List):** one sentence appended stating reset-flow audit entries carry `maskEmail` output only (Q5 convention: `j***@…`) and unknown-email events are IP-only — confirming the pino redaction pipeline already covers password/email, no new redact paths.
+- **Link decisions:** subsection links to ARCHITECTURE.md §3's new anchor (`#password-reset-for-local-users-inbox-proven-single-use-token` — exact-match, verified) and to `.hermes/plans/2026-10-29_forgot-password-design.md` (design doc lives there, not in feature-planning-and-development/). TOC child entry under §2 + Appendix A note "(includes the password-reset routes)".
+- **Footer:** `*Last updated:*` bumped 2026-10-16 → 2026-10-30.
+- No code changes; docs-only phase. Plan's reserved one-liner from Task 2.2 (distinct pathnames / catch-all pass-through / no double-count) is now stated in the subsection's operational-requirement paragraph.
+- **Commit:** `docs: SECURITY.md — password reset security model + rate-limit/env tables` (single commit for the phase).
 
 ---
 

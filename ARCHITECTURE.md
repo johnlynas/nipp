@@ -324,7 +324,7 @@ flowchart TB
 
 **Local-user invariant:** email/password sign-in keeps its exact code path. BetterAuth's stock password endpoints (`/request-password-reset`, `/reset-password…`) remain reachable only through the `[...all]` catch-all pass-through, untouched; the three new routes are distinct pathnames (exact match wins over the catch-all), so no route rewrites and no middleware changes beyond the two public page entries.
 
-Full design — threat table T1–T12, API contract, token state machine: [forgot-password-design.md](./.hermes/plans/2026-10-29_forgot-password-design.md); security model & rate-limit/env tables: [SECURITY.md §2 User Ban System (password-reset subsection in Phase 6)](./SECURITY.md#user-ban-system).
+Full design — threat table T1–T12, API contract, token state machine: [forgot-password-design.md](./.hermes/plans/2026-10-29_forgot-password-design.md); security model & threat table: [SECURITY.md §2 Password Reset (local users)](./SECURITY.md#password-reset-local-users).
 
 ### Bearer-Token Access & Public Reachability
 
