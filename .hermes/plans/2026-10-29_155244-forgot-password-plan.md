@@ -22,7 +22,7 @@ flowchart LR
     P3 --> P4[✅ Phase 4<br/>UI pages + login link + top-bar entry]
     P4 --> P5[✅ Phase 5<br/>ARCHITECTURE.md update]
     P5 --> P6[✅ Phase 6<br/>SECURITY.md update]
-    P6 --> FIN[Final validation gate<br/>test · lint · build]
+    P6 --> FIN[✅ Final validation gate<br/>test · lint · build]
 ```
 
 | Phase | Deliverable | TDD? | Status |
@@ -34,6 +34,7 @@ flowchart LR
 | 4 | 2 pages, login-link rewire, top-bar menu item; unit tests for page components | ✅ per component | ✅ Complete (2026-10-29) |
 | 5 | `ARCHITECTURE.md` §3 subsection + TOC + mermaid diagram | docs | ✅ Complete (2026-10-30) |
 | 6 | `SECURITY.md` §2 subsection + rate-limit table rows + Appendix A row + env table | docs | ✅ Complete (2026-10-30) |
+| Final gate | Full validation (test / test:integration / lint / build) + live smoke on production build | — | ✅ Complete (2026-10-30) |
 
 Key existing anchors (verified on branch `user-forgot-password`):
 
@@ -579,7 +580,7 @@ Commit: `docs: SECURITY.md — password reset security model + rate-limit/env ta
 
 ---
 
-## Final Validation Gate
+## Final Validation Gate — ✅ PASSED (2026-10-30)
 
 ```bash
 npm run test          # unit (expect: all pass incl. new forgot-password files)
@@ -589,6 +590,27 @@ npm run build         # type-check + production build
 ```
 
 Manual checklist (dev server + mail sink): local user completes flow end-to-end; unknown email gets identical success copy; banned 401; replay 400; login `?password_reset=1` banner; OIDC-only user sees admin-contact copy unchanged.
+
+### Final Validation Gate outcome (complete — 2026-10-30)
+
+Machine gate — all green, in the plan's exact order:
+
+- `npm run test` → **2392 passed / 113 files, exit 0** ✅ (matches Phase-4 count; no drift since). Only residual noise: the same pre-existing `tests/unit/rate-limiter.test.ts` worker-teardown unhandled-rejections recorded in Task 0.1 — not failures.
+- `npm run test:integration` → **471 passed / 32 files, exit 0** ✅ (matches Phase-3 count; no regressions in `auth.test.ts` / `password-change.test.ts`).
+- `npm run lint` → **0 ESLint warnings/errors + `lint-guardrails: OK — no PrismaClient/set_config misuse`** ✅.
+- `npx tsc --noEmit` → clean ✅ (also exercised inside the build).
+- `npm run build` → **exit 0** ✅. Route table confirms everything live as designed: `ƒ /api/auth/password-reset`, `ƒ …/verify`, `ƒ …/reset`, plus both new public pages static (`○ /auth/forgot-password 3.14 kB / 109 kB`, `○ /auth/reset-password 3.58 kB / 110 kB`).
+
+Live smoke on the **production build** (`npm run start -p 3129` against local `nipp_dev` Postgres — real DB, real BetterAuth in-process):
+
+- `/auth/forgot-password` and `/auth/reset-password` → **200**; login page chunk contains the rewired "Forgot password?" link targeting `/auth/forgot-password`.
+- Unknown-email POST → **200 `{ status:true, message:"If this email exists in our system, check your email for the reset link" }`** — no-oracle copy verbatim.
+- Verify route: garbage token → `{valid:false, reason:"invalid-or-expired"}`; missing token → `{valid:false, reason:"missing"}` (read-only, no consumption).
+- Reset route: garbage token → **400 `{error:"Invalid or expired reset link."}`** before any DB mutation; server log showed the exact no-oracle rejection message.
+
+**Honest scope note on the manual checklist:** items that need a **live mail sink + inbox-proven click-through** (end-to-end local-user flow, `?password_reset=1` banner from a real reset, banned 401, OIDC-only admin-contact copy) were **not executed here** — the banned/OIDC guard live checks are deferred to manual testing per user direction; their handler-level contracts remain pinned by the integration suite (Task 3.2/3.3/3.4 cases: banned→401, OIDC-only→403, replay→400, unknown-email no-oracle) and the `password_reset` banner by `tests/unit/login-messages.test.tsx`.
+
+**Branch state:** `feat/forgot-password`, clean working tree, 11 commits on top of `user-forgot-password`. No Prisma schema change, no migrations, no new dependencies — as planned.
 
 ---
 

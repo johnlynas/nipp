@@ -157,6 +157,20 @@ async function runOAuthRoundTrip(t: (req: Request) => Promise<Response>, body: R
   );
 }
 
+/**
+ * Parse a callback error redirect (?error=…&error_description=…) — the shape
+ * BetterAuth produces once a session-creation hook throws an APIError WITH a
+ * body.code (isAPIError && e.body?.code → redirectOnError onto errorCallbackURL).
+ * Returns null when the response is not such a redirect.
+ */
+function parseCallbackErrorRedirect(res: Response): { error: string | null; description: string | null } | null {
+  const loc = res.headers.get('location') ?? '';
+  if (!loc) return null;
+  const params = new URL(loc, 'http://localhost:3000').searchParams;
+  if (!params.has('error')) return null;
+  return { error: params.get('error'), description: params.get('error_description') };
+}
+
 // Identities this file drives through real callback round-trips (incl. the
 // forged-signup identity, which only exists while its spec runs).
 const ALL_FLOW_EMAILS = [
@@ -353,10 +367,19 @@ describe('Google OIDC — full mocked flow (Task 6)', () => {
     currentIdToken = buildIdToken(PENDING_EMAIL, PENDING_SUB);
     clearSentInvites();
 
-    const cbRes = await runOAuthRoundTrip(handler, { provider: 'google', callbackURL: CALLBACK_URL });
-    expect(cbRes.status).toBe(401);
-    const bodyText = await cbRes.text();
-    expect(bodyText).toMatch(/check your inbox|verification link/i);
+    const cbRes = await runOAuthRoundTrip(handler, {
+      provider: 'google',
+      callbackURL: CALLBACK_URL,
+      errorCallbackURL: '/login',
+    });
+    // The gate's APIError carries a body.code → BetterAuth redirects (302) to
+    // the login page with ?error=&error_description= — where the mount effect
+    // classifies it into the needs-inbox-check banner. A raw JSON 401 page was
+    // the bug this exists to prevent.
+    expect(cbRes.status).toBe(302);
+    const redirect = parseCallbackErrorRedirect(cbRes);
+    expect(redirect, 'callback should be an ?error= redirect').toBeTruthy();
+    expect(redirect?.description ?? '').toMatch(/check your inbox|verification link/i);
     expect(extractSetCookie(cbRes).sessionToken).toBeFalsy();
 
     // A consumable token landed in the Verification table (the magic link).
@@ -401,7 +424,9 @@ describe('Google OIDC — full mocked flow (Task 6)', () => {
         headers: { Origin: LAN_ORIGIN, Cookie: cookies ?? '' },
       }),
     );
-    expect(cbRes.status).toBe(401); // pre-registration gate rejects
+    // Gate rejects — now as a ?error= redirect onto errorCallbackURL (the APIError
+    // carries a body.code), not the raw 401 JSON page.
+    expect(parseCallbackErrorRedirect(cbRes)).toBeTruthy();
 
     const invite = sentInvites.find((s) => s.to === PENDING_EMAIL);
     expect(invite).toBeTruthy();
@@ -422,9 +447,10 @@ describe('Google OIDC — full mocked flow (Task 6)', () => {
     clearSentInvites();
 
     const cbRes = await runOAuthRoundTrip(handler, { provider: 'google', callbackURL: CALLBACK_URL });
-    expect(cbRes.status).toBe(401);
-    const bodyText = await cbRes.text();
-    expect(bodyText).toContain('provisioned');
+    expect(cbRes.status).toBe(302);
+    const redirect = parseCallbackErrorRedirect(cbRes);
+    expect(redirect, 'callback should be an ?error= redirect').toBeTruthy();
+    expect(redirect?.description ?? '').toContain('provisioned');
     expect(extractSetCookie(cbRes).sessionToken).toBeFalsy();
 
     // Verification gate passed ⇒ no re-send of an invitation email.
@@ -462,11 +488,10 @@ describe('Google OIDC — full mocked flow (Task 6)', () => {
     const issued = await issueInviteLink({ id: userId, name: 'Pending Flow', email: PENDING_EMAIL });
     if (!issued.ok) throw new Error(`invite link should issue in test env: ${issued.error}`);
 
-    // 1. Blocked before consumption (gate #2: unverified).
+    // 1. Blocked before consumption (gate #2: unverified) — now as a ?error= redirect.
     clearSentInvites();
     const blockedRes = await runOAuthRoundTrip(handler, { provider: 'google', callbackURL: CALLBACK_URL });
-    expect(blockedRes.status).toBe(401);
-    expect(await blockedRes.text()).toMatch(/check your inbox|verification link/i);
+    expect(parseCallbackErrorRedirect(blockedRes)?.description ?? '').toMatch(/check your inbox|verification link/i);
 
     // 2. Consume OUR issued token through the real verify route — it flips
     //    oidcVerified for the identity (the gate's own re-issued links don't
@@ -534,7 +559,7 @@ describe('Google OIDC — full mocked flow (Task 6)', () => {
     expect(sessions.length).toBeGreaterThan(0);
   }, 20000);
 
-  it('banned user is rejected at session creation — no session, 401 with the banned-banner message', async () => {
+  it('banned user is rejected at session creation — no session, redirect to /login with the banned message', async () => {
     // Seed a returning google user who is banned BEFORE this sign-in.
     await prisma.user.upsert({
       where: { email: BANNED_EMAIL },
@@ -553,16 +578,17 @@ describe('Google OIDC — full mocked flow (Task 6)', () => {
     const cbRes = await runOAuthRoundTrip(handler, {
       provider: 'google',
       callbackURL: CALLBACK_URL,
-      errorCallbackURL: '/login?oidc=error',
+      errorCallbackURL: '/login',
     });
 
-    // session.create.before threw APIError('UNAUTHORIZED'). BetterAuth surfaces a
-    // thrown APIError from inside the OAuth callback as a plain 401 (not an
-    // ?error= redirect) carrying the exact 'Access denied. …' message the login
-    // page's banned banner already recognises.
-    expect(cbRes.status).toBe(401);
-    const bodyText = await cbRes.text();
-    expect(bodyText).toContain('Access denied');
+    // session.create.before threw APIError('UNAUTHORIZED', { code }) — BetterAuth
+    // redirects (302) to the login page with ?error=…&error_description='Access
+    // denied. …' for the banned banner. The old behaviour was a raw 401 JSON body
+    // on the callback page (the bug this spec now pins against).
+    expect(cbRes.status).toBe(302);
+    const redirect = parseCallbackErrorRedirect(cbRes);
+    expect(redirect, 'callback should be an ?error= redirect').toBeTruthy();
+    expect(redirect?.description ?? '').toContain('Access denied');
     // No session cookie is issued for the rejected identity.
     expect(extractSetCookie(cbRes).sessionToken).toBeFalsy();
 
@@ -584,12 +610,12 @@ describe('Google OIDC — full mocked flow (Task 6)', () => {
     clearSentInvites();
 
     const cbRes = await runOAuthRoundTrip(handler, { provider: 'google', callbackURL: CALLBACK_URL });
-    expect(cbRes.status).toBe(401);
-    const bodyText = await cbRes.text();
     // Ban message (the seeded banReason), NOT the magic-link / provisioned variants.
-    expect(bodyText).toContain('Access denied');
-    expect(bodyText).toContain('Fraud');
-    expect(bodyText).not.toMatch(/check your inbox|verification link/i);
+    const redirect = parseCallbackErrorRedirect(cbRes);
+    expect(redirect, 'callback should be an ?error= redirect').toBeTruthy();
+    expect(redirect?.description ?? '').toContain('Access denied');
+    expect(redirect?.description ?? '').toContain('Fraud');
+    expect(redirect?.description ?? '').not.toMatch(/check your inbox|verification link/i);
     expect(extractSetCookie(cbRes).sessionToken).toBeFalsy();
 
     // No invitation email went out for a banned identity.

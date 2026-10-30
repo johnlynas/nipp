@@ -76,8 +76,11 @@ export async function enforceBanStatus(email: string): Promise<void> {
           { userId: user.id, email },
           `Banned user login attempt: ${reason}`,
         );
+        // `code` is required for the OAuth callback to redirect (see below) — a
+        // body-less 401 escapes /callback/:id as raw JSON on a bare page.
         throw new APIError('UNAUTHORIZED', {
           message: `Access denied. ${reason}`,
+          code: 'BANNED_USER',
         });
       }
     }
@@ -199,9 +202,13 @@ export async function enforceOidcProvisioning(userId: string): Promise<void> {
       .catch((err) => {
         logger.error({ err, userId: user.id }, '[Auth] Failed to remove stale invite tokens for stray identity');
       });
+    // code: the OAuth callback needs a machine-readable code on API errors to
+    // redirect (better-auth 1.6.x: `isAPIError(e) && e.body?.code` → redirectOnError);
+    // without it the thrown error escapes /callback/:id as a raw 401 JSON page.
     throw new APIError('UNAUTHORIZED', {
       message:
         'Access denied. This account has not been invited to the portal yet. Contact your portal administrator.',
+      code: 'NOT_INVITED',
     });
   }
 
@@ -214,9 +221,11 @@ export async function enforceOidcProvisioning(userId: string): Promise<void> {
     // cannot take the auth pipeline down; the token lands in Verification when
     // the insert succeeds.
     await issueInviteLink(user, { portalOrigin: getLastRequestOrigin() });
+    // code: required for the OAuth callback redirect (see NOT_INVITED branch).
     throw new APIError('UNAUTHORIZED', {
       message:
         'Access denied. We need to confirm your email first — check your inbox for a verification link, then try signing in with Google again.',
+      code: 'NEEDS_INBOX_CHECK',
     });
   }
 
@@ -225,9 +234,11 @@ export async function enforceOidcProvisioning(userId: string): Promise<void> {
       { userId: user.id, email: user.email },
       '[Auth] Google sign-in blocked: verified but no organization membership (not provisioned)',
     );
+    // code: required for the OAuth callback redirect (see above).
     throw new APIError('UNAUTHORIZED', {
       message:
         'Access denied. This account has not been provisioned by an administrator yet. Contact your portal administrator.',
+      code: 'NOT_PROVISIONED',
     });
   }
 }
