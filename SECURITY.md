@@ -12,6 +12,7 @@ The design follows three core principles:
 
 1. [Multi-Tenant Isolation](#1-multi-tenant-isolation)
 2. [Authentication & Session Security](#2-authentication--session-security)
+   - [Password Reset (local users)](#password-reset-local-users)
 3. [Authorization & Access Control](#3-authorization--access-control)
 4. [Teams & Sub-Organization Security](#4-teams--sub-organization-security)
 5. [Calendar Security](#5-calendar-security)
@@ -22,7 +23,7 @@ The design follows three core principles:
 
 ### Appendices
 
-- [A. API Route Security Summary](#appendix-a-api-route-security-summary)
+- [A. API Route Security Summary](#appendix-a-api-route-security-summary) (includes the password-reset routes)
 - [B. Tenant-Scoped Model Inventory](#appendix-b-tenant-scoped-model-inventory)
 - [C. Cross-References](#appendix-c-cross-references)
 
@@ -166,6 +167,57 @@ Users can be banned at any time. The `User` model includes three ban-related fie
 Ban enforcement happens in the authentication callback: when a user attempts to sign in or refresh their session, the system checks `banned` and `banExpires`. If a temporary ban has expired (`banExpires < now`), the ban is automatically cleared.
 
 Ban enforcement is method-agnostic: every successful sign-in (email, Google, and any future method) funnels through `databaseHooks.session.create.before`, where `enforceBanStatus(email)` runs — the single check that no sign-in door can route around. The email login form fast-paths the same helper for an immediate 401 on the form; expired-ban auto-clearing happens in the same place for all doors. Behavior is pinned by `tests/integration/google-oidc.test.ts` (active ban rejected; expired ban lifts the flag).
+
+### Password Reset (local users)
+
+**Shipped.** Local (email/password) users recover a lost password self-service through three public, session-less API routes that wrap BetterAuth's stock handlers in-process — token generation, scrypt hashing, and atomic consume stay single-sourced in BetterAuth; `lib/forgot-password.ts` owns the email hook, ban gate, credential guard, audit actions, and PII masking. Architectural shape: [ARCHITECTURE.md §3](./ARCHITECTURE.md#password-reset-for-local-users-inbox-proven-single-use-token); full threat model & API contract: [forgot-password design doc](./.hermes/plans/2026-10-29_forgot-password-design.md). OIDC-only users are **out of scope** — they have no portal credential to reset and keep the admin-assisted "contact your administrator" behaviour (top-bar entry renders disabled for them).
+
+```mermaid
+flowchart TD
+    REQ["POST /api/auth/password-reset {email}<br/>(public, no session)"] --> TIER{"password-reset IP tier<br/>5 per 60s default — separate counter from auth tier"}
+    TIER -- "throttled" --> R429[("429 — nothing downstream touched")]
+    TIER --> B1["enforceBanStatus — gate UPSTREAM of BetterAuth (T4)"]
+    B1 -- "active ban" --> R401a[("401 Access denied — no token issued")]
+    B1 --> BA1["BetterAuth requestPasswordReset (in-process)<br/>unknown email: dummy token + DB lookup, timing equalised (T1/T10)"]
+    BA1 -- "known local user" --> ROW[("Verification row<br/>reset-password:TOKEN, expiresAt = now + TTL (3600s default)")]
+    BA1 -. "always: 200 status:true with non-distinguishing copy — no account-existence oracle (T1)" .-> ACK["requester cannot distinguish known from unknown"]
+    ROW -- "sendResetPassword hook" --> MAIL["Gmail SMTP: branded email,<br/>host-independent /auth/reset-password?token=… link, name/email PII only (T6/T8)"]
+
+    VRF["GET …/verify?token<br/>(public, same tier)"] -. "READ-ONLY — row never deleted here" .-> ROW
+
+    RSET["POST …/reset {newPassword, token}<br/>(public, same tier)"] --> GUARD["preFlightResetToken (missing/expired → 400)<br/>→ credential-only guard hasCredentialAccount (T5: OIDC-only forged → 403)"]
+    GUARD --> B2["enforceBanStatus re-check at mutation time (T4)"]
+    B2 -- "active ban" --> R401b[("401 Access denied — BA never reached")]
+    B2 --> BA2["BetterAuth resetPassword: scrypt hash write<br/>+ atomic Verification delete in one transaction<br/>→ replay returns 400 (T3)"]
+```
+
+**Security-relevant shape:**
+
+- **No account-existence oracle.** The request route always replies `200 {status:true}` with the same copy whether or not the email is registered — BetterAuth's built-in dummy token generation + DB lookup equalises timing for unknown emails, and our in-process call preserves it. Audit entries for reset events carry the `maskEmail` output (`j***@example.com`) plus IP; no org, role, or other users' data ever appears in them (T8).
+- **Ban gate is upstream of mutation — twice.** `enforceBanStatus` runs *before* BetterAuth both at request time (no token issued to a banned user, 401 early) and again at reset completion (a valid live token cannot be spent by a mid-flow ban). It is the same choke point every sign-in door already funnels through (§2 User Ban System); a banned user cannot use recovery as an off-ramp.
+- **Single-use, TTL-bound token.** 24-char BetterAuth-generated token stored in `Verification` (`identifier = reset-password:<token>`, `value = userId`), lifetime `PASSWORD_RESET_TOKEN_TTL_SECS` (default 3600 s). The verify route is deliberately read-only — a link opened on one device stays completable on another; consumption happens exactly once inside BetterAuth's `resetPassword`, which deletes the row atomically with the hash write, so replays and races both 400.
+- **Credential-only guard (server-side).** `hasCredentialAccount(userId)` mirrors `/api/auth/password`: a request forged for an OIDC-only account gets 403 regardless of client claims — no portal reset exists for identities without a credential `Account` row (T5).
+- **CSRF posture.** The mutating endpoint handles no session cookie — the single-use token *is* the auth factor, so cross-site form submission by a victim's browser has nothing to ride on; CSP `form-action 'self'` keeps form posts same-origin, and BetterAuth's own origin check applies on the stock endpoints we wrap. No CORS headers are emitted (T7).
+- **PII discipline.** Password values are never logged (only length checks run); emails in reset-flow log/audit writes go through `maskEmail` plus the standard pino redaction pipeline (§8). The email itself carries no credentials and asks for none; its link is same-origin-only (T6, T9).
+
+**Threat controls (abridged from design doc §9 — full table with per-threat rationale there):**
+
+| Threat | Control |
+|--------|---------|
+| User enumeration via request endpoint (T1) | Always-200 + non-distinguishing copy; BetterAuth dummy token generation + DB lookup for unknown emails equalises timing |
+| Brute-force of the request endpoint (T2) | Dedicated `password-reset` IP tier (5/60 s default, env-tunable), separate counter from the auth tier; CRITICAL log + SSE via the existing `reportThrottle` path |
+| Link interception / replay (T3) | Single-use token; atomic delete + hash write in one transaction at consume; 1-hour TTL (`PASSWORD_RESET_TOKEN_TTL_SECS`) |
+| Banned-account self-service (T4) | `enforceBanStatus` before BetterAuth at request time **and** re-checked at mutation — same choke point as sign-in |
+| Forged reset for an OIDC-only user (T5) | Server-side `hasCredentialAccount` guard → 403, mirrors `/api/auth/password` |
+| Email phishing using the brand (T6) | Same Gmail relay identity/domain as all portal mail; no credentials asked in email; same-origin link only |
+| CSRF on the reset POST (T7) | Session-less mutation endpoint — token is the auth factor; CSP `form-action 'self'`; BetterAuth origin check on wrapped stock endpoints |
+| Audit-log PII leakage (T8) | `maskEmail` output only (`j***@…`); unknown-email requests recorded IP-only in log metadata |
+| Log injection via new password / email (T9) | Password never logged; values pass through the pino redactor pipeline — no raw PII concatenated into messages |
+| Gmail SMTP failure mid-flow (T10) | `sendResetPassword` catch-and-log, never throws into the request handler; token row remains valid so resend works |
+| Cross-tenant exposure via reset (T11) | All DB access inside `withPlatformContext(token-derived userId)` — no request-body tenantId can steer it; same isolation class as `/api/auth/password` |
+| Token leakage via Referer header (T12) | Reset page strips `?token=` from history in the mount effect; responses are no-store; token persists in state only for the POST body |
+
+**Operational requirement:** the flow reuses the existing Gmail relay (`SMTP_*` vars — no new email configuration). Relay failure degrades gracefully: the request still 200s, the token row stays valid, and resend works (T10). The three routes are distinct pathnames from BetterAuth's stock password endpoints, which remain reachable only through the `[...all]` catch-all pass-through untouched; the new tier's separate counter means no double-counting against the auth tier.
 
 ### Google OIDC Sign-In (invite-only door + magic-link verification)
 
@@ -505,7 +557,7 @@ The complete list of fields that are redacted from logs includes:
 - `apiKey`, `apiSecret`, `accessToken`, `refreshToken` — API credentials
 - `encryptionKey`, `privateKey`, `payloadKey` — cryptographic material
 
-This list is maintained in the logger configuration and should be updated whenever new PII fields are added to the data model.
+This list is maintained in the logger configuration and should be updated whenever new PII fields are added to the data model. Password-reset flow audit entries (request / link-opened / success) additionally write only `maskEmail` output (`j***@…`) as identifying metadata — never a raw email value (§2 password reset); unknown-email request events carry IP only, with no user identifier at all.
 
 ### Error Serialization Redaction
 
@@ -537,6 +589,7 @@ The following environment variables control security-relevant behavior:
 | `BETTER_AUTH_TRUSTED_ORIGINS` | Comma-separated extra trusted origins for cross-origin browser frontends (partner BFFs); cookieless bearer clients never need it | No |
 | `GOOGLE_CLIENT_ID` | Google OIDC client id — required by the env schema (`lib/env-schema.ts`) | Yes |
 | `GOOGLE_CLIENT_SECRET` | Google OIDC client secret (same requirement) | Yes |
+| `PASSWORD_RESET_TOKEN_TTL_SECS` | Lifetime of a password-reset token in seconds (`resetPasswordTokenExpiresIn`, BetterAuth default 3600); read by `lib/forgot-password.ts` and wired into `lib/auth.ts` (§2 password reset) | No (defaults to 3600) |
 | `DATABASE_URL` | PostgreSQL connection string (includes credentials) | Yes |
 | `REDIS_URL` | Redis connection string for caching and replay cache (optional) | No |
 | `NODE_ENV` | Environment mode (`development`, `production`) — affects CSP strictness and CSRF relaxation | Yes |
@@ -568,6 +621,7 @@ Applied to security-critical route groups to prevent abuse of auth, admin, and c
 | `RATE_LIMIT_PAYLOAD_KEY_MAX` / `_WINDOW` | Payload-key issuance limit per session | 30 / 60s |
 | `RATE_LIMIT_PAYLOAD_KEY_REVOKE_MAX` / `_WINDOW` | Payload-key revocation limit (stricter, prevents brute-force key destruction) | 5 / 60s |
 | `RATE_LIMIT_AUTH_MAX` / `_WINDOW` | Auth-route limit per IP — applied in `/api/auth/*` | 5 / 60s |
+| `RATE_LIMIT_PASSWORD_RESET_MAX` / `_WINDOW` | Password-reset route limit per IP — the three public `/api/auth/password-reset*` routes; **separate counter from the auth tier** so ops can tune reset abuse independently of login brute-force (§2 password reset) | 5 / 60s |
 | `RATE_LIMIT_ADMIN_MAX` / `_WINDOW` | Admin-write limit per session — `/api/admin/*`, `/api/dashboard/admin/*`, `/api/roles/*` mutations | 30 / 60s |
 | `RATE_LIMIT_CALENDAR_MAX` / `_WINDOW` | Calendar/team mutation limit per session | 30 / 60s |
 | `RATE_LIMIT_API_DOCS_MAX` / `_WINDOW` | API docs (/api-docs UI + spec + assets) limit per session | 10 / 60s |
@@ -603,6 +657,7 @@ All security-relevant routes are rate limited through the unified limiter (`lib/
 | Route group | Gate | Default (tunable) |
 |-------------|------|-------------------|
 | `/api/auth/*` (all methods incl. social sign-in & magic-link verify) | `checkAuthRateLimit` + BetterAuth built-ins | 5 req/60s per IP (`RATE_LIMIT_AUTH_MAX/WINDOW`) |
+| `/api/auth/password-reset*` (request, verify, reset — public, session-less) | `checkPasswordResetRateLimit` — dedicated tier, separate counter so it never double-counts against the auth tier (§2 password reset) | 5 req/60s per IP (`RATE_LIMIT_PASSWORD_RESET_MAX/WINDOW`) |
 | `/api/admin/*`, `/api/dashboard/admin/*`, `/api/roles/*` (mutations) | `checkAdminRateLimit` | 30 req/60s per session (`RATE_LIMIT_ADMIN_MAX/WINDOW`) |
 | `/api/organizations/[orgId]/*` calendar & team routes (mutations) | `checkCalendarRateLimit` | 30 req/60s per session (`RATE_LIMIT_CALENDAR_MAX/WINDOW`) |
 | `POST /api/security/payload-key` | `checkRateLimit` | 30 req/60s (`RATE_LIMIT_PAYLOAD_KEY_MAX/WINDOW`) |
@@ -627,6 +682,7 @@ Route groups as they exist under `app/api/`:
 | Route group | Access | Rate limiting |
 |-------------|--------|---------------|
 | `/api/auth/*` (sign-in, social sign-in, magic-link verify) | Public doors; ban + provisioning gates at session creation; origin/CSRF checks enabled, no CORS emitted | `checkAuthRateLimit` per IP + BetterAuth built-ins |
+| `/api/auth/password-reset`, `/api/auth/password-reset/verify`, `/api/auth/password-reset/reset` (local-user password reset) | Public, session-less (token is the auth factor on the mutation); ban gates at request + completion; credential-only guard rejects OIDC-only accounts server-side (403); no-oracle 200 on request; audit entries use `maskEmail` output only (§2 password reset) | `checkPasswordResetRateLimit` per IP — dedicated tier, separate counter from the auth tier |
 | `/api/admin/*`, `/api/dashboard/admin/*` | Verified platform admin only (app gate + RLS `is_platform_admin`) | `checkAdminRateLimit` per session on mutations |
 | `/api/organizations/[orgId]/*` (teams, calendar, org chart, location) | Target-org membership via the shared tenant-access gate; mutations permission-checked; RLS-scoped | `checkCalendarRateLimit` per session on mutation routes |
 | `/api/roles/*` | Member of the user's own organization with role-management permissions | `checkAdminRateLimit` per session |
@@ -677,5 +733,5 @@ This document covers security-specific details. For broader architectural contex
 
 ---
 
-*Last updated: 2026-10-16*
+*Last updated: 2026-10-30*
 *Document owner: Engineering Team*
