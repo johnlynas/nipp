@@ -20,7 +20,7 @@ flowchart LR
     P1 --> P2[✅ Phase 2<br/>BetterAuth wiring in lib/auth.ts]
     P2 --> P3[✅ Phase 3<br/>API endpoints + rate limit tier]
     P3 --> P4[✅ Phase 4<br/>UI pages + login link + top-bar entry]
-    P4 --> P5[Phase 5<br/>ARCHITECTURE.md update]
+    P4 --> P5[✅ Phase 5<br/>ARCHITECTURE.md update]
     P5 --> P6[Phase 6<br/>SECURITY.md update]
     P6 --> FIN[Final validation gate<br/>test · lint · build]
 ```
@@ -32,7 +32,7 @@ flowchart LR
 | 2 | `lib/auth.ts`: `sendResetPassword`, TTL option, `onPasswordReset`; env var | ✅ config test | ✅ Complete (2026-10-29) |
 | 3 | 3 route files + new rate-limit tier in `lib/rate-limiter.ts` + integration tests + OpenAPI docs (JSDoc headers, registry schemas, regenerated spec) | ✅ per endpoint | ✅ Complete (2026-10-29) |
 | 4 | 2 pages, login-link rewire, top-bar menu item; unit tests for page components | ✅ per component | ✅ Complete (2026-10-29) |
-| 5 | `ARCHITECTURE.md` §3 subsection + TOC + mermaid diagram | docs |
+| 5 | `ARCHITECTURE.md` §3 subsection + TOC + mermaid diagram | docs | ✅ Complete (2026-10-30) |
 | 6 | `SECURITY.md` §2 subsection + rate-limit table rows + Appendix A row + env table | docs |
 
 Key existing anchors (verified on branch `user-forgot-password`):
@@ -516,7 +516,9 @@ Locate the account-menu dropdown built in Phase #43 (search for the component co
 
 ---
 
-## Phase 5 — ARCHITECTURE.md update
+## Phase 5 — ARCHITECTURE.md update — ✅ COMPLETED (2026-10-30)
+
+**Status:** All three plan items landed and the diagram verified with the real mermaid parser (`validate-diagram-blocks.js`, 12/12 blocks OK, including the new one). Details recorded as "Phase-5 outcome" below.
 
 **Objective:** Keep the system architecture doc authoritative for the new door.
 
@@ -531,6 +533,18 @@ Locate the account-menu dropdown built in Phase #43 (search for the component co
 3. **§3 Auth Flow bullets** (lines 152-155): append third bullet: local users also have self-service password reset (see subsection).
 
 Commit: `docs: ARCHITECTURE.md — password reset flow for local users`.
+
+### Phase-5 outcome (complete — recorded during Phase 5 execution on 2026-10-30)
+
+- **TOC:** indented child entry under §3, "Password Reset for Local Users (inbox-proven, single-use token)", anchor matching the new header exactly.
+- **§3 Auth Flow bullets:** third bullet appended after Google OIDC — one line: local users have self-service reset; OIDC-only keeps admin-assisted behaviour. ("The in-process flow for both doors" sentence left untouched — it describes sign-in, not recovery.)
+- **New subsection** inserted between the Google OIDC subsection and `### Bearer-Token Access & Public Reachability`, following the OIDC subsection's house style (*Shipped* lead paragraph → mermaid → component inventory table → invariant note → links):
+  - Mermaid flowchart = condensed design §4 (Browser / Portal / PostgreSQL subgraphs; request → email → verify (read-only) → reset (atomic consume); banned/replay edges annotated in node/edge labels). Verified with `diagram-render-debugging` skill's real-parser harness: **two parse failures found and fixed before saving** — (1) escaped double-quotes inside the `/login` node label (`got 'STR'`) → reworded; (2) literal backslash-quote pair in the `Verification` cylinder label → inner quotes removed. Final run: **12/12 blocks OK, 0 FAILED**.
+  - Component inventory table mirrors the OIDC one: request / verify / reset routes (+ exact file paths), `lib/forgot-password.ts`, `lib/auth.ts` wiring (request-origin precedence deviation from Phase 2 noted inline), login UI + top-bar chip, both pages (`AuthBrand.tsx` shared slice, token-strip T12), the dedicated rate-limit tier (env names).
+  - Local-user invariant note: stock BetterAuth password endpoints still pass through the `[...all]` catch-all untouched; three new routes are distinct pathnames — no rewrites/middleware changes beyond the two public page entries.
+  - **Link decision (deviation from plan):** design doc lives at `.hermes/plans/2026-10-29_forgot-password-design.md` (not `documents/feature-planning-and-development/`), so the "full design" link points there; SECURITY.md link anchors `#user-ban-system` with an explicit "(password-reset subsection in Phase 6)" note — the anchor is valid today and stays valid after Phase 6 inserts after it.
+- No code changes; docs-only phase, no test/lint/build gate applicable (build already green at Phase 4).
+- **Commit:** `docs: ARCHITECTURE.md — password reset flow for local users` (single commit for the phase).
 
 ---
 
