@@ -526,14 +526,14 @@ describe('databaseHooks.session.create.after (auto org assignment)', () => {
 
   it('assigns the org from the user Member record when missing', async () => {
     mockPrisma.user.findUnique.mockResolvedValueOnce({ id: 'u_empty', activeOrganizationId: null });
-    mockPrisma.member.findFirst.mockResolvedValueOnce({ orgId: 'org_from_member' });
+    mockPrisma.member.findFirst.mockResolvedValueOnce({ organizationId: 'org_from_member' });
     mockPrisma.user.update.mockResolvedValueOnce({});
 
     await hook({ id: 's2', userId: 'u_empty' });
 
     expect(mockPrisma.member.findFirst).toHaveBeenCalledWith({
       where: { userId: 'u_empty' },
-      select: { orgId: true },
+      select: { organizationId: true },
     });
     expect(mockPrisma.user.update).toHaveBeenCalledWith({
       where: { id: 'u_empty' },
@@ -553,7 +553,7 @@ describe('databaseHooks.session.create.after (auto org assignment)', () => {
 
   it('tolerates a vanished user (findUnique → null): member lookup still runs, no crash', async () => {
     mockPrisma.user.findUnique.mockResolvedValueOnce(null);
-    mockPrisma.member.findFirst.mockResolvedValueOnce({ orgId: 'org_ghost' });
+    mockPrisma.member.findFirst.mockResolvedValueOnce({ organizationId: 'org_ghost' });
     mockPrisma.user.update.mockResolvedValueOnce({});
 
     await expect(hook({ id: 's4', userId: 'u_ghost' })).resolves.toBeUndefined();

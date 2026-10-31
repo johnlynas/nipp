@@ -34,7 +34,7 @@ export type TenantAccess =
 async function readMembershipForAccessCheck(userId: string, orgId: string) {
   const ctx = { ...buildPlatformContext(userId), orgId };
   return withExplicitRLS(ctx, () =>
-    tenantDb.member.findFirst({ where: { userId, orgId }, select: { role: true } })
+    tenantDb.member.findFirst({ where: { userId, organizationId: orgId }, select: { role: true } })
   );
 }
 

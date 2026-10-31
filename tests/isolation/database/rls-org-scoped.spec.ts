@@ -35,10 +35,11 @@ const ORG_TABLES: Record<string, OrgTableDef> = {
   },
   TeamMember: {
     orgField: 'organizationId', seedA: ['tm-a1'], seedB: ['tm-b1'],
-    insertCols: 'id, "teamId", "userId", "organizationId"',
+    insertCols: 'id, "teamId", "userId", "organizationId", "membershipKey"',
     // userId=Super (not a member of team-a1 → unique(userId,teamId) stays fresh);
     // the ONLY check that can fail is RLS WITH CHECK on the foreign org.
-    insertVals: (o) => `('x-tm', 'team-a1', '${FIXTURE.userSuper}', '${o}')`,
+    // membershipKey: 32-char md5 of a per-value seed — unique per probe row.
+    insertVals: (o) => `('x-tm', 'team-a1', '${FIXTURE.userSuper}', '${o}', md5('tm' || o))`,
   },
   TeamRole: {
     orgField: 'organizationId', seedA: ['tr-a1'], seedB: ['tr-b1'],
@@ -78,17 +79,19 @@ const ORG_TABLES: Record<string, OrgTableDef> = {
     insertCols: 'id, "memberId", "roleId", "organizationId"',
     insertVals: (o) => `('x-mr', 'mem-a1', 'role-a1', '${o}')`,
   },
-  // BetterAuth-owned org tables (orgId). Note: Member.updatedAt has no DB
-  // default (Prisma app-side) — set explicitly.
+  // BetterAuth-owned org tables (1.7: Member/Invitation renamed to organizationId;
+  // SentInvitation keeps orgId — the table is app-internal, not a 1.7 plugin model).
+  // Note: Member.updatedAt has no DB default (Prisma app-side) — set explicitly.
   Member: {
-    orgField: 'orgId', seedA: ['mem-a1'], seedB: ['mem-b1'],
-    insertCols: 'id, "orgId", "userId", "updatedAt"',
+    orgField: 'organizationId', seedA: ['mem-a1'], seedB: ['mem-b1'],
+    insertCols: 'id, "organizationId", "userId", "updatedAt"',
     insertVals: (o) => `('x-mem', '${o}', '${FIXTURE.userA}', now())`,
   },
   Invitation: {
-    orgField: 'orgId', seedA: ['inv-a1'], seedB: ['inv-b1'],
-    insertCols: 'id, email, role, token, "expiresAt", "orgId"',
-    insertVals: (o) => `('x-inv', 'f@x.co', 'member', 'tok-x-inv', now() + interval '7d', '${o}')`,
+    orgField: 'organizationId', seedA: ['inv-a1'], seedB: ['inv-b1'],
+    // 1.7: token removed, status added.
+    insertCols: 'id, email, role, status, "expiresAt", "organizationId"',
+    insertVals: (o) => `('x-inv', 'f@x.co', 'member', 'pending', now() + interval '7d', '${o}')`,
   },
   SentInvitation: {
     orgField: 'orgId', seedA: ['snt-a1'], seedB: ['snt-b1'],

@@ -154,11 +154,11 @@ describe('count/aggregate/groupBy are org-scoped', () => {
     expect(c.args.where).toEqual({ organizationId: 'org-A' });
   });
 
-  it('count uses the orgId column for Member', async () => {
+  it('count uses the organizationId column for Member (1.7 rename)', async () => {
     mockState.userId = 'u1';
     mockState.orgId = 'org-A';
     await tenantDb.member.count();
-    expect(lastCallFor('count').args.where).toEqual({ orgId: 'org-A' });
+    expect(lastCallFor('count').args.where).toEqual({ organizationId: 'org-A' });
   });
 
   it('count uses the organizationId column for Units', async () => {

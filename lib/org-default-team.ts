@@ -26,6 +26,7 @@
 
 import { Prisma } from '@prisma/client';
 import { logger } from '@/lib/logger';
+import { teamMembershipKey } from '@/lib/team-membership-key';
 
 /** Canonical slug of the default team every org gets. */
 export const DEFAULT_MEMBERS_TEAM_SLUG = 'members';
@@ -117,7 +118,7 @@ export async function enrollInDefaultMembersTeam(
     return; // Already a member of this team — nothing to do.
   }
 
-  await db.teamMember.create({ data: { userId, teamId: team.id, organizationId } });
+  await db.teamMember.create({ data: { userId, teamId: team.id, organizationId, membershipKey: teamMembershipKey(team.id, userId) } });
 
   logger.info(
     { userId, orgId: organizationId, teamId: team.id, method: 'enrollInDefaultMembersTeam' },
@@ -128,7 +129,7 @@ export async function enrollInDefaultMembersTeam(
   // kept for parity with TeamService.addTeamMember so the invariant survives
   // anyone binding roles to the default team).
   const member = await db.member.findFirst({
-    where: { userId, orgId: organizationId },
+    where: { userId, organizationId: organizationId},
     select: { id: true },
   });
 

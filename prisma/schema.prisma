@@ -7,7 +7,7 @@
 //   organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
 //   @@index([organizationId])
 //
-// (BetterAuth-owned models — Member, Invitation, SentInvitation — use `orgId`.)
+// (BetterAuth-owned models: Member/Invitation use `organizationId` on 1.7; SentInvitation — app-internal — keeps `orgId`.)
 // This is required for BOTH isolation layers:
 //   1. App layer: tenantDb extension (lib/tenant-db.ts / lib/tenant-extension-core.ts)
 //      injects the org column into where/data — its model list must match this
@@ -174,6 +174,11 @@ model Session {
   userId       String
   user         User      @relation(fields: [userId], references: [id], onDelete: Cascade)
 
+  // Better Auth 1.7 per-session org/team tracking — the organization plugin
+  // writes these via setActiveOrganization/setActiveTeam at every org switch.
+  activeOrganizationId  String?
+  activeTeamId          String?
+
   @@index([userId])
 }
 
@@ -229,6 +234,8 @@ model Organization {
   description String?
   status      OrgStatus @default(PENDING)
   metadata    Json?
+  // Better Auth 1.7 org logo (not surfaced by app UI; the adapter writes it).
+  logo        String?
   // Map coordinates + zoom for the organization's Map page (NOT exposed in the org
   // CRUD/view dialogs — read via GET /api/organizations/[orgId]/location). Zoom is
   // clamped to [MIN_ZOOM, MAX_ZOOM] when applied; e.g. 9 renders as "34%" with the
@@ -273,28 +280,37 @@ model Member {
 
   userId     String
   user       User     @relation(fields: [userId], references: [id], onDelete: Cascade)
-  orgId      String
-  organization Organization @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  // Better Auth 1.7 renamed `orgId` -> `organizationId` in the org plugin's
+  // member table; the adapter requires this exact column name to pass its
+  // runtime schema check.
+  organizationId String
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
   memberRoles MemberRole[]
 
   // Optional team association (BetterAuth internal alignment when teams are enabled)
   teamId     String?  @map("teamId")
 
-  @@unique([userId, orgId])
+  @@unique([userId, organizationId])
 }
 
 model Invitation {
   id         String   @id @default(cuid())
   email      String
   role       String?
-  token      String   @unique
+  // Better Auth 1.7 invitation columns (renamed orgId -> organizationId, token removed):
+  // the plugin's create writes status='pending' + inviterId; existing 1.6 rows are
+  // backfilled by migration (status defaulted pending, inviter left null).
+  organizationId String
+  status       String   @default("pending")
+  inviterId    String?
   expiresAt  DateTime
   createdAt  DateTime @default(now())
 
-  orgId      String
-  organization Organization @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
 
-  // Optional team association — invites users directly to a specific team
+  // Optional team association — invites users directly to a specific team.
+  // NOTE: 1.7 stores team ids as a comma-joined string here; single-team
+  // invites keep writing one id, so existing rows remain readable.
   teamId     String?  @map("teamId")
 
   @@index([email])
@@ -321,6 +337,10 @@ model Team {
   organizationId String
   organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
 
+  // Better Auth 1.7 team seat counter — the plugin reserves seats atomically
+  // via incrementOne guarded by memberCount < maximumMembersPerTeam.
+  memberCount  Int      @default(0)
+
   members TeamMember[]
   roles  TeamRole[]
 
@@ -343,8 +363,14 @@ model TeamMember {
   userId     String
   user       User     @relation(fields: [userId], references: [id], onDelete: Cascade)
 
-  organizationId String
-  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  // 1.7: org is derived from the team; the plugin never writes this column,
+  // so it must be nullable for its insert to pass the schema check.
+  organizationId String?
+  organization   Organization? @relation(fields: [organizationId], references: [id], onDelete: SetNull)
+
+  // Better Auth 1.7 canonical membership key:
+  // base64url(SHA-256(JSON.stringify([teamId, userId]))) without padding.
+  membershipKey String  @unique
 
   @@unique([userId, teamId]) // A user can only be in a team once
   @@index([organizationId])  // Index for tenant-scoped queries

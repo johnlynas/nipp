@@ -35,7 +35,7 @@ return withRLSContext({ userId: session.user.id, orgId, isPlatformAdmin: false }
 
   // Verify the user is a member of this organization
   const membership = await tenantDb.member.findFirst({
-    where: { userId: session.user.id, orgId },
+    where: { userId: session.user.id, organizationId: orgId },
   });
 
   if (!membership) {
@@ -93,7 +93,7 @@ return withRLSContext({ userId: session.user.id, orgId, isPlatformAdmin: false }
 
   // Verify the user is a member of this organization
   const membership = await tenantDb.member.findFirst({
-    where: { userId: session.user.id, orgId },
+    where: { userId: session.user.id, organizationId: orgId },
   });
 
   if (!membership) {

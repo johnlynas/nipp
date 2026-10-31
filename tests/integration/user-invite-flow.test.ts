@@ -143,11 +143,11 @@ describe('POST /api/dashboard/admin/users (create)', () => {
 
     // Member row created for the target org.
     expect(mockDb.member.create).toHaveBeenCalledWith(
-      expect.objectContaining({ data: expect.objectContaining({ userId: 'new-user-1', orgId, role: 'member' }) }),
+      expect.objectContaining({ data: expect.objectContaining({ userId: 'new-user-1', organizationId: orgId, role: 'member' }) }),
     );
     // Default "Members" team enrollment (no teamId requested).
     expect(mockDb.teamMember.create).toHaveBeenCalledWith(
-      { data: { userId: 'new-user-1', teamId: 'members-team', organizationId: orgId } },
+      { data: expect.objectContaining({ userId: 'new-user-1', teamId: 'members-team', organizationId: orgId }) },
     );
     // Invitation email fired exactly once for the invitee.
     expect(sentInvites).toHaveLength(1);
@@ -201,7 +201,7 @@ describe('POST /api/dashboard/admin/users (create)', () => {
     expect(body.magicLinkSent).toBe(true);
     // Enrolled into the requested team — NOT the default Members team.
     expect(mockDb.teamMember.create).toHaveBeenCalledWith({
-      data: { userId: 'new-user-2', teamId: 'team-blue', organizationId: orgId },
+      data: expect.objectContaining({ userId: 'new-user-2', teamId: 'team-blue', organizationId: orgId }),
     });
   });
 

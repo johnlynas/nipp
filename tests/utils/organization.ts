@@ -27,7 +27,7 @@ export async function addMemberToOrganization(
   return prisma.member.create({
     data: {
       userId,
-      orgId,
+      organizationId: orgId,
       role,
     },
   });
@@ -40,8 +40,8 @@ export async function createTestInvitation(email: string, orgId: string) {
   return prisma.invitation.create({
     data: {
       email,
-      orgId,
-      token: `test-token-${Date.now()}`,
+      organizationId: orgId,
+      status: 'pending', // 1.7: token column removed; invitation id is the link handle
       expiresAt: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000), // 7 days
     },
   });

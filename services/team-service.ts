@@ -20,6 +20,7 @@ import { runWithTenant } from '@/lib/tenant-context';
 import { env } from '@/lib/env';
 import { logger } from '@/lib/logger';
 import { recordAuditLog } from '@/lib/audit-log';
+import { teamMembershipKey } from '@/lib/team-membership-key';
 import { ServiceContext, ValidationError, NotFoundError, ConflictError, ForbiddenError } from '@/lib/services/types';
 import { requireAnyAdmin, logFailedAuth } from '@/lib/services/base-service';
 import { normalizePagination } from '@/lib/services/types';
@@ -502,7 +503,7 @@ export const TeamService = {
     return runWithTenant(team.organizationId, async () => {
       // Verify user is a member of the same organization
       const member = await tenantDb.member.findFirst({
-        where: { userId: input.userId, orgId: team.organizationId },
+        where: { userId: input.userId, organizationId: team.organizationId },
       });
 
       if (!member) {
@@ -525,6 +526,7 @@ export const TeamService = {
             userId: input.userId,
             teamId,
             organizationId: team.organizationId,
+            membershipKey: teamMembershipKey(teamId, input.userId),
           },
         });
 
@@ -586,7 +588,7 @@ export const TeamService = {
 
       // Find the corresponding Member record for role revocation
       const member = await tenantDb.member.findFirst({
-        where: { userId, orgId: team.organizationId },
+        where: { userId, organizationId: team.organizationId },
       });
 
       return tenantDb.$transaction(async (tx) => {

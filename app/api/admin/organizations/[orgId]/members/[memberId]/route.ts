@@ -76,7 +76,7 @@ export const PATCH = wrapPiiRoute(async (request, decryptedBody, params) => {
 
       // Verify member exists and belongs to this org (platform pass-through; RLS scopes)
       const existingMember = await tenantDb.member.findFirst({
-        where: { id: urlMemberId, orgId: urlOrgId },
+        where: { id: urlMemberId, organizationId: urlOrgId},
         include: { user: { select: { name: true, email: true } } },
       });
       if (!existingMember) {
@@ -153,7 +153,7 @@ export const DELETE = wrapPiiRoute(async (request, _decryptedBody, params) => {
 
       // Verify member exists and belongs to this org (platform pass-through; RLS scopes)
       const existingMember = await tenantDb.member.findFirst({
-        where: { id: urlMemberId, orgId: urlOrgId },
+        where: { id: urlMemberId, organizationId: urlOrgId},
         include: { user: { select: { name: true, email: true } } },
       });
       if (!existingMember) {

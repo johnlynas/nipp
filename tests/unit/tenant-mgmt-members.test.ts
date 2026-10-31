@@ -218,7 +218,7 @@ describe('POST /api/admin/organizations/[orgId]/members', () => {
 
     expect(response.status).toBe(201);
     expect(tenantDb.teamMember.create).toHaveBeenCalledWith({
-      data: { userId: 'user-1', teamId: 'members-team', organizationId: 'org-1' },
+      data: expect.objectContaining({ userId: 'user-1', teamId: 'members-team', organizationId: 'org-1' }),
     });
   });
 
@@ -253,7 +253,7 @@ describe('POST /api/admin/organizations/[orgId]/members', () => {
       data: { name: 'Members', slug: 'members', description: 'All members of organization Test Org', organizationId: 'org-1' },
     });
     expect(tenantDb.teamMember.create).toHaveBeenCalledWith({
-      data: { userId: 'user-1', teamId: 'healed-team', organizationId: 'org-1' },
+      data: expect.objectContaining({ userId: 'user-1', teamId: 'healed-team', organizationId: 'org-1' }),
     });
   });
 

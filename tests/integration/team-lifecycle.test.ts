@@ -112,7 +112,7 @@ describe('Team Lifecycle Integration', () => {
   it('should cascade delete team members when team is deleted', async () => {
     const team = await createTeam('Cascade Team');
     const user = await platform.user.create({ data: { name: 'Test User', email: `cascade-${Date.now()}@test.com`, emailVerified: true } });
-    await db().member.create({ data: { userId: user.id, orgId: testOrgId } });
+    await db().member.create({ data: { userId: user.id, organizationId: testOrgId} });
 
     // Production path (TeamService): membership + role inheritance in one op.
     await withTenantAccess(testOrgId, false, () => TeamService.addTeamMember(team.id, { userId: user.id }, adminCtx()));
@@ -151,7 +151,7 @@ describe('Team Lifecycle Integration', () => {
 
   it('should enforce unique [userId, teamId] constraint', async () => {
     const user = await platform.user.create({ data: { name: 'Test User', email: `dup-${Date.now()}@test.com`, emailVerified: true } });
-    const member = await db().member.create({ data: { userId: user.id, orgId: testOrgId } });
+    const member = await db().member.create({ data: { userId: user.id, organizationId: testOrgId} });
     const team = await createTeam('Dup Team');
 
     await withTenantAccess(testOrgId, false, () => TeamService.addTeamMember(team.id, { userId: user.id }, adminCtx()));

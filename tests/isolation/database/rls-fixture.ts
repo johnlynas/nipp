@@ -117,8 +117,9 @@ INSERT INTO "Organization" (id, name, slug, status, "updatedAt") VALUES
   ('${f.orgB}', 'Tenant B', 'tb', 'ACTIVE', now()),
   ('${f.orgPlatform}', 'Platform', 'platform', 'ACTIVE', now());
 
--- Members (orgId) — one per org + platform membership for the admin user.
-INSERT INTO "Member" (id, role, "orgId", "userId", "updatedAt") VALUES
+-- Members (BetterAuth 1.7: column renamed orgId -> organizationId) — one per org
+-- + platform membership for the admin user.
+INSERT INTO "Member" (id, role, "organizationId", "userId", "updatedAt") VALUES
   ('mem-a1', 'admin',  '${f.orgA}', '${f.userA}', now()),
   ('mem-b1', 'member', '${f.orgB}', '${f.userB}', now()),
   ('mem-p1', 'member', '${f.orgPlatform}', '${f.userSuper}', now());
@@ -140,10 +141,11 @@ INSERT INTO "MemberRole" (id, "memberId", "roleId", "organizationId") VALUES
   ('mr-a1', 'mem-a1', 'role-a1', '${f.orgA}'),
   ('mr-b1', 'mem-b1', 'role-b1', '${f.orgB}');
 
--- Invitations / sent invitations (orgId).
-INSERT INTO "Invitation" (id, email, role, token, "expiresAt", "orgId") VALUES
-  ('inv-a1', 'new@ta.co',  'member', 'tok-inv-a', now() + interval '7d', '${f.orgA}'),
-  ('inv-b1', 'new@tb.co',  'member', 'tok-inv-b', now() + interval '7d', '${f.orgB}');
+-- Invitations / sent invitations (1.7: orgId renamed; Invitation.token removed,
+-- status added — the invitation id is the link handle now).
+INSERT INTO "Invitation" (id, email, role, status, "expiresAt", "organizationId") VALUES
+  ('inv-a1', 'new@ta.co',  'member', 'pending', now() + interval '7d', '${f.orgA}'),
+  ('inv-b1', 'new@tb.co',  'member', 'pending', now() + interval '7d', '${f.orgB}');
 
 INSERT INTO "SentInvitation" (id, email, role, token, "expiresAt", "orgId") VALUES
   ('snt-a1', 'old@ta.co', 'member', 'tok-snt-a', now() + interval '7d', '${f.orgA}'),
@@ -160,9 +162,9 @@ INSERT INTO "Units" ("unitId", "organizationId", owner, address, "postCode", ema
   ('u-a2', '${f.orgA}', 'Michael Byrne', '12 High Street', 'BT49 3AB', 'michael.byrne@example.com', '+44 28 9123 4502', true,  'HOUSE',     now(), now()),
   ('u-b1', '${f.orgB}', 'Sadie Carson',  '7 Shore Road',   'BT78 5ZZ', 'sadie.carson@example.com',  '+44 28 9654 3201', true,  'OTHER',     now(), now());
 
-INSERT INTO "TeamMember" (id, "teamId", "userId", "organizationId") VALUES
-  ('tm-a1', 'team-a1', '${f.userA}', '${f.orgA}'),
-  ('tm-b1', 'team-b1', '${f.userB}', '${f.orgB}');
+INSERT INTO "TeamMember" (id, "teamId", "userId", "organizationId", "membershipKey") VALUES
+  ('tm-a1', 'team-a1', '${f.userA}', '${f.orgA}', 'i75S3vc8Ej3MesOKrn2PeIgEpok8_4FHo153doXXZrA'),
+  ('tm-b1', 'team-b1', '${f.userB}', '${f.orgB}', '0W6l1_DhCSqfRjQj324cIwkKF1SrS9mT1Ik50XxJ5Bk');
 
 INSERT INTO "TeamRole" (id, "teamId", "roleId", "organizationId") VALUES
   ('tr-a1', 'team-a1', 'role-a1', '${f.orgA}'),

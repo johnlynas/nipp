@@ -67,7 +67,7 @@ export async function POST(req: NextRequest) {
   const membership = await tenantDb.member.findFirst({
     where: {
       userId: session.user.id,
-      orgId: organizationId,
+      organizationId: organizationId,
     },
     select: { role: true },
   });

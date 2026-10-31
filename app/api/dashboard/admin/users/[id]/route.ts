@@ -14,9 +14,9 @@ export const runtime = 'nodejs';
 async function getFirstOrgId(sessionUserId: string, targetUserId: string): Promise<string | null> {
   try {
     const member = await withPlatformContext(sessionUserId, () =>
-      tenantDb.member.findFirst({ where: { userId: targetUserId }, select: { orgId: true } })
+      tenantDb.member.findFirst({ where: { userId: targetUserId }, select: { organizationId: true } })
     );
-    return member?.orgId ?? null;
+    return member?.organizationId ?? null;
   } catch {
     return null;
   }

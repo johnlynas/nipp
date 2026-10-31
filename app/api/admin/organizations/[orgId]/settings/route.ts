@@ -100,13 +100,13 @@ export const PATCH = wrapPiiRoute(async (request, decryptedBody, params) => {
       // Special handling for SUSPENDED: invalidate sessions
       if (status === 'SUSPENDED') {
         // Session has no RLS; Member filter is ctx-scoped (platform pass-through).
-        await tenantDb.session.deleteMany({ where: { user: { members: { some: { orgId } } } } });
+        await tenantDb.session.deleteMany({ where: { user: { members: { some: { organizationId: orgId } } } } });
         logger.info({ userId: session.user.id, orgId }, 'Invalidated all sessions for suspended organization');
       }
 
       // Special handling for ARCHIVED: ensure no active members (warning only)
       if (status === 'ARCHIVED') {
-        const memberCount = await tenantDb.member.count({ where: { orgId } });
+        const memberCount = await tenantDb.member.count({ where: { organizationId: orgId } });
         if (memberCount > 0) {
           logger.warn({ userId: session.user.id, orgId, memberCount }, 'Archiving organization with active members');
         }

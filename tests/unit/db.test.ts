@@ -157,7 +157,7 @@ describe('db.ts (Prisma extensions)', () => {
       const result = await db.teamMember.create(mockArgs);
 
       expect(mockPrisma.member.findFirst).toHaveBeenCalledWith({
-        where: { userId: 'user-1', orgId: 'org-1' },
+        where: { userId: 'user-1', organizationId: 'org-1' },
       });
       expect(mockPrisma.teamRole.findMany).toHaveBeenCalledWith({
         where: { teamId: 'team-1', organizationId: 'org-1' },

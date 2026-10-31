@@ -58,7 +58,7 @@ export async function DELETE(
 
   // Verify requester is a member of this organization
   const membership = await tenantDb.member.findFirst({
-    where: { userId: session.user.id, orgId: role.organizationId },
+    where: { userId: session.user.id, organizationId: role.organizationId },
     select: { role: true },
   });
 

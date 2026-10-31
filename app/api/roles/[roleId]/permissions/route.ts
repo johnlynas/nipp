@@ -55,7 +55,7 @@ export async function POST(
 
   // Verify membership and get role name
   const membership = await tenantDb.member.findFirst({
-    where: { userId: session.user.id, orgId: role.organizationId },
+    where: { userId: session.user.id, organizationId: role.organizationId },
     select: { role: true },
   });
 
@@ -113,7 +113,7 @@ export async function POST(
   // Invalidate cache for all members in the org
   const { invalidateUserCache } = await import('@/lib/permissions/resolver');
   const members = await tenantDb.member.findMany({
-    where: { orgId: role.organizationId },
+    where: { organizationId: role.organizationId },
     select: { userId: true },
   });
 

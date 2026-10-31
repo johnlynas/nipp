@@ -99,7 +99,7 @@ describe('UserService', () => {
 
       expect(result.id).toBe('new-user');
       expect(globalDb.member.create).toHaveBeenCalledWith(
-        expect.objectContaining({ data: expect.objectContaining({ userId: 'new-user', orgId: 'org-1' }) }),
+        expect.objectContaining({ data: expect.objectContaining({ userId: 'new-user', organizationId: 'org-1' }) }),
       );
     });
 
@@ -145,7 +145,7 @@ describe('UserService', () => {
       );
 
       expect(globalDb.teamMember.create).toHaveBeenCalledWith({
-        data: { userId: 'new-user', teamId: 'members-team', organizationId: 'org-1' },
+        data: expect.objectContaining({ userId: 'new-user', teamId: 'members-team', organizationId: 'org-1' }),
       });
     });
 
@@ -164,7 +164,7 @@ describe('UserService', () => {
       );
 
       expect(globalDb.teamMember.create).toHaveBeenCalledWith({
-        data: { userId: 'new-user', teamId: 'members-team', organizationId: 'target-org' },
+        data: expect.objectContaining({ userId: 'new-user', teamId: 'members-team', organizationId: 'target-org' }),
       });
     });
 
@@ -229,7 +229,7 @@ describe('UserService', () => {
       expect(result.id).toBe('invited-user');
       // Membership + default team enrollment happen for the invited user.
       expect(globalDb.member.create).toHaveBeenCalledWith(
-        expect.objectContaining({ data: expect.objectContaining({ userId: 'invited-user', orgId: 'org-invite', role: 'member' }) }),
+        expect.objectContaining({ data: expect.objectContaining({ userId: 'invited-user', organizationId: 'org-invite', role: 'member' }) }),
       );
     });
 
@@ -270,10 +270,10 @@ describe('UserService', () => {
 
       // BOTH enrollments happened: default Members team AND the chosen team.
       expect(globalDb.teamMember.create).toHaveBeenCalledWith(
-        { data: { userId: 'tm-user', teamId: 'members-team', organizationId: 'org-t' } },
+        { data: expect.objectContaining({ userId: 'tm-user', teamId: 'members-team', organizationId: 'org-t' }) },
       );
       expect(globalDb.teamMember.create).toHaveBeenCalledWith(
-        { data: { userId: 'tm-user', teamId: 'team-blue', organizationId: 'org-t' } },
+        { data: expect.objectContaining({ userId: 'tm-user', teamId: 'team-blue', organizationId: 'org-t' }) },
       );
     });
 
@@ -296,7 +296,7 @@ describe('UserService', () => {
       );
 
       expect(globalDb.teamMember.create).toHaveBeenCalledWith(
-        { data: { userId: 'tm-user2', teamId: 'team-green', organizationId: 'org-g' } },
+        { data: expect.objectContaining({ userId: 'tm-user2', teamId: 'team-green', organizationId: 'org-g' }) },
       );
     });
 
@@ -404,7 +404,7 @@ describe('UserService', () => {
     it('returns all users for PLATFORM_ADMIN', async () => {
       vi.mocked(globalDb.user.findMany).mockResolvedValue([castUser(mockUser()) as never]);
       vi.mocked(globalDb.user.count).mockResolvedValue(1);
-      vi.mocked(globalDb.member.findMany).mockResolvedValue([{ id: 'm-1', userId: 'user-1', orgId: 'org-1', role: 'MEMBER', teamId: null, createdAt: new Date(), updatedAt: new Date() }]);
+      vi.mocked(globalDb.member.findMany).mockResolvedValue([{ id: 'm-1', userId: 'user-1', organizationId: 'org-1', role: 'MEMBER', teamId: null, createdAt: new Date(), updatedAt: new Date() }]);
 
       const result = await UserService.list({}, { page: 1, pageSize: 20 }, mockCtx('PLATFORM_ADMIN'));
 
@@ -420,7 +420,7 @@ describe('UserService', () => {
 
       expect(globalDb.user.findMany).toHaveBeenCalledWith(
         expect.objectContaining({
-          where: { members: { some: { orgId: 'org-1' } } },
+          where: { members: { some: { organizationId: 'org-1' } } },
         }),
       );
     });
@@ -428,7 +428,7 @@ describe('UserService', () => {
     it('applies search filter', async () => {
       vi.mocked(globalDb.user.findMany).mockResolvedValue([]);
       vi.mocked(globalDb.user.count).mockResolvedValue(0);
-      vi.mocked(globalDb.member.findMany).mockResolvedValue([{ id: 'm-1', userId: 'user-1', orgId: 'org-1', role: 'MEMBER', teamId: null, createdAt: new Date(), updatedAt: new Date() }]);
+      vi.mocked(globalDb.member.findMany).mockResolvedValue([{ id: 'm-1', userId: 'user-1', organizationId: 'org-1', role: 'MEMBER', teamId: null, createdAt: new Date(), updatedAt: new Date() }]);
 
       await UserService.list({ search: 'john' }, { page: 1, pageSize: 20 }, mockCtx('PLATFORM_ADMIN'));
 
@@ -475,7 +475,7 @@ describe('UserService', () => {
     it('returns correct pagination', async () => {
       vi.mocked(globalDb.user.findMany).mockResolvedValue([]);
       vi.mocked(globalDb.user.count).mockResolvedValue(45);
-      vi.mocked(globalDb.member.findMany).mockResolvedValue([{ id: 'm-1', userId: 'user-1', orgId: 'org-1', role: 'MEMBER', teamId: null, createdAt: new Date(), updatedAt: new Date() }]);
+      vi.mocked(globalDb.member.findMany).mockResolvedValue([{ id: 'm-1', userId: 'user-1', organizationId: 'org-1', role: 'MEMBER', teamId: null, createdAt: new Date(), updatedAt: new Date() }]);
 
       const result = await UserService.list({}, { page: 2, pageSize: 10 }, mockCtx('PLATFORM_ADMIN'));
 
@@ -644,7 +644,7 @@ describe('UserService', () => {
 
       expect(globalDb.member.create).toHaveBeenCalledWith(
         expect.objectContaining({
-          data: expect.objectContaining({ userId: 'org-assign', orgId: 'target-org-5', role: 'member' }),
+          data: expect.objectContaining({ userId: 'org-assign', organizationId: 'target-org-5', role: 'member' }),
         }),
       );
     });
@@ -662,7 +662,7 @@ describe('UserService', () => {
       await UserService.list({ organizationId: 'org-1' } , { page: 1, pageSize: 20 }, mockCtx('PLATFORM_ADMIN'));
 
       expect(globalDb.member.findMany).toHaveBeenCalledWith(
-        expect.objectContaining({ where: { orgId: 'org-1' } }),
+        expect.objectContaining({ where: { organizationId: 'org-1' } }),
       );
       expect(globalDb.user.findMany).toHaveBeenCalledWith(
         expect.objectContaining({ where: expect.objectContaining({ id: { in: ['user-1', 'user-2'] } }) }),
@@ -677,7 +677,7 @@ describe('UserService', () => {
       await UserService.list({ organizationId: 'org-1', role: 'admin' }, { page: 1, pageSize: 20 }, mockCtx('PLATFORM_ADMIN'));
 
       expect(globalDb.member.findMany).toHaveBeenCalledWith(
-        expect.objectContaining({ where: { orgId: 'org-1', role: 'admin' } }),
+        expect.objectContaining({ where: { organizationId: 'org-1', role: 'admin' } }),
       );
     });
 
@@ -749,7 +749,7 @@ describe('UserService', () => {
       expect(globalDb.user.findMany).toHaveBeenCalledWith(
         expect.objectContaining({
           where: expect.objectContaining({
-            members: { some: { orgId: 'org-1', role: 'admin' } },
+            members: { some: { organizationId: 'org-1', role: 'admin' } },
           }),
         }),
       );

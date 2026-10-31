@@ -6,6 +6,7 @@ import { prisma } from '@/lib/db';
 import { logger } from '@/lib/logger';
 import { env } from '@/lib/env';
 import { issueInviteLink } from '@/lib/oidc-magic-link';
+import { teamMembershipKey } from '@/lib/team-membership-key';
 import { hashPassword } from 'better-auth/crypto';
 import { rlsFixture } from '@/tests/utils/rls-fixture';
 
@@ -90,17 +91,6 @@ function buildIdToken(email: string, sub: string): string {
   return `${header}.${payload}.`;
 }
 
-// BetterAuth stores the OAuth flow state in the Verification table (database
-// strategy is the default) — identifier holds the `state` value, value holds the
-// JSON blob (codeVerifier, callbackURL, … custom keys). sign-in/social accepts
-// `additionalData`, which we set to a unique marker so lookups stay deterministic
-// even when other test files write their own state rows concurrently.
-async function findOAuthState(marker: string): Promise<string> {
-  const row = await prisma.verification.findFirst({ where: { value: { contains: marker } } });
-  if (!row) throw new Error(`No Verification row carrying marker ${marker}`);
-  return row.identifier;
-}
-
 /**
  * Pull named cookies off a Response's Set-Cookie header(s). BetterAuth prefixes
  * cookie names with `__Secure-` when the Secure flag applies (this build does —
@@ -135,6 +125,22 @@ function socialSignInRequest(body: Record<string, unknown>): Request {
     headers: { Origin: 'http://localhost:3000', 'Content-Type': 'application/json' },
     body: JSON.stringify(body),
   });
+}
+
+// BetterAuth stores the OAuth flow state in the Verification table (database
+// strategy is the default). Value holds the JSON blob (codeVerifier,
+// callbackURL, … custom keys); the identifier is the storage key. sign-in/social
+// accepts `additionalData`, which we set to a unique marker so lookups stay
+// deterministic even when other test files write their own state rows concurrently.
+//
+// 1.7 PREFIX: since better-auth 1.7 the Verification identifier is
+// `auth-state:<state>` (getAuthStateVerificationIdentifier) while the provider's
+// `state` query parameter stays the BARE `<state>`. Stripping the prefix keeps
+// this helper source-compatible with both 1.6 rows and 1.7 rows.
+async function findOAuthState(marker: string): Promise<string> {
+  const row = await prisma.verification.findFirst({ where: { value: { contains: marker } } });
+  if (!row) throw new Error(`No Verification row carrying marker ${marker}`);
+  return row.identifier.replace(/^auth-state:/, '');
 }
 
 /** Sign-in → mock callback; reads flow state from the Verification table. */
@@ -285,8 +291,8 @@ describe('Google OIDC — full mocked flow (Task 6)', () => {
       // upsert (not create): specs in this file re-seed the same identities in different states.
       const work = rlsFixture(orgId) as unknown as typeof prisma;
       await work.member.upsert({
-        where: { userId_orgId: { userId: user.id, orgId } },
-        create: { userId: user.id, orgId },
+        where: { userId_organizationId: { userId: user.id, organizationId: orgId } },
+        create: { userId: user.id, organizationId: orgId },
         update: {},
       });
       // Default "Members" team (idempotent) + enroll the user in it.
@@ -297,7 +303,7 @@ describe('Google OIDC — full mocked flow (Task 6)', () => {
       })) as { id: string };
       await work.teamMember.upsert({
         where: { userId_teamId: { userId: user.id, teamId: membersTeam.id } },
-        create: { userId: user.id, teamId: membersTeam.id, organizationId: orgId },
+        create: { userId: user.id, teamId: membersTeam.id, organizationId: orgId, membershipKey: teamMembershipKey(membersTeam.id, user.id) },
         update: {},
       });
     }

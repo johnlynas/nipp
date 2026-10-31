@@ -33,7 +33,7 @@ export async function resolvePermissions(
       // target-org context (see module header) for RLS visibility.
       () => withTenantAdminContext(userId, orgId, async () => {
         const memberWithRoles = await tenantDb.member.findFirst({
-          where: { userId, orgId },
+          where: { userId, organizationId: orgId },
           select: {
             memberRoles: {
               select: {
