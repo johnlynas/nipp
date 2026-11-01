@@ -127,13 +127,19 @@ function LoginForm() {
       setOidcBanner({ tone: 'success', text: PASSWORD_RESET_BANNER_TEXT });
     }
 
-    // Strip the one-shot params in a single navigation.
-    const params = new URLSearchParams(searchParams.toString());
-    params.delete('oidc');
-    params.delete('error');
-    params.delete('error_description');
-    params.delete('password_reset');
-    router.replace(params.toString() ? `?${params}` : window.location.pathname, { scroll: false });
+    // Strip the one-shot params in a single navigation — and ONLY when there
+    // is actually one to strip. This effect's deps include `searchParams`, and
+    // on Next 16 / React 19 its object identity is no longer stable across
+    // every render; an unconditional router.replace(...) of the same URL would
+    // re-trigger this effect forever (the observed GET /login?callbackUrl loop
+    // after the Next-16 upgrade). A navigation-free steady state keeps the
+    // effect idempotent regardless of identity churn.
+    const oneShotKeys = ['oidc', 'error', 'error_description', 'password_reset'];
+    if (oneShotKeys.some((key) => searchParams.get(key) !== null)) {
+      const params = new URLSearchParams(searchParams.toString());
+      for (const key of oneShotKeys) params.delete(key);
+      router.replace(params.toString() ? `?${params}` : window.location.pathname, { scroll: false });
+    }
   }, [searchParams, router]);
 
   // Auto-dismiss the oidc marker banner (success/info) — gate rejection banners
