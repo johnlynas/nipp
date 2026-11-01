@@ -136,6 +136,19 @@ Expectation: only the deepmerge-ts high remains, now documented. Decision point:
 Clears the postcss cluster (XSS via unescaped `</style>`, sourceMappingURL file-disclosure ×3, all bundled inside next@15.5) and modernises the app shell. **Own branch, own spike gate.** Start only after Phases 1-5 are assessed and settled.
 
 **Step 6.1 — Spike first (no code changes to keep):** scratch branch; `npm install next@<latest-16> eslint-config-next@<matching>`; run `npm run type-check && npm run lint && npm run build && npm run test:integration`. Record every breakage in the assessment report; the spike output becomes the real task list.
+
+**Spike results (2026-11-01, branch `spike/next-16-spike`, commits a614a03 + bc3dd5e):** all gates green after exactly 3 classes of breakage:
+1. `revalidateTag` now requires a second stale-window profile arg (`string | {expire?}`); old single-arg call deprecated-equivalent to `{expire:0}`. 12 sites across 8 route files in org/roles admin + tenant routes → pass `{ expire: 0 }`. One structural unit test asserted the literal string — loosened to stable prefix `revalidateTag('org'`.
+2. `next lint` command removed in v16 (flat ESLint only). `lint` script: `next lint` → `eslint .` (repo already has `eslint.config.mjs` with `@next/eslint-plugin-next`; plugin bumps to 16.4.3 automatically via eslint-config-next).
+3. Build needs `--webpack` while the custom `webpack()` externals block in next.config.ts is migrated — Next 16 defaults to Turbopack and hard-fails on webpack-only configs. Spike ran with `npx next build --webpack`.
+
+**Phase 6.2 real task list (from spike) — all done 2026-11-01 on `feat/next-16-upgrade` (commits a31ca5f, db45136):**
+- [x] Migrate next.config.ts `webpack()` externals to the Turbopack shape: deleted the block; `serverExternalPackages` is the externalization list (verified ioredis absent from edge chunks). Bonus fix: instrumentation.ts top-level side effects pulled crypto into edge chunks under Turbopack → moved bootstrap into async `register()` behind `NEXT_RUNTIME === 'nodejs'` with dynamic imports (clears both Turbopack edge warnings; prod health check confirms warm ran)
+- [x] 12-site `{ expire: 0 }` revalidateTag + structural test loosening (already in from spike)
+- [x] middleware.ts → proxy.ts via `npx @next/codemod@canary middleware-to-proxy .` (function renamed to `proxy`, matcher untouched); no more deprecation in builds; prod smoke verified CSP header, session-cookie gate 307→/login?callbackUrl, /api/health all-green
+- [x] Cache-default check: no implicit cache changes hit RLS flows — org-details `unstable_cache({revalidate:30})` + `{expire:0}` invalidation preserved; integration suite (incl. reset/org-lifecycle) green
+- [x] Node engines: next@16 `>=20.9.0`, CI Node 22 ✓
+Residual smoke-test observation (benign): running the full unit suite right after a long build produces transient vitest worker unhandled rejections in rate-limiter.test.ts (`Closing rpc while onUserConsoleLog pending`); clean when run standalone — pre-existing flake class, not Next-16 related.
 **Step 6.2:** Apply fixes per spike findings, checking against Next 16 release notes for: middleware/matcher naming, caching-default changes (confirm no implicit cache changes hit tenant RLS flows), React 19 peer ranges (we're on ^19 ✓), Node engines (CI uses Node 22 images — confirm 16 supports it).
 **Step 6.3:** Verify auth surfaces under the new request lifecycle: session cookies, bearer token translation (`lastRequest` capture in `lib/auth.ts`), rate limiting.
 **Step 6.4:** Commit(s), then full gate below.
