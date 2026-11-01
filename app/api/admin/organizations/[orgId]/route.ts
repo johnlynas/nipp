@@ -162,7 +162,7 @@ export const PATCH = wrapPiiRoute(async (request, decryptedBody, params) => {
         data: updateData,
       });
 
-      revalidateTag('org');
+      revalidateTag('org', { expire: 0 });
 
       logger.info({ userId: session.user.id, orgId }, 'Updated organization details');
 
@@ -233,7 +233,7 @@ export const DELETE = wrapPiiRoute(async (request, _decryptedBody, params) => {
     if (existingOrg.status === 'PENDING') {
       await withTenantAdminContext(session.user.id, orgId, async () => {
         await tenantDb.organization.delete({ where: { id: orgId } });
-        revalidateTag('org');
+        revalidateTag('org', { expire: 0 });
 
         // Record audit log for hard delete of pending org
         await recordAuditLog({
@@ -264,7 +264,7 @@ export const DELETE = wrapPiiRoute(async (request, _decryptedBody, params) => {
       }),
     );
 
-    revalidateTag('org');
+    revalidateTag('org', { expire: 0 });
 
     // Record audit log for archive action
     await recordAuditLog({
