@@ -163,7 +163,7 @@ async function banOrgUsers(orgId: string, orgName: string, adminUserId: string, 
   try {
     // Runs inside the verified target-org context set by the route (Member rows are RLS-scoped).
     const members = await tenantDb.member.findMany({
-      where: { orgId },
+      where: { organizationId: orgId },
       select: { userId: true },
     });
 
@@ -198,7 +198,7 @@ async function banOrgUsers(orgId: string, orgName: string, adminUserId: string, 
 async function unbanOrgUsers(orgId: string, adminUserId: string): Promise<number> {
   try {
     const members = await tenantDb.member.findMany({
-      where: { orgId },
+      where: { organizationId: orgId },
       select: { userId: true },
     });
 
@@ -232,7 +232,7 @@ async function unbanOrgUsers(orgId: string, adminUserId: string): Promise<number
 async function invalidateOrgSessions(orgId: string) {
   try {
     const members = await tenantDb.member.findMany({
-      where: { orgId },
+      where: { organizationId: orgId },
       select: { userId: true },
     });
 

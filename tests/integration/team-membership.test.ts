@@ -56,7 +56,7 @@ describe('Team Membership Integration', () => {
 
   async function addMember(teamIdArg: string, userCreator: { name: string; email: string }) {
     const user = await platform.user.create({ data: { ...userCreator, emailVerified: true } });
-    await db().member.create({ data: { userId: user.id, orgId: testOrgId } });
+    await db().member.create({ data: { userId: user.id, organizationId: testOrgId} });
     return withTenantAccess(testOrgId, false, () => TeamService.addTeamMember(teamIdArg, { userId: user.id }, adminCtx()));
   }
 
@@ -74,8 +74,8 @@ describe('Team Membership Integration', () => {
     const user1 = await platform.user.create({ data: { name: 'Member 1', email: `m1-${Date.now()}@test.com`, emailVerified: true } });
     const user2 = await platform.user.create({ data: { name: 'Member 2', email: `m2-${Date.now()}@test.com`, emailVerified: true } });
 
-    await db().member.create({ data: { userId: user1.id, orgId: testOrgId } });
-    await db().member.create({ data: { userId: user2.id, orgId: testOrgId } });
+    await db().member.create({ data: { userId: user1.id, organizationId: testOrgId} });
+    await db().member.create({ data: { userId: user2.id, organizationId: testOrgId} });
 
     await withTenantAccess(testOrgId, false, () => TeamService.addTeamMember(teamId, { userId: user1.id }, adminCtx()));
     await withTenantAccess(testOrgId, false, () => TeamService.addTeamMember(teamId, { userId: user2.id }, adminCtx()));
@@ -89,7 +89,7 @@ describe('Team Membership Integration', () => {
 
   it('should remove a member from a team', async () => {
     const user = await platform.user.create({ data: { name: 'Remove Me', email: `remove-${Date.now()}@test.com`, emailVerified: true } });
-    await db().member.create({ data: { userId: user.id, orgId: testOrgId } });
+    await db().member.create({ data: { userId: user.id, organizationId: testOrgId} });
 
     const teamMember = await withTenantAccess(testOrgId, false, () => TeamService.addTeamMember(teamId, { userId: user.id }, adminCtx()));
 
@@ -101,7 +101,7 @@ describe('Team Membership Integration', () => {
 
   it('should enforce unique [userId, teamId] constraint', async () => {
     const user = await platform.user.create({ data: { name: 'Dup User', email: `dup-${Date.now()}@test.com`, emailVerified: true } });
-    await db().member.create({ data: { userId: user.id, orgId: testOrgId } });
+    await db().member.create({ data: { userId: user.id, organizationId: testOrgId} });
 
     await withTenantAccess(testOrgId, false, () => TeamService.addTeamMember(teamId, { userId: user.id }, adminCtx()));
 
@@ -172,7 +172,7 @@ describe('Team Membership Integration', () => {
   it('should cascade delete TeamMember when Team is deleted', async () => {
     const team = await db().team.create({ data: { name: 'Cascade TM Team', organizationId: testOrgId } });
     const user = await platform.user.create({ data: { name: 'Cascade User', email: `cascade-${Date.now()}@test.com`, emailVerified: true } });
-    await db().member.create({ data: { userId: user.id, orgId: testOrgId } });
+    await db().member.create({ data: { userId: user.id, organizationId: testOrgId} });
 
     await withTenantAccess(testOrgId, false, () => TeamService.addTeamMember(team.id, { userId: user.id }, adminCtx()));
 
@@ -204,7 +204,7 @@ describe('Team Membership Integration', () => {
 
     // Create user and add to team (production path — inherits the team's roles)
     const user = await platform.user.create({ data: { name: 'Inherited User', email: `inherited-${Date.now()}@test.com`, emailVerified: true } });
-    const member = await db().member.create({ data: { userId: user.id, orgId: testOrgId } });
+    const member = await db().member.create({ data: { userId: user.id, organizationId: testOrgId} });
 
     await withTenantAccess(testOrgId, false, () => TeamService.addTeamMember(teamId, { userId: user.id }, adminCtx()));
 

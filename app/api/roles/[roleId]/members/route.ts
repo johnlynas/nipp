@@ -55,7 +55,7 @@ export async function POST(
 
   // Verify requester membership and get their role name
   const requesterMembership = await tenantDb.member.findFirst({
-    where: { userId: session.user.id, orgId: role.organizationId },
+    where: { userId: session.user.id, organizationId: role.organizationId },
     select: { role: true },
   });
 
@@ -79,7 +79,7 @@ export async function POST(
 
   // Verify the target user is a member of this organization
   const targetMembership = await tenantDb.member.findFirst({
-    where: { userId, orgId: role.organizationId },
+    where: { userId, organizationId: role.organizationId },
   });
 
   if (!targetMembership) {

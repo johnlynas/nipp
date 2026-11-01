@@ -70,8 +70,8 @@ function buildRLSBootstrapStatements(appPassword: string | null): string[] {
     ['Role', 'rls_role_isolated', 'organizationId'],
     ['RolePermission', 'rls_rolepermission_isolated', 'organizationId'],
     ['MemberRole', 'rls_memberrole_isolated', 'organizationId'],
-    ['Member', 'rls_member_isolated', 'orgId'],
-    ['Invitation', 'rls_invitation_isolated', 'orgId'],
+    ['Member', 'rls_member_isolated', 'organizationId'],
+    ['Invitation', 'rls_invitation_isolated', 'organizationId'],
     ['SentInvitation', 'rls_sentinvitation_isolated', 'orgId'],
   ];
   for (const [table, policy, orgCol] of orgScoped) {
@@ -311,13 +311,13 @@ async function ensureTenantUser(
   // Ensure member record exists
   let memberId: string;
   const existingMember = await prisma.member.findFirst({
-    where: { userId: user.id, orgId },
+    where: { userId: user.id, organizationId: orgId },
   });
   if (existingMember) {
     memberId = existingMember.id;
   } else {
     const newMember = await prisma.member.create({
-      data: { userId: user.id, orgId, role: 'member' },
+      data: { userId: user.id, organizationId: orgId, role: 'member' },
     });
     memberId = newMember.id;
   }
@@ -353,11 +353,12 @@ async function addUserToTeam(userId: string, teamId: string, orgId: string): Pro
   if (existing) return; // Already a member
 
   const member = await prisma.member.findFirst({
-    where: { userId, orgId },
+    where: { userId, organizationId: orgId },
   });
 
+  const { teamMembershipKey } = await import('../lib/team-membership-key');
   await prisma.teamMember.create({
-    data: { userId, teamId, organizationId: orgId },
+    data: { userId, teamId, organizationId: orgId, membershipKey: teamMembershipKey(teamId, userId) },
   });
 
   // Assign all team roles (role inheritance)
@@ -713,14 +714,14 @@ async function main() {
   // 7. MEMBER RECORD & ROLE ASSIGNMENT
   // =========================================================================
   let member = await prisma.member.findFirst({
-    where: { userId: superAdmin.id, orgId: platformOrgId },
+    where: { userId: superAdmin.id, organizationId: platformOrgId},
   });
 
   if (!member) {
     member = await prisma.member.create({
       data: {
         userId: superAdmin.id,
-        orgId: platformOrgId,
+        organizationId: platformOrgId,
         role: 'admin',
       },
     });

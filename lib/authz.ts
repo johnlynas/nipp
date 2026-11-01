@@ -48,7 +48,7 @@ export async function verifySuperAdmin(
       return tenantDb.member.findFirst({
         where: {
           userId,
-          orgId: platformOrgId,
+          organizationId: platformOrgId,
         },
       });
     });

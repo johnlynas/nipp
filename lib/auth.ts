@@ -164,7 +164,7 @@ export async function enforceOidcProvisioning(userId: string): Promise<void> {
   const memberships = await withPlatformRead(async () => {
     const u = await tenantDb.user.findUnique({
       where: { id: userId },
-      select: { members: { select: { orgId: true } } },
+      select: { members: { select: { organizationId: true} } },
     });
     return u?.members ?? [];
   });
@@ -528,17 +528,17 @@ export const auth = betterAuth({
           // withPlatformRead above); inside it tenantDb routes to the pinned
           // connection where the GUCs are visible.
           const member = await withPlatformRead(
-            () => tenantDb.member.findFirst({ where: { userId: session.userId }, select: { orgId: true } }),
+            () => tenantDb.member.findFirst({ where: { userId: session.userId }, select: { organizationId: true } }),
           );
 
           if (member) {
             logger.info(
-              { userId: session.userId, orgId: member.orgId },
+              { userId: session.userId, orgId: member.organizationId },
               '[Auth] Found Member record — setting activeOrganizationId on User',
             );
             await prisma.user.update({
               where: { id: session.userId },
-              data: { activeOrganizationId: member.orgId },
+              data: { activeOrganizationId: member.organizationId },
             });
           } else {
             logger.warn(

@@ -49,7 +49,7 @@ export async function GET(request: NextRequest) {
       // Platform Admin: apply org/role/team filters to the where clause for counts
       if (organizationId || role || teamId) {
         const memberWhere: Prisma.MemberWhereInput = {};
-        if (organizationId) memberWhere.orgId = organizationId;
+        if (organizationId) memberWhere.organizationId = organizationId;
         if (role) memberWhere.role = role;
 
         let userIds: string[] = [];

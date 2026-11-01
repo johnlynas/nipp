@@ -321,7 +321,7 @@ export async function sendTodayEventNotifications(
   if (input.userId) {
     // Single user notification
     const member = await runWithTenant(targetOrgId, () => tenantDb.member.findFirst({
-      where: { userId: input.userId, orgId: targetOrgId },
+      where: { userId: input.userId, organizationId: targetOrgId},
       include: { user: true },
     }));
 
@@ -331,7 +331,7 @@ export async function sendTodayEventNotifications(
   } else {
     // Organization-wide — all members
     const members = await runWithTenant(targetOrgId, () => tenantDb.member.findMany({
-      where: { orgId: targetOrgId },
+      where: { organizationId: targetOrgId},
       include: { user: true },
     }));
 

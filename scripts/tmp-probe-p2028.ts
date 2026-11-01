@@ -15,7 +15,7 @@ import { tenantDb } from '../lib/tenant-db';
 
 async function main() {
   const rows = await prisma.$queryRawUnsafe<Array<{ userId: string; orgId: string }>>(`
-    SELECT u.id AS "userId", m."orgId" AS "orgId" FROM "User" u JOIN "Member" m ON m."userId" = u.id
+    SELECT u.id AS "userId", m."organizationId" AS "orgId" FROM "User" u JOIN "Member" m ON m."userId" = u.id
     JOIN "Organization" o ON o.id = m."orgId" WHERE o.slug = 'platform' LIMIT 1`);
   const { userId, orgId } = rows[0];
   console.log(`probe ctx: userId=${userId} platformOrg=${orgId}`);

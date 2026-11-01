@@ -253,7 +253,7 @@ export const OrganizationService = {
         await tx.member.create({
           data: {
             userId: user.id,
-            orgId: organization.id,
+            organizationId: organization.id,
             role: 'admin',
           },
         });

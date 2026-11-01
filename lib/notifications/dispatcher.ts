@@ -91,7 +91,7 @@ export async function getSuperAdminEmails(): Promise<string[]> {
   // Member IS tenant-scoped in tenantDb — the platform-org id becomes the context.
   const members = await runWithTenant(platformOrgId, () =>
     tenantDb.member.findMany({
-      where: { orgId: platformOrgId },
+      where: { organizationId: platformOrgId},
       select: { user: { select: { email: true } } },
     })
   );

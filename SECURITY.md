@@ -20,6 +20,7 @@ The design follows three core principles:
 7. [Content Security Policy](#7-content-security-policy)
 8. [Logging & PII Redaction](#8-logging--pii-redaction)
 9. [Security Configuration Reference](#9-security-configuration-reference)
+10. [Dependency Vulnerability Management](#10-dependency-vulnerability-management) (accepted-risk table)
 
 ### Appendices
 
@@ -671,7 +672,25 @@ Not rate limited: `POST /api/csp-report` (report ingestion — flagged for prote
 
 When the application runs behind a reverse proxy (e.g., nginx, Cloudflare), the real client IP is extracted from the `X-Forwarded-For` header. The `TRUSTED_PROXY_CIDRS` configuration specifies which IP ranges are trusted to provide this header.
 
-Only requests from trusted proxy IPs will have their forwarded headers honored; requests claiming to be from a trusted proxy but arriving directly are ignored. This prevents IP spoofing by untrusted clients.
+Only requests from trusted proxy IPs will have their forwarded headers honored; requests claiming to be from trusted proxies but arriving directly are ignored. This prevents IP spoofing by untrusted clients.
+
+---
+
+## 10. Dependency Vulnerability Management
+
+### Policy
+
+`npm audit --audit-level=high` is a **merge gate**: the `Security audit` job in `.github/workflows/ci.yml` fails on any high- or critical-severity finding, so no phase lands while it would push CI red — except entries explicitly listed below as *accepted risk*, which are tracked with follow-up work and re-audited on every dependency upgrade.
+
+Advisories are remediated to zero when the fix is reachable within the current major/lockfile ranges (`npm audit fix` + targeted bumps, applied in the phased sweep of 2026-10: dead bundled-npm dep chain removed, better-auth → 1.7.x, nodemailer → 10.x, postcss-selector-parser override). Findings whose only fix is a breaking major are not force-upgraded inside a security sweep — they get an accepted-risk row here plus a tracked migration effort (see Appendix C).
+
+### Accepted Risk Table
+
+| Finding | Advisory | Rationale & tracking |
+|---------|----------|----------------------|
+| `deepmerge-ts <8` via `@prisma/config` → `prisma@6.19.3` | [GHSA-ggr8-5vv4-36mx](https://github.com/advisories/GHSA-ggr8-5vv4-36mx) (high — stack exhaustion when merging recursive object graphs) | Build/CLI-time config merge only; not reachable from app request input (the Prisma client, which handles runtime traffic, does not use deepmerge-ts). Fixed only in `@prisma/config` ≥ 7.10.1 i.e. the Prisma 7 line — a breaking major deliberately excluded from the security sweep. Migration tracked as its own effort: [Migrate Prisma 6 → 7](./openspec/changes/prisma-7-migration/proposal.md). Re-audit on every Prisma upgrade; drop this row when it lands. |
+
+Residual below-high findings (moderate, dev-time only — no action tracked): `minimatch <11.0.1` ([GHSA-g3hv-75wg-m249](https://github.com/advisories/GHSA-g3hv-75wg-m249)) under the ESLint/typescript-eslint toolchain (fixed only in minimatch 11; no installed range reaches it without an eslint 10 major) and `postcss-selector-parser` (build-time only, pinned `^6.1.5` via `overrides`).
 
 ---
 
@@ -727,11 +746,12 @@ This document covers security-specific details. For broader architectural contex
 | [ARCHITECTURE.md](./ARCHITECTURE.md) | Overall system architecture, data flow, and component interactions |
 | [CACHING_ARCHITECTURE.md](./CACHING_ARCHITECTURE.md) | Caching strategy, Redis usage, and cache invalidation patterns |
 | [QUICK_START.md](./QUICK_START.md) | Getting started guide for developers |
+| [Prisma 7 migration proposal](./openspec/changes/prisma-7-migration/proposal.md) | Tracked migration effort that clears the deepmerge-ts accepted-risk row in §10 |
 | [Google OIDC design doc](./documents/feature-planning-and-development/google-oidc-design.md) | Google sign-in flow, account-linking semantics, magic-link verification and its threat table (shipped) |
 | [Bearer-token developer reference](./documents/api/bearer-tokens.md) | Token acquisition doors, lifetime & refresh policy, storage/usage rules (developer-facing) |
 | [Bearer-token design doc](./documents/feature-planning-and-development/bearer-token-remote-access.md) | Bearer architecture decision, threat model, state diagram (source of truth for diagrams) |
 
 ---
 
-*Last updated: 2026-10-30*
+*Last updated: 2026-10-31*
 *Document owner: Engineering Team*

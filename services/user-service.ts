@@ -146,7 +146,7 @@ export const UserService = {
       // Member row first — TeamService.addTeamMember requires it.
       await runWithTenant(organizationId, () =>
         tenantDb.member.create({
-          data: { userId: user.id, orgId: organizationId, role: 'member' },
+          data: { userId: user.id, organizationId: organizationId, role: 'member' },
         }),
       );
 
@@ -203,7 +203,7 @@ export const UserService = {
     if (ctx.role === 'TENANT_ADMIN' && ctx.organizationId) {
       const member = await runWithTenant(ctx.organizationId, () =>
         tenantDb.member.findFirst({
-          where: { userId: id, orgId: ctx.organizationId! },
+          where: { userId: id, organizationId: ctx.organizationId! },
         }),
       );
       if (!member) {
@@ -237,14 +237,14 @@ export const UserService = {
     // Tenant Admin scope: only members of their org
     if (ctx.role === 'TENANT_ADMIN' && ctx.organizationId) {
       where.members = {
-        some: { orgId: ctx.organizationId },
+        some: { organizationId: ctx.organizationId },
       };
 
       // Apply role filter within the org context
       if (filters.role) {
         where.members = {
           ...where.members,
-          some: { orgId: ctx.organizationId, role: filters.role },
+          some: { organizationId: ctx.organizationId, role: filters.role },
         };
       }
     }
@@ -258,7 +258,7 @@ export const UserService = {
         const memberWhere: Prisma.MemberWhereInput = {};
 
         if (filters.organizationId) {
-          memberWhere.orgId = filters.organizationId;
+          memberWhere.organizationId = filters.organizationId;
         }
         if (filters.role) {
           memberWhere.role = filters.role;
@@ -371,7 +371,7 @@ export const UserService = {
     if (ctx.role === 'TENANT_ADMIN' && ctx.organizationId) {
       const member = await runWithTenant(ctx.organizationId, () =>
         tenantDb.member.findFirst({
-          where: { userId: id, orgId: ctx.organizationId! },
+          where: { userId: id, organizationId: ctx.organizationId! },
         }),
       );
       if (!member) {
@@ -423,7 +423,7 @@ export const UserService = {
     if (ctx.role === 'TENANT_ADMIN' && ctx.organizationId) {
       const member = await runWithTenant(ctx.organizationId, () =>
         tenantDb.member.findFirst({
-          where: { userId: id, orgId: ctx.organizationId! },
+          where: { userId: id, organizationId: ctx.organizationId! },
         }),
       );
       if (!member) {

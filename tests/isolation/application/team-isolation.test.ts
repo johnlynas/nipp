@@ -215,7 +215,7 @@ describe('Team Isolation — Prisma Extension', () => {
       tenantDb = (await import('@/lib/tenant-db')).default;
 
       await tenantDb.teamMember.create({
-        data: { teamId: 'team-1', userId: 'user-1', organizationId: mockState.orgId! },
+        data: { teamId: 'team-1', userId: 'user-1', organizationId: mockState.orgId!, membershipKey: 'q2l3Rfjg7lVPxWsiTmz4MdMdWfSfMMgiwE_nXwdpNRc' },
       });
 
       expect(vi.mocked(tenantDb.teamMember.create).mock.calls[0][0].data.organizationId).toBe('org-a-id');
@@ -293,15 +293,22 @@ describe('Team Isolation — Prisma Extension', () => {
       expect(callArgs?.where?.organizationId).toBe('org-b-id');
     });
 
-    it('TeamMember queries are scoped to active organization', async () => {
+    it('TeamMember queries get NO app-layer org injection (1.7: column nullable)', async () => {
       mockState.orgId = 'org-a-id';
 
       tenantDb = (await import('@/lib/tenant-db')).default;
 
+      // 1.7: the organization plugin writes TeamMember rows with a NULL
+      // organizationId (derived from the team), so injecting an org clause
+      // would hide every plugin-written membership. App-layer reads pass
+      // through untouched; isolation is enforced by the DB layer (RLS) for
+      // app-role connections — see TENANT_SCOPED_MODELS note in
+      // lib/tenant-extension-core.ts.
       await tenantDb.teamMember.findMany({ where: { teamId: 'team-1' } });
 
       const callArgs = vi.mocked(tenantDb.teamMember.findMany).mock.calls[vi.mocked(tenantDb.teamMember.findMany).mock.calls.length - 1][0];
-      expect(callArgs?.where?.organizationId).toBe('org-a-id');
+      expect(callArgs?.where?.organizationId).toBeUndefined();
+      expect(callArgs?.where).toEqual({ teamId: 'team-1' });
     });
 
     it('TeamRole queries are scoped to active organization', async () => {
@@ -380,14 +387,21 @@ describe('Team Isolation — Prisma Extension', () => {
       );
     });
 
-    it('throws error when tenant context is missing for TeamMember queries', async () => {
+    it('does not fail-closed at app layer for TeamMember queries (1.7: RLS owns isolation)', async () => {
       mockState.orgId = null;
 
       tenantDb = (await import('@/lib/tenant-db')).default;
 
-      await expect(tenantDb.teamMember.findFirst({ where: { id: 'tm-1' } })).rejects.toThrow(
-        'Tenant context missing for scoped query.',
-      );
+      // 1.7: TeamMember.organizationId is nullable and plugin-written rows
+      // leave it NULL, so app-layer org injection would hide legitimate rows
+      // (a user just added to their own team via the plugin). Isolation for
+      // this table comes from the RLS layer on app-role connections — not a
+      // tenant-context throw here. The raw prisma mock resolves; assert the
+      // op passes through WITHOUT org injection even when no context is set.
+      vi.mocked(tenantDb.teamMember.findFirst).mockResolvedValue({ id: 'tm-1' } as never);
+      const result = await tenantDb.teamMember.findFirst({ where: { id: 'tm-1' } });
+      expect(result).toEqual({ id: 'tm-1' });
+      expect(vi.mocked(tenantDb.teamMember.findFirst).mock.calls.at(-1)?.[0]?.where?.organizationId).toBeUndefined();
     });
 
     it('throws error when tenant context is missing for TeamRole queries', async () => {

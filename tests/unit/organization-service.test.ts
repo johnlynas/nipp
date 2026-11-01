@@ -390,7 +390,7 @@ describe('OrganizationService', () => {
       expect(globalDb.user.create).not.toHaveBeenCalled();
       expect(globalDb.member.create).toHaveBeenCalledWith(
         expect.objectContaining({
-          data: expect.objectContaining({ userId: 'admin-user-1', orgId: 'new-org', role: 'admin' }),
+          data: expect.objectContaining({ userId: 'admin-user-1', organizationId: 'new-org', role: 'admin' }),
         }),
       );
     });
@@ -440,7 +440,7 @@ describe('OrganizationService', () => {
       });
       // …and the bootstrap admin is enrolled in it
       expect(txTeamMemberCreate).toHaveBeenCalledWith({
-        data: { userId: 'admin-user-1', teamId: 'members-team', organizationId: 'new-org' },
+        data: expect.objectContaining({ userId: 'admin-user-1', teamId: 'members-team', organizationId: 'new-org' }),
       });
     });
 

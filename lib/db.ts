@@ -1,5 +1,6 @@
 import { PrismaClient } from '@prisma/client';
 import { env } from '@/lib/env';
+import { teamMembershipKey } from '@/lib/team-membership-key';
 
 /**
  * Generate a URL-friendly slug from a string.
@@ -47,6 +48,17 @@ const prismaClient = basePrisma.$extends({
     },
     teamMember: {
       async create({ args, query }) {
+        // 1.7 schema requires TeamMember.membershipKey (unique, NOT NULL) and the
+        // organization plugin computes it on its own writes. App code inserting
+        // directly must supply the identical canonical key — inject centrally when
+        // a caller forgot, computed from (teamId, userId). Transaction-scoped tx
+        // paths don't hit this extension, so those call sites pass it explicitly.
+        if (!('membershipKey' in (args.data as Record<string, unknown>))) {
+          const d = args.data as { teamId?: string; userId?: string };
+          if (d.teamId && d.userId) {
+            args.data = { ...args.data, membershipKey: teamMembershipKey(d.teamId, d.userId) };
+          }
+        }
         const result = await query(args);
         
         // Role inheritance: assign all team roles to the new member
@@ -59,7 +71,7 @@ const prismaClient = basePrisma.$extends({
         if (teamId && userId && organizationId) {
           // Find the Member record for this user in this org
           const member = await basePrisma.member.findFirst({
-            where: { userId, orgId: organizationId },
+            where: { userId, organizationId: organizationId},
           });
 
           if (member) {

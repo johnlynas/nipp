@@ -144,7 +144,7 @@ export const POST = wrapPiiRoute(async (request, decryptedBody, params) => {
 
       // Check if already a member (platform context pass-through; RLS scopes)
       const existingMember = await tenantDb.member.findFirst({
-        where: { userId: user.id, orgId: urlOrgId },
+        where: { userId: user.id, organizationId: urlOrgId},
       });
       if (existingMember) {
         return NextResponse.json({ error: 'User is already a member of this organization' }, { status: 409 });
@@ -153,7 +153,7 @@ export const POST = wrapPiiRoute(async (request, decryptedBody, params) => {
       // Add member in the target org (extension passes through for platform ctx;
       // data carries orgId explicitly, matching RLS WITH CHECK)
       const member = await tenantDb.member.create({
-        data: { userId: user.id, orgId: urlOrgId, role: role || 'member' },
+        data: { userId: user.id, organizationId: urlOrgId, role: role || 'member' },
         include: { user: { select: { name: true, email: true } } },
       });
 

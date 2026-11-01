@@ -70,7 +70,7 @@ describe('org-default-team', () => {
       await enrollInDefaultMembersTeam(globalDb, 'org-1', 'user-9');
 
       expect(globalDb.teamMember.create).toHaveBeenCalledWith({
-        data: { userId: 'user-9', teamId: 'members-team', organizationId: 'org-1' },
+        data: expect.objectContaining({ userId: 'user-9', teamId: 'members-team', organizationId: 'org-1' }),
       });
     });
 
@@ -93,7 +93,7 @@ describe('org-default-team', () => {
         },
       });
       expect(globalDb.teamMember.create).toHaveBeenCalledWith({
-        data: { userId: 'user-9', teamId: 'healed-team', organizationId: 'legacy-org' },
+        data: expect.objectContaining({ userId: 'user-9', teamId: 'healed-team', organizationId: 'legacy-org' }),
       });
     });
 

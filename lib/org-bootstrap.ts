@@ -137,7 +137,7 @@ export async function bootstrapOrganizationRoles(organizationId: string, creator
         member = await tenantDb.member.create({
           data: {
             userId: creatorUserId,
-            orgId: organizationId, // <-- Changed from organizationId to orgId
+            organizationId: organizationId, // <-- Changed from organizationId to orgId
           },
         });
       }

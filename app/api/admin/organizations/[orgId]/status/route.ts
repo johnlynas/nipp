@@ -224,7 +224,7 @@ async function invalidateOrgSessions(orgId: string) {
     // Runs inside a verified target-org context (caller wraps with withTenantAdminContext).
     // Member is RLS-scoped (platform pass-through); Session has no RLS.
     const members = await tenantDb.member.findMany({
-      where: { orgId },
+      where: { organizationId: orgId },
       select: { userId: true },
     });
 
@@ -260,7 +260,7 @@ async function banOrgUsers(orgId: string, orgName: string, adminUserId: string, 
   try {
     // Runs inside a verified target-org context; Member rows are RLS-scoped.
     const members = await tenantDb.member.findMany({
-      where: { orgId },
+      where: { organizationId: orgId },
       select: { userId: true },
     });
 
@@ -297,7 +297,7 @@ async function unbanOrgUsers(orgId: string, adminUserId: string): Promise<number
   try {
     // Runs inside a verified target-org context; Member rows are RLS-scoped.
     const members = await tenantDb.member.findMany({
-      where: { orgId },
+      where: { organizationId: orgId },
       select: { userId: true },
     });
 

@@ -157,7 +157,7 @@ function mockMembers(count: number) {
     createdAt: new Date(),
     updatedAt: new Date(),
     userId: `user-${i}`,
-    orgId: 'org-123',
+    organizationId: 'org-123',
     teamId: null,
   }));
 }
@@ -526,7 +526,7 @@ describe('Admin status route — org suspend/archive/reactivate', () => {
   });
 
   it('should handle single-member org correctly', async () => {
-    vi.mocked(globalDb.member.findMany).mockResolvedValue([{ id: 'member-1', role: 'member', createdAt: new Date(), updatedAt: new Date(), userId: 'user-single', orgId: 'org-123', teamId: null }]);
+    vi.mocked(globalDb.member.findMany).mockResolvedValue([{ id: 'member-1', role: 'member', createdAt: new Date(), updatedAt: new Date(), userId: 'user-single', organizationId: 'org-123', teamId: null }]);
 
     await adminPatch(createRequest({ status: 'SUSPENDED' }), adminParams());
 
@@ -793,7 +793,7 @@ describe('Dashboard status route — org suspend/archive/reactivate', () => {
   });
 
   it('should handle single-member org correctly', async () => {
-    vi.mocked(globalDb.member.findMany).mockResolvedValue([{ id: 'member-1', role: 'member', createdAt: new Date(), updatedAt: new Date(), userId: 'user-single', orgId: 'org-123', teamId: null }]);
+    vi.mocked(globalDb.member.findMany).mockResolvedValue([{ id: 'member-1', role: 'member', createdAt: new Date(), updatedAt: new Date(), userId: 'user-single', organizationId: 'org-123', teamId: null }]);
 
     await dashboardPatch(createDashboardRequest({ status: 'SUSPENDED' }), dashboardParams());
 

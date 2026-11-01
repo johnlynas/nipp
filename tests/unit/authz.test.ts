@@ -239,7 +239,7 @@ describe('authz', () => {
         createdAt: new Date(),
         updatedAt: new Date(),
         userId: 'user-1',
-        orgId: 'platform-org-id',
+        organizationId: 'platform-org-id',
         teamId: null,
         role: 'admin',
       });

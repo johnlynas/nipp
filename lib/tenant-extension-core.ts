@@ -32,7 +32,12 @@ import { getCurrentOrgId as readCurrentOrgId, getTenantContext } from './tenant-
  * scoping. Regeneration guard: if you touch this list, run
  * `npm test` — coverage drift is a release-blocking failure (design §5.2).
  */
-export const TENANT_SCOPED_MODELS = ['Role', 'RolePermission', 'MemberRole', 'Member', 'Invitation', 'SentInvitation', 'Team', 'TeamMember', 'TeamRole', 'Calendar', 'CalendarEvent', 'Units', 'WorkOrder', 'WorkOrderNote', 'Quotation', 'Invoice'] as const;
+// NOTE: TeamMember is intentionally NOT in this list on Better Auth 1.7 — its
+// `organizationId` column became nullable (the plugin derives org from team and
+// never writes the column), so app-layer org injection no longer applies.
+// TeamMember isolation stays two-layered: callers fetch/resolve the Team first
+// (which IS scoped here) and RLS backstops at the DB layer (design §3).
+export const TENANT_SCOPED_MODELS = ['Role', 'RolePermission', 'MemberRole', 'Member', 'Invitation', 'SentInvitation', 'Team', 'TeamRole', 'Calendar', 'CalendarEvent', 'Units', 'WorkOrder', 'WorkOrderNote', 'Quotation', 'Invoice'] as const;
 
 /** Compile-time name type for any tenant-scoped model. */
 export type TenantScopedModelName = (typeof TENANT_SCOPED_MODELS)[number];
@@ -62,8 +67,10 @@ function getFlag(): boolean {
   return getTenantContext()?.isPlatformAdmin === '1';
 }
 
-function orgFieldFor(name: string): string {
-  return name === 'Member' ? 'orgId' : 'organizationId';
+function orgFieldFor(_name: string): string {
+  // Better Auth 1.7 renamed the org-plugin member/invitation column to
+  // organizationId — every tenant-scoped model now uses the same field name.
+  return 'organizationId';
 }
 
 /**

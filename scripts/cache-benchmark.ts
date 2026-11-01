@@ -144,7 +144,7 @@ async function runDbBenchmark() {
     async () => {
       // Simulate the exact query pattern used in permission resolution
       await prisma.member.findFirst({
-        where: { orgId: org.id },
+        where: { organizationId: org.id },
         select: {
           role: true,
         },
@@ -400,7 +400,7 @@ async function runSearchHitBenchmark() {
 
 async function runPermissionResolutionBenchmark() {
   const members = await prisma.member.findMany({
-    select: { id: true, userId: true, orgId: true },
+    select: { id: true, userId: true, organizationId: true},
     take: 5,
   });
 
@@ -410,10 +410,10 @@ async function runPermissionResolutionBenchmark() {
   }
 
   const member = members[0];
-  const cacheKey = `perm:${member.userId}:${member.orgId}`;
+  const cacheKey = `perm:${member.userId}:${member.organizationId}`;
 
   console.log('\n🟠 Scenario G: Permission Resolution (via cacheGet)');
-  console.log(`   Testing with member: ${member.userId} in org: ${member.orgId}`);
+  console.log(`   Testing with member: ${member.userId} in org: ${member.organizationId}`);
 
   // Get actual permissions from DB
   const memberWithRole = await prisma.member.findFirst({
