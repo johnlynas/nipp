@@ -2,43 +2,13 @@ import type { NextConfig } from 'next';
 
 const nextConfig: NextConfig = {
 
-  // Keeps the Node.js runtime (Server Components) happy
+  // Keeps the Node.js runtime (Server Components) happy.
+  // Also serves as the Turbopack externalization list — these server-only
+  // packages must never be bundled (they spawn sockets, schedulers, or
+  // depend on Node built-ins). Replaces the legacy webpack() externals
+  // block from Next 15: node built-in modules are handled natively by
+  // Turbopack and need no per-module externals.
   serverExternalPackages: ['ioredis', 'pg', 'bree', 'graceful', '@breejs/later'],
-
-  // Fixes the Edge runtime (Middleware) build error
-  webpack(config, { nextRuntime }) {
-    if (nextRuntime === 'edge') {
-      config.externals = config.externals || [];
-      config.externals.push('ioredis');
-    }
-
-    // Node.js built-ins that webpack can't resolve natively.
-    // `crypto` is available in both Node.js and Edge runtimes, so it's always externalized.
-    // The other modules are only needed for server-side bundles where Node.js built-ins 
-    // aren't polyfilled (instrumentation.ts uses require() to load pg/ioredis dynamically).
-    // These are NOT needed for browser bundles where Node.js built-ins like Buffer are 
-    // polyfilled by webpack.
-    const alwaysExternal = ['crypto'];
-    config.externals = config.externals || [];
-    for (const builtin of alwaysExternal) {
-      if (!config.externals.includes(builtin)) {
-        config.externals.push(builtin);
-      }
-    }
-
-    // Node.js-specific built-ins — only needed for server-side bundles
-    if (nextRuntime === 'nodejs') {
-      const nodeBuiltins = ['fs', 'path', 'async_hooks', 'net', 'tls', 'dns', 'util/types', 'stream', 'events', 'util', 'string_decoder', 'readline', 'os'];
-      config.externals = config.externals || [];
-      for (const builtin of nodeBuiltins) {
-        if (!config.externals.includes(builtin)) {
-          config.externals.push(builtin);
-        }
-      }
-    }
-
-    return config;
-  },
 
   // CSP is now handled dynamically in middleware.ts with nonce injection
   // Old static headers removed to avoid conflicts:
