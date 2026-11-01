@@ -263,7 +263,8 @@ describe('Tenant Management API — Structural Verification', () => {
     });
 
     it('should revalidate cache on permission changes', () => {
-      expect(content).toContain("revalidateTag('org')");
+      // Next 16 requires a stale-window second arg; keep the assertion on the stable prefix.
+      expect(content).toContain("revalidateTag('org'");
     });
   });
 

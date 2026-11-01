@@ -21,7 +21,7 @@ function isPublicRoute(pathname: string): boolean {
   );
 }
 
-export async function middleware(request: NextRequest) {
+export async function proxy(request: NextRequest) {
   const { pathname } = request.nextUrl;
 
   const isDev = env.NODE_ENV !== 'production';

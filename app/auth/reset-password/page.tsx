@@ -142,9 +142,13 @@ function ResetPasswordContent() {
       });
 
     // One-shot strip (design T12): the address bar must not keep carrying the
-    // token in history after verification. Runs unconditionally — with no
-    // token the URL is already clean, so this is a harmless same-state replace.
-    router.replace('/auth/reset-password', { scroll: false });
+    // token in history after verification. Gated on the param existing so the
+    // effect is idempotent — a no-op replace of the same URL would re-trigger
+    // itself if router identity churned across renders (same class as the
+    // /login?callbackUrl loop found on Next 16).
+    if (searchParams.get('token') !== null) {
+      router.replace('/auth/reset-password', { scroll: false });
+    }
 
     return () => {
       cancelled = true;
