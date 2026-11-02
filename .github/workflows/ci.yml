@@ -26,6 +26,8 @@ jobs:
       # Prisma 7: the client is ESM-generated into prisma/generated (not
       # shipped in @prisma/client) — generate before type-check/build.
       - name: Generate Prisma client
+        env:
+          DATABASE_URL: "postgresql://x:x@localhost:5432/x"
         run: npx prisma generate
 
       - name: Lint
