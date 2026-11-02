@@ -5,7 +5,7 @@ import { checkAdminRateLimit } from '@/lib/rate-limiter';
 import { JobSchedulerService, type Schedule } from '@/services/job-scheduler-service';
 import { withPlatformContext } from '@/lib/platform-db';
 import { ConflictError, ValidationError } from '@/lib/services/types';
-import { NotificationPriority, NotificationScope } from '@prisma/client';
+import { NotificationPriority, NotificationScope } from '@/lib/prisma';
 
 export const runtime = 'nodejs';
 

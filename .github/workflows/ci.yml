@@ -23,6 +23,11 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
+      # Prisma 7: the client is ESM-generated into prisma/generated (not
+      # shipped in @prisma/client) — generate before type-check/build.
+      - name: Generate Prisma client
+        run: npx prisma generate
+
       - name: Lint
         run: npx eslint . --max-warnings=0
 

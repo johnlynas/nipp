@@ -6,7 +6,7 @@
  * exist only on non-terminal work orders (FINISHED / CLOSED reject writes).
  */
 
-import { Prisma, WorkOrderNote } from '@prisma/client';
+import { Prisma, WorkOrderNote } from '@/lib/prisma';
 import tenantDb from '@/lib/tenant-db';
 import { logger } from '@/lib/logger';
 import { WorkOrderService } from './work-order-service';
@@ -32,7 +32,7 @@ const NOTE_MAX_LEN = 2000;
 const TERMINAL_STATES: readonly string[] = ['FINISHED', 'CLOSED'];
 
 /** Notes exist only on non-terminal work orders; 404 if the parent is gone. */
-async function requireNonTerminalWorkOrder(workOrderId: string): Promise<import('@prisma/client').WorkOrder> {
+async function requireNonTerminalWorkOrder(workOrderId: string): Promise<import('@/lib/prisma').WorkOrder> {
   const workOrder = await WorkOrderService.getById(workOrderId, READ_CTX);
   if (TERMINAL_STATES.includes(workOrder.state)) {
     throw new ValidationError(`Notes cannot be added to a ${workOrder.state} work order`);

@@ -43,6 +43,8 @@
 *.db
 *.db-journal
 prisma/dev.db*
+# Prisma 7 generated client (ESM, git-ignored — regenerate via `npx prisma generate`)
+prisma/generated/
 
 # ==========================
 # Test Coverage

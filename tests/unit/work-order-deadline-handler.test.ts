@@ -39,7 +39,7 @@ vi.mock('@/lib/platform-db', () => ({
 }));
 
 import { runWorkOrderDeadlineScan, workOrdersQuoteDeadlinesHandler } from '@/services/work-order-deadline-handler';
-import { NotificationPriority, NotificationScope } from '@prisma/client';
+import { NotificationPriority, NotificationScope } from '@/lib/prisma';
 import type { JobRunContext } from '@/services/job-scheduler-service';
 
 // ---------------------------------------------------------------------------

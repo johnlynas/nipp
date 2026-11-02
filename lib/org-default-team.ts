@@ -24,7 +24,7 @@
  * row, matching the RLS WITH CHECK policies for Team/TeamMember/TeamRole.
  */
 
-import { Prisma } from '@prisma/client';
+import { Prisma } from '@/lib/prisma';
 import { logger } from '@/lib/logger';
 import { teamMembershipKey } from '@/lib/team-membership-key';
 

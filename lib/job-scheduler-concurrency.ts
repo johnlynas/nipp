@@ -34,7 +34,7 @@
 import { env } from '@/lib/env';
 import { logger } from '@/lib/logger';
 import { pushNotification } from '@/lib/notification-push';
-import { NotificationPriority, NotificationScope } from '@prisma/client';
+import { NotificationPriority, NotificationScope } from '@/lib/prisma';
 
 // ---------------------------------------------------------------------------
 // Config

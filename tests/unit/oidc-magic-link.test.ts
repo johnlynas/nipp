@@ -30,7 +30,7 @@ vi.mock('@/lib/logger', () => ({ logger: mockLogger }));
 
 import os from 'os';
 import { issueInviteLink, consumeInviteToken, normalizePortalOrigin, getMachineIPv4 } from '@/lib/oidc-magic-link';
-import type { User } from '@prisma/client';
+import type { User } from '@/lib/prisma';
 
 /** LAN IPv4 the fake machine exposes; stub per-test to exercise edge cases. */
 function stubNetworkInterfaces(address: string | null) {

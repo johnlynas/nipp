@@ -4,7 +4,7 @@
  * Model locality: Global (non-org-scoped). Uses tenantDb for all queries.
  */
 
-import { Prisma } from '@prisma/client';
+import { Prisma } from '@/lib/prisma';
 // RLS plan Phase 3: Resource/ResourceRole are non-org-scoped (platform resource catalog) —
 // pass-through swap removes the unscoped-client bypass.
 import tenantDb from '@/lib/tenant-db';

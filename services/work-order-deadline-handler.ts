@@ -17,7 +17,7 @@
  *     tenant-ADMIN context (policy WITH CHECK requires app.current_org_id).
  */
 
-import { NotificationPriority, NotificationScope } from '@prisma/client';
+import { NotificationPriority, NotificationScope } from '@/lib/prisma';
 import tenantDb from '@/lib/tenant-db';
 import { withEnvPlatformContext } from '@/lib/rls-transaction';
 import { withTenantAdminContext } from '@/lib/platform-db';

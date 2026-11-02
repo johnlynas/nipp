@@ -40,13 +40,19 @@
 //                                 layer injection.
 // ============================================================
 
+// Prisma 7: the `prisma-client` provider REQUIRES an explicit `output`.
+// The generated ESM client lives in ./generated/prisma (git-ignored — run
+// `npx prisma generate`; CI does so before type-check/build). All app code
+// imports it through the lib/prisma.ts re-export barrel.
 generator client {
-  provider = "prisma-client-js"
+  provider = "prisma-client"
+  output   = "./generated/prisma"
 }
 
+// Prisma 7: the CLI connection URL lives in prisma.config.ts (datasource.url),
+// not in the schema — an `url` field here is no longer accepted.
 datasource db {
   provider = "postgresql"
-  url      = env("DATABASE_URL")
 }
 
 // ============================================================

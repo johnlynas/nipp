@@ -7,7 +7,7 @@ import { checkAdminRateLimit } from '@/lib/rate-limiter';
 // to app.current_org_id, which must equal the target org (42501 otherwise).
 import tenantDb from '@/lib/tenant-db';
 import { withPlatformContext, withTenantAdminContext } from '@/lib/platform-db';
-import type { Prisma } from '@prisma/client';
+import type { Prisma } from '@/lib/prisma';
 import { UnitService, UNIT_TYPES, type UnitTypeValue } from '@/services/unit-service';
 import { ValidationError, ForbiddenError } from '@/lib/services/types';
 

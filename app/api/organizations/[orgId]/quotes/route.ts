@@ -8,7 +8,7 @@
  */
 
 import { NextRequest, NextResponse } from 'next/server';
-import type { QuotationState } from '@prisma/client';
+import type { QuotationState } from '@/lib/prisma';
 import { auth } from '@/lib/auth';
 import { resolveTenantAccess, toTenantContext } from '@/lib/tenant-access';
 import { withRLSContext } from '@/lib/rls-transaction';

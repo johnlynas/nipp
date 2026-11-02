@@ -6,7 +6,7 @@ import tenantDb from '@/lib/tenant-db';
 import { isSameSiteRequest } from '@/lib/csrf';
 import { handleServiceError } from '@/lib/services/error-handler';
 import { ValidationError } from '@/lib/services/types';
-import type { WorkOrderState } from '@prisma/client';
+import type { WorkOrderState } from '@/lib/prisma';
 import { WorkOrderService, WORK_ORDER_STATES, setWorkOrderEmailDispatcher } from '@/services/work-order-service';
 import { sendWorkOrderEmailEvent } from '@/services/work-order-email';
 

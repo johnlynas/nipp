@@ -31,7 +31,7 @@
  * Production callers NEVER use these — they are test-only and intentionally not
  * part of the app import surface beyond tests/.
  */
-import type { PrismaClient } from '@prisma/client';
+import type { PrismaClient } from '@/lib/prisma';
 import prisma from '@/lib/db';
 import { runWithRLS, withRLSContext, type RLSContext } from '@/lib/rls-transaction';
 

@@ -26,7 +26,7 @@ import { env } from '@/lib/env';
 import { auth } from '@/lib/auth';
 import { logger as rootLogger } from '@/lib/logger';
 import { pushNotification } from '@/lib/notification-push';
-import { NotificationPriority, NotificationScope } from '@prisma/client';
+import { NotificationPriority, NotificationScope } from '@/lib/prisma';
 
 // ---------------------------------------------------------------------------
 // Helpers — session extraction (used by route wrappers)

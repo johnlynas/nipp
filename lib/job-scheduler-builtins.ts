@@ -22,7 +22,7 @@ import { checkHealthStatus, type HealthResponse } from '@/lib/health-check';
 import { findDueToStartEvents } from '@/lib/calendar-event-scheduler';
 import { pushNotification } from '@/lib/notification-push';
 import { workOrdersQuoteDeadlinesHandler } from '@/services/work-order-deadline-handler';
-import { NotificationPriority, NotificationScope } from '@prisma/client';
+import { NotificationPriority, NotificationScope } from '@/lib/prisma';
 
 /** `noop` — the minimal smoke-test handler. Proves the end-to-end path. */
 export const noopHandler: JobHandler = async (ctx) => {

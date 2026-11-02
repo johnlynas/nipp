@@ -688,7 +688,7 @@ Advisories are remediated to zero when the fix is reachable within the current m
 
 | Finding | Advisory | Rationale & tracking |
 |---------|----------|----------------------|
-| `deepmerge-ts <8` via `@prisma/config` → `prisma@6.19.3` | [GHSA-ggr8-5vv4-36mx](https://github.com/advisories/GHSA-ggr8-5vv4-36mx) (high — stack exhaustion when merging recursive object graphs) | Build/CLI-time config merge only; not reachable from app request input (the Prisma client, which handles runtime traffic, does not use deepmerge-ts). Fixed only in `@prisma/config` ≥ 7.10.1 i.e. the Prisma 7 line — a breaking major deliberately excluded from the security sweep. Migration tracked as its own effort: [Migrate Prisma 6 → 7](./openspec/changes/prisma-7-migration/proposal.md). Re-audit on every Prisma upgrade; drop this row when it lands. |
+| — none — | — | The `deepmerge-ts <8` high finding (GHSA-ggr8-5vv4-36mx, via `@prisma/config` → `prisma@6.19.3`) was cleared by the Prisma 7 migration ([proposal](./openspec/changes/prisma-7-migration/proposal.md)): `@prisma/config` ≥ 7.10.1 ships `deepmerge-ts` 8.x, and `npm audit --audit-level=high` reports zero high/critical findings (verified 2026-11-01). |
 
 Residual below-high findings (moderate, dev-time only — no action tracked): `minimatch <11.0.1` ([GHSA-g3hv-75wg-m249](https://github.com/advisories/GHSA-g3hv-75wg-m249)) under the ESLint/typescript-eslint toolchain (fixed only in minimatch 11; no installed range reaches it without an eslint 10 major) and `postcss-selector-parser` (build-time only, pinned `^6.1.5` via `overrides`).
 
@@ -746,12 +746,12 @@ This document covers security-specific details. For broader architectural contex
 | [ARCHITECTURE.md](./ARCHITECTURE.md) | Overall system architecture, data flow, and component interactions |
 | [CACHING_ARCHITECTURE.md](./CACHING_ARCHITECTURE.md) | Caching strategy, Redis usage, and cache invalidation patterns |
 | [QUICK_START.md](./QUICK_START.md) | Getting started guide for developers |
-| [Prisma 7 migration proposal](./openspec/changes/prisma-7-migration/proposal.md) | Tracked migration effort that clears the deepmerge-ts accepted-risk row in §10 |
+| [Prisma 7 migration proposal](./openspec/changes/prisma-7-migration/proposal.md) | Prisma 6 → 7 migration effort (shipped 2026-11-01) — cleared the deepmerge-ts accepted-risk row in §10 |
 | [Google OIDC design doc](./documents/feature-planning-and-development/google-oidc-design.md) | Google sign-in flow, account-linking semantics, magic-link verification and its threat table (shipped) |
 | [Bearer-token developer reference](./documents/api/bearer-tokens.md) | Token acquisition doors, lifetime & refresh policy, storage/usage rules (developer-facing) |
 | [Bearer-token design doc](./documents/feature-planning-and-development/bearer-token-remote-access.md) | Bearer architecture decision, threat model, state diagram (source of truth for diagrams) |
 
 ---
 
-*Last updated: 2026-10-31*
+*Last updated: 2026-11-01*
 *Document owner: Engineering Team*

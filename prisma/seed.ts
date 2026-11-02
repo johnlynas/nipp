@@ -1,4 +1,6 @@
-import { PrismaClient, type NotificationPriority, type NotificationScope } from '@prisma/client';
+import 'dotenv/config';
+import { PrismaClient, type NotificationPriority, type NotificationScope } from './generated/prisma/client';
+import { PrismaPg } from '@prisma/adapter-pg';
 import { hashPassword } from 'better-auth/crypto';
 import { readFileSync, writeFileSync, existsSync } from 'node:fs';
 
@@ -24,7 +26,11 @@ function persistPlatformOrgIdToEnv(platformOrgId: string): void {
 //   SEED_RLS_DSN="postgresql://postgres:<pw>@localhost:5432/nipp_dev"
 const SEED_OWNER_DSN = process.env.SEED_RLS_DSN?.trim() || null;
 
-const prisma = new PrismaClient(SEED_OWNER_DSN ? { datasources: { db: { url: SEED_OWNER_DSN } } } : undefined);
+// Prisma 7 clients always construct with an explicit driver adapter (no
+// auto env resolution) — fall back to DATABASE_URL when no owner DSN set.
+const prisma = new PrismaClient({
+  adapter: new PrismaPg({ connectionString: SEED_OWNER_DSN || process.env.DATABASE_URL }),
+});
 
 // =========================================================================
 // RLS BOOTSTRAP (idempotent) — nipp_app role + grants + row-level policies

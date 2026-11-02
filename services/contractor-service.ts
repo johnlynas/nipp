@@ -8,7 +8,7 @@
  * the route boundary (requireSuperAdmin), as with the other admin routes.
  */
 
-import { Contractors, Prisma } from '@prisma/client';
+import { Contractors, Prisma } from '@/lib/prisma';
 import tenantDb from '@/lib/tenant-db';
 import { logger } from '@/lib/logger';
 import { ServiceContext, NotFoundError, ValidationError } from '@/lib/services/types';

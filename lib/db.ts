@@ -1,4 +1,5 @@
-import { PrismaClient } from '@prisma/client';
+import { PrismaClient } from '@/lib/prisma';
+import { PrismaPg } from '@prisma/adapter-pg';
 import { env } from '@/lib/env';
 import { teamMembershipKey } from '@/lib/team-membership-key';
 
@@ -23,7 +24,16 @@ function generateSlug(name: string): string {
  */
 const globalForPrisma = globalThis as unknown as { prisma: PrismaClient };
 
-const basePrisma = globalForPrisma.prisma || new PrismaClient();
+// Prisma 7 requires a driver adapter for client construction. The `pg`
+// connection pool defaults differ from v6 (notably no default connect
+// timeout), so pin the v6 behavior explicitly. URL comes from lib/env —
+// already validated and NODE-ENV aware (test fixtures in tests).
+const adapter = new PrismaPg({
+  connectionString: env.DATABASE_URL,
+  connectionTimeoutMillis: 5_000,
+});
+
+const basePrisma = globalForPrisma.prisma || new PrismaClient({ adapter });
 
 // Auto-generate slug for Team model and handle role inheritance for TeamMember
 const prismaClient = basePrisma.$extends({

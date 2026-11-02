@@ -9,9 +9,13 @@
  * This script is idempotent — safe to run multiple times.
  */
 
-import { PrismaClient, OrgStatus } from '@prisma/client';
+import 'dotenv/config';
+import { PrismaClient, OrgStatus } from '../generated/prisma/client';
+import { PrismaPg } from '@prisma/adapter-pg';
 
-const prisma = new PrismaClient();
+const prisma = new PrismaClient({
+  adapter: new PrismaPg({ connectionString: process.env.DATABASE_URL }),
+});
 
 /**
  * Generate a URL-friendly slug from an organization name.

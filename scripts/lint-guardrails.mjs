@@ -39,6 +39,8 @@ const files = [];
     const abs = path.join(dir, entry);
     const st = statSync(abs);
     const rel = path.relative(ROOT, abs);
+    // The Prisma 7 generated client is machine output — same status as .next.
+    if (st.isDirectory() && (IGNORED_DIRS.has(entry) || rel === 'prisma/generated')) continue;
     if (st.isDirectory()) walk(abs);
     else if (SCAN_EXTS.has(path.extname(entry)) && !REL_EXEMPT.test(rel)) {
       files.push({ rel, abs });

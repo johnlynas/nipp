@@ -47,7 +47,7 @@ import Bree from 'bree';
 import { env } from '@/lib/env';
 import tenantDb from '@/lib/tenant-db';
 import { logger } from '@/lib/logger';
-import { NotificationPriority, NotificationScope } from '@prisma/client';
+import { NotificationPriority, NotificationScope } from '@/lib/prisma';
 import { pushNotification } from '@/lib/notification-push';
 
 // ---------------------------------------------------------------------------

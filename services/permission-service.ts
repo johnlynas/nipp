@@ -6,7 +6,7 @@
  * stale cached permissions (security gap: up to 5 min without invalidation).
  */
 
-import { Prisma } from '@prisma/client';
+import { Prisma } from '@/lib/prisma';
 // RLS plan Phase 3: Permission/RolePermission are not in tenantDb's scoped model list —
 // pass-through swap removes the unscoped-client bypass without changing query behavior.
 import tenantDb from '@/lib/tenant-db';

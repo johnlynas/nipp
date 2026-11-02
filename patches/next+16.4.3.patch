@@ -1,0 +1,22 @@
+diff --git a/node_modules/next/dist/server/lib/router-utils/block-cross-site-dev.js b/node_modules/next/dist/server/lib/router-utils/block-cross-site-dev.js
+--- a/node_modules/next/dist/server/lib/router-utils/block-cross-site-dev.js
++++ b/node_modules/next/dist/server/lib/router-utils/block-cross-site-dev.js
+@@ -71,10 +71,18 @@
+     // CORS checks.
+     const isIgnoredRequest = pathname.includes('/_next/image') || pathname.includes('/_next/static/media') || pathname.includes('/_next/static/immutable/media');
+     return !isIgnoredRequest && (isInternalAsset || isMiddlewareRequest);
+ }
+ const blockCrossSiteDEV = (req, res, allowedDevOrigins, hostname)=>{
++    // patch-package (patches/next+16.4.3.patch): this NIPP project is accessed
++    // over general LAN origins and secured at the app layer by Better Auth's
++    // proxy (Bearer token + RBAC), not same-origin session state. Disable Next
++    // 16's cross-origin allowlist for /_next dev resources (HMR). Set
++    // NEXT_DISABLE_CROSS_SITE_DEV=false to restore enforcement.
++    if (process.env.NEXT_DISABLE_CROSS_SITE_DEV !== 'false') {
++        return false;
++    }
+     const allowedOrigins = [
+         '**.localhost',
+         'localhost',
+         ...allowedDevOrigins ?? []
+     ];

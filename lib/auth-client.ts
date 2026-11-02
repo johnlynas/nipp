@@ -18,6 +18,24 @@ export const authClient = createAuthClient({
   ],
 });
 
+// Eager session hydrate (browser only). Better-populated-by-subscriber-only:
+// better-auth 1.7.x fills $session via a nanostores onMount fetch (/get-session)
+// that fires ONLY while a subscriber is mounted during its keep-mount window.
+// During Next.js client-side navigations the tree unmounts/remounts in between —
+// if nothing subscribes inside that window (timing-dependent; widens when the
+// framework renders slower, e.g. Next 16) the fetch never fires and the atom
+// sits at {data: null} forever → UI widgets that read it silently render null
+// (e.g. TopBarUserIdentityChip — "pill missing after re-login"). Kick the same
+// refetch once at module load so a fetch is always in flight before any component
+// reads the atom, regardless of subscriber timing. Deduped internally: if a
+// fetch is already in flight or data is fresh, this is a no-op.
+if (typeof window !== 'undefined') {
+  const state = authClient.useSession.get() as { isPending?: boolean; refetch?: () => Promise<void> };
+  if (state?.isPending && typeof state.refetch === 'function') {
+    void state.refetch();
+  }
+}
+
 /**
  * Stable empty session object used as the server snapshot for useSyncExternalStore.
  * Must be a module-level constant so Object.is comparison never sees a "change".

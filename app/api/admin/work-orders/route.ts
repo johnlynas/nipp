@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import type { WorkOrderState } from '@prisma/client';
+import type { WorkOrderState } from '@/lib/prisma';
 import { requireSuperAdmin } from '@/lib/require-super-admin';
 import { checkAdminRateLimit } from '@/lib/rate-limiter';
 import { withTenantAdminContext, withPlatformContext } from '@/lib/platform-db';

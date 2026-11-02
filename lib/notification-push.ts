@@ -14,7 +14,7 @@
  *   - GLOBAL: delivered to all active subscribers (super admins + all tenants)
  */
 
-import { NotificationPriority, NotificationScope } from '@prisma/client';
+import { NotificationPriority, NotificationScope } from '@/lib/prisma';
 import tenantDb from '@/lib/tenant-db';
 import { withEnvPlatformContext } from '@/lib/rls-transaction';
 
