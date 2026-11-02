@@ -4,11 +4,6 @@ import react from '@vitejs/plugin-react';
 
 export default defineConfig({
   plugins: [react()],
-  // Integration tests connect to a real Postgres (nipp_dev via .env.test).
-  // Vitest does not load shell env — without this, DATABASE_URL is unset and
-  // lib/env.ts falls back to its bogus `test:test@localhost/test` fixture URL.
-  envDir: '.',
-  dotenv: { path: ['.env.test'], quiet: true },
   test: {
     globals: true,
     setupFiles: ['./tests/setup.ts'],

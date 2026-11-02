@@ -4,12 +4,6 @@
  * Configures global matchers and common mocks for the test environment.
  */
 
-// Must be set before any test module import runs: lib/env only takes the
-// NODE_ENV=test env path (trusting .env.test via vitest `dotenv` config) when
-// this is 'test'; otherwise validateEnv() fails on a bare CI shell and every
-// DB-backed test connects to the fixture URL. Harmless when already set.
-process.env.NODE_ENV = process.env.NODE_ENV || 'test';
-
 // Pin the timezone so date/time assertions are deterministic regardless of the
 // machine's local zone (e.g. Europe/London GMT/BST). Must be set before any
 // Date arithmetic in tests; Node re-reads TZ on each operation.

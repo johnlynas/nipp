@@ -95,6 +95,7 @@
     "vitest": "^4.1.5"
   },
   "overrides": {
-    "postcss-selector-parser": "^6.1.5"
+    "postcss-selector-parser": "^6.1.5",
+    "minimatch": "^11.0.1"
   }
 }
