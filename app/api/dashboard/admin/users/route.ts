@@ -6,7 +6,7 @@ import { UserService } from '@/services/user-service';
 // RLS Phase 3: dashboard user listing/creation run under verified contexts.
 import tenantDb from '@/lib/tenant-db';
 import { withPlatformContext, withTenantAdminContext } from '@/lib/platform-db';
-import type { Prisma } from '@prisma/client';
+import type { Prisma } from '@/lib/prisma';
 import { issueInviteLink } from '@/lib/oidc-magic-link';
 import { recordAuditLog } from '@/lib/audit-log';
 import { notifyUserOperation } from '@/lib/notification-push';

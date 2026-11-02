@@ -34,7 +34,7 @@
  * fire on interactive-tx clients. Nested `prisma.$transaction` reuses the
  * pinned connection, so service-level transactions stay covered end-to-end.
  */
-import type { PrismaClient } from '@prisma/client';
+import type { PrismaClient } from '@/lib/prisma';
 import prisma from './db';
 import { buildRLSContextQueries, buildOrgRebindQuery, type RLSContext } from './rls-context';
 // Re-exported so downstream callers (lib/platform-db.ts) import the verified

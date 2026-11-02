@@ -3,7 +3,7 @@ import { requireSuperAdmin } from '@/lib/require-super-admin';
 import { checkAdminRateLimit } from '@/lib/rate-limiter';
 
 import { JobSchedulerService } from '@/services/job-scheduler-service';
-import { NotificationPriority, NotificationScope } from '@prisma/client';
+import { NotificationPriority, NotificationScope } from '@/lib/prisma';
 import { NotFoundError, ForbiddenError, ValidationError } from '@/lib/services/types';
 import { withPlatformContext } from '@/lib/platform-db';
 

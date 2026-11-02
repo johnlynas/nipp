@@ -53,11 +53,18 @@ describe('db.ts (Prisma extensions)', () => {
 
   beforeEach(async () => {
     mockPrisma = createMockPrismaClient();
-    vi.doMock('@prisma/client', () => ({
+    // Prisma 7: lib/db.ts imports the client through the lib/prisma.ts barrel
+    // (ESM generated output) + the @prisma/adapter-pg driver adapter — mock the
+    // same surfaces the module actually touches.
+    vi.doMock('@/lib/prisma', () => ({
       PrismaClient: vi.fn(function() { return mockPrisma; }),
     }));
+    vi.doMock('@prisma/adapter-pg', () => ({
+      // lib/db.ts does `new PrismaPg(...)` — must be a constructor.
+      PrismaPg: class PrismaPg {},
+    }));
     vi.doMock('@/lib/env', () => ({
-      env: { NODE_ENV: 'test' },
+      env: { NODE_ENV: 'test', DATABASE_URL: 'postgresql://test:***@localhost:5432/test' },
     }));
     
     const dbModule = await import('@/lib/db');

@@ -8,7 +8,7 @@
  * FINISHED / CLOSED (409 — the record belongs to a decided/completed chain).
  */
 
-import { Prisma, Quotation } from '@prisma/client';
+import { Prisma, Quotation } from '@/lib/prisma';
 import tenantDb from '@/lib/tenant-db';
 import { logger } from '@/lib/logger';
 import { WorkOrderService } from './work-order-service';

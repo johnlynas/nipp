@@ -8,7 +8,7 @@
  * Redis cache invalidation: Every update() and delete() call invalidates the Redis permission cache.
  */
 
-import { Prisma } from '@prisma/client';
+import { Prisma } from '@/lib/prisma';
 // RLS plan Phase 3: the unscoped globalDb client is gone; org-targeted lookups
 // run on tenantDb inside the existing runWithTenant(targetOrgId) scope.
 import tenantDb from '@/lib/tenant-db';

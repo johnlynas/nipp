@@ -13,7 +13,7 @@
  * under `withPlatformContext` alone.
  */
 
-import { Prisma, WorkOrder, WorkOrderState } from '@prisma/client';
+import { Prisma, WorkOrder, WorkOrderState } from '@/lib/prisma';
 import tenantDb from '@/lib/tenant-db';
 import * as workOrderState from '@/lib/work-order-state';
 import { logger } from '@/lib/logger';

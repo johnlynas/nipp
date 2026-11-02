@@ -18,7 +18,7 @@ import { sendEmail } from '@/lib/notifications/email';
 import tenantDb from '@/lib/tenant-db';
 import { withEnvPlatformContext } from '@/lib/rls-transaction';
 import { logger } from '@/lib/logger';
-import type { WorkOrder } from '@prisma/client';
+import type { WorkOrder } from '@/lib/prisma';
 import type { WorkOrderEmailEvent } from './work-order-service';
 
 /** No emailed URL is ever produced by a work order email (design D7). */

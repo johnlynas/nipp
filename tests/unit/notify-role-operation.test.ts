@@ -4,7 +4,7 @@
  */
 
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { NotificationPriority, NotificationScope } from '@prisma/client';
+import { NotificationPriority, NotificationScope } from '@/lib/prisma';
 import { notifyRoleOperation } from '@/lib/notification-push';
 
 // Mock the Prisma client — notification-push persists via globalDb.notification and

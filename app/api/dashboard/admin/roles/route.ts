@@ -7,7 +7,7 @@ import { withPlatformContext, withTenantAdminContext } from '@/lib/platform-db';
 
 import { RoleService } from '@/services/role-service';
 import { notifyRoleOperation } from '@/lib/notification-push';
-import type { Prisma } from '@prisma/client';
+import type { Prisma } from '@/lib/prisma';
 
 export const runtime = 'nodejs';
 

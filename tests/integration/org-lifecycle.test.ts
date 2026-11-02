@@ -6,7 +6,7 @@
  */
 
 import { describe, it, expect, afterAll } from 'vitest';
-import { OrgStatus } from '@prisma/client';
+import { OrgStatus } from '@/lib/prisma';
 import { rlsFixture } from '@/tests/utils/rls-fixture';
 
 describe('Organization Lifecycle Integration', () => {

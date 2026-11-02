@@ -6,7 +6,7 @@
  * (i.e., a Tenant Admin can only see/manage users who are members of their org).
  */
 
-import { Prisma } from '@prisma/client';
+import { Prisma } from '@/lib/prisma';
 // RLS plan Phase 3: tenantDb (unscoped bypass) removed — org-scoped models go
 // through tenantDb; Member/TeamMember calls are wrapped in runWithTenant so the
 // Prisma extension's tenant scoping resolves a context. User/Account are global

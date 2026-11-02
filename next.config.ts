@@ -1,7 +1,6 @@
 import type { NextConfig } from 'next';
 
 const nextConfig: NextConfig = {
-
   // Keeps the Node.js runtime (Server Components) happy.
   // Also serves as the Turbopack externalization list — these server-only
   // packages must never be bundled (they spawn sockets, schedulers, or

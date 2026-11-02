@@ -26,7 +26,7 @@
  *   - Per-scan cap on processed events avoids flooding subscribers on bursts.
  */
 
-import { NotificationPriority, NotificationScope } from '@prisma/client';
+import { NotificationPriority, NotificationScope } from '@/lib/prisma';
 import { isMainThread } from 'node:worker_threads';
 import tenantDb from '@/lib/tenant-db';
 import { logger } from '@/lib/logger';

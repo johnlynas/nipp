@@ -1,5 +1,5 @@
 import { describe, it, expect, vi } from 'vitest';
-import type { PrismaClient } from '@prisma/client';
+import type { PrismaClient } from '@/lib/prisma';
 import { withTenantRLS, withExplicitRLS, runWithRLS, type RLSTx } from '@/lib/rls-transaction';
 // Static import of the REAL slot module — in this test file static and dynamic
 // resolution may yield separate instances (Vitest CJS interop), so every

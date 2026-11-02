@@ -30,7 +30,7 @@ import {
   NotificationPriority,
   NotificationScope,
   Prisma,
-} from '@prisma/client';
+} from '@/lib/prisma';
 // RLS Phase 3 (plan §3.4 sanctioned exception): platform-scoped service —
 // JobDefinition/JobExecution are platform-only at GRANT + RLS level. Routes wrap
 // each call in withPlatformContext(...); the out-of-request scheduler engine and

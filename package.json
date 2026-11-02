@@ -7,6 +7,7 @@
   },
   "scripts": {
     "dev": "next dev",
+    "postinstall": "patch-package",
     "dev:https": "next dev --experimental-https",
     "build": "next build",
     "start": "next start",
@@ -15,7 +16,7 @@
     "db:migrate": "prisma migrate dev",
     "db:push": "prisma db push",
     "db:studio": "prisma studio",
-    "db:reset": "prisma migrate reset --skip-seed",
+    "db:reset": "prisma migrate reset",
     "db:seed": "tsx prisma/seed.ts",
     "build:cloud": "echo 'Placeholder — configure cloud build'",
     "deploy:cloud": "echo 'Placeholder — configure cloud deploy'",
@@ -38,7 +39,8 @@
     "@better-auth/core": "1.7.14",
     "@breejs/later": "^4.2.0",
     "@googlemaps/js-api-loader": "^2.1.3",
-    "@prisma/client": "^6.19.3",
+    "@prisma/adapter-pg": "7.10.1",
+    "@prisma/client": "7.10.1",
     "@tanstack/react-query": "^5.101.4",
     "better-auth": "1.7.14",
     "bree": "^9.2.9",
@@ -83,8 +85,9 @@
     "husky": "^9.1.7",
     "jsdom": "^26.0.0",
     "lint-staged": "^15.4.0",
+    "patch-package": "^8.0.1",
     "prettier": "^3.4.0",
-    "prisma": "^6.19.3",
+    "prisma": "7.10.1",
     "tailwindcss": "^4.0.0",
     "tsx": "^4.23.0",
     "typescript": "^5.7.0",
@@ -92,6 +95,7 @@
     "vitest": "^4.1.5"
   },
   "overrides": {
-    "postcss-selector-parser": "^6.1.5"
+    "postcss-selector-parser": "^6.1.5",
+    "minimatch": "^11.0.1"
   }
 }

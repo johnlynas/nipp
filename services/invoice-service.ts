@@ -9,7 +9,7 @@
  * (@unique) and mapped to ValidationError on P2002.
  */
 
-import { Prisma, Invoice } from '@prisma/client';
+import { Prisma, Invoice } from '@/lib/prisma';
 import tenantDb from '@/lib/tenant-db';
 import { logger } from '@/lib/logger';
 import { WorkOrderService } from './work-order-service';

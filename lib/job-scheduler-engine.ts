@@ -32,7 +32,7 @@ import tenantDb from '@/lib/tenant-db';
 // Bree ships its own CJS + types; it stays webpack-external (next.config.ts
 // serverExternalPackages) so this import is a plain Node require at runtime.
 import later, { type Schedule as LaterSchedule } from '@breejs/later';
-import { NotificationPriority, NotificationScope } from '@prisma/client';
+import { NotificationPriority, NotificationScope } from '@/lib/prisma';
 import { env } from '@/lib/env';
 import { logger } from '@/lib/logger';
 import { pushNotification } from '@/lib/notification-push';

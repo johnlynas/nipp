@@ -6,7 +6,7 @@
  */
 
 import { NextRequest, NextResponse } from 'next/server';
-import type { WorkOrderState } from '@prisma/client';
+import type { WorkOrderState } from '@/lib/prisma';
 import { auth } from '@/lib/auth';
 import { resolveTenantAccess, toTenantContext } from '@/lib/tenant-access';
 import { withRLSContext } from '@/lib/rls-transaction';

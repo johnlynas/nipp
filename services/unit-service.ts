@@ -14,7 +14,7 @@
  * org — with the env-derived platform org as last resort (super-admin paths).
  */
 
-import { Prisma } from '@prisma/client';
+import { Prisma } from '@/lib/prisma';
 import tenantDb from '@/lib/tenant-db';
 import { runWithTenant } from '@/lib/tenant-context';
 import { env } from '@/lib/env';

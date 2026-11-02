@@ -1,4 +1,4 @@
-import { Prisma } from '@prisma/client';
+import { Prisma } from '@/lib/prisma';
 // RLS plan Phase 3: Organization/User are not in tenantDb's scoped model list —
 // pass-through swap; cross-org listing is platform-admin-only by product model.
 import tenantDb from '@/lib/tenant-db';

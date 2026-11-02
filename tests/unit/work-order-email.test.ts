@@ -151,7 +151,7 @@ describe('work-order email templates', () => {
     expect(NO_URL_RE.test(subject)).toBe(false);
 
     const assigned = { ...workOrderFixture, contractorId: 'c-1' } as Pick<
-      import('@prisma/client').WorkOrder,
+      import('@/lib/prisma').WorkOrder,
       'description' | 'workOrderId'
     >;
     const a = renderAssignment({ workOrder: assigned, organisationName: orgFixture.name, contractor: contractorFixture as never });
