@@ -432,6 +432,34 @@ export const auth = betterAuth({
     cookieCache: {
       enabled: true,
       maxAge: 60 * 60, // 1 hour (prevents DB hits during short outages)
+      // PASSWORD-RESET FIX: bind the cookie-cache version to user.updatedAt.
+      // A valid cached payload short-circuits /get-session WITHOUT running the
+      // session callback (verified in better-auth dist/api/routes/session.mjs),
+      // so stale cookie caches serve user data that lacks/contradicts the live
+      // permissions for up to maxAge — this is what fed falsy isSuperAdmin into
+      // the client's $session atom ~10s after a reset + re-login. Better-auth
+      // evaluates this callback on BOTH write (setCookieCache) and read
+      // (get-session version check), so bumping user.updatedAt at login time —
+      // which admin resets / self-changes always do via Prisma @updatedAt —
+      // invalidates that device's stale cache immediately: the next get-session
+      // falls through to the DB path, session callback re-resolves
+      // isSuperAdmin/permissions from live state, and setCookieCache stores the
+      // fresh, consistent payload under the new version. Cost: one PK lookup per
+      // get-session call; it runs in Node only (Edge skips the whole path via
+      // the EdgeRuntime check below, and cookies are request-scoped there).
+      version: async (_session, user) => {
+        try {
+          const u = await prisma.user.findUnique({
+            where: { id: user.id },
+            select: { updatedAt: true },
+          });
+          return (u?.updatedAt ?? new Date(0)).toISOString();
+        } catch {
+          // DB unavailable: keep the stable default version so get-session degrades
+          // to normal cache behaviour instead of 500-ing on every call.
+          return '1';
+        }
+      },
     },
   },
 
@@ -442,11 +470,29 @@ export const auth = betterAuth({
     window: 15 * 60, // 15 minutes (in seconds)
     max: 10,         // 10 requests per window per IP
     customRules: {
+      // NOTE — path keys are matched AFTER better-auth strips the base URL from
+      // the request (normalizePathname(req.url, basePath), verified in
+      // dist/api/rate-limiter/index.mjs): for requests to /api/auth/* the key is
+      // the remainder ("/get-session", "/sign-in/email"). Full-path keys silently
+      // NEVER match (this repo's original sign-in rule had that bug — brute force
+      // fell back to the 10/15 global, not the tighter intent).
+
       // Tighter limit for password sign-in to prevent brute-force
-      '/api/auth/sign-in/email': {
+      '/sign-in/email': {
         window: 15 * 60, // 15 minutes
         max: 5,          // 5 attempts per window
       },
+      // USER-PILL FIX: exempt read-only session fetch from the global limit.
+      // better-auth's limiter counts EVERY auth endpoint (including this GET)
+      // against the 10/15-min budget — normal dashboard browsing (which refetches
+      // /get-session on navigation/hydrate) exhausted it, every further fetch
+      // 429'd (verified: `GET /api/auth/get-session 429` under plain use), and
+      // the client $session atom dropped to its error state → TopBarUserIdentityChip
+      // rendered nothing until re-login. Brute-force exposure is zero here: it's a
+      // GET on the caller's OWN cookie-scoped session, and the real attack surface
+      // (sign-in 5/15min above; better-auth's built-in sign-in/sign-up/password-reset
+      // rules) stays fully limited.
+      '/get-session': false,
     },
   },
 

@@ -308,13 +308,29 @@ describe('useIsSuperAdmin', () => {
       expect(result.current).toBe(true);
     });
 
-    it('returns false when the session explicitly says not super admin', () => {
-      mocks.setSession({ user: { isSuperAdmin: false, permissions: ['*'] } });
+    it('returns null (optimistic) while a session `false` is verified against the query', () => {
+      mocks.setSession({ user: { isSuperAdmin: false } });
+      let release!: (v: Response) => void;
+      mocks.mockEncryptedFetch.mockReturnValue(
+        new Promise<Response>((resolve) => {
+          release = resolve;
+        }),
+      );
 
       const { result } = renderHook(() => useIsSuperAdmin(), { wrapper: makeWrapper() });
 
-      // The flag short-circuits the '*' wildcard check.
-      expect(result.current).toBe(false);
+      // AccessDenied must not latch off the session flag alone — verify first.
+      expect(result.current).toBeNull();
+      release(jsonResponse(['*']));
+    });
+
+    it('returns true when session says false but live permissions prove super admin (stale-cache race)', async () => {
+      mocks.setSession({ user: { isSuperAdmin: false, permissions: [] } });
+      mocks.mockEncryptedFetch.mockResolvedValue(jsonResponse(['*']));
+
+      const { result } = renderHook(() => useIsSuperAdmin(), { wrapper: makeWrapper() });
+
+      await waitFor(() => expect(result.current).toBe(true));
     });
   });
 
