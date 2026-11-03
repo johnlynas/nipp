@@ -71,21 +71,30 @@ export function useAnyPermission(permissions: string[]): boolean {
 
 /**
  * Check if the user is a Super Admin.
+ *
+ * Returns true, false, or null (unknown/loading). RequireSuperAdmin renders
+ * children optimistically while this is null/undefined and AccessDenied only
+ * on an explicit false — so false must be CONFIRMED, never assumed:
+ *
+ *  - session flag true  → true immediately (fast path)
+ *  - session flag false OR the extended fields are absent entirely (bare
+ *    /get-session payload from a cookie-cache hit / Edge-skipped callback —
+ *    the "Access Denied after ~10s" window) → defer to a LIVE permissions
+ *    query: still loading or transient failure → null (optimistic), loaded
+ *    ['*'] → true, any other loaded list → false.
  */
 export function useIsSuperAdmin(): boolean | null {
   const { data: session } = useSession();
-  const { data: permissions, isLoading } = usePermissions();
+  const { data: permissions, isLoading, isError } = usePermissions();
 
-  // Fast path: session already has isSuperAdmin flag
   const user = (session as AuthSession | null)?.user;
-  if (user?.isSuperAdmin !== undefined) {
-    return user.isSuperAdmin;
+  if (user?.isSuperAdmin === true) {
+    return true;
   }
 
-  // Slow path: wait for React Query cache to load
-  if (isLoading) return null;
+  // Everything else verifies against the live permissions endpoint result.
+  if (isLoading || isError) return null; // stay optimistic until proven otherwise
 
-  // Super Admins have the wildcard permission '*' or can be inferred from permissions
   const available = permissions ?? [];
   return available.includes('*');
 }

@@ -6,6 +6,7 @@ import { createAuthClient } from 'better-auth/client';
 import { organizationClient } from 'better-auth/client/plugins';
 import { useSyncExternalStore } from 'react';
 import { clearPayloadKey } from './payload-key-manager';
+import { invalidateUserPermissionQueries } from './query-client';
 
 export const authClient = createAuthClient({
   plugins: [
@@ -30,9 +31,24 @@ export const authClient = createAuthClient({
 // reads the atom, regardless of subscriber timing. Deduped internally: if a
 // fetch is already in flight or data is fresh, this is a no-op.
 if (typeof window !== 'undefined') {
-  const state = authClient.useSession.get() as { isPending?: boolean; refetch?: () => Promise<void> };
-  if (state?.isPending && typeof state.refetch === 'function') {
-    void state.refetch();
+  let eagerKicked = false;
+  const kickRefetch = () => {
+    const state = authClient.useSession.get() as { isPending?: boolean; data?: unknown; refetch?: () => Promise<void> };
+    // isPending covers the initial-mount case; data === null additionally covers
+    // a stale NULL atom left behind by a failed/never-fetched hydrate (the
+    // "works 10s, then Access Denied" window fed falsy isSuperAdmin exactly this way).
+    if (!eagerKicked && typeof state?.refetch === 'function' && (state.isPending || state.data === null)) {
+      eagerKicked = true;
+      void state.refetch();
+    }
+  };
+  kickRefetch();
+  // Re-arm on every atom transition: if the refetch fails or the hydrate window
+  // is missed, a later null-data state gets one more chance before the guard reads it.
+  try {
+    authClient.useSession.subscribe(kickRefetch);
+  } catch {
+    // nanostore API drift — module-load kick above already ran; degrade gracefully
   }
 }
 
@@ -73,6 +89,11 @@ export async function signInEmail(email: string, password: string) {
     return { error: result.error.message || 'Invalid credentials' };
   }
 
+  // A fresh session must never serve the previous user's React Query data as
+  // "fresh" (usePermissions keeps results for 30 min staleTime / 1 h gcTime —
+  // enough time to cover an entire re-login on the same browser).
+  invalidateUserPermissionQueries();
+
   return { success: true };
 }
 
@@ -98,6 +119,11 @@ export async function signOutUser() {
       onSuccess: () => {
         // Step 2: Clear client-side cached payload key
         void clearPayloadKey();
+
+        // A second user signing into this browser must never inherit this
+        // user's permissions/roles cache (React Query gcTime is up to 1 h,
+        // which outlives a full logout → login cycle).
+        invalidateUserPermissionQueries();
 
         // Step 3: Clear all session cookie variants on the client side.
         // BetterAuth prefixes with __Secure- when BETTER_AUTH_URL uses https://,

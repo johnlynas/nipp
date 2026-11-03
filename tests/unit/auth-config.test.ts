@@ -184,9 +184,14 @@ describe('auth configuration (options)', () => {
     expect(s.updateAge).toBe(60 * 15);
   });
 
-  it('enables session cookie cache (1h maxAge) to survive short DB outages', () => {
+  it('enables session cookie cache (1h maxAge) with user.updatedAt-bound invalidation', () => {
     const s = options().session as Record<string, any>;
-    expect(s.cookieCache).toEqual({ enabled: true, maxAge: 60 * 60 });
+    expect(s.cookieCache.enabled).toBe(true);
+    expect(s.cookieCache.maxAge).toBe(60 * 60);
+    // Version binding: a valid cache must be re-checked against user.updatedAt so
+    // stale cookie payloads (lacking the session callback's isSuperAdmin) can't
+    // outlive a password reset — see lib/auth.ts PASSWORD-RESET FIX.
+    expect(typeof s.cookieCache.version).toBe('function');
   });
 
   it('uses an env-driven dynamic baseURL (no static base pinning trusted origins)', () => {
@@ -215,8 +220,14 @@ describe('auth configuration (options)', () => {
     const rl = options().rateLimit as Record<string, any>;
     expect(rl.enabled).toBe(false); // env.NODE_ENV === 'test'
     // The brute-force rule is still defined so it activates in production.
-    expect(rl.customRules['/api/auth/sign-in/email'].max).toBe(5);
-    expect(rl.customRules['/api/auth/sign-in/email'].window).toBe(15 * 60);
+    // Keys are base-stripped paths — better-auth matches customRules AFTER
+    // normalizing req.url against the auth base URL (see lib/auth.ts).
+    expect(rl.customRules['/sign-in/email'].max).toBe(5);
+    expect(rl.customRules['/sign-in/email'].window).toBe(15 * 60);
+    // Read-only session fetch must stay exempt (customRule === false) in every
+    // environment — the global budget used to 429 normal /get-session traffic and
+    // blank out the TopBar identity pill (see lib/auth.ts USER-PILL FIX).
+    expect(rl.customRules['/get-session']).toBe(false);
     expect(rl.window).toBe(15 * 60);
     expect(rl.max).toBe(10);
   });
