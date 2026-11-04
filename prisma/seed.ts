@@ -5,18 +5,24 @@ import { hashPassword } from 'better-auth/crypto';
 import { readFileSync, writeFileSync, existsSync } from 'node:fs';
 
 /**
- * Write PLATFORM_ORGANIZATION_ID=<id> into .env (replace existing line, keep the
- * rest of the file byte-for-byte; append with a comment if absent). This kills
- * the stale-platform-org FK failures after `prisma db push` + reseed.
+ * Write PLATFORM_ORGANIZATION_ID=<id> into a single env file (replace existing
+ * line, keep the rest of the file byte-for-byte; append with a comment if
+ * absent). Silently skips files that don't exist. This kills the
+ * stale-platform-org FK failures after `prisma db push` + reseed.
  */
-function persistPlatformOrgIdToEnv(platformOrgId: string): void {
-  const envPath = new URL('../.env', import.meta.url);
+function persistPlatformOrgIdToFile(envPath: URL | string, platformOrgId: string): void {
   if (!existsSync(envPath)) return;
   const content = readFileSync(envPath, 'utf8');
   const line = `PLATFORM_ORGANIZATION_ID="${platformOrgId}"   # verified Platform org (RLS platform ops fail-closed without it)`;
   const re = /^PLATFORM_ORGANIZATION_ID=.*$/m;
   const next = re.test(content) ? content.replace(re, line) : `${content.trimEnd()}\n\n${line}\n`;
   writeFileSync(envPath, next);
+}
+
+/** Keep both .env (dev) and .env.test (test stack) in sync with the resolved id. */
+function persistPlatformOrgIdToEnv(platformOrgId: string): void {
+  persistPlatformOrgIdToFile(new URL('../.env', import.meta.url), platformOrgId);
+  persistPlatformOrgIdToFile(new URL('../.env.test', import.meta.url), platformOrgId);
 }
 
 // The seed ALWAYS connects as OWNER: it performs DDL (roles/grants/policies)
@@ -586,12 +592,12 @@ async function main() {
   }
   platformOrgId = platformOrg.id;
 
-  // Keep .env in sync so the dev server and job-scheduler don't carry a stale
-  // platform org id from a previous DB recreation (causes FK failures on
-  // GLOBAL notifications). Only writes when the value actually differs.
+  // Keep .env (dev) and .env.test (test stack) in sync so the dev server,
+  // job-scheduler, and integration tests don't carry a stale platform org id
+  // from a previous DB recreation (causes FK failures on GLOBAL notifications).
   persistPlatformOrgIdToEnv(platformOrgId);
   if (platformOrgId !== envPlatformOrgId) {
-    console.log(`📝 Wrote PLATFORM_ORGANIZATION_ID=${platformOrgId} to .env`);
+    console.log(`📝 Wrote PLATFORM_ORGANIZATION_ID=${platformOrgId} to .env and .env.test`);
   }
 
   // =========================================================================

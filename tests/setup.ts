@@ -9,6 +9,16 @@
 // Date arithmetic in tests; Node re-reads TZ on each operation.
 process.env.TZ = 'UTC';
 
+// Load .env.test BEFORE any test file imports app code: lib/env resolves
+// DATABASE_URL at import time, and without it the Prisma client falls back to
+// the hardcoded test fixture DSN (user `test`) which does not exist on the
+// local Postgres. dotenv never overrides vars already set in the environment,
+// so an explicit `DATABASE_URL=... npm run test:integration` still wins.
+import dotenv from 'dotenv';
+import path from 'node:path';
+
+dotenv.config({ path: path.resolve(__dirname, '..', '.env.test') });
+
 import { vi } from 'vitest';
 import '@testing-library/jest-dom/vitest';
 
