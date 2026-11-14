@@ -89,6 +89,7 @@ All requirements are implemented:
 | FR-9 | Recurring events: daily through annually with interval/end/count limits | ✅ (DAILY, WEEKLY, MONTHLY, QUARTERLY, SEMI_ANNUALLY, ANNUALLY) |
 | FR-13 | RFC 5545 recurrence compliance (month-end overflow, BYDAY, BYMONTHDAY) | ✅ — migrated from custom engine to `rrule` library |
 | FR-14 | Google Calendar-style edit scopes: "this event", "this & following", "all events" | ✅ — scope handlers in `lib/recurrence-scopes.ts`, wired into PATCH endpoint and UI |
+| FR-15 | First-class "All day" events (Google Calendar behaviour) | ✅ — `CalendarEvent.allDay` flag; modal toggle hides time inputs; dedicated All Day lane in Week/Day views, top-of-cell bars in Month view; date-only drag; excluded from due-to-start SSE; "All day" label in sidebar + today's-events email. Normalisation in `lib/all-day.ts`; recurring all-day series expand via the existing rrule engine (dtstart at midnight) |
 | FR-10 | Standalone reusable component in `components/calendar/` | ✅ |
 | FR-11 | Organization-scoped events via `organizationId` (tenant isolation) | ✅ — models in tenant extension + org filters on all service queries |
 | FR-12 | Integration into Integrated Super Admin Dashboard sidebar navigation | ✅ (`/dashboard/admin/calendar`) |
@@ -146,6 +147,12 @@ model CalendarEvent {
   description String?
   startDate   DateTime // Local datetime (no timezone for v1)
   endDate     DateTime // Local datetime (no timezone for v1)
+
+  /** True when the event occupies whole days with no time-of-day.
+   *  When true, startDate is local midnight of the first day and
+   *  endDate is 23:59:59.999 of the last day (inclusive). */
+  allDay      Boolean  @default(false)
+
   eventType   CalendarEventType @default(OTHER)
   color       String?  // Event-level override of calendar default color
 

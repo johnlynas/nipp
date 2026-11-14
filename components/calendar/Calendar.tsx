@@ -2,7 +2,7 @@
 
 import { useState, useCallback, useEffect, useMemo, useRef } from 'react';
 import type { CalendarView, CalendarEvent } from './types';
-import { getMonthName, getEventInstanceKey, getEventPosition, toLocalDateInputValue } from './calendar-utils';
+import { getMonthName, getEventInstanceKey, getEventPosition, toLocalDateInputValue, isAllDayEvent } from './calendar-utils';
 
 // Sub-components
 import CalendarMonthView from './CalendarMonthView';
@@ -395,6 +395,61 @@ export default function Calendar({
     const end = existing.endDate instanceof Date ? existing.endDate : new Date(existing.endDate);
     if (isNaN(start.getTime()) || isNaN(end.getTime())) return;
 
+    // All-day events move by DAY ONLY — there is no time-of-day to change.
+    // The drop date becomes the new first day; the span length (in days) is
+    // preserved and the vertical drag delta is ignored entirely.
+    if (isAllDayEvent(existing)) {
+      // Span length in whole days, computed on date-only values so the
+      // 23:59:59.999 end boundary can't round up to an extra day.
+      const spanDays = Math.round(
+        (Date.UTC(end.getFullYear(), end.getMonth(), end.getDate()) -
+          Date.UTC(start.getFullYear(), start.getMonth(), start.getDate())) / 86400000,
+      ) + 1;
+      const newStart = new Date(date.getFullYear(), date.getMonth(), date.getDate(), 0, 0, 0, 0);
+      const newEnd = new Date(date.getFullYear(), date.getMonth(), date.getDate() + spanDays - 1, 23, 59, 59, 999);
+
+      const isRecurring = !!existing.recurrence;
+      if (!isRecurring) {
+        setEvents((prev) => prev.map((e) => (e.id === eventId ? { ...existing, startDate: newStart, endDate: newEnd } : e)));
+      }
+
+      try {
+        const patchRes = await fetch(
+          `/api/organizations/${effectiveOrgId}/calendar-events/${eventId}`,
+          {
+            method: 'PATCH',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              startDate: newStart.toISOString(),
+              endDate: newEnd.toISOString(),
+              allDay: true,
+              ...(isRecurring ? { editScope: 'this', clickedDate: toLocalDateInputValue(start) } : {}),
+            }),
+          },
+        );
+
+        if (!patchRes.ok) {
+          const err = await patchRes.json().catch(() => ({ error: 'Failed to move event' }));
+          console.error('Failed to move all-day event:', err);
+          return;
+        }
+
+        const { event: movedEvent }: { event: CalendarEvent } = await patchRes.json();
+        if (isRecurring) {
+          const movedInstanceKey = getEventInstanceKey(existing);
+          setEvents((prev) => prev.map((e) => (e.id === eventId && getEventInstanceKey(e) === movedInstanceKey ? movedEvent : e)));
+        } else {
+          setEvents((prev) => prev.map((e) => (e.id === movedEvent.id ? movedEvent : e)));
+        }
+      } catch {
+        console.error('Error moving all-day event');
+        if (!isRecurring) {
+          setEvents((prev) => prev.map((e) => (e.id === eventId ? existing : e)));
+        }
+      }
+      return;
+    }
+
     const duration = end.getTime() - start.getTime();
 
     // The Month view lays events out on a 2D week grid, so dragging a chip
@@ -628,6 +683,7 @@ export default function Calendar({
             description: eventData.description ?? null,
             startDate: newStart.toISOString(),
             endDate: newEnd.toISOString(),
+            allDay: eventData.allDay ?? selectedEvent.allDay ?? false,
             calendarId: defaultCalendarId || selectedEvent.calendarId,
             eventType: eventData.eventType ?? selectedEvent.eventType,
             color: (eventData.color as string | undefined) ?? undefined,
@@ -653,6 +709,7 @@ export default function Calendar({
           description: eventData.description,
           startDate: newStart.toISOString(),
           endDate: newEnd.toISOString(),
+          allDay: eventData.allDay ?? selectedEvent.allDay ?? false,
           eventType: eventData.eventType,
           recurrence: recurrencePayload,
           color: (eventData.color as string | undefined) ?? null,
@@ -705,6 +762,7 @@ export default function Calendar({
           description: eventData.description,
           startDate: (eventData.startDate as Date).toISOString(),
           endDate: (eventData.endDate as Date).toISOString(),
+          allDay: eventData.allDay ?? false,
           calendarId: targetCalendarId,
           eventType: eventData.eventType,
           recurrence: recurrencePayload,

@@ -41,6 +41,8 @@ export interface TodayEvent {
   description?: string | null;
   startDate: Date;
   endDate: Date;
+  /** True when the event occupies whole days with no time-of-day. */
+  allDay?: boolean;
   eventType: 'VIEWING' | 'INSPECTION' | 'MAINTENANCE' | 'LEASE_SIGNING' | 'LEASE_RENEWAL' | 'KEY_EXCHANGE' | 'OTHER';
   color?: string | null;
 }
@@ -71,6 +73,12 @@ const EVENT_TYPE_COLORS: Record<string, string> = {
 
 function formatTime(date: Date): string {
   return date.toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' });
+}
+
+/** Time-range display for an event row: "All day" for all-day events. */
+function formatEventTimeRange(e: TodayEvent): string {
+  if (e.allDay) return 'All day';
+  return `${formatTime(e.startDate)} – ${formatTime(e.endDate)}`;
 }
 
 // ---------------------------------------------------------------------------
@@ -116,6 +124,7 @@ export async function getTodayEvents(
     description: e.description,
     startDate: e.startDate,
     endDate: e.endDate,
+    allDay: e.allDay ?? false,
     eventType: e.eventType as TodayEvent['eventType'],
     color: e.color,
   }));
@@ -157,6 +166,7 @@ export async function getTodayEventsForUser(
     description: e.description,
     startDate: e.startDate,
     endDate: e.endDate,
+    allDay: e.allDay ?? false,
     eventType: e.eventType as TodayEvent['eventType'],
     color: e.color,
   }));
@@ -211,7 +221,7 @@ function buildEmailHtml(
               <td style="padding: 8px 12px; background-color: #ffffff;">
                 <div style="font-weight: 600; color: #1B2A4A; font-size: 14px;">${escapeHtml(e.title)}</div>
                 <div style="color: #6c757d; font-size: 12px;">
-                  ${formatTime(e.startDate)} – ${formatTime(e.endDate)} · <span style="color: ${color}; font-weight: 500;">${label}</span>
+                  ${formatEventTimeRange(e)} · <span style="color: ${color}; font-weight: 500;">${label}</span>
                 </div>
               </td>
             </tr>
@@ -273,7 +283,7 @@ function buildTextMessage(
   for (const e of events) {
     const label = EVENT_TYPE_LABELS[e.eventType] || 'Other';
     lines.push(`  ${e.title}`);
-    lines.push(`  ${formatTime(e.startDate)} – ${formatTime(e.endDate)} · ${label}`);
+    lines.push(`  ${formatEventTimeRange(e)} · ${label}`);
     if (e.description) {
       lines.push(`  ${e.description}`);
     }

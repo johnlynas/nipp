@@ -62,6 +62,8 @@ type DbEventShape = {
   description?: string | null;
   startDate: Date;
   endDate: Date;
+  /** True when the event occupies whole days (excluded from due-to-start). */
+  allDay?: boolean;
   eventType: string;
   calendarId: string;
   organizationId: string;
@@ -150,13 +152,16 @@ export async function findDueToStartEvents(now: Date): Promise<DueToStartInstanc
   // 1. Non-recurring events — single query, then code-level window filter
   //    (the DB filter is the primary gate; the code check guards mocks and
   //    rounding edges, and keeps behavior identical for recurring below).
+  //    All-day events are excluded: they have no meaningful start time, so a
+  //    "starts at 00:00" alert would be noise (design decision, §8.1).
   const singleEvents = (await tenantDb.calendarEvent.findMany({
-    where: { startDate: { gte: now, lte: windowEnd } },
+    where: { startDate: { gte: now, lte: windowEnd }, allDay: false },
     orderBy: { startDate: 'asc' },
   })) as unknown as DbEventShape[];
 
   for (const event of singleEvents) {
     if (getRruleJson(event)) continue; // recurring series handled below
+    if (event.allDay) continue; // defensive — DB filter already excludes them
     const start = new Date(event.startDate);
     const end = new Date(event.endDate);
     if (start > now && start <= windowEnd) {
@@ -181,6 +186,7 @@ export async function findDueToStartEvents(now: Date): Promise<DueToStartInstanc
   for (const event of recurringSeries) {
     const rruleJson = getRruleJson(event);
     if (!rruleJson) continue; // not actually recurring
+    if (event.allDay) continue; // all-day series have no start time to alert on
     const exdates = getExdates(event);
 
     const expanded = expandRecurrenceWithRrule(

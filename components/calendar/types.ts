@@ -38,6 +38,8 @@ export interface CalendarEvent {
   description?: string | null;
   startDate: Date;
   endDate: Date;
+  /** True when the event occupies whole days with no time-of-day. */
+  allDay?: boolean;
   eventType: CalendarEventType;
   color?: string | null;
   calendarId: string;
@@ -109,6 +111,8 @@ export interface UpcomingEvent {
   title: string;
   startDate: Date;
   endDate: Date;
+  /** True when the event occupies whole days with no time-of-day. */
+  allDay?: boolean;
   eventType: CalendarEventType;
   color?: string | null;
 }

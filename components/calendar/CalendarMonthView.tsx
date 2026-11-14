@@ -2,7 +2,7 @@
 
 import { useMemo } from 'react';
 import type { CalendarEvent } from './types';
-import { generateMonthDays, isToday, getEventInstanceKey } from './calendar-utils';
+import { generateMonthDays, isToday, getEventInstanceKey, isAllDayEvent } from './calendar-utils';
 import CalendarEventCard, { EventOverflowIndicator } from './CalendarEventCard';
 
 // ---------------------------------------------------------------------------
@@ -163,6 +163,15 @@ export default function CalendarMonthView({
         {days.map(({ date, isCurrentMonth }, index) => {
           const dayStr = formatDateKey(date);
           const dayEvents = eventsByDate[dayStr] || [];
+          // Split into all-day (headline bars at the top of the cell) and timed.
+          const allDayEvents = dayEvents.filter((e) => isAllDayEvent(e));
+          const timedEvents = dayEvents.filter((e) => !isAllDayEvent(e));
+          // All-day bars count toward the visible budget and are prioritised —
+          // they carry no time, so they're the "headline" of the day.
+          const VISIBLE_BUDGET = 3;
+          const allDayShown = allDayEvents.slice(0, VISIBLE_BUDGET);
+          const timedShown = timedEvents.slice(0, Math.max(0, VISIBLE_BUDGET - allDayShown.length));
+          const hiddenCount = dayEvents.length - allDayShown.length - timedShown.length;
           const todayClass = '';
           const currentMonthClass = isCurrentMonth ? 'text-slate-800' : 'text-slate-400';
 
@@ -182,9 +191,41 @@ export default function CalendarMonthView({
                 {date.getDate()}
               </div>
 
+              {/* All-day bars — solid fill with a left accent, above the timed list */}
+              {allDayShown.map((event, index) => {
+                const isDragging = event.id === draggingEventId;
+                const color = event.color || '#2A9D8F';
+                return (
+                  <div
+                    key={`allday-${getEventInstanceKey(event)}-${event.position}-${index}`}
+                    draggable
+                    onDragStart={(e) => {
+                      e.dataTransfer.setData('text/plain', event.id);
+                      e.dataTransfer.effectAllowed = 'move';
+                      onEventDragStart?.(event, e as unknown as React.DragEvent);
+                    }}
+                    onDragEnd={() => onDragEnd?.()}
+                    onClick={(e) => { e.stopPropagation(); onEventClick?.(event); }}
+                    onContextMenu={(e) => { e.preventDefault(); onEventRightClick?.(event, e); }}
+                    className="flex items-center gap-1 px-1 py-0.5 rounded cursor-grab hover:brightness-95 transition-all overflow-hidden mb-0.5"
+                    style={{
+                      backgroundColor: `${color}B3`,
+                      borderLeft: `2px solid ${color}`,
+                      opacity: isDragging ? 0.5 : 1,
+                    }}
+                  >
+                    <span className="text-xs font-medium truncate" style={{ color: 'var(--color-slate-800)' }}>
+                      {event.position === 'start' && '▸ '}
+                      {event.recurrence && <span title="Recurring event">↻</span>} {event.title}
+                      {event.position === 'end' && ' ◂'}
+                    </span>
+                  </div>
+                );
+              })}
+
               {/* Events */}
               <div className="space-y-0.5">
-                {dayEvents.slice(0, 3).map((event, index) => {
+                {timedShown.map((event, index) => {
                   // Multi-day events: render differently based on position
                   if (event.position === 'middle') {
                     // Just a colored bar spanning the cell width — draggable + context menu
@@ -278,9 +319,9 @@ export default function CalendarMonthView({
                   );
                 })}
 
-                {/* Overflow indicator (only for single-day events) */}
-                {dayEvents.filter((e) => e.position === 'single').length > 3 && (
-                  <EventOverflowIndicator count={dayEvents.filter((e) => e.position === 'single').length - 3} />
+                {/* Overflow indicator — counts everything hidden by the budget */}
+                {hiddenCount > 0 && (
+                  <EventOverflowIndicator count={hiddenCount} />
                 )}
               </div>
             </div>

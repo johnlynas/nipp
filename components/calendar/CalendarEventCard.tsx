@@ -2,7 +2,7 @@
 
 import { useState } from 'react';
 import type { CalendarEvent, CalendarEventType } from './types';
-import { getEventIcon, getEventColor, formatTime } from './calendar-utils';
+import { getEventIcon, getEventColor, formatTime, isAllDayEvent } from './calendar-utils';
 
 // ---------------------------------------------------------------------------
 // Props
@@ -99,7 +99,13 @@ export default function CalendarEventCard({
             <p className="text-xs text-slate-600 mb-1">{event.description}</p>
           )}
           <div className="text-xs text-slate-500">
-            {formatTime(event.startDate instanceof Date ? event.startDate : new Date(event.startDate))} – {formatTime(event.endDate instanceof Date ? event.endDate : new Date(event.endDate))}
+            {isAllDayEvent(event) ? (
+              'All day'
+            ) : (
+              <>
+                {formatTime(event.startDate instanceof Date ? event.startDate : new Date(event.startDate))} – {formatTime(event.endDate instanceof Date ? event.endDate : new Date(event.endDate))}
+              </>
+            )}
           </div>
         </div>
       )}

@@ -3,7 +3,7 @@
 import { useState, useEffect } from 'react';
 import type { CalendarEvent, CalendarEventType, CalendarEventRecurrence, CalendarRecurrenceFrequency } from './types';
 import { EVENT_TYPES, RECURRENCE_FREQUENCIES } from './types';
-import { getRecurrenceEndDateLabel } from './calendar-utils';
+import { getRecurrenceEndDateLabel, isAllDayEvent } from './calendar-utils';
 import RecurrenceEditScopePicker, { type EditScope } from './RecurrenceEditScopePicker';
 import { Modal } from '@/components/dashboard/Modal';
 
@@ -80,6 +80,8 @@ export default function CalendarEventModal({
   const [startTime, setStartTime] = useState('');
   const [endDate, setEndDate] = useState('');
   const [endTime, setEndTime] = useState('');
+  // All-day toggle — hides the time inputs and stores day-boundary dates.
+  const [allDay, setAllDay] = useState(false);
   // Recurrence state (null = Does Not Repeat) — also drives the Repeat Option buttons
   const [recurrence, setRecurrence] = useState<CalendarEventRecurrence | null>(null);
   // Number of times — always visible when repeating; defaulted to 1 on create
@@ -119,6 +121,10 @@ export default function CalendarEventModal({
       setEndDate(eDate);
       setEndTime(eTime);
 
+      // All-day pre-fill — the stored flag is authoritative, with a legacy
+      // midnight→23:59 same-day fallback (see lib/all-day.ts).
+      setAllDay(isAllDayEvent(event));
+
       // Recurrence pre-fill (frequency + occurrence count)
       if (event.recurrence) {
         const rec = event.recurrence;
@@ -156,6 +162,17 @@ export default function CalendarEventModal({
     if (endDate && endDate < value) setEndDate(value);
   };
 
+  // All-day toggle — unchecking an all-day event re-shows the time inputs with
+  // a sane working-day default so the user has a starting point.
+  const handleAllDayChange = (checked: boolean) => {
+    const wasAllDay = allDay;
+    setAllDay(checked);
+    if (!checked && wasAllDay) {
+      setStartTime('09:00');
+      setEndTime('17:00');
+    }
+  };
+
   const handleRepeatOptionChange = (option: RepeatOption) => {
     if (option === 'none') {
       setRecurrence(null);
@@ -184,8 +201,19 @@ export default function CalendarEventModal({
   const handleSave = async () => {
     if (!title.trim()) return;
 
-    const start = new Date(`${startDate}T${startTime}`);
-    const end = new Date(`${endDate}T${endTime}`);
+    let start: Date;
+    let end: Date;
+    if (allDay) {
+      // All-day events are stored at day boundaries (the service re-normalises
+      // defensively, but we send clean values).
+      const [sy, sm, sd] = startDate.split('-').map(Number);
+      const [ey, em, ed] = endDate.split('-').map(Number);
+      start = new Date(sy, sm - 1, sd, 0, 0, 0, 0);
+      end = new Date(ey, em - 1, ed, 23, 59, 59, 999);
+    } else {
+      start = new Date(`${startDate}T${startTime}`);
+      end = new Date(`${endDate}T${endTime}`);
+    }
     if (isNaN(start.getTime()) || isNaN(end.getTime())) {
       setSaveError('Please provide a valid start date and end date.');
       return;
@@ -208,6 +236,7 @@ export default function CalendarEventModal({
           eventType,
           startDate: start,
           endDate: end,
+          allDay,
           recurrence: finalRecurrence,
           color: event.color ?? null,
           propertyId: event.propertyId ?? null,
@@ -310,69 +339,117 @@ export default function CalendarEventModal({
           )}
         </div>
 
-        {/* Date & Time matrix (2×2) */}
-        <div className="grid grid-cols-2 gap-4 mb-5">
-          <div>
-            <FieldLabel htmlFor="startDate">Start Date</FieldLabel>
-            {isViewMode ? (
-              <ViewValue>{startDisplay.toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' })}</ViewValue>
-            ) : (
+        {/* Date & Time matrix (2×2) — all-day events hide the time inputs */}
+        <div className="mb-5">
+          {/* All day toggle — plain accessible checkbox, styled to match the field chrome */}
+          {isViewMode ? (
+            event.allDay ? (
+              <ViewValue>All day</ViewValue>
+            ) : null
+          ) : (
+            <label
+              htmlFor="allDay"
+              className="flex items-center gap-2 mb-3 cursor-pointer select-none"
+              style={{ color: '#475569' }}
+            >
               <input
-                id="startDate"
-                type="date"
-                value={startDate}
-                onChange={(e) => handleStartDateChange(e.target.value)}
-                required
-                className={inputClasses}
-                style={inputStyles}
+                id="allDay"
+                type="checkbox"
+                checked={allDay}
+                onChange={(e) => handleAllDayChange(e.target.checked)}
+                className="w-4 h-4 rounded border-slate-300 accent-[#F5A623]"
               />
+              <span className="text-sm font-medium">All day</span>
+            </label>
+          )}
+
+          <div className="grid grid-cols-2 gap-4">
+            <div>
+              <FieldLabel htmlFor="startDate">Start Date</FieldLabel>
+              {isViewMode ? (
+                <ViewValue>{startDisplay.toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' })}</ViewValue>
+              ) : (
+                <input
+                  id="startDate"
+                  type="date"
+                  value={startDate}
+                  onChange={(e) => handleStartDateChange(e.target.value)}
+                  required
+                  className={inputClasses}
+                  style={inputStyles}
+                />
+              )}
+            </div>
+            {allDay ? (
+              <div>
+                <FieldLabel htmlFor="stopDate">End Date</FieldLabel>
+                {isViewMode ? (
+                  <ViewValue>{endDisplay.toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' })}</ViewValue>
+                ) : (
+                  <input
+                    id="stopDate"
+                    type="date"
+                    value={endDate}
+                    min={startDate || undefined}
+                    onChange={(e) => setEndDate(e.target.value)}
+                    required
+                    className={inputClasses}
+                    style={inputStyles}
+                  />
+                )}
+              </div>
+            ) : (
+              <div>
+                <FieldLabel htmlFor="startTime">Start Time</FieldLabel>
+                {isViewMode ? (
+                  <ViewValue>{startDisplay.toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' })}</ViewValue>
+                ) : (
+                  <input
+                    id="startTime"
+                    type="time"
+                    value={startTime}
+                    onChange={(e) => setStartTime(e.target.value)}
+                    className={inputClasses}
+                    style={inputStyles}
+                  />
+                )}
+              </div>
             )}
-          </div>
-          <div>
-            <FieldLabel htmlFor="startTime">Start Time</FieldLabel>
-            {isViewMode ? (
-              <ViewValue>{startDisplay.toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' })}</ViewValue>
-            ) : (
-              <input
-                id="startTime"
-                type="time"
-                value={startTime}
-                onChange={(e) => setStartTime(e.target.value)}
-                className={inputClasses}
-                style={inputStyles}
-              />
+            {allDay ? null : (
+              <div>
+                <FieldLabel htmlFor="stopDate">End Date</FieldLabel>
+                {isViewMode ? (
+                  <ViewValue>{endDisplay.toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' })}</ViewValue>
+                ) : (
+                  <input
+                    id="stopDate"
+                    type="date"
+                    value={endDate}
+                    min={startDate || undefined}
+                    onChange={(e) => setEndDate(e.target.value)}
+                    required
+                    className={inputClasses}
+                    style={inputStyles}
+                  />
+                )}
+              </div>
             )}
-          </div>
-          <div>
-            <FieldLabel htmlFor="stopDate">End Date</FieldLabel>
-            {isViewMode ? (
-              <ViewValue>{endDisplay.toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' })}</ViewValue>
-            ) : (
-              <input
-                id="stopDate"
-                type="date"
-                value={endDate}
-                min={startDate || undefined}
-                onChange={(e) => setEndDate(e.target.value)}
-                required
-                className={inputClasses}
-                style={inputStyles}
-              />
-            )}
-          </div>
-          <div>
-            <FieldLabel htmlFor="stopTime">End Time</FieldLabel>
-            {isViewMode ? (
-              <ViewValue>{endDisplay.toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' })}</ViewValue>
-            ) : (
-              <input
-                id="stopTime"
-                type="time"
-                value={endTime}
-                onChange={(e) => setEndTime(e.target.value)}
-                className={inputClasses}
-                style={inputStyles}
-              />
+            {!allDay && (
+              <div>
+                <FieldLabel htmlFor="stopTime">End Time</FieldLabel>
+                {isViewMode ? (
+                  <ViewValue>{endDisplay.toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' })}</ViewValue>
+                ) : (
+                  <input
+                    id="stopTime"
+                    type="time"
+                    value={endTime}
+                    onChange={(e) => setEndTime(e.target.value)}
+                    className={inputClasses}
+                    style={inputStyles}
+                  />
+                )}
+              </div>
             )}
           </div>
         </div>

@@ -2,7 +2,7 @@
 
 import { useMemo, useCallback, useRef, type RefObject } from 'react';
 import type { CalendarEvent } from './types';
-import { generateHourlySlots, isToday, formatTime, getEventInstanceKey } from './calendar-utils';
+import { generateHourlySlots, isToday, formatTime, getEventInstanceKey, isAllDayEvent } from './calendar-utils';
 import { useVerticalDragScroll } from './hooks/useVerticalDragScroll';
 
 // ---------------------------------------------------------------------------
@@ -56,9 +56,11 @@ export default function CalendarDayView({
     [beginAutoscroll],
   );
 
-  // Filter events for this day
-  const dayEvents = useMemo(() => {
-    return events.filter((event) => {
+  // Filter events for this day, split into all-day (top section) and timed.
+  const { allDayEvents, timedEvents } = useMemo(() => {
+    const allDay: CalendarEvent[] = [];
+    const timed: CalendarEvent[] = [];
+    for (const event of events) {
       const eventStart = new Date(event.startDate);
       eventStart.setHours(0, 0, 0, 0);
 
@@ -71,8 +73,12 @@ export default function CalendarDayView({
       const dayEnd = new Date(date);
       dayEnd.setHours(23, 59, 59, 999);
 
-      return eventStart <= dayEnd && eventEnd >= dayStart;
-    });
+      if (eventStart <= dayEnd && eventEnd >= dayStart) {
+        if (isAllDayEvent(event)) allDay.push(event);
+        else timed.push(event);
+      }
+    }
+    return { allDayEvents: allDay, timedEvents: timed };
   }, [events, date]);
 
   const handleDrop = (e: React.DragEvent) => {
@@ -109,6 +115,46 @@ export default function CalendarDayView({
           {date.getDate()}
         </div>
       </div>
+
+      {/* All-day section — full-width bars directly under the day header */}
+      {allDayEvents.length > 0 && (
+        <div className="px-4 py-2 border-b" style={{ borderColor: 'var(--color-slate-200)' }}>
+          <p className="m-0 mb-1.5 text-xs font-semibold uppercase tracking-wider" style={{ color: 'var(--color-slate-500)' }}>
+            All day
+          </p>
+          <div className="flex flex-col gap-1">
+            {allDayEvents.map((event) => {
+              const isDragging = event.id === draggingEventId;
+              const color = event.color || '#2A9D8F';
+              return (
+                <div
+                  key={`allday-${getEventInstanceKey(event)}`}
+                  draggable
+                  onDragStart={(e) => {
+                    e.dataTransfer.setData('text/plain', event.id);
+                    e.dataTransfer.effectAllowed = 'move';
+                    onEventDragStart?.(event, e as unknown as React.DragEvent);
+                  }}
+                  onDragEnd={() => onDragEnd?.()}
+                  onClick={(e) => { e.stopPropagation(); _onEventClick?.(event); }}
+                  onContextMenu={(e) => { e.preventDefault(); e.stopPropagation(); onEventRightClick?.(event, e); }}
+                  className="flex items-center gap-1.5 px-2 py-1 rounded cursor-grab hover:brightness-95 transition-all"
+                  style={{
+                    backgroundColor: `${color}B3`,
+                    borderLeft: `2px solid ${color}`,
+                    opacity: isDragging ? 0.5 : 1,
+                  }}
+                >
+                  <span className="text-sm font-semibold truncate" style={{ color: 'var(--color-slate-800)' }}>
+                    {event.recurrence && <span className="mr-1" title="Recurring event">↻</span>}
+                    {event.title}
+                  </span>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      )}
 
       {/* Time grid */}
       <div
@@ -150,8 +196,8 @@ export default function CalendarDayView({
               />
             ))}
 
-            {/* Event overlays */}
-            {dayEvents.map((event) => {
+            {/* Event overlays — timed events only (all-day live in the top section) */}
+            {timedEvents.map((event) => {
               const start = event.startDate instanceof Date ? event.startDate : new Date(event.startDate);
               const end = event.endDate instanceof Date ? event.endDate : new Date(event.endDate);
               if (isNaN(start.getTime()) || isNaN(end.getTime())) return null;

@@ -18,6 +18,7 @@ import {
 import { requireAnyAdmin } from '@/lib/services/base-service';
 import { expandRecurrenceWithRrule, RruleJson } from '@/lib/recurrence-rrule';
 import { RecurrenceRuleWithFilters } from '@/lib/recurrence';
+import { normalizeAllDayDates } from '@/lib/all-day';
 
 // ---------------------------------------------------------------------------
 // Input / Output Types
@@ -28,6 +29,8 @@ export interface CreateEventInput {
   description?: string | null;
   startDate: Date;
   endDate: Date;
+  /** True when the event occupies whole days with no time-of-day. */
+  allDay?: boolean;
   calendarId: string;
   eventType?: 'VIEWING' | 'INSPECTION' | 'MAINTENANCE' | 'LEASE_SIGNING' | 'LEASE_RENEWAL' | 'KEY_EXCHANGE' | 'OTHER';
   color?: string | null;
@@ -48,6 +51,8 @@ export interface UpdateEventInput {
   description?: string | null;
   startDate?: Date;
   endDate?: Date;
+  /** True when the event occupies whole days with no time-of-day. */
+  allDay?: boolean;
   eventType?: 'VIEWING' | 'INSPECTION' | 'MAINTENANCE' | 'LEASE_SIGNING' | 'LEASE_RENEWAL' | 'KEY_EXCHANGE' | 'OTHER';
   color?: string | null;
   propertyId?: string | null;
@@ -78,6 +83,8 @@ export interface CalendarEventWithDetails {
   description?: string | null;
   startDate: Date;
   endDate: Date;
+  /** True when the event occupies whole days with no time-of-day. */
+  allDay?: boolean;
   eventType: 'VIEWING' | 'INSPECTION' | 'MAINTENANCE' | 'LEASE_SIGNING' | 'LEASE_RENEWAL' | 'KEY_EXCHANGE' | 'OTHER';
   color?: string | null;
   calendarId: string;
@@ -209,6 +216,10 @@ export async function createEvent(
     throw new ValidationError('Event title is required');
   }
 
+  // All-day events are stored at day boundaries (single source of truth: lib/all-day.ts).
+  const allDay = input.allDay ?? false;
+  const normalizedDates = normalizeAllDayDates(input.startDate, input.endDate, allDay);
+
   const calendar = await runWithTenant(ctx.organizationId!, () =>
     tenantDb.calendar.findFirst({
       where: { id: input.calendarId, organizationId: ctx.organizationId! },
@@ -222,8 +233,9 @@ export async function createEvent(
   const eventData: Record<string, unknown> = {
     title: input.title.trim(),
     description: input.description,
-    startDate: input.startDate,
-    endDate: input.endDate,
+    startDate: normalizedDates.startDate,
+    endDate: normalizedDates.endDate,
+    allDay,
     eventType: input.eventType || 'OTHER',
     color: input.color ?? null,
     propertyId: input.propertyId ?? null,
@@ -232,7 +244,7 @@ export async function createEvent(
   };
 
   if (input.recurrence) {
-    const rruleJson = buildRruleJson(input.recurrence, input.startDate);
+    const rruleJson = buildRruleJson(input.recurrence, normalizedDates.startDate);
     eventData.rrule = rruleJson as unknown as string;
 
     if (input.recurrence.excludedDates != null && input.recurrence.excludedDates.length > 0) {
@@ -252,7 +264,7 @@ export async function createEvent(
   // Build recurrence details from the rrule JSON we just wrote
   let recurrenceDetails: CalendarEventRecurrenceDetails | null = null;
   if (input.recurrence) {
-    const rruleJson = buildRruleJson(input.recurrence, input.startDate);
+    const rruleJson = buildRruleJson(input.recurrence, normalizedDates.startDate);
     recurrenceDetails = mapRecurrenceFromRrule(rruleJson);
   }
 
@@ -264,11 +276,12 @@ export async function createEvent(
     description: event.description,
     startDate: event.startDate,
     endDate: event.endDate,
+    allDay: event.allDay,
     eventType: event.eventType,
     color: event.color,
     calendarId: event.calendarId,
     recurrence: recurrenceDetails,
-    rrule: input.recurrence ? buildRruleJson(input.recurrence, input.startDate) : null,
+    rrule: input.recurrence ? buildRruleJson(input.recurrence, normalizedDates.startDate) : null,
     exdates: exdates.length > 0 ? exdates : undefined,
     propertyId: event.propertyId,
     createdAt: event.createdAt,
@@ -395,6 +408,7 @@ function mapEventToDetails(e: {
   description?: string | null;
   startDate: Date;
   endDate: Date;
+  allDay?: boolean;
   eventType: string;
   color?: string | null;
   calendarId: string;
@@ -411,6 +425,7 @@ function mapEventToDetails(e: {
     description: e.description,
     startDate: e.startDate,
     endDate: e.endDate,
+    allDay: e.allDay ?? false,
     eventType: e.eventType as CalendarEventWithDetails['eventType'],
     color: e.color,
     calendarId: e.calendarId,
@@ -450,6 +465,10 @@ export async function updateEvent(
     throw new ValidationError('End date must be after start date');
   }
 
+  // All-day events are stored at day boundaries (single source of truth: lib/all-day.ts).
+  const newAllDay = input.allDay ?? (event.allDay ?? false);
+  const normalizedDates = normalizeAllDayDates(newStartDate, newEndDate, newAllDay);
+
   const updateData: Record<string, unknown> = {};
 
   if (input.title !== undefined) {
@@ -463,12 +482,13 @@ export async function updateEvent(
     updateData.description = input.description;
   }
 
-  if (input.startDate !== undefined) {
-    updateData.startDate = input.startDate;
-  }
+  // Dates are written as a pair from the normalised values so an all-day
+  // toggle always lands on consistent day boundaries.
+  updateData.startDate = normalizedDates.startDate;
+  updateData.endDate = normalizedDates.endDate;
 
-  if (input.endDate !== undefined) {
-    updateData.endDate = input.endDate;
+  if (input.allDay !== undefined) {
+    updateData.allDay = input.allDay;
   }
 
   if (input.eventType !== undefined) {
@@ -500,7 +520,7 @@ export async function updateEvent(
         updateData.exdates = [] as unknown as string;
       } else {
         // Build rrule JSON for the new format
-        const useStartDate = input.startDate ?? event.startDate;
+        const useStartDate = normalizedDates.startDate;
         const rruleJson = buildRruleJson(input.recurrence, useStartDate);
         updateData.rrule = rruleJson as unknown as string;
 
