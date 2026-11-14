@@ -57,6 +57,10 @@ There is no public sign-up. Accounts are created by a Super Admin.
 | Super Admin console | Run the whole platform from one dashboard |
 | Tenant workspace | Daily tools for your organization, view-by-default |
 | Calendar | Interactive, recurring events, live "starting soon" alerts |
+| Work orders & quotations | Maintenance lifecycle: quote requests, contractor assignment, execution |
+| Invoices | 1:1 with a work order — price, dates, document link |
+| Organization map | Google Maps view of your organization's location (optional key) |
+| AI agent | Embedded chat interface for the portal AI agent (admin console) |
 | Organization chart | Zoomable tree of org → teams → members |
 | Notifications | Live in-app feed + email for today's events |
 | Caching | In-memory + Redis; works with Redis off |
@@ -83,13 +87,13 @@ Each organization's data — properties, members, roles, calendars, and its audi
 
 ### Super Admin Console
 
-Super Admins run the whole platform from one console (`/dashboard/admin`): user accounts, organizations, units, contractors, roles, permissions, teams, the notification log, calendars, org charts, and system health. The sidebar groups these into three collapsible sections — **People**, **Platform**, and **Ops**.
+Super Admins run the whole platform from one console (`/dashboard/admin`): user accounts, organizations, units, contractors, work orders, quotations, invoices, roles, permissions, teams, the notification log, calendars, org charts, maps, the AI agent, and system health. The sidebar groups these into three collapsible sections — **People**, **Platform**, and **Ops**.
 
 *Page-by-page and route reference: the `/api-docs` Swagger UI.*
 
 ### Tenant Workspace
 
-Every organization's staff sign in to the same portal, but each sees only their own organization — tenant users are isolated from every other organization's data. Their workspace includes the calendar, an organization chart of their people and teams, member and role listings, and a map page; tenant administrators can manage those, everyone else views. **Super Admins** belong to the Platform organization, which grants root access: they can view and update any tenant, anywhere. (An external-contractor workspace is planned — its data model already exists.)
+Every organization's staff sign in to the same portal, but each sees only their own organization — tenant users are isolated from every other organization's data. Their workspace includes the calendar, an organization chart of their people and teams, member and role listings, a read-only view of the organization's work orders and quotations, an organization setup page, and a map page; tenant administrators can manage those, everyone else views. **Super Admins** belong to the Platform organization, which grants root access: they can view and update any tenant, anywhere. (An external-contractor workspace is planned — its data model already exists.)
 
 *Pages and routes: documented per feature; super admins can also browse the full `/api-docs` API reference.*
 
@@ -105,11 +109,29 @@ A full interactive calendar for each organization — month, week, day, and year
 
 *Details in: [ARCHITECTURE.md §9](./ARCHITECTURE.md#9-calendar-system).*
 
+### Work orders & quotations
+
+Each organization's maintenance and repair work is tracked as a **work order** that moves through a fixed lifecycle: created → out for quotes → quotes in → contractor assigned → started → complete → invoiced → finished (or closed before a contractor is engaged). Sending a work order out for quotes sets a quotation deadline (7 days by default, adjustable), and an hourly platform job raises a one-time alert if quotes are overdue. Contractors receive plain email notices — quotation requests, assignments, and invoice requests — with no links or workflow URLs; they respond by phone or reply, and super admins key the answers into the portal. In the admin console, work orders can be created, transitioned, annotated, and deleted; tenant users see their own organization's work orders and quotations read-only.
+
+*Details in: [ARCHITECTURE.md §12](./ARCHITECTURE.md#12-work-orders--quotations).*
+
+### Invoices
+
+When a work order reaches the invoicing stage, an **invoice** is created for it — one per work order — recording the contractor's price, invoice and due dates, and an optional link to the document. Invoicing is a super-admin operation from the admin console; creating an invoice sends the contractor their invoice-request email.
+
+*Details in: [ARCHITECTURE.md §13](./ARCHITECTURE.md#13-invoices).*
+
 ### Organization chart
 
 A live, interactive tree of an organization's people — organization → teams → members — with zoom and pan, a member detail popup showing each person's roles and permissions, and an unassigned bucket for anyone without a team. It reads the data that already exists; it doesn't create any new records.
 
 *Details in: [ARCHITECTURE.md §10](./ARCHITECTURE.md#10-organization-chart).*
+
+### Organization map (Google Maps)
+
+Both dashboards have a **Map** page showing the organization's location on Google Maps. The organization's stored coordinates centre and pin the map directly; if only an address is set, it is geocoded instead. A postcode field lets anyone jump to any location, with zoom in/out/reset controls. The Google Maps API key (`NEXT_PUBLIC_GOOGLE_MAPS_API_KEY`) is optional — without it the page shows a setup hint instead of a map, and everything else in the portal works normally.
+
+*Details in: [ARCHITECTURE.md §15](./ARCHITECTURE.md#15-organization-map-google-maps).*
 
 ### Notifications (live + email)
 
@@ -121,13 +143,19 @@ Two channels. **Live:** every connected dashboard shows a running feed at the bo
 
 Frequent lookups — permission checks, search results — are served from an in-memory cache backed by Redis, so the database isn't hit on every request. The portal runs fine if Redis is off: it just falls back to the database. Live hit-rate figures appear in the admin console.
 
-*Details in: [ARCHITECTURE.md §12](./ARCHITECTURE.md#12-cache-architecture), [CACHING_ARCHITECTURE.md](./CACHING_ARCHITECTURE.md).*
+*Details in: [ARCHITECTURE.md §16](./ARCHITECTURE.md#16-cache-architecture), [CACHING_ARCHITECTURE.md](./CACHING_ARCHITECTURE.md).*
 
 ### Background job scheduler
 
 Platform automation runs on a built-in scheduler: recurring or one-off jobs written as cron expressions, managed from the admin console (create, trigger, inspect history). Because it can also run operator-authored JavaScript, every new job must be **approved by a platform admin before it is allowed to run at all**, and can first be tested risk-free in *dry-run* mode, which runs the job without changing anything. Each run is timed, logged, and pushed to the live feed when it finishes or fails.
 
 *Details in: [ARCHITECTURE.md §11](./ARCHITECTURE.md#11-job-scheduler).*
+
+### Portal AI agent
+
+The admin console's **Agent** page embeds the portal AI agent's chat interface (a separate service, `mastra-nipp-agent`) in a full-bleed frame. The URL comes from `NIPP_AGENT_URL`; if the agent isn't running, the page shows an unavailable state with start instructions instead of a blank frame.
+
+*Details in: [ARCHITECTURE.md §14](./ARCHITECTURE.md#14-portal-ai-agent).*
 
 ### Security hardening
 
@@ -249,7 +277,7 @@ npx tsc --noEmit
 | Document | What it covers |
 |----------|----------------|
 | [`QUICK_START.md`](./QUICK_START.md) | Complete local setup — environment variables, seeding, the test environment |
-| [`ARCHITECTURE.md`](./ARCHITECTURE.md) | How every part of the system works — components, data flow, calendar, org chart, job scheduler, notifications, caching |
+| [`ARCHITECTURE.md`](./ARCHITECTURE.md) | How every part of the system works — components, data flow, calendar, org chart, work orders, quotations, invoices, organization map, job scheduler, notifications, caching |
 | [`SECURITY.md`](./SECURITY.md) | The security model — tenant isolation, sign-in and sessions, authorization, encryption, browser policy |
 | [`CACHING_ARCHITECTURE.md`](./CACHING_ARCHITECTURE.md) | Cache layers in depth, tuning, cross-instance behaviour |
 | [`ISOLATION_TEST_STRATEGY.md`](./ISOLATION_TEST_STRATEGY.md) + [quick-start](./ISOLATION_TEST_QUICK_START.md) | How the "no tenant sees another's data" guarantee is tested |
@@ -259,7 +287,7 @@ npx tsc --noEmit
 | `openspec/changes/` | One design proposal per feature |
 | `documents/` | Feature planning, business research, operations notes |
 
-**Known open threads:** live notifications are relayed in-process, so a future multi-server deployment needs a shared relay; the external-contractor workspace has its data model and admin pages shipped but no tenant dashboard yet; property-management business flows and the cloud build/deploy pipeline are placeholders. Full list: [the deferred-items registry](./openspec/changes/project-initialization/proposal.md).
+**Known open threads:** live notifications are relayed in-process, so a future multi-server deployment needs a shared relay; the external-contractor workspace has its data model and admin pages shipped but no tenant dashboard yet; remaining property-management business flows (leases, payments, documents) and the cloud build/deploy pipeline are placeholders. Full list: [the deferred-items registry](./openspec/changes/project-initialization/proposal.md).
 
 ## License
 

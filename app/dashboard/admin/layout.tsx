@@ -3,7 +3,7 @@
 import { useState, useEffect, useMemo } from 'react';
 import { useRouter, usePathname } from 'next/navigation';
 import Link from 'next/link';
-import { Menu, X, ChevronDown, UserRound, Building2, UsersRound, Houses, Drill, Drama, Key, Layers, LogOut, CalendarDays, Bell, XCircle, HeartPulse, ChartNoAxesCombined, ScrollText, Network, FileSearch, TerminalSquare, Map as MapIcon, Pickaxe, Quote, ReceiptPoundSterling } from 'lucide-react';
+import { Menu, X, ChevronDown, UserRound, Building2, UsersRound, Houses, Drill, Drama, Key, Layers, LogOut, CalendarDays, Bell, XCircle, HeartPulse, ChartNoAxesCombined, ScrollText, Network, FileSearch, TerminalSquare, Map as MapIcon, Pickaxe, Quote, ReceiptPoundSterling, CpuAi } from 'lucide-react';
 import { authClient } from '@/lib/auth-client';
 import { RequireSuperAdmin } from '@/components/auth/RequireSuperAdmin';
 import { useNotifications, PRIORITY_COLORS, getPriorityIcon } from '@/hooks/useNotifications';
@@ -37,6 +37,7 @@ const navGroups: NavGroup[] = [
       { href: '/dashboard/admin/calendar', label: 'Calendar', icon: CalendarDays },
       { href: '/dashboard/admin/org-chart', label: 'Org Chart', icon: Network },
       { href: '/dashboard/admin/map', label: 'Map', icon: MapIcon },
+      { href: '/dashboard/admin/agent', label: 'Agent', icon: CpuAi },
     ],
   },
   {
@@ -74,7 +75,7 @@ export default function AdminDashboardLayout({ children }: { children: React.Rea
   }, [pathname]);
   // Full-bleed pages (no content padding) so their canvases + slide-in panels
   // anchor edge-to-edge between the top bar and the footer rail.
-  const isFullScreenPage = isCalendarPage || pathname === '/dashboard/admin/org-chart' || pathname === '/dashboard/admin/map';
+  const isFullScreenPage = isCalendarPage || pathname === '/dashboard/admin/org-chart' || pathname === '/dashboard/admin/map' || pathname === '/dashboard/admin/agent';
   const { notifications, isConnected, dismissNotification, clearNotifications } = useNotifications();
 
   const handleLogout = async () => {
