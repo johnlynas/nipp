@@ -18,6 +18,9 @@ export const envSchema = z.object({
   FRONTEND_URL: z.string().url('FRONTEND_URL must be a valid URL').default('http://localhost:3000'),
   NEXT_PUBLIC_API_URL: z.string().url('NEXT_PUBLIC_API_URL must be a valid URL').default('http://localhost:3000'),
 
+  /** Portal AI agent — chat interface URL embedded on the admin dashboard Agent page (server-side only). */
+  NIPP_AGENT_URL: z.string().url('NIPP_AGENT_URL must be a valid URL').default('http://localhost:3001/chat'),
+
   // ---------------------------------------------------------------------------
   // BetterAuth public access (Phase B): per-request base URL + trusted origins.
   // lib/auth.ts hardcodes zero host values — every deploy-tunable flows from here.
