@@ -35,11 +35,15 @@ A full-stack, multi-tenant property management system. It provides a secure, rol
 - [9. Calendar System](#9-calendar-system)
 - [10. Organization Chart](#10-organization-chart)
 - [11. Job Scheduler](#11-job-scheduler)
-- [12. Cache Architecture](#12-cache-architecture)
-- [13. Security](#13-security)
-- [14. Project Structure](#14-project-structure)
-- [15. Development & Testing](#15-development--testing)
-- [16. API Reference (OpenAPI + Swagger UI)](#16-api-reference-openapi--swagger-ui)
+- [12. Work Orders & Quotations](#12-work-orders--quotations)
+- [13. Invoices](#13-invoices)
+- [14. Portal AI Agent](#14-portal-ai-agent)
+- [15. Organization Map (Google Maps)](#15-organization-map-google-maps)
+- [16. Cache Architecture](#16-cache-architecture)
+- [17. Security](#17-security)
+- [18. Project Structure](#18-project-structure)
+- [19. Development & Testing](#19-development--testing)
+- [20. API Reference (OpenAPI + Swagger UI)](#20-api-reference-openapi--swagger-ui)
 
 ---
 
@@ -513,6 +517,12 @@ A dedicated `services/` layer sits between the API routes and the database (Pris
 | Calendar Event | `services/calendar-event-service.ts` | Event CRUD, recurrence expansion, upcoming events |
 | Calendar Notification | `services/calendar-notification-service.ts` | Today's-events email notifications, delivery history |
 | Job Scheduler | `services/job-scheduler-service.ts` + `lib/job-scheduler-engine.ts` / `lib/job-scheduler-bree.ts` | Platform-org job engine: main-thread due-scanner, Bree worker-per-run execution (or inline), sandboxed operator scripts, approval gate, concurrency circuit breaker, execution history, lifecycle SSE. |
+| Work Order | `services/work-order-service.ts` + `lib/work-order-state.ts` | Org-scoped work order CRUD + state machine (single source of truth shared with client components); RFQ deadline tracking; post-commit email dispatch seam |
+| Work Order Note | `services/work-order-note-service.ts` | Super-admin notes attached to a work order (blocked in terminal states) |
+| Work Order Deadline | `services/work-order-deadline-handler.ts` | Hourly built-in job: idempotent overdue quote-deadline alerts (ORG + GLOBAL SSE) |
+| Work Order Email | `services/work-order-email.ts` | Quotation-request / assignment / invoice-request notices — link-free, failure-tolerant |
+| Quotation | `services/quote-service.ts` | Per-contractor quotations (unique per work order), receive/accept/reject/close |
+| Invoice | `services/invoice-service.ts` | 1:1 work-order invoices: price, dates, document link; assigned-contractor rule |
 
 ---
 
@@ -545,6 +555,10 @@ A dedicated `services/` layer sits between the API routes and the database (Pris
 | `JobExecution` | Platform-org | Per-run record with status lifecycle (PENDING→RUNNING→terminal), trigger type, actor, and result; cascades delete from `JobDefinition`. Full detail in [Section 11 — Data Model](#data-model). |
 | `Units` | Org-scoped | Per-organization unit registry: address, contact email/phone, `rented` flag, and a `UnitType` (e.g. 1–5 bed). Managed under `/dashboard/admin/units`; feeds the "Total Units" stat and future property scheduling. |
 | `Contractors` | Global | Shared external-contractor directory usable by all organizations (no org column, no RLS policy — access is gated at the app/route layer): company name, contact, a `ContractorType`, and a description. Managed under `/dashboard/admin/contractors`. |
+| `WorkOrder` | Org-scoped | Maintenance/repair lifecycle item: description, opener, assigned contractor, RFQ deadline (`quotesDue`), state machine (10 states). Full detail in [Section 12](#12-work-orders--quotations). |
+| `WorkOrderNote` | Org-scoped | Super-admin notes attached to a work order (terminal states take no notes) |
+| `Quotation` | Org-scoped | Per-contractor quote on a work order: link, breakdown, price, due date, state; unique per `(workOrderId, contractorId)` |
+| `Invoice` | Org-scoped | 1:1 with a work order (created at `INVOICED`): price, invoice/due dates, optional document link. Full detail in [Section 13](#13-invoices). |
 
 ### Relationships
 
@@ -559,6 +573,7 @@ A dedicated `services/` layer sits between the API routes and the database (Pris
 - `Resource` → `Role`: Via `ResourceRole` (many-to-many, global junction)
 - `Calendar` → `CalendarEvent`: One-to-many cascading delete
 - `Notification` → `Organization`: Optional many-to-one (`SetNull` on org delete) — carries the affected tenant for org-level events; NULL for pure global broadcasts
+- `WorkOrder` → `Quotation`, `Invoice`: One-to-many / one-to-one (cascade); `WorkOrder` → `Contractors` optional until assignment
 
 ### Indexing Strategy
 
@@ -1347,7 +1362,85 @@ Design rationale, spike evidence, and the phase plan live in
 
 ---
 
-## 12. Cache Architecture
+## 12. Work Orders & Quotations
+
+Work orders are the portal's maintenance/repair lifecycle, scoped per organization. Each work order tracks a piece of work from creation through contractor quoting, assignment, execution, invoicing, and closure.
+
+### State machine
+
+The legal transitions live in **`lib/work-order-state.ts`** — a single, dependency-free source of truth imported by the server services, the API routes, *and* the client components, so every surface derives its action buttons from the same map:
+
+```
+CREATED → OUT_FOR_QUOTES → QUOTES_IN → CONTRACTOR_ASSIGNED → STARTED → COMPLETE → INVOICED → FINISHED
+   │              │              │
+   └──────────────┴──────────────┴──→ CLOSED
+```
+
+- `FINISHED` and `CLOSED` are terminal — no notes, no further actions.
+- `CLOSED` is only reachable from the pre-assignment states (work abandoned before a contractor was engaged).
+
+### Quotations (RFQ flow)
+
+- Sending for quotes sets `quotesDue` — **default 7 days out, configurable at send time**.
+- One quotation per contractor (`@@unique([workOrderId, contractorId])`); quotations are `OPENED → ACCEPTED | REJECTED | CLOSED`.
+- Recording a received quote (price + breakdown) auto-moves the work order to `QUOTES_IN`.
+- **Overdue deadline scan** — built-in hourly job `work-order-quote-deadlines` ([Section 11](#11-job-scheduler)): finds work orders stuck in `OUT_FOR_QUOTES` past `quotesDue` and raises a one-time, idempotent alert (`deadlineAlertAt` is set on fire, so repeated runs never re-notify) — an ORG-scoped notification for the org's members plus a GLOBAL WARNING for the admin dashboard. Super admins follow up with contractors directly; there is deliberately **no automatic state change** (not all invited contractors respond).
+
+### Emails
+
+Work order emails (quotation request, work assignment, invoice request) are plain informational notices on the OIDC-invite email pipeline — **they contain no links, tokens, or workflow URLs** (a `NO_URL_RE` invariant is asserted inside every render, so a template change that smuggles a URL in fails loudly at send time). Dispatch runs *after* the committed transaction and a failed SMTP send is logged + recorded as a FAILED `NotificationLog` row — it never rolls back the transition.
+
+### Access model
+
+- **Mutations are super-admin only**, and each mutation route wraps the service in a tenant RLS context pinned to the target row's own `organizationId` (a pure platform-admin context fails closed on the policy `WITH CHECK`).
+- **Tenant users see their own organization's work orders and quotations read-only** — the tenant workspace has Work Orders and Quotations pages with the same incumbent vocabulary as the admin console.
+- Work order notes are super-admin managed (`services/work-order-note-service.ts`).
+
+### Data model
+
+| Entity | Scope | Description |
+|--------|-------|-------------|
+| `WorkOrder` | Org-scoped | The work item: description, opener (email + optional user id), assigned contractor, `quotesDue`, state; indexed on `[organizationId, state]` and `[organizationId, quotesDue]` (the deadline scan) |
+| `WorkOrderNote` | Org-scoped | Super-admin notes attached to a work order |
+| `Quotation` | Org-scoped | Per-contractor quote: link, breakdown, price (`Decimal(12,2)`), due date, state; unique per `(workOrderId, contractorId)` |
+
+---
+
+## 13. Invoices
+
+Invoices close out the financial side of a work order and are **1:1 with it** (`Invoice.workOrderId` is unique — created when the work order moves to `INVOICED`). An invoice records the contractor's price (`Decimal(12,2)`), invoice date, due date (default 7 days), and an optional link to the remote invoice document.
+
+- **Admin console** (`/dashboard/admin/invoices`): list, create, edit, delete; an invoice must record for exactly the work order's assigned contractor (service-enforced).
+- Creating an invoice triggers the **invoice-request email** to the contractor (see [Section 12 — Emails](#emails)).
+- Tenant users have no invoice page — invoicing is a platform-admin operation in v1.
+
+| Entity | Scope | Description |
+|--------|-------|-------------|
+| `Invoice` | Org-scoped | 1:1 with `WorkOrder`: price, invoice date, due date, optional document link; contractor FK mirrors the work order's assigned contractor |
+
+---
+
+## 14. Portal AI Agent
+
+The admin console's **Agent** page (`/dashboard/admin/agent`) embeds the portal AI agent's chat interface in a full-bleed iframe. The agent itself is a **separate service** (`mastra-nipp-agent`, default `http://localhost:3001/chat`) — not part of this repository.
+
+- The page is a server component that reads `NIPP_AGENT_URL` (server-side only; see [QUICK_START.md](./QUICK_START.md#environment-variables)) and **probes it with a 3-second timeout on every load** (`force-dynamic`) — if the agent service isn't running, the page renders an unavailable state with start instructions instead of a blank frame.
+- The iframe allows clipboard writes so chat copy-paste works; the URL is never exposed to the client bundle beyond the rendered `src`.
+
+---
+
+## 15. Organization Map (Google Maps)
+
+Every organization can have a map location, shown on two pages: the **tenant workspace Map page** (`/dashboard/tenant/map`) and the **admin Map page** (`/dashboard/admin/map`, which reuses the org-chart's `?org=` pattern so any tenant's map can be viewed).
+
+- **`components/maps/OrgMap.tsx`** loads Google Maps via `@googlemaps/js-api-loader` (maps + geocoding + marker libraries) using `NEXT_PUBLIC_GOOGLE_MAPS_API_KEY`. The key is optional — without it the page renders a placeholder card explaining how to configure it, so the portal works with no Google account.
+- **Location source** — `GET /api/organizations/[orgId]/location` returns, in preference order: stored coordinates (`Organization.latitude`/`longitude`, plus optional `mapZoom`, clamped to Google's 3–21 range) → the address string in `metadata.location.address` as a geocoding fallback. Stored coordinates mean no geocoding call is needed at all; out-of-range values are ignored.
+- **Viewer controls** — a postcode/address search field jumps anywhere on the map (geocoded, with a result marker), zoom in/out/reset use the same overlay pattern as the org chart canvas, and the default centre is Belfast (Northern Ireland) until an organization's location is loaded (located zoom 16).
+- **Authorization** mirrors the org-chart route: membership in the URL's organization *or* super admin (`resolveTenantAccess`, 401/403/503), read under the verified tenant RLS context.
+
+---
+
+## 16. Cache Architecture
 
 The portal implements a **multi-layered caching strategy** combining Next.js ISR, L1 in-memory LRU cache, Redis (L2), TanStack Query (client-side), and SSE for real-time updates. This section covers the server-side cache layers in detail.
 
@@ -1464,7 +1557,7 @@ The admin dashboard includes a cache metrics page at `/admin/cache-metrics`. A p
 
 ---
 
-## 13. Security
+## 17. Security
 
 ### Content Security Policy (CSP)
 
@@ -1557,7 +1650,7 @@ Payload encryption does **not** replace CSRF protection. PII mutating routes mus
 
 ---
 
-## 14. Project Structure
+## 18. Project Structure
 
 ```
 nipp/
@@ -1583,7 +1676,7 @@ nipp/
 │   │   ├── roles/                # Role-related APIs
 │   │   └── security/payload-key/# Payload encryption key management
 │   ├── dashboard/                # Tenant dashboard layouts & pages (layouts carry the SSE footer ticker)
-│   │   ├── admin/                # Super admin tenant view (calendar, orgs, permissions, resources, roles, teams, users, system health)
+│   │   ├── admin/                # Super admin tenant view (calendar, orgs, permissions, resources, roles, teams, users, system health, work orders, quotes, invoices, agent, map)
 │   │   │   └── notifications/    # Notification log: history, filters, search, acknowledge/delete
 │   │   └── contractor/           # Contractor-specific dashboard
 │   ├── org/[orgId]/              # Org-scoped pages (roles)
@@ -1597,6 +1690,7 @@ nipp/
 │   ├── calendar/                 # Interactive calendar (month/week/day/year views, DnD, recurrence)
 │   ├── dashboard/                # Dashboard UI (ConfirmDialog, DataTable)
 │   ├── org-chart/                # Interactive org chart (canvas tree, sidebar, member detail modal) — Section 10
+│   ├── maps/                     # Google Maps canvas for the organization Map pages — Section 15
 │   └── ui/                       # Shared UI primitives
 ├── features/                     # Client feature modules (auth, notifications inbox, org, permissions, user)
 ├── hooks/                        # Custom React hooks
@@ -1658,7 +1752,8 @@ nipp/
 │   ├── tenant-access.ts          # Tenant access control utilities
 │   ├── tenant-context.ts         # AsyncLocalStorage for tenant context propagation
 │   ├── tenant-db.ts              # Prisma $extends extension (tenant isolation)
-│   └── validate-schema.ts        # Schema validation utilities
+│   ├── validate-schema.ts        # Schema validation utilities
+│   └── work-order-state.ts       # Work order state machine — single source of truth, shared server + client (Section 12)
 ├── middleware.ts                 # Route protection & Edge-runtime CSP/session validation
 │                                  # Public routes: /login, /register, /api/auth/*, /api/health
 ├── next.config.ts                # Next.js configuration (CSP, webpack externals)
@@ -1677,13 +1772,19 @@ nipp/
 │   ├── calendar-event-service.ts  # Calendar event CRUD, recurrence expansion
 │   ├── calendar-notification-service.ts  # Today's-events email notifications
 │   ├── calendar-service.ts        # Calendar CRUD, default-calendar bootstrapping
+│   ├── invoice-service.ts         # 1:1 work-order invoices (Section 13)
 │   ├── job-scheduler-service.ts   # Job engine interface: CRUD, approval gate, claim gate, handler dispatch, sandboxed scripts, dry-run, history (Section 11)
 │   ├── organization-service.ts    # Organization management & lifecycle
 │   ├── permission-service.ts      # Global permission catalog CRUD
+│   ├── quote-service.ts           # Per-contractor quotations on work orders (Section 12)
 │   ├── resource-service.ts        # Global resource catalog CRUD (Super Admin)
 │   ├── role-service.ts            # Org-scoped role CRUD
 │   ├── team-service.ts            # Team CRUD, membership, role inheritance
-│   └── user-service.ts            # User management & lifecycle
+│   ├── user-service.ts            # User management & lifecycle
+│   ├── work-order-deadline-handler.ts  # Hourly overdue quote-deadline scan (Section 12)
+│   ├── work-order-email.ts        # Link-free contractor notices: RFQ / assignment / invoice request (Section 12)
+│   ├── work-order-note-service.ts # Super-admin work order notes (Section 12)
+│   └── work-order-service.ts      # Work order CRUD + state machine (Section 12)
 ├── tests/                        # Test suites
 │   ├── fixtures/                 # Test data fixtures (organizations, users)
 │   ├── integration/              # Integration tests (PostgreSQL + Redis)
@@ -1720,7 +1821,7 @@ nipp/
 
 ---
 
-## 15. Development & Testing
+## 19. Development & Testing
 
 ### Local Setup
 
@@ -1759,7 +1860,7 @@ npm run dev                      # Start development server
 
 ---
 
-## 16. API Reference (OpenAPI + Swagger UI)
+## 20. API Reference (OpenAPI + Swagger UI)
 
 A browsable, auto-generated OpenAPI reference for every `app/api/**` route is served at **`/api-docs`** (super-admin only — membership in the Platform organization, verified in `app/api-docs/_guard.ts`). The spec is generated from the JSDoc header blocks that live next to each route handler, so the documentation ships with the code.
 
@@ -1812,5 +1913,5 @@ Routes missing a JSDoc header still appear in the spec (generated summary only) 
 
 ---
 
-*Last Updated: 16/10/26 — readability pass: added How-to-Read + Glossary, slimmed TOC; deduped JobDefinition/JobExecution (now in §11) and calendar recurrence (now in §9); added the defense-in-depth diagram to §5; OIDC phase-deviation detail condensed (was 5 rows of build-quirk table); fixed stale cross-references (org-chart Section 7→10, "planned feature"→shipped, dead README Appendix F pointer to README "Known open threads"). Earlier: calendar UI/API + email flows, health endpoint, Units & Contractors entities, and the API reference moved here; env-var references relocated to QUICK_START.md (operational) and SECURITY.md (security)*
+*Last Updated: 14/11/26 — added §12 Work Orders & Quotations, §13 Invoices, §14 Portal AI Agent, §15 Organization Map (Google Maps); renumbered former §12–§16 to §16–§20; services/data-model/project-structure tables extended for the new features. Earlier: readability pass — How-to-Read + Glossary, slimmed TOC; deduped JobDefinition/JobExecution (now in §11) and calendar recurrence (now in §9); added the defense-in-depth diagram to §5; OIDC phase-deviation detail condensed (was 5 rows of build-quirk table); fixed stale cross-references (org-chart Section 7→10, "planned feature"→shipped, dead README Appendix F pointer to README "Known open threads"). Earlier: calendar UI/API + email flows, health endpoint, Units & Contractors entities, and the API reference moved here; env-var references relocated to QUICK_START.md (operational) and SECURITY.md (security)*
 *Maintained by: Property NI Development Team*
