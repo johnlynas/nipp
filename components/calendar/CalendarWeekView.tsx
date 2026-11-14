@@ -2,7 +2,7 @@
 
 import { useMemo, useCallback, useRef, type RefObject } from 'react';
 import type { CalendarEvent } from './types';
-import { generateWeekGrid, generateHourlySlots, isToday, formatTime, getEventInstanceKey } from './calendar-utils';
+import { generateWeekGrid, generateHourlySlots, isToday, formatTime, getEventInstanceKey, isAllDayEvent } from './calendar-utils';
 import { useVerticalDragScroll } from './hooks/useVerticalDragScroll';
 
 // ---------------------------------------------------------------------------
@@ -144,6 +144,70 @@ export default function CalendarWeekView({
     e.dataTransfer.dropEffect = 'move';
   };
 
+  // All-day lane: each day's all-day events as full-width bars with
+  // start/middle/end caps for multi-day spans. The lane is a plain grid row
+  // above the hour body, sharing the same track widths so columns line up.
+  const renderAllDayLane = () => {
+    return (
+      <>
+        <div
+          className="border-r border-b text-xs flex items-center justify-center"
+          style={{ borderColor: 'var(--color-slate-200)', color: 'var(--color-slate-500)' }}
+        >
+          All day
+        </div>
+        {weekDays.map((day, dayIndex) => {
+          const dayStr = formatDateKey(day);
+          const allDayEvents = (eventsByDay[dayStr] || []).filter((e) => isAllDayEvent(e));
+          return (
+            <div
+              key={dayIndex}
+              className="border-l border-b relative"
+              style={{ borderColor: 'var(--color-slate-200)' }}
+              onClick={() => onDateClick?.(day)}
+              onContextMenu={(e) => { e.preventDefault(); onDateRightClick?.(day, e); }}
+              onDrop={(e) => handleDrop(e, day)}
+              onDragOver={handleDragOver}
+            >
+              <div className="flex flex-col gap-0.5 p-0.5">
+                {allDayEvents.map((event) => {
+                  const isDragging = event.id === draggingEventId;
+                  const color = event.color || '#2A9D8F';
+                  return (
+                    <div
+                      key={`allday-${getEventInstanceKey(event)}-${event.position}`}
+                      draggable
+                      onDragStart={(e) => {
+                        e.dataTransfer.setData('text/plain', event.id);
+                        e.dataTransfer.effectAllowed = 'move';
+                        onEventDragStart?.(event, e as unknown as React.DragEvent);
+                      }}
+                      onDragEnd={() => onDragEnd?.()}
+                      onClick={(e) => { e.stopPropagation(); onEventClick?.(event); }}
+                      onContextMenu={(e) => { e.preventDefault(); e.stopPropagation(); onEventRightClick?.(event, e); }}
+                      className="flex items-center gap-1 px-1 py-0.5 rounded cursor-grab hover:brightness-95 transition-all overflow-hidden"
+                      style={{
+                        backgroundColor: `${color}B3`,
+                        borderLeft: `2px solid ${color}`,
+                        opacity: isDragging ? 0.5 : 1,
+                      }}
+                    >
+                      <span className="text-xs font-medium truncate" style={{ color: 'var(--color-slate-800)' }}>
+                        {event.position === 'start' && '▸ '}
+                        {event.recurrence && <span title="Recurring event">↻</span>} {event.title}
+                        {event.position === 'end' && ' ◂'}
+                      </span>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          );
+        })}
+      </>
+    );
+  };
+
   return (
     <div className="bg-white rounded-lg shadow-sm border overflow-hidden" style={{ borderColor: 'var(--color-slate-200)' }}>
       {/* Single scrollable grid holding BOTH the day-header row and the time
@@ -182,6 +246,10 @@ export default function CalendarWeekView({
           </div>
         ))}
 
+        {/* All Day lane — a plain grid row above the hour body; it scrolls
+            away with the header, matching Google Calendar. */}
+        {renderAllDayLane()}
+
         {/* Time labels column — 4rem wide, matching the Day view's w-16 */}
         <div className="border-r border-b" style={{ borderColor: 'var(--color-slate-200)' }}>
           {hours.map((hour) => (
@@ -198,7 +266,8 @@ export default function CalendarWeekView({
         {/* Day columns */}
         {weekDays.map((day, dayIndex) => {
           const dayStr = formatDateKey(day);
-          const dayEvents = eventsByDay[dayStr] || [];
+          // All-day events live in the lane above — the hourly grid only gets timed ones.
+          const dayEvents = (eventsByDay[dayStr] || []).filter((e) => !isAllDayEvent(e));
           return (
             <div
               key={dayIndex}

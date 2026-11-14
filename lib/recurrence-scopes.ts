@@ -26,6 +26,7 @@ export interface UpdateEventInput {
   description?: string | null;
   startDate?: Date;
   endDate?: Date;
+  allDay?: boolean;
   eventType?: CalendarEventType;
   color?: string | null;
   propertyId?: string | null;
@@ -89,6 +90,7 @@ async function createOverrideEvent(
   overrides: {
     startDate: Date;
     endDate: Date;
+    allDay?: boolean;
     title?: string;
     description?: string | null;
     eventType?: string;
@@ -108,6 +110,8 @@ async function createOverrideEvent(
       description: overrides.description !== undefined ? overrides.description : baseEvent.description,
       startDate: overrides.startDate,
       endDate: overrides.endDate,
+      // Carry the all-day flag onto the detached override (explicit update wins).
+      allDay: overrides.allDay ?? (baseEvent.allDay ?? false),
       eventType: (overrides.eventType ?? baseEvent.eventType) as unknown as string,
       color: overrides.color ?? baseEvent.color,
       propertyId: overrides.propertyId ?? baseEvent.propertyId,
@@ -156,6 +160,7 @@ async function doApplyEditScopeThis(
         ...(updates.description !== undefined && { description: updates.description }),
         ...(updates.startDate !== undefined && { startDate: updates.startDate }),
         ...(updates.endDate !== undefined && { endDate: updates.endDate }),
+        ...(updates.allDay !== undefined && { allDay: updates.allDay }),
         ...(updates.eventType !== undefined && { eventType: updates.eventType as unknown as string }),
         ...(updates.color !== undefined && { color: updates.color }),
         ...(updates.propertyId !== undefined && { propertyId: updates.propertyId }),
@@ -189,6 +194,7 @@ async function doApplyEditScopeThis(
   const overrideId = await createOverrideEvent(ctx, eventId, {
     startDate: overrideStartDate,
     endDate: overrideEndDate,
+    allDay: updates.allDay,
     title: updates.title ?? baseEvent?.title,
     description: updates.description !== undefined ? updates.description : baseEvent?.description,
     eventType: (updates.eventType ?? baseEvent?.eventType) as string,
@@ -261,6 +267,8 @@ async function doApplyEditScopeFollowing(
       description: updates.description,
       startDate: newSeriesStartDate,
       endDate: new Date(newSeriesStartDate.getTime() + (durationMs || 3600000)),
+      // Carry the all-day flag onto the new series (explicit update wins).
+      allDay: updates.allDay ?? (baseEvent?.allDay ?? false),
       eventType: updates.eventType as unknown as string | undefined,
       color: updates.color,
       propertyId: updates.propertyId,
@@ -326,6 +334,7 @@ async function doApplyEditScopeAll(
       ...(updates.description !== undefined && { description: updates.description }),
       ...(updates.startDate !== undefined && { startDate: updates.startDate }),
       ...(updates.endDate !== undefined && { endDate: updates.endDate }),
+      ...(updates.allDay !== undefined && { allDay: updates.allDay }),
       ...(updates.eventType !== undefined && { eventType: updates.eventType as unknown as string }),
       ...(updates.color !== undefined && { color: updates.color }),
       ...(updates.propertyId !== undefined && { propertyId: updates.propertyId }),

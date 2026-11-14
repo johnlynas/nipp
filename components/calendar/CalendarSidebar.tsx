@@ -2,7 +2,7 @@
 
 import { useState, useRef, useEffect, useMemo } from 'react';
 import type { UpcomingEvent } from './types';
-import { getEventInstanceKey } from './calendar-utils';
+import { getEventInstanceKey, isAllDayEvent } from './calendar-utils';
 
 // ---------------------------------------------------------------------------
 // Props
@@ -123,6 +123,15 @@ export default function CalendarSidebar({
     const start = event.startDate instanceof Date ? event.startDate : new Date(event.startDate);
     const end = event.endDate instanceof Date ? event.endDate : new Date(event.endDate);
     if (isNaN(start.getTime()) || isNaN(end.getTime())) return '';
+
+    // All-day events show "All day" instead of a time-of-day.
+    if (isAllDayEvent(event)) {
+      const dateOpts: Intl.DateTimeFormatOptions = { weekday: 'short', day: 'numeric', month: 'short' };
+      if (start.toDateString() !== end.toDateString()) {
+        return `${start.toLocaleDateString('en-GB', dateOpts)} – ${end.toLocaleDateString('en-GB', dateOpts)} · All day`;
+      }
+      return `${start.toLocaleDateString('en-GB', dateOpts)} · All day`;
+    }
 
     const isMultiDay = start.toDateString() !== end.toDateString();
 

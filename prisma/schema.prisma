@@ -670,6 +670,12 @@ model CalendarEvent {
   description String?
   startDate   DateTime // Local datetime (no timezone for v1)
   endDate     DateTime // Local datetime (no timezone for v1)
+
+  /** True when the event occupies whole days with no time-of-day.
+   *  When true, startDate is local midnight of the first day and
+   *  endDate is 23:59:59.999 of the last day (inclusive). */
+  allDay      Boolean  @default(false)
+
   eventType   CalendarEventType @default(OTHER)
   color       String?  // Event-level override of calendar default color
 

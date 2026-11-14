@@ -7,6 +7,10 @@
 
 import { CalendarEvent, CalendarEventType } from './types';
 import * as recurrence from '@/lib/recurrence';
+import { isAllDayEvent } from '@/lib/all-day';
+
+// Re-export the all-day detector so views branch on it without re-implementing.
+export { isAllDayEvent };
 
 // Re-export display helpers and date utilities for backwards compatibility.
 export {
@@ -354,6 +358,7 @@ export const CalendarUtils = {
   getRecurrenceEndDateLabel: _getRecurrenceEndDateLabel,
   getEventPosition,
   getEventSpan,
+  isAllDayEvent,
   toLocalDateTimeInputValue: _toLocalDateTimeInputValue,
   toLocalDateInputValue: _toLocalDateInputValue,
   parseLocalDateInputValue: _parseLocalDateInputValue,

@@ -115,11 +115,12 @@ return withRLSContext(toTenantContext(access, session.user.id), async () => {
   }
 
   const body = await req.json();
-  const { title, description, startDate, endDate, calendarId, eventType, color, propertyId, recurrence } = body as {
+  const { title, description, startDate, endDate, allDay, calendarId, eventType, color, propertyId, recurrence } = body as {
     title: string;
     description?: string | null;
     startDate: string;
     endDate: string;
+    allDay?: boolean;
     calendarId: string;
     eventType?: 'VIEWING' | 'INSPECTION' | 'MAINTENANCE' | 'LEASE_SIGNING' | 'LEASE_RENEWAL' | 'KEY_EXCHANGE' | 'OTHER';
     color?: string | null;
@@ -145,6 +146,7 @@ return withRLSContext(toTenantContext(access, session.user.id), async () => {
       description,
       startDate: new Date(startDate),
       endDate: new Date(endDate),
+      allDay: allDay ?? false,
       calendarId,
       eventType,
       color,
