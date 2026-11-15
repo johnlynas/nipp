@@ -140,7 +140,7 @@ flowchart TB
 
 | Layer | Responsibility | Runtime |
 |-------|---------------|---------|
-| **Edge Middleware** (`middleware.ts`) | Session cookie check, CSP headers, cache control. Fast path — no Prisma. | Edge |
+| **Edge Middleware** (`proxy.ts`) | Session cookie *or* bearer-token presence check, CSP headers (incl. agent + Google Maps allowlists), cache control. Fast path — no Prisma. | Edge |
 | **API Routes** (`app/api/`) | HTTP request handling, parameter parsing, status codes. Thin wrappers around services. | Node |
 | **Service Layer** (`services/`, `lib/services/`) | Business logic: slug generation, complex transactions, multi-step bootstrapping. | Node |
 | **Data Layer** (`prisma/schema.prisma`) | Schema definition, relations, RLS policies. | PostgreSQL |
@@ -182,11 +182,11 @@ A React hook (`hooks/useInactivityTimeout.ts`) listens for `mousemove`, `click`,
 
 ### Middleware Protection
 
-`middleware.ts` performs a fast check for session cookie presence on every non-public route. This avoids Prisma Edge Runtime crashes while ensuring unauthenticated users are redirected to `/login`. Protected routes return `Cache-Control: no-store, max-age=0`, `Surrogate-Control: no-store`, and `Pragma: no-cache` headers to prevent caching of sensitive data.
+`proxy.ts` performs a fast check for **credential presence** on every non-public route: either a session cookie *or* an `Authorization: Bearer *** header (server-to-server clients — MCP server, agent). This avoids Prisma Edge Runtime crashes while ensuring unauthenticated users are redirected to `/login`. The proxy deliberately checks presence only — actual validation happens in-route (`requireSuperAdmin` / `withAuth` → `auth.api.getSession` resolves the bearer header), so an invalid token gets a JSON 401 from the route, not a redirect. Protected routes return `Cache-Control: no-store, max-age=0`, `Surrogate-Control: no-store`, and `Pragma: no-cache` headers to prevent caching of sensitive data.
 
 ### Public Routes
 
-The following routes bypass session validation: `/login`, `/register`, `/api/auth/*`, and `/api/health`; the magic-link verify route (`GET /auth/magic-link/verify`) is public as well.
+The following routes bypass session validation: `/login`, `/register`, `/api/auth/*`, `/api/health`, the SSE stream (`/api/notifications/stream` — handles its own auth), and the session-less public flows: magic-link verify (`GET /auth/magic-link/verify`) and password reset (`/auth/forgot-password`, `/auth/reset-password`).
 
 ### Google OIDC Sign-In (invite-only door + magic-link verification)
 
@@ -260,7 +260,7 @@ stateDiagram-v2
 | PKCE/state storage | `Verification` model in `prisma/schema.prisma` | BetterAuth stores the signed per-flow state nonce here; the same table carries magic-link tokens |
 | Session-creation gate | `lib/auth.ts` `databaseHooks.session.create.before` | Single funnel for **all** sign-in methods: `enforceBanStatus` → `enforceOidcProvisioning`. The authoritative membership read runs `tenantDb.user.findUnique(… select members)` inside the platform RLS context (`withPlatformContextForDB`) — a GUC-less read as the non-owner role `nipp_app` sees zero Member rows and would deny provisioned users |
 | Magic-link helper | `lib/oidc-magic-link.ts` | `generateRandomString(32)` → `Verification` row (5-min expiry) → link built on **the requesting origin** (`portalOrigin`, host-independent — LAN IP, tunnel host, or public domain; `FRONTEND_URL` only as off-request fallback), subject "NIPP account activation", via the existing nodemailer path |
-| Verify route | `GET /auth/magic-link/verify` (public in `middleware.ts`) | Rate-limited, session-less: atomic consume, sets `oidcVerified = true`, redirects to `/login?oidc=link-verified`; deliberately mints **no** session — sign-in completes on the second Google click |
+| Verify route | `GET /auth/magic-link/verify` (public in `proxy.ts`) | Rate-limited, session-less: atomic consume, sets `oidcVerified = true`, redirects to `/login?oidc=link-verified`; deliberately mints **no** session — sign-in completes on the second Google click |
 | Login UI | `app/login/page.tsx` + `lib/oidc-login-ui.ts` | Banners classified from BetterAuth's callback error params by `classifyGateMessage` (four kinds: banned / inbox-check / not-invited / not-provisioned) — server messages are the single source of truth, no client markers needed |
 | Admin invite routes | `app/api/admin/users/route.ts`, `app/api/dashboard/admin/users/route.ts`, `…/[id]/invite/route.ts` | Passwordless create + resend call the shared helper with **their own** request origin; a missing org is rejected (every user belongs to an org — see §5) |
 
@@ -318,7 +318,7 @@ flowchart TB
 | Piece | Where | Role |
 |-------|-------|------|
 | Request route | `POST /api/auth/password-reset` (`app/api/auth/password-reset/route.ts`) | Public, IP-rate-limited (dedicated `password-reset` tier, 5/min default), ban gate **before** BetterAuth, then in-process `auth.api.requestPasswordReset`; always replies `200 {status:true}` with non-distinguishing copy — no account-existence oracle; audit entry records the masked email + IP only |
-| Verify route | `GET /api/auth/password-reset/verify` (public in `middleware.ts`) | Read-only pre-flight so the page can decide what to render: `{valid:true, expiresInSeconds}` or `{valid:false, reason}` — deliberately **deletes nothing** (a link opened on one device stays completable on another); audit on valid opens only |
+| Verify route | `GET /api/auth/password-reset/verify` (public in `proxy.ts`) | Read-only pre-flight so the page can decide what to render: `{valid:true, expiresInSeconds}` or `{valid:false, reason}` — deliberately **deletes nothing** (a link opened on one device stays completable on another); audit on valid opens only |
 | Reset route | `POST /api/auth/password-reset/reset` (`app/api/auth/password-reset/reset/route.ts`) | Tier rate-limit → shape/length pre-checks (≤72, scrypt ceiling) → `preFlightResetToken` (missing/expired → 400) → `hasCredentialAccount` guard (OIDC-only forged request → 403) → `enforceBanStatus` re-check at mutation time (→ 401) → in-process `auth.api.resetPassword` — scrypt hash write and atomic token delete single-sourced in BetterAuth; success audit + the same no-store headers as `/api/auth/password` |
 | Shared library | `lib/forgot-password.ts` | `issueResetEmail` (branded HTML, host-independent link via `resolveResetLinkOrigin` — the OIDC magic-link origin helper, DRY), `preFlightResetToken`, `hasCredentialAccount`, `maskEmail` (`j***@…` audit convention), `AUDIT_ACTION` constants; global `prisma` + `withPlatformContext` like sibling auth libs |
 | BetterAuth wiring | `lib/auth.ts` | `emailAndPassword.sendResetPassword` hook (request origin wins over stale session-captured origin — reset requests arrive unauthenticated) + `resetPasswordTokenExpiresIn = PASSWORD_RESET_TOKEN_TTL_SECS` (env-overridable, default 3600 s); `onPasswordReset` wired as an observer only |
@@ -441,7 +441,7 @@ The system enforces strict tenant isolation using a **defense-in-depth** approac
 
 ```mermaid
 flowchart LR
-    REQ[Request] --> MW["middleware.ts<br/>session cookie check (Edge-safe)"]
+    REQ[Request] --> MW["proxy.ts<br/>session cookie / bearer presence check (Edge-safe)"]
     MW --> ALS["lib/tenant-context.ts<br/>organizationId → AsyncLocalStorage"]
     ALS --> EXT["Layer 1 — lib/tenant-db.ts ($extends)<br/>auto-injects organizationId into where/data/<br/>create/update; throws when context is missing"]
     EXT --> RLS{"Layer 2 — PostgreSQL RLS<br/>policies read app.current_org_id GUC"}
@@ -902,7 +902,7 @@ input to the shared-dedup-store work above.
 | Model | Scope | Description |
 |-------|-------|-------------|
 | `Calendar` | Org-scoped | Container/namespace for events (one default per org, multiple supported) |
-| `CalendarEvent` | Org-scoped | Individual events (local datetimes, optional `propertyId`; RFC 5545 `rrule` JSON + `exdates` Json columns on the event itself — there is no separate recurrence model) |
+| `CalendarEvent` | Org-scoped | Individual events (local datetimes, optional `propertyId`; RFC 5545 `rrule` JSON + `exdates` Json columns on the event itself — there is no separate recurrence model; `allDay Boolean @default(false)` flag for day-spanning events) |
 
 Services:
 - `services/calendar-service.ts` — Calendar CRUD, default-calendar bootstrapping (org-scoped)
@@ -923,6 +923,33 @@ The calendar is a standalone component tree in `components/calendar/`, embedded 
 - **Drag-and-drop rescheduling:** single events move across dates and times; changes persist to the database, including preserved start/end times across month-view drags. Dragging a *recurring* event's occurrence excludes the original date from the series (`exdates`) and creates a one-off event at the new location — the rest of the series is untouched.
 - **Event detail modal** for viewing/editing; **quick-add** via right-click context menu on any day, plus a "+ Create Event" toolbar button pre-populated for the visible date range; clicking an upcoming-event row navigates the calendar to it.
 - **Color-coded event types:** `VIEWING`, `INSPECTION`, `MAINTENANCE`, `LEASE_SIGNING`, `LEASE_RENEWAL`, `KEY_EXCHANGE`, `OTHER` — with per-event color overrides.
+
+### All-Day Events
+
+Events can be flagged **all-day** (`CalendarEvent.allDay`, default `false`). An all-day event spans local midnight → 23:59:59.999 and carries no meaningful start time, which ripples through the whole calendar stack:
+
+```mermaid
+flowchart LR
+    subgraph Write path
+        UI["Modal toggle / drag payload<br/>(allDay in create & update)"] --> N["lib/all-day.ts<br/>normalizeAllDayDates — single source of truth"]
+        N -- "allDay" --> B["local midnight → 23:59:59.999<br/>day boundaries"]
+        N -- "timed" --> T["dates unchanged"]
+    end
+    subgraph Read & alert paths
+        R["recurrence-scopes.ts<br/>flag carried through this / following / all edit scopes"]
+        S["calendar-event-scheduler.ts<br/>all-day events EXCLUDED from due-to-start alerts"]
+        E["calendar-notification-service.ts<br/>email rows render 'All day' instead of a time range"]
+    end
+    B --> R & S & E
+```
+
+- **Normalisation** — `lib/all-day.ts` (`normalizeAllDayDates`) is the single source of truth for day-boundary rewriting on create/update; the service layer calls it before every write, and the rrule `dtstart` is built from the normalised start so recurrence expansion stays consistent.
+- **Recurrence scopes** — the flag survives edits: *this* (override inherits the base event's flag; an explicit update wins), *following* (a new series inherits the flag), *all* (the flag is included in the bulk update) — `lib/recurrence-scopes.ts`.
+- **Scheduling & email** — the due-to-start scheduler excludes all-day events (single and recurring): there is no meaningful start time to alert on. Today's-events emails render an "All day" label instead of a time range.
+- **Frontend** — the modal shows an All-day toggle that hides the time inputs; week/day views get a dedicated **All Day lane** above the timed grid (events split into all-day vs timed); month view renders top-of-cell bars; dragging an all-day event is date-only (span length preserved, vertical delta ignored) and recurring instances are patched with edit scope `this`.
+- **API** — `POST`/`PATCH /calendar-events` accept an optional `allDay` (defaults to `false`).
+
+The unit suite covering normalisation, scheduler exclusion, recurrence scopes, and service paths lives in `tests/unit/calendar-all-day.test.ts`.
 
 ### API Routes
 
@@ -1427,6 +1454,27 @@ The admin console's **Agent** page (`/dashboard/admin/agent`) embeds the portal 
 - The page is a server component that reads `NIPP_AGENT_URL` (server-side only; see [QUICK_START.md](./QUICK_START.md#environment-variables)) and **probes it with a 3-second timeout on every load** (`force-dynamic`) — if the agent service isn't running, the page renders an unavailable state with start instructions instead of a blank frame.
 - The iframe allows clipboard writes so chat copy-paste works; the URL is never exposed to the client bundle beyond the rendered `src`.
 
+### Server-to-Server Bearer Auth for the Embed
+
+Cross-origin cookies don't cross the embed (in production the portal's session cookie carries the `__Secure-` prefix, which the agent's better-auth instance doesn't read over plain HTTP). So the page authenticates **server-to-server** instead:
+
+```mermaid
+sequenceDiagram
+    participant B as Browser
+    participant P as Portal (agent page, server)
+    participant A as mastra-nipp-agent
+
+    B->>P: GET /dashboard/admin/agent (portal session cookie)
+    P->>A: probe NIPP_AGENT_URL (3 s timeout)
+    P->>P: read caller's BetterAuth session token from the request cookie
+    P-->>B: render <iframe src="NIPP_AGENT_URL?agentToken=***">
+    B->>A: iframe load → /api/session, /api/chat
+    Note over A: Authorization: Bearer *** verified against<br/>the shared BETTER_AUTH_SECRET (bearer plugin)
+```
+
+- The caller's live portal session token is appended to the iframe URL as `?agentToken=*** and the agent's `/api/session` / `/api/chat` accept it as `Authorization: Bearer *** via BetterAuth's bearer plugin — same token, same shared `BETTER_AUTH_SECRET`, so every portal gate (ban, rate limits, permissions) applies identically.
+- The token lives **only in this page's server-rendered HTML** (never in a client-side store) and is single-use per iframe load; no cross-origin cookies are involved.
+
 ---
 
 ## 15. Organization Map (Google Maps)
@@ -1561,18 +1609,21 @@ The admin dashboard includes a cache metrics page at `/admin/cache-metrics`. A p
 
 ### Content Security Policy (CSP)
 
-The application enforces a strict CSP via Edge Runtime middleware (`middleware.ts`) to mitigate XSS and data injection attacks. CSP is deployed in **Report-Only** mode in development (logs violations without blocking) and strict enforcement in production.
+The application enforces a strict CSP via Edge Runtime middleware (`proxy.ts`) to mitigate XSS and data injection attacks. CSP is deployed in **Report-Only** mode in development (logs violations without blocking) and strict enforcement in production. The policy is built per-request: the agent-origin `frame-src` comes from `NIPP_AGENT_URL`, and the Google Maps hosts come from the fixed allowlist below — so both third-party surfaces are covered without loosening `default-src`.
 
 | Directive | Development | Production | Rationale |
 |-----------|------------|------------|-----------|
 | `default-src` | `'self'` | `'self'` | Blocks all resources not explicitly allowed. |
-| `script-src` | `'self' 'unsafe-inline' 'unsafe-eval'` | `'self' 'unsafe-inline'` | `unsafe-eval` only in dev for Fast Refresh. `unsafe-inline` required because Next.js App Router injects inline scripts (hydration, RSC payload) that cannot be given nonces without a custom server. |
-| `style-src` | `'self' 'unsafe-inline'` | `'self' 'unsafe-inline'` | Next.js internal runtime injects inline styles at hydration time. |
-| `img-src` | `'self' data: blob:` | `'self' data: blob:` | Standard images, inline base64 data URIs, and blob URLs. |
-| `font-src` | `'self' data:` | `'self' data:` | Standard fonts and base64-encoded font files. |
-| `connect-src` | `'self'` | `'self'` | Restricts AJAX/Fetch/WebSocket connections to same origin. |
+| `script-src` | `'self' 'unsafe-inline' 'unsafe-eval'` + Maps hosts | `'self' 'unsafe-inline'` + Maps hosts | `unsafe-eval` only in dev for Fast Refresh. `unsafe-inline` required because Next.js App Router injects inline scripts (hydration, RSC payload) that cannot be given nonces without a custom server. Maps hosts allow the Google Maps JS API. |
+| `style-src` | `'self' 'unsafe-inline'` + Maps hosts & assets | `'self' 'unsafe-inline'` + Maps hosts & assets | Next.js internal runtime injects inline styles at hydration time; map tiles/icons/fonts load from `maps.gstatic.com`. |
+| `img-src` | `'self' data: blob:` + Maps hosts & assets | `'self' data: blob:` + Maps hosts & assets | Standard images, inline base64 data URIs, and blob URLs, plus map tile/icon imagery. |
+| `font-src` | `'self' data:` + Maps hosts & assets | `'self' data:` + Maps hosts & assets | Standard fonts and base64-encoded font files, plus Google Fonts served by the Maps API. |
+| `connect-src` | `'self'` + Maps hosts | `'self'` + Maps hosts | Restricts AJAX/Fetch/WebSocket connections to same origin, plus geocoding/map-data XHRs. |
+| `frame-src` | agent origin (`NIPP_AGENT_URL`) | agent origin (`NIPP_AGENT_URL`) | Allows the admin Agent page's iframe embed; without it the frame falls back to `default-src 'self'` and production CSP blocks it. |
 | `frame-ancestors` | `'none'` | `'none'` | Prevents clickjacking. |
 | `base-uri` / `form-action` | `'self'` | `'self'` | Prevents base tag hijacking and restricts form submissions. |
+
+Maps hosts = `https://maps.googleapis.com`, `https://www.google.com`; Maps assets = `https://maps.gstatic.com`.
 
 **Nonce Infrastructure:** A cryptographically secure nonce is generated on every request (`lib/csp-nonce.ts`) and passed via the `x-csp-nonce` header. Application-level inline scripts can use this nonce (browsers honor it alongside `'unsafe-inline'`). The nonce cannot be applied to Next.js internal hydration scripts — this is a known limitation documented at [vercel/next.js#54850](https://github.com/vercel/next.js/issues/54850).
 
@@ -1754,8 +1805,8 @@ nipp/
 │   ├── tenant-db.ts              # Prisma $extends extension (tenant isolation)
 │   ├── validate-schema.ts        # Schema validation utilities
 │   └── work-order-state.ts       # Work order state machine — single source of truth, shared server + client (Section 12)
-├── middleware.ts                 # Route protection & Edge-runtime CSP/session validation
-│                                  # Public routes: /login, /register, /api/auth/*, /api/health
+├── proxy.ts                      # Route protection & Edge-runtime CSP/session validation
+│                                  # Public routes: /login, /register, /api/auth/*, /api/health, SSE stream, magic-link + password-reset flows
 ├── next.config.ts                # Next.js configuration (CSP, webpack externals)
 ├── prisma/                       # Database schema & migrations
 │   ├── migration-scripts/        # Migration helper scripts (upgrade-existing-orgs.ts)
@@ -1913,5 +1964,5 @@ Routes missing a JSDoc header still appear in the spec (generated summary only) 
 
 ---
 
-*Last Updated: 14/11/26 — added §12 Work Orders & Quotations, §13 Invoices, §14 Portal AI Agent, §15 Organization Map (Google Maps); renumbered former §12–§16 to §16–§20; services/data-model/project-structure tables extended for the new features. Earlier: readability pass — How-to-Read + Glossary, slimmed TOC; deduped JobDefinition/JobExecution (now in §11) and calendar recurrence (now in §9); added the defense-in-depth diagram to §5; OIDC phase-deviation detail condensed (was 5 rows of build-quirk table); fixed stale cross-references (org-chart Section 7→10, "planned feature"→shipped, dead README Appendix F pointer to README "Known open threads"). Earlier: calendar UI/API + email flows, health endpoint, Units & Contractors entities, and the API reference moved here; env-var references relocated to QUICK_START.md (operational) and SECURITY.md (security)*
+*Last Updated: 15/11/26 — Calendar all-day events documented in §9 (normalisation, recurrence scopes, scheduler exclusion, All Day lane UI); §14 gained the server-to-server bearer-token embed auth for the agent iframe; §17 CSP table brought current with `proxy.ts` (`frame-src` for the agent origin + Google Maps host allowlists); middleware references renamed to `proxy.ts` throughout (incl. bearer presence check in the Edge guard). Earlier: added §12 Work Orders & Quotations, §13 Invoices, §14 Portal AI Agent, §15 Organization Map (Google Maps); renumbered former §12–§16 to §16–§20; services/data-model/project-structure tables extended for the new features. Earlier: readability pass — How-to-Read + Glossary, slimmed TOC; deduped JobDefinition/JobExecution (now in §11) and calendar recurrence (now in §9); added the defense-in-depth diagram to §5; OIDC phase-deviation detail condensed (was 5 rows of build-quirk table); fixed stale cross-references (org-chart Section 7→10, "planned feature"→shipped, dead README Appendix F pointer to README "Known open threads"). Earlier: calendar UI/API + email flows, health endpoint, Units & Contractors entities, and the API reference moved here; env-var references relocated to QUICK_START.md (operational) and SECURITY.md (security)*
 *Maintained by: Property NI Development Team*

@@ -79,7 +79,17 @@ export async function proxy(request: NextRequest) {
     request.cookies.get('__Secure-better-auth-session_token')?.value ||
     request.cookies.get('better-auth-session_token')?.value;
 
-  if (!sessionCookie) {
+  // Server-to-server clients (MCP server, agent) authenticate with the portal's
+  // BetterAuth bearer token (Authorization: Bearer <session token>, minted via
+  // the bearer() plugin's set-auth-token on sign-in). The proxy only checks for
+  // the PRESENCE of a credential — actual validation happens in-route
+  // (requireSuperAdmin / withAuth → auth.api.getSession resolves the bearer
+  // header), so an invalid token gets a JSON 401 from the route, not this
+  // redirect. Browser clients keep the cookie door above; both coexist.
+  const authorization = request.headers.get('authorization');
+  const hasBearer = !!authorization && authorization.startsWith('Bearer ');
+
+  if (!sessionCookie && !hasBearer) {
     const loginUrl = new URL('/login', request.url);
     loginUrl.searchParams.set('callbackUrl', pathname);
     return NextResponse.redirect(loginUrl);

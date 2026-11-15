@@ -261,7 +261,21 @@ flowchart TD
 
 ### Remote Bearer-Token Access — Origin Policy & Operations
 
-The portal exposes an `Authorization: Bearer <token>` door for programmatic and cross-domain clients (scripts, server-to-server consumers). A bearer token **is** a BetterAuth session token: one Session row backs both the browser cookie and the header, so every gate above (rate limits, ban enforcement, provisioning, permission resolution) applies identically. Full developer reference: [documents/api/bearer-tokens.md](./documents/api/bearer-tokens.md); design document with diagrams: [bearer-token-remote-access.md](./documents/feature-planning-and-development/bearer-token-remote-access.md).
+The portal exposes an `Authorization: Bearer *** door for programmatic and cross-domain clients (scripts, server-to-server consumers). A bearer token **is** a BetterAuth session token: one Session row backs both the browser cookie and the header, so every gate above (rate limits, ban enforcement, provisioning, permission resolution) applies identically.
+
+```mermaid
+flowchart LR
+    subgraph Doors["Credential doors (proxy.ts — presence check only)"]
+        C["Browser<br/>session cookie"] 
+        B["Server-to-server<br/>Authorization: Bearer ***<br/>(scripts, MCP server, agent iframe embed)"]
+    end
+    C --> S[(One Session row<br/>BetterAuth)]
+    B --> S
+    S --> V["In-route validation — requireSuperAdmin / withAuth → auth.api.getSession<br/>(invalid bearer ⇒ JSON 401 from the route, not a redirect)"]
+    V --> G["Shared gates: rate limits · ban · provisioning · permissions"]
+```
+
+Full developer reference: [documents/api/bearer-tokens.md](./documents/api/bearer-tokens.md); design document with diagrams: [bearer-token-remote-access.md](./documents/feature-planning-and-development/bearer-token-remote-access.md).
 
 **Origin policy (public access):** the base URL and trusted origins resolve **per-request from the incoming `Host` header** (`x-forwarded-host` when behind a proxy), validated against `BETTER_AUTH_ALLOWED_HOSTS` — env-driven, zero hardcoded hosts in `lib/auth.ts`. Consequences:
 
@@ -279,6 +293,12 @@ The portal exposes an `Authorization: Bearer <token>` door for programmatic and 
 5. **Secret rotation (nuclear option):** changing `BETTER_AUTH_SECRET` invalidates every bearer token and cookie at once (they are HMACs over it) — last resort, not a routine control.
 
 **Proxy header contract:** behind a TLS-terminating reverse proxy/edge the deployment must set `TRUSTED_PROXY_CIDRS` to the edge's CIDR(s) and keep `TRUSTED_PROXY_HEADERS=true` so BetterAuth reads `x-forwarded-host` / `x-forwarded-proto` (base URL + protocol + client IP all come from there). The proxy must send both headers on every request; untrusted `x-forwarded-for` hops beyond a trusted CIDR are ignored, which also protects the per-IP rate limits above from client-IP spoofing.
+
+**Agent iframe embed (`NIPP_AGENT_URL`).** The admin Agent page is a live consumer of this door: cross-origin cookies don't reach the agent's origin (in production the portal session cookie carries the `__Secure-` prefix, which the agent's better-auth instance does not read over plain HTTP), so the page passes the caller's **live session token** as `?agentToken=*** in the server-rendered iframe `src`. The agent's `/api/session` and `/api/chat` accept it as `Authorization: Bearer *** via the same bearer plugin and shared `BETTER_AUTH_SECRET` — one Session row, all gates above apply identically. Security-relevant properties:
+
+- **Server-side only.** The token is read from the request cookie inside a server component and never stored client-side; it appears in exactly one place (the rendered `src`) and is single-use per iframe load.
+- **No new credential type.** It *is* the session token — no second secret, no scope narrowing beyond what the bearer door already provides. Rotation/kill paths are the existing ones: sign-out deletes the Session row; ban stops traffic on the next call.
+- **CSP scoping.** The agent origin is allowed by a per-request `frame-src` derived from `NIPP_AGENT_URL` (§7) — no global frame allowance, and `frame-ancestors 'none'` still prevents the portal itself from being framed.
 
 ---
 
@@ -386,15 +406,16 @@ Team management is exposed through org-scoped routes, all tenant-isolated by the
 
 ### Calendar Data Model
 
-Calendar data is stored in three models:
+Calendar data is stored in two models:
 
 | Model | Purpose |
 |-------|---------|
 | `Calendar` | A calendar belonging to a tenant (e.g., "Work Schedule") |
-| `CalendarEvent` | An event within a calendar, with start/end times and recurrence rules |
-| `CalendarRecurrence` | Recurring event patterns (daily, weekly, monthly, yearly) |
+| `CalendarEvent` | An event within a calendar, with start/end times; recurrence lives in RFC 5545 `rrule` JSON + `exdates` columns on the event itself — there is no separate recurrence model |
 
-All three models are tenant-scoped. Each event belongs to a specific calendar, which in turn belongs to a specific tenant.
+All models are tenant-scoped. Each event belongs to a specific calendar, which in turn belongs to a specific tenant.
+
+**All-day events.** `CalendarEvent.allDay` (default `false`) marks day-spanning events, stored as local midnight → 23:59:59.999 boundaries. The normalisation (`lib/all-day.ts`) runs inside the service layer on every create/update — clients cannot smuggle in inconsistent date/flag combinations, and the recurrence scopes (`this` / `following` / `all`) carry the flag so an edit of one occurrence can't silently flip a series' all-day status. All-day events are excluded from the due-to-start SSE scheduler (no meaningful start time to alert on), which keeps the notification surface identical for timed events; today's-events emails render an "All day" label instead of a time range.
 
 ### Authorization Flow
 
@@ -505,20 +526,22 @@ Secrets and configuration values are managed through environment variables:
 
 ### CSP Directives
 
-Content Security Policy (CSP) headers are configured in `middleware.ts` to prevent XSS, clickjacking, and other code injection attacks. The policy differs between development and production:
+Content Security Policy (CSP) headers are configured in `proxy.ts` (Edge runtime) to prevent XSS, clickjacking, and other code injection attacks. The policy differs between development and production, and is built **per-request**: the agent origin for `frame-src` resolves from `NIPP_AGENT_URL`, and the Google Maps allowlist (`https://maps.googleapis.com`, `https://www.google.com`, plus assets on `https://maps.gstatic.com`) covers the Map page's JS API, tiles, icons, and fonts.
 
 | Directive | Development | Production |
 |-----------|-------------|------------|
 | `default-src` | `'self'` | `'self'` |
-| `script-src` | `'self' 'unsafe-inline' 'unsafe-eval'` | `'self' <nonces>` |
-| `style-src` | `'self' 'unsafe-inline'` | `'self' <nonces>` |
-| `img-src` | `'self' data: blob:` | `'self' data: blob:` |
-| `connect-src` | `'self' ws: wss:` | `'self' wss:` |
+| `script-src` | `'self' 'unsafe-inline' 'unsafe-eval'` + Maps hosts | `'self' 'unsafe-inline'` + Maps hosts |
+| `style-src` | `'self' 'unsafe-inline'` + Maps hosts & assets | `'self' 'unsafe-inline'` + Maps hosts & assets |
+| `img-src` | `'self' data: blob:` + Maps hosts & assets | `'self' data: blob:` + Maps hosts & assets |
+| `font-src` | `'self' data:` + Maps hosts & assets | `'self' data:` + Maps hosts & assets |
+| `connect-src` | `'self'` + Maps hosts | `'self'` + Maps hosts |
+| `frame-src` | agent origin (`NIPP_AGENT_URL`) | agent origin (`NIPP_AGENT_URL`) |
 | `frame-ancestors` | `'none'` (relaxed in dev) | `'none'` |
 | `base-uri` | `'self'` | `'self'` |
 | `form-action` | `'self'` | `'self'` |
 
-In production, inline scripts and styles are blocked by default; they must use nonces (see below) to be allowed.
+In production, inline scripts and styles are blocked by default; they must use nonces (see below) to be allowed. Two third-party surfaces get narrow, purpose-specific allowances instead of a loosened `default-src`: the **agent iframe** (`frame-src` only — the embed loads its own scripts/styles from its own origin, which CSP here does not police) and **Google Maps** (script/style/img/font/connect hosts only). `unsafe-eval` is development-only (Fast Refresh); `unsafe-inline` for scripts/styles remains in production because Next.js App Router injects inline hydration/RSC payloads that cannot be nonced without a custom server.
 
 ### Nonce Generation & Propagation
 
@@ -594,6 +617,7 @@ The following environment variables control security-relevant behavior:
 | `DATABASE_URL` | PostgreSQL connection string (includes credentials) | Yes |
 | `REDIS_URL` | Redis connection string for caching and replay cache (optional) | No |
 | `NODE_ENV` | Environment mode (`development`, `production`) — affects CSP strictness and CSRF relaxation | Yes |
+| `NIPP_AGENT_URL` | Portal AI agent base URL (server-side only) — drives the Agent page's reachability probe *and* the per-request CSP `frame-src` (§7); a misconfigured value widens or breaks the embed allowance | Defaulted (`http://localhost:3001/chat`) |
 
 ### Payload Encryption Variables
 
@@ -753,5 +777,5 @@ This document covers security-specific details. For broader architectural contex
 
 ---
 
-*Last updated: 2026-11-01*
+*Last updated: 2026-11-15 — §2 bearer section gained the agent-iframe embed (`?agentToken`*** server-to-server auth, credential-door diagram); §5 calendar model corrected (no `CalendarRecurrence` model) + all-day events; §7 CSP table brought current with `proxy.ts`, per-request `frame-src` for the agent origin, and the Google Maps host allowlists; env table gained `NIPP_AGENT_URL`. Earlier: 2026-11-01 — Prisma 7 migration cleared the deepmerge-ts accepted-risk row in §10.*
 *Document owner: Engineering Team*
