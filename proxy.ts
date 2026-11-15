@@ -37,13 +37,22 @@ export async function proxy(request: NextRequest) {
 
   // NOTE: React/Next.js dynamically apply inline styles at runtime
   // (layout, transitions) that cannot be given nonces — hence unsafe-inline.
+  // The admin agent page iframes the mastra agent server (NIPP_AGENT_URL);
+  // without an explicit frame-src it falls back to default-src 'self' and
+  // production CSP blocks the embed.
+  const agentOrigin = new URL(env.NIPP_AGENT_URL).origin;
+  // The tenant Map page loads the Google Maps JS API via @googlemaps/js-api-loader;
+  // map tiles, marker icons and fonts come from maps.gstatic.com as well.
+  const googleMapsHosts = 'https://maps.googleapis.com https://www.google.com';
+  const googleMapsAssets = 'https://maps.gstatic.com';
   const cspHeader = [
     `default-src 'self'`,
-    `script-src ${scriptSrcDirective}`,
-    `style-src 'self' 'unsafe-inline'`,
-    `img-src 'self' data: blob:`,
-    `font-src 'self' data:`,
-    `connect-src 'self'`,
+    `script-src ${scriptSrcDirective} ${googleMapsHosts}`,
+    `style-src 'self' 'unsafe-inline' ${googleMapsHosts} ${googleMapsAssets}`,
+    `img-src 'self' data: blob: ${googleMapsHosts} ${googleMapsAssets}`,
+    `font-src 'self' data: ${googleMapsHosts} ${googleMapsAssets}`,
+    `connect-src 'self' ${googleMapsHosts}`,
+    `frame-src ${agentOrigin}`,
     `frame-ancestors 'none'`,
     `base-uri 'self'`,
     `form-action 'self'`,
