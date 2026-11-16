@@ -58,6 +58,8 @@ describe('notifyHealthCheck', () => {
   it.each([
     ['cache', 'Cache health check', 'health-check:cache'],
     ['pgbouncer', 'Connection pool health check', 'health-check:pgbouncer'],
+    ['mcp', 'MCP server health check', 'health-check:mcp'],
+    ['ai_agent', 'AI agent server health check', 'health-check:ai-agent'],
   ] as const)('%s: pass and fail titles with correct source', async (service, title, source) => {
     await notifyHealthCheck(service, true);
     expect(notificationCreate.mock.calls[0][0].data.title).toBe(`${title} passed`);
@@ -67,7 +69,26 @@ describe('notifyHealthCheck', () => {
     await notifyHealthCheck(service, false);
     const calls = notificationCreate.mock.calls;
     expect(calls[1][0].data.title).toBe(`${title} failed`);
-    expect(calls[1][0].data.priority).toBe(NotificationPriority.CRITICAL);
+    // Critical services (database, pgbouncer) alert CRITICAL; non-critical
+    // ones (cache, mcp, ai_agent) only degrade the system — WARNING (amber).
+    const critical = service === 'pgbouncer';
+    expect(calls[1][0].data.priority).toBe(
+      critical ? NotificationPriority.CRITICAL : NotificationPriority.WARNING,
+    );
+  });
+
+  it('alerts CRITICAL when a critical service is unhealthy', async () => {
+    await notifyHealthCheck('database', false);
+    const data = notificationCreate.mock.calls[0][0].data;
+    expect(data.priority).toBe(NotificationPriority.CRITICAL);
+    expect(data.message).toContain('unreachable');
+  });
+
+  it('alerts WARNING (not CRITICAL) when a non-critical service is unhealthy', async () => {
+    await notifyHealthCheck('mcp', false);
+    const data = notificationCreate.mock.calls[0][0].data;
+    expect(data.priority).toBe(NotificationPriority.WARNING);
+    expect(data.message).toContain('portal continues to run without it');
   });
 
   it('passes organizationId as null when no platform org is known', async () => {
