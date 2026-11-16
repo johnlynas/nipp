@@ -13,6 +13,7 @@ import { env } from '@/lib/env';
 import { notifyHealthCheck } from '@/lib/notification-push';
 import { addSystemLog, updateHealthState } from '@/lib/system-logs';
 import { PgBouncerMonitor } from '@/lib/pgbouncer-monitor';
+import { checkRemoteService } from '@/lib/health-check';
 
 /** Resolve the platform organization ID at runtime. */
 async function getPlatformOrgId(): Promise<string | null> {
@@ -40,6 +41,37 @@ export async function performStartupHealthCheck(): Promise<void> {
   let dbStatus: 'healthy' | 'unhealthy' = 'healthy';
   let cacheStatus: 'healthy' | 'unhealthy' | null = null;
   let pgbouncerStatus: 'healthy' | 'unhealthy' | null = null;
+  let mcpStatus: 'healthy' | 'unhealthy' | null = null;
+  let aiAgentStatus: 'healthy' | 'unhealthy' | null = null;
+
+  /** Probe a remote health endpoint, log + notify its state (non-critical service). */
+  const probeRemoteService = async (
+    label: string,
+    source: string,
+    url: string,
+    service: 'mcp' | 'ai_agent',
+  ): Promise<'healthy' | 'unhealthy'> => {
+    const result = await checkRemoteService(url);
+    const healthy = result.status === 'healthy';
+    if (healthy) {
+      console.log(`[startup-health] ${label}: healthy (${result.latency_ms}ms)`);
+      addSystemLog({
+        level: 'info',
+        source,
+        message: `Startup health check — ${label} connectivity OK`,
+      });
+    } else {
+      console.error(`[startup-health] ${label}: DOWN — ${result.error ?? 'unreachable'}`);
+      addSystemLog({
+        level: 'error',
+        source,
+        message: `Startup health check — ${label} unreachable`,
+        details: result.error,
+      });
+    }
+    await notifyHealthCheck(service, healthy, platformOrgId);
+    return healthy ? 'healthy' : 'unhealthy';
+  };
 
   // Check PostgreSQL
   try {
@@ -151,8 +183,20 @@ export async function performStartupHealthCheck(): Promise<void> {
     await notifyHealthCheck('pgbouncer', false, platformOrgId);
   }
 
+  // Check MCP server (non-critical — amber when down)
+  mcpStatus = await probeRemoteService('MCP server', 'health-check:mcp', env.MCP_HEALTH_URL, 'mcp');
+
+  // Check AI agent server (non-critical — amber when down; depends on MCP + portal)
+  aiAgentStatus = await probeRemoteService('AI agent server', 'health-check:ai-agent', env.AI_AGENT_HEALTH_URL, 'ai_agent');
+
   // Update the tracked health state so subsequent /api/health checks can detect transitions
-  updateHealthState(dbStatus, cacheStatus || 'healthy', pgbouncerStatus || undefined);
+  updateHealthState(
+    dbStatus,
+    cacheStatus || 'healthy',
+    pgbouncerStatus || undefined,
+    mcpStatus || undefined,
+    aiAgentStatus || undefined,
+  );
 
   console.log('[startup-health] Startup health check complete');
 }

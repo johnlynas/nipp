@@ -62,10 +62,12 @@ async function runHealthCheckWithNotifications(): Promise<void> {
   // Capture a SNAPSHOT of state AFTER the health check runs
   const nextState = { ...getPreviousHealthState() };
 
-  const services: Array<{ key: 'database' | 'cache' | 'pgbouncer', label: string, source: string }> = [
+  const services: Array<{ key: 'database' | 'cache' | 'pgbouncer' | 'mcp' | 'ai_agent', label: string, source: string }> = [
     { key: 'database', label: 'Database', source: 'health-check:database' },
     { key: 'cache', label: 'Cache', source: 'health-check:cache' },
     { key: 'pgbouncer', label: 'Connection pool', source: 'health-check:pgbouncer' },
+    { key: 'mcp', label: 'MCP server', source: 'health-check:mcp' },
+    { key: 'ai_agent', label: 'AI agent server', source: 'health-check:ai-agent' },
   ];
 
   // Check each service for transitions (prev !== next means a change occurred).
@@ -96,7 +98,7 @@ async function runHealthCheckWithNotifications(): Promise<void> {
         });
 
         // Send SSE notification (only on transitions)
-        await notifyHealthCheck(key as 'database' | 'cache' | 'pgbouncer', isUp, platformOrgId);
+        await notifyHealthCheck(key, isUp, platformOrgId);
 
         console.log(`[background-health-check] ${label} transitioned: ${prevValue ?? 'null'} → ${nextValue}`);
       } else {

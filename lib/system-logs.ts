@@ -18,13 +18,15 @@ type HealthState = {
   database: 'healthy' | 'unhealthy' | null;
   cache: 'healthy' | 'unhealthy' | null;
   pgbouncer: 'healthy' | 'unhealthy' | null;
+  mcp: 'healthy' | 'unhealthy' | null;
+  ai_agent: 'healthy' | 'unhealthy' | null;
 };
 
 /** Shared across all module instances (Next.js dev mode can load the same module twice). */
 function getHealthState(): HealthState {
   const g = globalThis as unknown as Record<string, HealthState>;
   if (!g.__nipp_healthState) {
-    g.__nipp_healthState = { database: null, cache: null, pgbouncer: null };
+    g.__nipp_healthState = { database: null, cache: null, pgbouncer: null, mcp: null, ai_agent: null };
   }
   return g.__nipp_healthState;
 }
@@ -37,13 +39,17 @@ export function getPreviousHealthState(): HealthState {
 export function updateHealthState(
   database: 'healthy' | 'unhealthy',
   cache: 'healthy' | 'unhealthy',
-  pgbouncer?: 'healthy' | 'unhealthy'
+  pgbouncer?: 'healthy' | 'unhealthy',
+  mcp?: 'healthy' | 'unhealthy',
+  ai_agent?: 'healthy' | 'unhealthy'
 ) {
   // Update the shared global state object (not a new one) so all module instances see the same values
   const shared = getHealthState();
   shared.database = database;
   shared.cache = cache;
   shared.pgbouncer = pgbouncer || null;
+  shared.mcp = mcp || null;
+  shared.ai_agent = ai_agent || null;
 }
 
 export function clearHealthState() {
@@ -51,6 +57,8 @@ export function clearHealthState() {
   shared.database = null;
   shared.cache = null;
   shared.pgbouncer = null;
+  shared.mcp = null;
+  shared.ai_agent = null;
 }
 
 export function addSystemLog(entry: Omit<SystemLogEntry, 'timestamp'>) {

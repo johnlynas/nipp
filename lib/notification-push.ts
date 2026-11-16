@@ -416,18 +416,27 @@ startHeartbeat();
 // Health event integration — convenience wrapper for system health changes
 // ---------------------------------------------------------------------------
 
-export type HealthService = 'database' | 'cache' | 'pgbouncer';
+export type HealthService = 'database' | 'cache' | 'pgbouncer' | 'mcp' | 'ai_agent';
 
-const HEALTH_SERVICE_META: Record<HealthService, { title: string; source: string }> = {
-  database: { title: 'Database health check', source: 'health-check:database' },
-  cache: { title: 'Cache health check', source: 'health-check:cache' },
-  pgbouncer: { title: 'Connection pool health check', source: 'health-check:pgbouncer' },
+/**
+ * Per-service metadata: display title, SSE source tag, and severity.
+ * `critical` services take the whole system red (CRITICAL alert on failure);
+ * non-critical ones only degrade it to amber (WARNING) — the portal keeps
+ * running without cache, MCP, or the AI agent server.
+ */
+const HEALTH_SERVICE_META: Record<HealthService, { title: string; source: string; critical: boolean }> = {
+  database: { title: 'Database health check', source: 'health-check:database', critical: true },
+  cache: { title: 'Cache health check', source: 'health-check:cache', critical: false },
+  pgbouncer: { title: 'Connection pool health check', source: 'health-check:pgbouncer', critical: true },
+  mcp: { title: 'MCP server health check', source: 'health-check:mcp', critical: false },
+  ai_agent: { title: 'AI agent server health check', source: 'health-check:ai-agent', critical: false },
 };
 
 /**
  * Push a system health event for a monitored service to SSE subscribers.
  * - Healthy (success / recovery): INFO priority
- * - Unhealthy (first failure): CRITICAL priority — persists until dismissed
+ * - Unhealthy: CRITICAL for critical services (database, connection pool),
+ *   WARNING for non-critical ones (cache, MCP, AI agent) — amber, not red
  *
  * GLOBAL scope (health events go to everyone). The platform organization id
  * is passed through when known so the history table can show which org's
@@ -439,13 +448,15 @@ export async function notifyHealthCheck(
   healthy: boolean,
   organizationId?: string | null,
 ): Promise<void> {
-  const { title, source } = HEALTH_SERVICE_META[service];
+  const { title, source, critical } = HEALTH_SERVICE_META[service];
   await pushNotification({
     title: `${title} ${healthy ? 'passed' : 'failed'}`,
     message: healthy
       ? `${title} passed. Service is responsive.`
-      : `${title} failed. The service is unreachable and may degrade platform operations.`,
-    priority: healthy ? NotificationPriority.INFO : NotificationPriority.CRITICAL,
+      : critical
+        ? `${title} failed. The service is unreachable and may degrade platform operations.`
+        : `${title} failed. The service is unreachable; the portal continues to run without it.`,
+    priority: healthy ? NotificationPriority.INFO : critical ? NotificationPriority.CRITICAL : NotificationPriority.WARNING,
     scope: NotificationScope.GLOBAL, // Health events go to everyone
     source,
     organizationId: organizationId ?? null,
