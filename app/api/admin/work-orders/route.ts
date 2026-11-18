@@ -4,7 +4,7 @@ import { requireSuperAdmin } from '@/lib/require-super-admin';
 import { checkAdminRateLimit } from '@/lib/rate-limiter';
 import { withTenantAdminContext, withPlatformContext } from '@/lib/platform-db';
 import tenantDb from '@/lib/tenant-db';
-import { isSameSiteRequest } from '@/lib/csrf';
+import { isSameOriginRequest } from '@/lib/csrf';
 import { handleServiceError } from '@/lib/services/error-handler';
 import { WorkOrderService, WORK_ORDER_STATES } from '@/services/work-order-service';
 
@@ -86,7 +86,7 @@ export async function GET(request: NextRequest) {
  * target organization (policy WITH CHECK requires app.current_org_id).
  */
 export async function POST(request: NextRequest) {
-  if (!isSameSiteRequest(request.method, request.headers)) {
+  if (!isSameOriginRequest(request.url, request.method, request.headers)) {
     return NextResponse.json({ error: 'Forbidden: cross-site request blocked' }, { status: 403 });
   }
 

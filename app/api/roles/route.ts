@@ -11,7 +11,7 @@ import { auth } from '@/lib/auth';
 import tenantDb from '@/lib/tenant-db';
 import { recordAuditLog } from '@/lib/audit-log';
 import { getClientIp } from '@/lib/ip';
-import { isSameSiteRequest } from '@/lib/csrf';
+import { isSameOriginRequest } from '@/lib/csrf';
 import { checkAdminRateLimit } from '@/lib/rate-limiter';
 
 export const runtime = 'nodejs';
@@ -22,7 +22,7 @@ export const runtime = 'nodejs';
 
 export async function POST(req: NextRequest) {
   // SECURITY (S8): Validate CSRF for state-changing requests
-  if (!isSameSiteRequest(req.method, req.headers)) {
+  if (!isSameOriginRequest(req.url, req.method, req.headers)) {
     return NextResponse.json(
       { error: 'Forbidden: cross-site request blocked' },
       { status: 403 }
