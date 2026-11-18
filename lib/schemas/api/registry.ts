@@ -130,6 +130,15 @@ export const registry: Record<string, ApiEntry> = {
   // Notifications (admin) + SSE stream
   // ---------------------------------------------------------------------------
   'GET /api/admin/notifications': {
+    parameters: {
+      page: z.string().optional().describe('Page number (default 1)'),
+      pageSize: z.string().optional().describe('Rows per page (default 50)'),
+      scope: z.enum(['global', 'org']).optional().describe("Filter by delivery scope ('global' | 'org')"),
+      priority: z.string().optional().describe("Filter by priority, e.g. 'INFO' | 'WARNING' | 'ERROR' | 'CRITICAL' | 'CALENDAR' | 'JOB'"),
+      organizationId: z.string().optional().describe('Scope to notifications for one organization'),
+      acknowledged: z.enum(['true', 'false']).optional().describe("Filter by acknowledgement state ('true' | 'false')"),
+      search: z.string().optional().describe('Source or message substring, case-insensitive'),
+    },
     responses: {
       '200': z
         .object({
@@ -158,6 +167,7 @@ export const registry: Record<string, ApiEntry> = {
     responses: { '200': successResponse, '400': E, '429': E, '500': E },
   },
   'PATCH /api/admin/notifications': {
+    parameters: { id: z.string().describe("Notification ID to acknowledge (?id=…; required)") },
     responses: {
       '200': z.object({ success: z.literal(true), acknowledged: z.boolean() }).meta({ id: 'NotificationAck' }),
       '400': E,
@@ -167,6 +177,7 @@ export const registry: Record<string, ApiEntry> = {
     },
   },
   'DELETE /api/admin/notifications': {
+    parameters: { id: z.string().describe('Notification ID to delete (?id=…; required)') },
     responses: { '200': successResponse, '400': E, '404': E, '429': E, '500': E },
   },
 
@@ -234,6 +245,12 @@ export const registry: Record<string, ApiEntry> = {
   // Organizations (admin)
   // ---------------------------------------------------------------------------
   'GET /api/admin/organizations': {
+    parameters: {
+      page: z.string().optional().describe('Page number (default 1)'),
+      pageSize: z.string().optional().describe('Rows per page (default 20)'),
+      status: z.enum(['PENDING', 'ACTIVE', 'SUSPENDED', 'ARCHIVED']).optional().describe('Filter by organization status'),
+      search: z.string().optional().describe('Name substring, case-insensitive'),
+    },
     responses: { '200': M.paginatedOrganizations, '400': E, '429': E, '500': E },
   },
   'POST /api/admin/organizations': {
@@ -825,6 +842,52 @@ export const registry: Record<string, ApiEntry> = {
   },
 
   // ---------------------------------------------------------------------------
+  // Dashboard units + contractors (UnitService / ContractorService) — super admin.
+  // ---------------------------------------------------------------------------
+  'GET /api/dashboard/admin/units': {
+    parameters: {
+      page: z.string().optional().describe('Page number (default 1)'),
+      pageSize: z.string().optional().describe('Rows per page (default 20, max 100)'),
+      organizationId: z.string().optional().describe('Scope to one org; omit for the cross-org merge'),
+      search: z.string().optional().describe('Owner / address / post code / email / phone substring, case-insensitive'),
+      rented: z.enum(['true', 'false']).optional().describe("Filter by rental state ('true' | 'false')"),
+      type: z.enum(['HOUSE', 'APARTMENT', 'OTHER']).optional().describe('Filter by unit type'),
+    },
+    // { items, pagination, counts } — counts are whole-table (ignore filters).
+    responses: {
+      '200': z
+        .object({
+          items: z.array(z.record(z.string(), z.unknown())).describe('Unit rows'),
+          pagination: z.object({ page: z.number(), pageSize: z.number(), total: z.number(), totalPages: z.number() }),
+          counts: z.object({ totalCount: z.number(), rentedCount: z.number(), ownerOccupiedCount: z.number() }),
+        })
+        .meta({ id: 'DashboardUnitsList' }),
+      '401': E,
+      '500': E,
+    },
+  },
+  'GET /api/dashboard/admin/contractors': {
+    parameters: {
+      page: z.string().optional().describe('Page number (default 1)'),
+      pageSize: z.string().optional().describe('Rows per page (default 20)'),
+      search: z.string().optional().describe('Name / company / email substring, case-insensitive'),
+      type: z.enum(['PAINTER', 'ELECTRICIAN', 'PLUMBER', 'GAS_ENGINEER', 'LIFT_MAINTENANCE', 'GARDENER', 'ACCOUNTANT', 'FIRE_ALARMS', 'SOLICITOR', 'ROOFER', 'WINDOW_CLEANER', 'OTHER']).optional().describe('Filter by contractor type'),
+    },
+    // { items, pagination, counts } — tile counts are whole-table (ignore filters).
+    responses: {
+      '200': z
+        .object({
+          items: z.array(z.record(z.string(), z.unknown())).describe('Contractor rows'),
+          pagination: z.object({ page: z.number(), pageSize: z.number(), total: z.number(), totalPages: z.number() }),
+          counts: z.object({ totalCount: z.number(), types: z.record(z.string(), z.number()) }),
+        })
+        .meta({ id: 'DashboardContractorsList' }),
+      '401': E,
+      '500': E,
+    },
+  },
+
+  // ---------------------------------------------------------------------------
   // Dashboard teams (TeamService) — cross-org listing; org is a query/body field
   // Catch blocks map service classes: NotFound → 404, Forbidden → 403,
   // Conflict → 409, Validation → 400 (previously most of these fell to generic 500).
@@ -906,6 +969,7 @@ export const registry: Record<string, ApiEntry> = {
       organizationId: z.string().optional().describe('Scope to members of one organization'),
       teamId: z.string().optional().describe('Intersect with members of one team'),
       status: z.enum(['active', 'banned']).optional().describe('Filter by ban state'),
+      userType: z.enum(['oidc', 'local']).optional().describe("Filter by credential type ('oidc' | 'local')"),
     },
     // Rows newest-first with counts for stat cards (counts from the filtered dataset).
     responses: { '200': M.dashboardAdminUsersList, '401': E, '500': E },
@@ -933,6 +997,50 @@ export const registry: Record<string, ApiEntry> = {
   'POST /api/dashboard/admin/users/{id}/ban': {
     requestBody: R.banUserBody,
     responses: { '200': M.user, '401': E, '404': E, '429': E, '500': E },
+  },
+
+  // ---------------------------------------------------------------------------
+  // Tenant-surface work orders + quotes (org in the path; membership OR super admin).
+  // ---------------------------------------------------------------------------
+  'GET /api/organizations/{orgId}/work-orders': {
+    parameters: {
+      page: z.string().optional().describe('Page number (default 1)'),
+      pageSize: z.string().optional().describe('Rows per page (default 20)'),
+      search: z.string().optional().describe('Description substring, case-insensitive'),
+      state: z.enum(['CREATED', 'OUT_FOR_QUOTES', 'QUOTES_IN', 'CONTRACTOR_ASSIGNED', 'STARTED', 'COMPLETE', 'INVOICED', 'FINISHED', 'CLOSED']).optional().describe('Filter by work order state'),
+    },
+    responses: {
+      '200': z
+        .object({
+          items: z.array(z.record(z.string(), z.unknown())).describe('Work order rows (org-isolated by RLS)'),
+          pagination: z.object({ page: z.number(), pageSize: z.number(), total: z.number(), totalPages: z.number() }),
+        })
+        .meta({ id: 'TenantWorkOrdersList' }),
+      '400': E,
+      '401': E,
+      '403': E,
+      '500': E,
+    },
+  },
+  'GET /api/organizations/{orgId}/quotes': {
+    parameters: {
+      page: z.string().optional().describe('Page number (default 1)'),
+      pageSize: z.string().optional().describe('Rows per page (default 20)'),
+      search: z.string().optional().describe('Description substring, case-insensitive'),
+      state: z.enum(['OPENED', 'ACCEPTED', 'REJECTED', 'CLOSED']).optional().describe('Filter by quote state'),
+    },
+    responses: {
+      '200': z
+        .object({
+          items: z.array(z.record(z.string(), z.unknown())).describe('Quotation rows (org-isolated by RLS)'),
+          pagination: z.object({ page: z.number(), pageSize: z.number(), total: z.number(), totalPages: z.number() }),
+        })
+        .meta({ id: 'TenantQuotesList' }),
+      '400': E,
+      '401': E,
+      '403': E,
+      '500': E,
+    },
   },
 
   // ---------------------------------------------------------------------------
