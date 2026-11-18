@@ -503,3 +503,68 @@ export const updateInvoiceBody = z
     invoiceLink: z.string().nullable().optional(),
   })
   .meta({ id: 'UpdateInvoiceBody' });
+
+// ---------------------------------------------------------------------------
+// Contractors + units (dashboard admin) — super admin.
+// ---------------------------------------------------------------------------
+
+const contractorType = z.enum([
+  'PAINTER',
+  'ELECTRICIAN',
+  'PLUMBER',
+  'GAS_ENGINEER',
+  'LIFT_MAINTENANCE',
+  'GARDENER',
+  'ACCOUNTANT',
+  'FIRE_ALARMS',
+  'SOLICITOR',
+  'ROOFER',
+  'WINDOW_CLEANER',
+  'OTHER',
+]);
+
+export const createContractorBody = z
+  .object({
+    companyName: z.string().min(1).describe('Company name (required)'),
+    name: z.string().min(1).describe('Contact person name (required)'),
+    email: z.string().email().describe('Contact email (required)'),
+    phone: z.string().min(1).describe('Contact phone (required)'),
+    address: z.string().min(1).describe('Street address (required)'),
+    postCode: z.string().min(1).describe('Post code (required)'),
+    type: contractorType.optional().describe('Contractor trade'),
+    description: z.string().optional(),
+  })
+  .meta({ id: 'CreateContractorBody' });
+
+/** PATCH /api/dashboard/admin/contractors/{id} — at least one field required (route rejects empty bodies). */
+export const updateContractorBody = createContractorBody
+  .partial()
+  .meta({ id: 'UpdateContractorBody' });
+
+const unitType = z.enum(['HOUSE', 'APARTMENT', 'OTHER']);
+
+export const createUnitBody = z
+  .object({
+    organizationId: z.string().describe('Organization the unit belongs to (required)'),
+    owner: z.string().min(1).describe('Owner name (required)'),
+    address: z.string().min(1).describe('Street address (required)'),
+    postCode: z.string().min(1).describe('Post code (required)'),
+    email: z.string().email().describe('Contact email (required)'),
+    phone: z.string().min(1).describe('Contact phone (required)'),
+    rented: z.boolean().optional().describe('Rented out? Defaults to false'),
+    type: unitType.optional().describe('Unit type'),
+  })
+  .meta({ id: 'CreateUnitBody' });
+
+/** PATCH /api/dashboard/admin/units/{id} — at least one field required (route rejects empty bodies). */
+export const updateUnitBody = z
+  .object({
+    owner: z.string().min(1).optional(),
+    address: z.string().min(1).optional(),
+    postCode: z.string().min(1).optional(),
+    email: z.string().email().optional(),
+    phone: z.string().min(1).optional(),
+    rented: z.boolean().optional(),
+    type: unitType.optional(),
+  })
+  .meta({ id: 'UpdateUnitBody' });

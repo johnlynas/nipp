@@ -4923,6 +4923,108 @@
         ],
         "additionalProperties": false
       },
+      "CreateUnitBody": {
+        "type": "object",
+        "properties": {
+          "organizationId": {
+            "type": "string",
+            "description": "Organization the unit belongs to (required)"
+          },
+          "owner": {
+            "type": "string",
+            "minLength": 1,
+            "description": "Owner name (required)"
+          },
+          "address": {
+            "type": "string",
+            "minLength": 1,
+            "description": "Street address (required)"
+          },
+          "postCode": {
+            "type": "string",
+            "minLength": 1,
+            "description": "Post code (required)"
+          },
+          "email": {
+            "type": "string",
+            "format": "email",
+            "pattern": "^(?:[A-Za-z0-9_'+\\-]+\\.)*[A-Za-z0-9_'+\\-]*[A-Za-z0-9_+-]@(?:[A-Za-z0-9][A-Za-z0-9\\-]*\\.)+[A-Za-z]{2,}$",
+            "description": "Contact email (required)"
+          },
+          "phone": {
+            "type": "string",
+            "minLength": 1,
+            "description": "Contact phone (required)"
+          },
+          "rented": {
+            "description": "Rented out? Defaults to false",
+            "type": "boolean"
+          },
+          "type": {
+            "description": "Unit type",
+            "type": "string",
+            "enum": [
+              "HOUSE",
+              "APARTMENT",
+              "OTHER"
+            ]
+          }
+        },
+        "required": [
+          "organizationId",
+          "owner",
+          "address",
+          "postCode",
+          "email",
+          "phone"
+        ],
+        "additionalProperties": false
+      },
+      "CreatedUnit": {
+        "type": "object",
+        "propertyNames": {
+          "type": "string"
+        },
+        "additionalProperties": {}
+      },
+      "UpdateUnitBody": {
+        "type": "object",
+        "properties": {
+          "owner": {
+            "type": "string",
+            "minLength": 1
+          },
+          "address": {
+            "type": "string",
+            "minLength": 1
+          },
+          "postCode": {
+            "type": "string",
+            "minLength": 1
+          },
+          "email": {
+            "type": "string",
+            "format": "email",
+            "pattern": "^(?:[A-Za-z0-9_'+\\-]+\\.)*[A-Za-z0-9_'+\\-]*[A-Za-z0-9_+-]@(?:[A-Za-z0-9][A-Za-z0-9\\-]*\\.)+[A-Za-z]{2,}$"
+          },
+          "phone": {
+            "type": "string",
+            "minLength": 1
+          },
+          "rented": {
+            "type": "boolean"
+          },
+          "type": {
+            "type": "string",
+            "enum": [
+              "HOUSE",
+              "APARTMENT",
+              "OTHER"
+            ]
+          }
+        },
+        "additionalProperties": false
+      },
       "DashboardContractorsList": {
         "type": "object",
         "properties": {
@@ -4990,6 +5092,144 @@
           "counts"
         ],
         "additionalProperties": false
+      },
+      "CreateContractorBody": {
+        "type": "object",
+        "properties": {
+          "companyName": {
+            "type": "string",
+            "minLength": 1,
+            "description": "Company name (required)"
+          },
+          "name": {
+            "type": "string",
+            "minLength": 1,
+            "description": "Contact person name (required)"
+          },
+          "email": {
+            "type": "string",
+            "format": "email",
+            "pattern": "^(?:[A-Za-z0-9_'+\\-]+\\.)*[A-Za-z0-9_'+\\-]*[A-Za-z0-9_+-]@(?:[A-Za-z0-9][A-Za-z0-9\\-]*\\.)+[A-Za-z]{2,}$",
+            "description": "Contact email (required)"
+          },
+          "phone": {
+            "type": "string",
+            "minLength": 1,
+            "description": "Contact phone (required)"
+          },
+          "address": {
+            "type": "string",
+            "minLength": 1,
+            "description": "Street address (required)"
+          },
+          "postCode": {
+            "type": "string",
+            "minLength": 1,
+            "description": "Post code (required)"
+          },
+          "type": {
+            "description": "Contractor trade",
+            "type": "string",
+            "enum": [
+              "PAINTER",
+              "ELECTRICIAN",
+              "PLUMBER",
+              "GAS_ENGINEER",
+              "LIFT_MAINTENANCE",
+              "GARDENER",
+              "ACCOUNTANT",
+              "FIRE_ALARMS",
+              "SOLICITOR",
+              "ROOFER",
+              "WINDOW_CLEANER",
+              "OTHER"
+            ]
+          },
+          "description": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "companyName",
+          "name",
+          "email",
+          "phone",
+          "address",
+          "postCode"
+        ],
+        "additionalProperties": false
+      },
+      "CreatedContractor": {
+        "type": "object",
+        "propertyNames": {
+          "type": "string"
+        },
+        "additionalProperties": {}
+      },
+      "UpdateContractorBody": {
+        "type": "object",
+        "properties": {
+          "companyName": {
+            "type": "string",
+            "minLength": 1,
+            "description": "Company name (required)"
+          },
+          "name": {
+            "type": "string",
+            "minLength": 1,
+            "description": "Contact person name (required)"
+          },
+          "email": {
+            "type": "string",
+            "format": "email",
+            "pattern": "^(?:[A-Za-z0-9_'+\\-]+\\.)*[A-Za-z0-9_'+\\-]*[A-Za-z0-9_+-]@(?:[A-Za-z0-9][A-Za-z0-9\\-]*\\.)+[A-Za-z]{2,}$",
+            "description": "Contact email (required)"
+          },
+          "phone": {
+            "type": "string",
+            "minLength": 1,
+            "description": "Contact phone (required)"
+          },
+          "address": {
+            "type": "string",
+            "minLength": 1,
+            "description": "Street address (required)"
+          },
+          "postCode": {
+            "type": "string",
+            "minLength": 1,
+            "description": "Post code (required)"
+          },
+          "type": {
+            "description": "Contractor trade",
+            "type": "string",
+            "enum": [
+              "PAINTER",
+              "ELECTRICIAN",
+              "PLUMBER",
+              "GAS_ENGINEER",
+              "LIFT_MAINTENANCE",
+              "GARDENER",
+              "ACCOUNTANT",
+              "FIRE_ALARMS",
+              "SOLICITOR",
+              "ROOFER",
+              "WINDOW_CLEANER",
+              "OTHER"
+            ]
+          },
+          "description": {
+            "type": "string"
+          }
+        },
+        "additionalProperties": false
+      },
+      "UpdatedContractor": {
+        "type": "object",
+        "propertyNames": {
+          "type": "string"
+        },
+        "additionalProperties": {}
       },
       "DashboardAdminTeamsList": {
         "type": "object",
@@ -13739,9 +13979,76 @@
             }
           }
         ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UpdateContractorBody"
+              }
+            }
+          }
+        },
         "responses": {
-          "default": {
-            "description": "Unspecified — response schema not yet documented (add a registry entry in lib/schemas/api/ to fill this in)."
+          "200": {
+            "description": "200",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UpdatedContractor"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "400",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "401",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "404",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "429",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "500",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
           }
         }
       }
@@ -13855,9 +14162,66 @@
           }
         ],
         "parameters": [],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateContractorBody"
+              }
+            }
+          }
+        },
         "responses": {
-          "default": {
-            "description": "Unspecified — response schema not yet documented (add a registry entry in lib/schemas/api/ to fill this in)."
+          "201": {
+            "description": "201",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CreatedContractor"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "400",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "401",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "429",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "500",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
           }
         }
       }
@@ -17748,9 +18112,86 @@
             }
           }
         ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UpdateUnitBody"
+              }
+            }
+          }
+        },
         "responses": {
-          "default": {
-            "description": "Unspecified — response schema not yet documented (add a registry entry in lib/schemas/api/ to fill this in)."
+          "200": {
+            "description": "200",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SuccessResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "400",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "401",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "403",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "404",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "429",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "500",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
           }
         }
       }
@@ -17877,9 +18318,76 @@
           }
         ],
         "parameters": [],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateUnitBody"
+              }
+            }
+          }
+        },
         "responses": {
-          "default": {
-            "description": "Unspecified — response schema not yet documented (add a registry entry in lib/schemas/api/ to fill this in)."
+          "201": {
+            "description": "201",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CreatedUnit"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "400",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "401",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "403",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "429",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "500",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
           }
         }
       }

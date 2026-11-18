@@ -866,6 +866,15 @@ export const registry: Record<string, ApiEntry> = {
       '500': E,
     },
   },
+  'POST /api/dashboard/admin/units': {
+    requestBody: R.createUnitBody,
+    // Bare unit row on create (no envelope).
+    responses: { '201': z.record(z.string(), z.unknown()).meta({ id: 'CreatedUnit' }), '400': E, '401': E, '403': E, '429': E, '500': E },
+  },
+  'PATCH /api/dashboard/admin/units/{id}': {
+    requestBody: R.updateUnitBody,
+    responses: { '200': successResponse, '400': E, '401': E, '403': E, '404': E, '429': E, '500': E },
+  },
   'GET /api/dashboard/admin/contractors': {
     parameters: {
       page: z.string().optional().describe('Page number (default 1)'),
@@ -885,6 +894,15 @@ export const registry: Record<string, ApiEntry> = {
       '401': E,
       '500': E,
     },
+  },
+  'POST /api/dashboard/admin/contractors': {
+    requestBody: R.createContractorBody,
+    // Bare contractor row on create (no envelope).
+    responses: { '201': z.record(z.string(), z.unknown()).meta({ id: 'CreatedContractor' }), '400': E, '401': E, '429': E, '500': E },
+  },
+  'PATCH /api/dashboard/admin/contractors/{id}': {
+    requestBody: R.updateContractorBody,
+    responses: { '200': z.record(z.string(), z.unknown()).meta({ id: 'UpdatedContractor' }), '400': E, '401': E, '404': E, '429': E, '500': E },
   },
 
   // ---------------------------------------------------------------------------
