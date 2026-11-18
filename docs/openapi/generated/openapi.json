@@ -4857,6 +4857,140 @@
         ],
         "additionalProperties": false
       },
+      "DashboardUnitsList": {
+        "type": "object",
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "propertyNames": {
+                "type": "string"
+              },
+              "additionalProperties": {}
+            },
+            "description": "Unit rows"
+          },
+          "pagination": {
+            "type": "object",
+            "properties": {
+              "page": {
+                "type": "number"
+              },
+              "pageSize": {
+                "type": "number"
+              },
+              "total": {
+                "type": "number"
+              },
+              "totalPages": {
+                "type": "number"
+              }
+            },
+            "required": [
+              "page",
+              "pageSize",
+              "total",
+              "totalPages"
+            ],
+            "additionalProperties": false
+          },
+          "counts": {
+            "type": "object",
+            "properties": {
+              "totalCount": {
+                "type": "number"
+              },
+              "rentedCount": {
+                "type": "number"
+              },
+              "ownerOccupiedCount": {
+                "type": "number"
+              }
+            },
+            "required": [
+              "totalCount",
+              "rentedCount",
+              "ownerOccupiedCount"
+            ],
+            "additionalProperties": false
+          }
+        },
+        "required": [
+          "items",
+          "pagination",
+          "counts"
+        ],
+        "additionalProperties": false
+      },
+      "DashboardContractorsList": {
+        "type": "object",
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "propertyNames": {
+                "type": "string"
+              },
+              "additionalProperties": {}
+            },
+            "description": "Contractor rows"
+          },
+          "pagination": {
+            "type": "object",
+            "properties": {
+              "page": {
+                "type": "number"
+              },
+              "pageSize": {
+                "type": "number"
+              },
+              "total": {
+                "type": "number"
+              },
+              "totalPages": {
+                "type": "number"
+              }
+            },
+            "required": [
+              "page",
+              "pageSize",
+              "total",
+              "totalPages"
+            ],
+            "additionalProperties": false
+          },
+          "counts": {
+            "type": "object",
+            "properties": {
+              "totalCount": {
+                "type": "number"
+              },
+              "types": {
+                "type": "object",
+                "propertyNames": {
+                  "type": "string"
+                },
+                "additionalProperties": {
+                  "type": "number"
+                }
+              }
+            },
+            "required": [
+              "totalCount",
+              "types"
+            ],
+            "additionalProperties": false
+          }
+        },
+        "required": [
+          "items",
+          "pagination",
+          "counts"
+        ],
+        "additionalProperties": false
+      },
       "DashboardAdminTeamsList": {
         "type": "object",
         "properties": {
@@ -5488,6 +5622,96 @@
             "nullable": true
           }
         },
+        "additionalProperties": false
+      },
+      "TenantWorkOrdersList": {
+        "type": "object",
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "propertyNames": {
+                "type": "string"
+              },
+              "additionalProperties": {}
+            },
+            "description": "Work order rows (org-isolated by RLS)"
+          },
+          "pagination": {
+            "type": "object",
+            "properties": {
+              "page": {
+                "type": "number"
+              },
+              "pageSize": {
+                "type": "number"
+              },
+              "total": {
+                "type": "number"
+              },
+              "totalPages": {
+                "type": "number"
+              }
+            },
+            "required": [
+              "page",
+              "pageSize",
+              "total",
+              "totalPages"
+            ],
+            "additionalProperties": false
+          }
+        },
+        "required": [
+          "items",
+          "pagination"
+        ],
+        "additionalProperties": false
+      },
+      "TenantQuotesList": {
+        "type": "object",
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "propertyNames": {
+                "type": "string"
+              },
+              "additionalProperties": {}
+            },
+            "description": "Quotation rows (org-isolated by RLS)"
+          },
+          "pagination": {
+            "type": "object",
+            "properties": {
+              "page": {
+                "type": "number"
+              },
+              "pageSize": {
+                "type": "number"
+              },
+              "total": {
+                "type": "number"
+              },
+              "totalPages": {
+                "type": "number"
+              }
+            },
+            "required": [
+              "page",
+              "pageSize",
+              "total",
+              "totalPages"
+            ],
+            "additionalProperties": false
+          }
+        },
+        "required": [
+          "items",
+          "pagination"
+        ],
         "additionalProperties": false
       },
       "CreateTeamBody": {
@@ -8002,7 +8226,17 @@
             "cookieAuth": []
           }
         ],
-        "parameters": [],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "description": "Notification ID to delete (?id=…; required)"
+            }
+          }
+        ],
         "responses": {
           "200": {
             "description": "200",
@@ -8067,7 +8301,79 @@
             "cookieAuth": []
           }
         ],
-        "parameters": [],
+        "parameters": [
+          {
+            "name": "page",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "description": "Page number (default 1)",
+              "type": "string"
+            }
+          },
+          {
+            "name": "pageSize",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "description": "Rows per page (default 50)",
+              "type": "string"
+            }
+          },
+          {
+            "name": "scope",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "description": "Filter by delivery scope ('global' | 'org')",
+              "type": "string",
+              "enum": [
+                "global",
+                "org"
+              ]
+            }
+          },
+          {
+            "name": "priority",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "description": "Filter by priority, e.g. 'INFO' | 'WARNING' | 'ERROR' | 'CRITICAL' | 'CALENDAR' | 'JOB'",
+              "type": "string"
+            }
+          },
+          {
+            "name": "organizationId",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "description": "Scope to notifications for one organization",
+              "type": "string"
+            }
+          },
+          {
+            "name": "acknowledged",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "description": "Filter by acknowledgement state ('true' | 'false')",
+              "type": "string",
+              "enum": [
+                "true",
+                "false"
+              ]
+            }
+          },
+          {
+            "name": "search",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "description": "Source or message substring, case-insensitive",
+              "type": "string"
+            }
+          }
+        ],
         "responses": {
           "200": {
             "description": "200",
@@ -8122,7 +8428,17 @@
             "cookieAuth": []
           }
         ],
-        "parameters": [],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "description": "Notification ID to acknowledge (?id=…; required)"
+            }
+          }
+        ],
         "responses": {
           "200": {
             "description": "200",
@@ -9539,7 +9855,50 @@
             "cookieAuth": []
           }
         ],
-        "parameters": [],
+        "parameters": [
+          {
+            "name": "page",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "description": "Page number (default 1)",
+              "type": "string"
+            }
+          },
+          {
+            "name": "pageSize",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "description": "Rows per page (default 20)",
+              "type": "string"
+            }
+          },
+          {
+            "name": "status",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "description": "Filter by organization status",
+              "type": "string",
+              "enum": [
+                "PENDING",
+                "ACTIVE",
+                "SUSPENDED",
+                "ARCHIVED"
+              ]
+            }
+          },
+          {
+            "name": "search",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "description": "Name substring, case-insensitive",
+              "type": "string"
+            }
+          }
+        ],
         "responses": {
           "200": {
             "description": "200",
@@ -13399,10 +13758,88 @@
             "cookieAuth": []
           }
         ],
-        "parameters": [],
+        "parameters": [
+          {
+            "name": "page",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "description": "Page number (default 1)",
+              "type": "string"
+            }
+          },
+          {
+            "name": "pageSize",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "description": "Rows per page (default 20)",
+              "type": "string"
+            }
+          },
+          {
+            "name": "search",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "description": "Name / company / email substring, case-insensitive",
+              "type": "string"
+            }
+          },
+          {
+            "name": "type",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "description": "Filter by contractor type",
+              "type": "string",
+              "enum": [
+                "PAINTER",
+                "ELECTRICIAN",
+                "PLUMBER",
+                "GAS_ENGINEER",
+                "LIFT_MAINTENANCE",
+                "GARDENER",
+                "ACCOUNTANT",
+                "FIRE_ALARMS",
+                "SOLICITOR",
+                "ROOFER",
+                "WINDOW_CLEANER",
+                "OTHER"
+              ]
+            }
+          }
+        ],
         "responses": {
-          "default": {
-            "description": "Unspecified — response schema not yet documented (add a registry entry in lib/schemas/api/ to fill this in)."
+          "200": {
+            "description": "200",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DashboardContractorsList"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "401",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "500",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
           }
         }
       },
@@ -17330,10 +17767,101 @@
             "cookieAuth": []
           }
         ],
-        "parameters": [],
+        "parameters": [
+          {
+            "name": "page",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "description": "Page number (default 1)",
+              "type": "string"
+            }
+          },
+          {
+            "name": "pageSize",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "description": "Rows per page (default 20, max 100)",
+              "type": "string"
+            }
+          },
+          {
+            "name": "organizationId",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "description": "Scope to one org; omit for the cross-org merge",
+              "type": "string"
+            }
+          },
+          {
+            "name": "search",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "description": "Owner / address / post code / email / phone substring, case-insensitive",
+              "type": "string"
+            }
+          },
+          {
+            "name": "rented",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "description": "Filter by rental state ('true' | 'false')",
+              "type": "string",
+              "enum": [
+                "true",
+                "false"
+              ]
+            }
+          },
+          {
+            "name": "type",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "description": "Filter by unit type",
+              "type": "string",
+              "enum": [
+                "HOUSE",
+                "APARTMENT",
+                "OTHER"
+              ]
+            }
+          }
+        ],
         "responses": {
-          "default": {
-            "description": "Unspecified — response schema not yet documented (add a registry entry in lib/schemas/api/ to fill this in)."
+          "200": {
+            "description": "200",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DashboardUnitsList"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "401",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "500",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
           }
         }
       },
@@ -17791,6 +18319,19 @@
               "enum": [
                 "active",
                 "banned"
+              ]
+            }
+          },
+          {
+            "name": "userType",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "description": "Filter by credential type ('oidc' | 'local')",
+              "type": "string",
+              "enum": [
+                "oidc",
+                "local"
               ]
             }
           }
@@ -19452,11 +19993,100 @@
             "schema": {
               "type": "string"
             }
+          },
+          {
+            "name": "page",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "description": "Page number (default 1)",
+              "type": "string"
+            }
+          },
+          {
+            "name": "pageSize",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "description": "Rows per page (default 20)",
+              "type": "string"
+            }
+          },
+          {
+            "name": "search",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "description": "Description substring, case-insensitive",
+              "type": "string"
+            }
+          },
+          {
+            "name": "state",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "description": "Filter by quote state",
+              "type": "string",
+              "enum": [
+                "OPENED",
+                "ACCEPTED",
+                "REJECTED",
+                "CLOSED"
+              ]
+            }
           }
         ],
         "responses": {
-          "default": {
-            "description": "Unspecified — response schema not yet documented (add a registry entry in lib/schemas/api/ to fill this in)."
+          "200": {
+            "description": "200",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TenantQuotesList"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "400",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "401",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "403",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "500",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
           }
         }
       }
@@ -20702,11 +21332,105 @@
             "schema": {
               "type": "string"
             }
+          },
+          {
+            "name": "page",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "description": "Page number (default 1)",
+              "type": "string"
+            }
+          },
+          {
+            "name": "pageSize",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "description": "Rows per page (default 20)",
+              "type": "string"
+            }
+          },
+          {
+            "name": "search",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "description": "Description substring, case-insensitive",
+              "type": "string"
+            }
+          },
+          {
+            "name": "state",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "description": "Filter by work order state",
+              "type": "string",
+              "enum": [
+                "CREATED",
+                "OUT_FOR_QUOTES",
+                "QUOTES_IN",
+                "CONTRACTOR_ASSIGNED",
+                "STARTED",
+                "COMPLETE",
+                "INVOICED",
+                "FINISHED",
+                "CLOSED"
+              ]
+            }
           }
         ],
         "responses": {
-          "default": {
-            "description": "Unspecified — response schema not yet documented (add a registry entry in lib/schemas/api/ to fill this in)."
+          "200": {
+            "description": "200",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TenantWorkOrdersList"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "400",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "401",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "403",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "500",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
           }
         }
       }
