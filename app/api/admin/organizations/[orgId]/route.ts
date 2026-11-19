@@ -1,6 +1,6 @@
 /**
  * GET    /api/admin/organizations/[orgId]          -- organization details by ID (cached via tag `org`)
- * PATCH  /api/admin/organizations/[orgId]          -- update name/slug/status (slug uniqueness enforced)
+ * PATCH  /api/admin/organizations/[orgId]          -- update name/slug/description/status (slug uniqueness enforced)
  * DELETE /api/admin/organizations/[orgId]          -- archive; PENDING orgs are hard-deleted
  *
  * Super Admin only. Writes are rate-limited per session. Runs under a verified
@@ -116,7 +116,7 @@ export const PATCH = wrapPiiRoute(async (request, decryptedBody, params) => {
     }
 
     // Get body from decrypted payload or parse JSON
-    let body: { name?: string; slug?: string; status?: string };
+    let body: { name?: string; slug?: string; description?: string | null; status?: string };
     if (decryptedBody && typeof decryptedBody === 'object') {
       body = decryptedBody as typeof body;
     } else {
@@ -140,8 +140,9 @@ export const PATCH = wrapPiiRoute(async (request, decryptedBody, params) => {
         return null;
       }
 
-      const updateData: Record<string, string> = {};
+      const updateData: Record<string, string | null> = {};
       if (body.name) updateData.name = body.name;
+      if (body.description !== undefined) updateData.description = body.description;
       if (body.slug && body.slug !== existingOrg.slug) {
         const slugCollision = await tenantDb.organization.findFirst({ where: { slug: body.slug, id: { not: orgId } } });
         if (slugCollision) {

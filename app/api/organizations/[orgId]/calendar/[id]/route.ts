@@ -11,7 +11,7 @@ import { auth } from '@/lib/auth';
 import { resolveTenantAccess, toTenantContext } from '@/lib/tenant-access';
 import { withRLSContext } from '@/lib/rls-transaction';
 import { CalendarService } from '@/services/calendar-service';
-import { isSameSiteRequest } from '@/lib/csrf';
+import { isSameOriginRequest } from '@/lib/csrf';
 import { checkCalendarRateLimit } from '@/lib/rate-limiter';
 
 export const runtime = 'nodejs';
@@ -63,7 +63,7 @@ export async function PATCH(
   { params }: { params: Promise<{ orgId: string; id: string }> },
 ) {
   // SECURITY (S8): Validate CSRF for state-changing requests
-  if (!isSameSiteRequest(req.method, req.headers)) {
+  if (!isSameOriginRequest(req.url, req.method, req.headers)) {
     return NextResponse.json(
       { error: 'Forbidden: cross-site request blocked' },
       { status: 403 }
@@ -126,7 +126,7 @@ export async function DELETE(
   { params }: { params: Promise<{ orgId: string; id: string }> },
 ) {
   // SECURITY (S8): Validate CSRF for state-changing requests
-  if (!isSameSiteRequest(req.method, req.headers)) {
+  if (!isSameOriginRequest(req.url, req.method, req.headers)) {
     return NextResponse.json(
       { error: 'Forbidden: cross-site request blocked' },
       { status: 403 }
