@@ -352,7 +352,7 @@ export const registry: Record<string, ApiEntry> = {
     responses: { '200': M.organizationDetail, '400': E, '404': E, '429': E, '503': E },
   },
   'PATCH /api/admin/organizations/{orgId}': {
-    requestBody: R.orgUpdateOrganizationBody,
+    requestBody: R.adminUpdateOrganizationBody,
     responses: { '200': M.organizationUpdated, '400': E, '404': E, '409': E, '429': E, '503': E },
   },
   // PENDING orgs are hard-deleted; ACTIVE/SUSPENDED move to ARCHIVED; already-ARCHIVED → 400.

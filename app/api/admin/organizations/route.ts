@@ -1,6 +1,6 @@
 /**
  * GET /api/admin/organizations          -- paginated organization list (page, pageSize, status, search)
- * POST /api/admin/organizations         -- create an organization (name, slug?, adminEmail?)
+ * POST /api/admin/organizations         -- create an organization (name, slug?, description?, adminEmail?)
  *
  * Super Admin only. Writes are rate-limited per session. Cross-tenant reads
  * and inserts run under a verified platform context (RLS Phase 3); creation
@@ -83,9 +83,9 @@ export const POST = wrapPiiRoute(async (request, decryptedBody) => {
     logger.info({ route: '/api/admin/organizations', method: 'POST' }, 'Request received');
 
     // Use decryptedBody (already parsed JSON) or fall back to request.json()
-    let body: { name?: string; slug?: string; adminEmail?: string };
+    let body: { name?: string; slug?: string; description?: string | null; adminEmail?: string };
     if (decryptedBody && typeof decryptedBody === 'object') {
-      body = decryptedBody as { name?: string; slug?: string; adminEmail?: string };
+      body = decryptedBody as { name?: string; slug?: string; description?: string | null; adminEmail?: string };
     } else {
       // decryptedBody is null when encryption mode is 'disabled'.
       // In that case the body should be plaintext JSON — but if the client
@@ -108,7 +108,7 @@ export const POST = wrapPiiRoute(async (request, decryptedBody) => {
       }
     }
 
-    const { name, slug, adminEmail } = body;
+    const { name, slug, description, adminEmail } = body;
     if (!name) {
       return NextResponse.json({ error: 'Organization name is required' }, { status: 400 });
     }
@@ -120,7 +120,7 @@ export const POST = wrapPiiRoute(async (request, decryptedBody) => {
       };
       // Verified platform context for the org insert (flag checked by policy).
       const organization = await withPlatformContext(session.user.id, () =>
-        OrganizationService.createOrganization({ name, slug, adminEmail }, ctx)
+        OrganizationService.createOrganization({ name, slug, description, adminEmail }, ctx)
       );
 
       logger.info({ orgId: organization.id, method: 'POST' }, 'Organization created');

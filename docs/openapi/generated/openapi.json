@@ -1265,6 +1265,11 @@
             "type": "string",
             "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$"
           },
+          "description": {
+            "description": "Organization description",
+            "type": "string",
+            "nullable": true
+          },
           "adminEmail": {
             "description": "Bootstrap an admin user for this org",
             "type": "string",
@@ -2197,6 +2202,30 @@
           "memberCount",
           "customRoleCount"
         ],
+        "additionalProperties": false
+      },
+      "AdminUpdateOrganizationBody": {
+        "type": "object",
+        "properties": {
+          "name": {
+            "type": "string",
+            "minLength": 1
+          },
+          "slug": {
+            "description": "New URL slug (409 when already in use)",
+            "type": "string",
+            "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$"
+          },
+          "status": {
+            "description": "State machine transitions enforced server-side (ARCHIVED is terminal)",
+            "$ref": "#/components/schemas/OrgStatus"
+          },
+          "description": {
+            "description": "New description (null clears it)",
+            "type": "string",
+            "nullable": true
+          }
+        },
         "additionalProperties": false
       },
       "MessageResponse": {
@@ -9763,8 +9792,8 @@
         "tags": [
           "admin"
         ],
-        "summary": "update name/slug/status (slug uniqueness enforced)",
-        "description": "PATCH — update name/slug/status (slug uniqueness enforced)\n\nSuper Admin only. Writes are rate-limited per session. Runs under a verified\ntarget-org context (RLS Phase 3); every mutation is audit-logged and\ninvalidates the `org` cache tag. DELETE state machine: PENDING → deleted,\nACTIVE/SUSPENDED → ARCHIVED (terminal), ARCHIVED → 400.\n\nRequires super admin session.\n\nHandler: `app/api/admin/organizations/[orgId]/route.ts`.",
+        "summary": "update name/slug/description/status (slug uniqueness enforced)",
+        "description": "PATCH — update name/slug/description/status (slug uniqueness enforced)\n\nSuper Admin only. Writes are rate-limited per session. Runs under a verified\ntarget-org context (RLS Phase 3); every mutation is audit-logged and\ninvalidates the `org` cache tag. DELETE state machine: PENDING → deleted,\nACTIVE/SUSPENDED → ARCHIVED (terminal), ARCHIVED → 400.\n\nRequires super admin session.\n\nHandler: `app/api/admin/organizations/[orgId]/route.ts`.",
         "security": [
           {
             "cookieAuth": []
@@ -9785,7 +9814,7 @@
           "content": {
             "application/json": {
               "schema": {
-                "$ref": "#/components/schemas/OrgUpdateOrganizationBody"
+                "$ref": "#/components/schemas/AdminUpdateOrganizationBody"
               }
             }
           }
@@ -10186,8 +10215,8 @@
         "tags": [
           "admin"
         ],
-        "summary": "create an organization (name, slug?, adminEmail?)",
-        "description": "POST — create an organization (name, slug?, adminEmail?)\n\nSuper Admin only. Writes are rate-limited per session. Cross-tenant reads\nand inserts run under a verified platform context (RLS Phase 3); creation\nis recorded in the audit log.\n\nRequires super admin session.\n\nHandler: `app/api/admin/organizations/route.ts`.",
+        "summary": "create an organization (name, slug?, description?, adminEmail?)",
+        "description": "POST — create an organization (name, slug?, description?, adminEmail?)\n\nSuper Admin only. Writes are rate-limited per session. Cross-tenant reads\nand inserts run under a verified platform context (RLS Phase 3); creation\nis recorded in the audit log.\n\nRequires super admin session.\n\nHandler: `app/api/admin/organizations/route.ts`.",
         "security": [
           {
             "cookieAuth": []

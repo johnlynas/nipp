@@ -19,6 +19,7 @@ export const createOrganizationBody = z
       .regex(/^[a-z0-9]+(?:-[a-z0-9]+)*$/)
       .optional()
       .describe('URL slug (auto-generated from name when omitted)'),
+    description: z.string().nullable().optional().describe('Organization description'),
     adminEmail: z.string().email().optional().describe('Bootstrap an admin user for this org'),
   })
   .meta({ id: 'CreateOrganizationBody' });
@@ -137,7 +138,7 @@ export const createTopLevelRoleBody = z
   })
   .meta({ id: 'CreateTopLevelRoleBody' });
 
-/** PATCH /api/admin/organizations/[orgId] and [orgId]/settings — accepts name/slug/status (state machine enforced). */
+/** PATCH /api/admin/organizations/[orgId]/settings — accepts name/slug/status (state machine enforced). */
 export const orgUpdateOrganizationBody = z
   .object({
     name: z.string().min(1).optional(),
@@ -151,6 +152,13 @@ export const orgUpdateOrganizationBody = z
     ),
   })
   .meta({ id: 'OrgUpdateOrganizationBody' });
+
+/** PATCH /api/admin/organizations/[orgId] — like the settings surface, plus `description` (null clears it). */
+export const adminUpdateOrganizationBody = orgUpdateOrganizationBody
+  .extend({
+    description: z.string().nullable().optional().describe('New description (null clears it)'),
+  })
+  .meta({ id: 'AdminUpdateOrganizationBody' });
 
 export const createPermissionBody = z
   .object({
