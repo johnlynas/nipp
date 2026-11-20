@@ -14323,6 +14323,33 @@
       }
     },
     "/api/dashboard/admin/organizations/{id}": {
+      "delete": {
+        "tags": [
+          "dashboard-admin"
+        ],
+        "summary": "DELETE /api/dashboard/admin/organizations/{id}",
+        "description": "Delete an organization. Platform Admin only.\nSafety semantics live in OrganizationService.deleteOrganization: the\nPlatform Organization is protected, and organizations with existing members\nare refused (archive those instead). Memberless orgs — including archived\nones — are hard-deleted.\n\nRequires super admin session.\n\nHandler: `app/api/dashboard/admin/organizations/[id]/route.ts`.",
+        "security": [
+          {
+            "cookieAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "default": {
+            "description": "Unspecified — response schema not yet documented (add a registry entry in lib/schemas/api/ to fill this in)."
+          }
+        }
+      },
       "get": {
         "tags": [
           "dashboard-admin"

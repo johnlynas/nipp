@@ -114,3 +114,68 @@ export async function PATCH(
     return NextResponse.json({ error: 'Failed to update organization' }, { status: 500 });
   }
 }
+
+/**
+ * DELETE /api/dashboard/admin/organizations/[id]
+ * Delete an organization. Platform Admin only.
+ *
+ * Safety semantics live in OrganizationService.deleteOrganization: the
+ * Platform Organization is protected, and organizations with existing members
+ * are refused (archive those instead). Memberless orgs — including archived
+ * ones — are hard-deleted.
+ */
+export async function DELETE(
+  request: NextRequest,
+  { params }: { params: Promise<{ id: string }> }
+) {
+  const auth = await requireSuperAdmin(request.headers);
+  if (!auth.authorized) {
+    return NextResponse.json({ error: auth.error }, { status: auth.status });
+  }
+
+  const ctx: ServiceContext = {
+    userId: auth.session!.user.id,
+    role: 'PLATFORM_ADMIN',
+  };
+  const id = (await params).id;
+
+  // Rate limit write operations by session
+  if (!checkAdminRateLimit(ctx.userId)) {
+    return NextResponse.json({ error: 'rate_limited' }, { status: 429 });
+  }
+
+  try {
+    // One verified target-org context covers label lookup + delete.
+    const { label, deleted } = await withTenantAdminContext(
+      auth.session!.user.id,
+      id,
+      async () => ({
+        label: await getOrgLabel(id, ctx),
+        deleted: await OrganizationService.deleteOrganization(id, ctx),
+      })
+    );
+
+    // No organizationId on success: the org row is gone, and Notification's
+    // FK to Organization would reject it. The target label already carries
+    // the org name in the message.
+    await notifyOrganizationOperation('delete', label, true);
+
+    return NextResponse.json(deleted);
+  } catch (error) {
+    if (error instanceof Error && error.message === 'Organization not found') {
+      await notifyOrganizationOperation('delete', id, false, 'Organization not found');
+      return NextResponse.json({ error: 'Organization not found' }, { status: 404 });
+    }
+    console.error('Failed to delete organization:', error);
+    const message =
+      error instanceof Error && error.message ? error.message : 'Failed to delete organization';
+    await notifyOrganizationOperation('delete', id, false, message, id);
+    if (error instanceof Error && error.name === 'ConflictError') {
+      return NextResponse.json({ error: error.message }, { status: 409 });
+    }
+    if (error instanceof Error && error.name === 'ForbiddenError') {
+      return NextResponse.json({ error: error.message }, { status: 403 });
+    }
+    return NextResponse.json({ error: 'Failed to delete organization' }, { status: 500 });
+  }
+}
