@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useEffect, useCallback, useRef } from 'react';
-import { Eye, Pencil, Archive } from 'lucide-react';
+import { Eye, Pencil, Archive, Trash2 } from 'lucide-react';
 import { logClientError } from '@/lib/client-error-logger';
 import { SearchBar } from '@/components/dashboard/SearchBar';
 import { StatusBadge } from '@/components/dashboard/StatusBadge';
@@ -46,6 +46,7 @@ export default function OrganizationsPage() {
   const [detailModalOpen, setDetailModalOpen] = useState(false);
   const [selectedOrg, setSelectedOrg] = useState<Organization | null>(null);
   const [archiveModalOpen, setArchiveModalOpen] = useState(false);
+  const [deleteModalOpen, setDeleteModalOpen] = useState(false);
   const [createModalOpen, setCreateModalOpen] = useState(false);
   const [createForm, setCreateForm] = useState({ name: '', description: '' });
 
@@ -147,6 +148,32 @@ export default function OrganizationsPage() {
     }
   };
 
+  // Handle delete — calls the delete API; the service refuses orgs with
+  // members (409) and protects the Platform Organization (403), both of which
+  // surface through the shared error banner.
+  const handleDelete = async () => {
+    if (!selectedOrg) return;
+
+    try {
+      const res = await apiFetch(`/api/dashboard/admin/organizations/${selectedOrg.id}`, {
+        method: 'DELETE',
+      });
+
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}));
+        throw new Error(data.error || 'Failed to delete organization');
+      }
+
+      setDeleteModalOpen(false);
+      fetchData();
+    } catch (err) {
+      const message = err instanceof Error ? err.message : 'Failed to delete organization';
+      console.error('Failed to delete org:', err);
+      logClientError(message, 'organizations', 'delete');
+      setError(message);
+    }
+  };
+
   // Handle create org
   const handleCreate = async () => {
     try {
@@ -215,6 +242,14 @@ export default function OrganizationsPage() {
             <Archive className="h-4 w-4" />
           </button>
         )}
+        <button
+          onClick={() => { setSelectedOrg(o); setDeleteModalOpen(true); }}
+          title={`Delete ${o.name}`}
+          className="rounded p-1.5 text-slate-500 hover:bg-danger-tint hover:text-danger-ink transition-colors"
+          aria-label={`Delete ${o.name}`}
+        >
+          <Trash2 className="h-4 w-4" />
+        </button>
       </div>
     )},
   ];
@@ -318,6 +353,17 @@ export default function OrganizationsPage() {
         title="Archive Organization"
         message={`Are you sure you want to archive "${selectedOrg?.name}"? This action will mark the organization as archived.`}
         confirmLabel="Archive"
+        variant="danger"
+      />
+
+      {/* Delete Confirm Dialog */}
+      <ConfirmDialog
+        isOpen={deleteModalOpen}
+        onClose={() => setDeleteModalOpen(false)}
+        onConfirm={handleDelete}
+        title="Delete Organization"
+        message={`Are you sure you want to delete "${selectedOrg?.name}"? This action is permanent and cannot be undone. Organizations with members cannot be deleted — archive them instead.`}
+        confirmLabel="Delete"
         variant="danger"
       />
 

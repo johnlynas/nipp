@@ -523,11 +523,12 @@ export async function notifyUserOperation(
  * passed through when known (usually the affected organization itself) so the
  * history table and per-org consumers can show which organization was affected.
  *
- * Note: organizations cannot be hard-deleted — archiving is the terminal
- * removal, hence the 'archive' operation.
+ * Note: organizations cannot be hard-deleted while they have members —
+ * archiving is the terminal removal for live orgs, hence the 'archive'
+ * operation. Memberless orgs (including archived ones) can be hard-deleted.
  */
 export async function notifyOrganizationOperation(
-  operation: 'create' | 'update' | 'archive',
+  operation: 'create' | 'update' | 'archive' | 'delete',
   targetLabel: string,
   success: boolean,
   errorMessage?: string,
@@ -537,13 +538,14 @@ export async function notifyOrganizationOperation(
     create: ['Organization created', 'Failed to create organization'],
     update: ['Organization updated', 'Failed to update organization'],
     archive: ['Organization archived', 'Failed to archive organization'],
+    delete: ['Organization deleted', 'Failed to delete organization'],
   };
   const [successTitle, failureTitle] = titles[operation];
   await pushNotification({
     title: success ? successTitle : failureTitle,
     message: success
       ? `${targetLabel} was ${
-          operation === 'create' ? 'created' : operation === 'update' ? 'updated' : 'archived'
+          operation === 'create' ? 'created' : operation === 'update' ? 'updated' : operation === 'archive' ? 'archived' : 'deleted'
         } successfully.`
       : `The ${operation} operation failed for ${targetLabel}. ${errorMessage ?? 'No error details available.'}`,
     priority: success ? NotificationPriority.INFO : NotificationPriority.ERROR,
