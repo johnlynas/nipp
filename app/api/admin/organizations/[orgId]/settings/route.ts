@@ -6,6 +6,7 @@
  */
 
 import { NextResponse } from 'next/server';
+import { revalidateTag } from 'next/cache';
 // RLS Phase 3: org settings run under a verified target-org context.
 import tenantDb from '@/lib/tenant-db';
 import { withTenantAdminContext } from '@/lib/platform-db';
@@ -132,6 +133,9 @@ export const PATCH = wrapPiiRoute(async (request, decryptedBody, params) => {
       where: { id: orgId },
       data: updateData,
     });
+
+    // P7: Invalidate cached org details — name/slug/status are part of the cached payload.
+    revalidateTag('org', { expire: 0 });
 
     // Audit log (globalDb)
     await recordAuditLog({

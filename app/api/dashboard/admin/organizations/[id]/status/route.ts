@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
+import { revalidateTag } from 'next/cache';
 import { requireSuperAdmin } from '@/lib/require-super-admin';
 import { checkAdminRateLimit } from '@/lib/rate-limiter';
 
@@ -137,6 +138,11 @@ export async function PATCH(
       { status: newStatus },
       ctx
     );
+
+    // P7: Invalidate cached org details on status change (same tag the
+    // admin-scope route uses — without this, GET /api/admin/organizations/[id]
+    // serves a stale snapshot for up to its 30s revalidate window).
+    revalidateTag('org', { expire: 0 });
 
     await notifyOrganizationOperation(operation, targetLabel, true, undefined, id);
 

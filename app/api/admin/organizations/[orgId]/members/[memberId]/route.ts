@@ -7,6 +7,7 @@
  */
 
 import { NextRequest, NextResponse } from 'next/server';
+import { revalidateTag } from 'next/cache';
 import { requireSuperAdmin } from '@/lib/require-super-admin';
 // RLS Phase 3: cross-org admin member ops run under a verified target-org context.
 import tenantDb from '@/lib/tenant-db';
@@ -90,6 +91,9 @@ export const PATCH = wrapPiiRoute(async (request, decryptedBody, params) => {
         include: { user: { select: { name: true, email: true } } },
       });
 
+      // P7: Invalidate cached org details — the member list (incl. roles) is part of the cached payload.
+      revalidateTag('org', { expire: 0 });
+
       // Audit log
       await recordAuditLog({
         userId: session.user.id,
@@ -162,6 +166,9 @@ export const DELETE = wrapPiiRoute(async (request, _decryptedBody, params) => {
 
       // Remove member (platform ctx pass-through; orgId in where matches RLS)
       await tenantDb.member.delete({ where: { id: urlMemberId } });
+
+      // P7: Invalidate cached org details — memberCount is part of the cached payload.
+      revalidateTag('org', { expire: 0 });
 
       // Audit log
       await recordAuditLog({

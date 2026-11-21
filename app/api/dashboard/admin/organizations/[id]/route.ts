@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
+import { revalidateTag } from 'next/cache';
 import { requireSuperAdmin } from '@/lib/require-super-admin';
 import { checkAdminRateLimit } from '@/lib/rate-limiter';
 
@@ -99,6 +100,11 @@ export async function PATCH(
     );
     targetLabel = label;
 
+    // P7: Invalidate cached org details on update (same tag the admin-scope
+    // route uses — keeps GET /api/admin/organizations/[id] from serving a
+    // stale snapshot for its 30s revalidate window).
+    revalidateTag('org', { expire: 0 });
+
     await notifyOrganizationOperation('update', targetLabel, true, undefined, id);
 
     return NextResponse.json(result);
@@ -159,6 +165,10 @@ export async function DELETE(
     // FK to Organization would reject it. The target label already carries
     // the org name in the message.
     await notifyOrganizationOperation('delete', label, true);
+
+    // P7: Invalidate cached org details on delete (same tag the admin-scope
+    // route uses — a hard-deleted org must not keep serving from cache).
+    revalidateTag('org', { expire: 0 });
 
     return NextResponse.json(deleted);
   } catch (error) {

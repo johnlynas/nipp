@@ -7,6 +7,7 @@
  */
 
 import { NextRequest, NextResponse } from 'next/server';
+import { revalidateTag } from 'next/cache';
 import { requireSuperAdmin } from '@/lib/require-super-admin';
 // RLS Phase 3: cross-org admin member ops run under a verified target-org context.
 import tenantDb from '@/lib/tenant-db';
@@ -160,6 +161,9 @@ export const POST = wrapPiiRoute(async (request, decryptedBody, params) => {
       // Auto-enroll the new member in the org's default "Members" team
       // (idempotent; also self-heals legacy orgs missing the team).
       await enrollInDefaultMembersTeam(tenantDb, urlOrgId, user.id);
+
+      // P7: Invalidate cached org details — memberCount is part of the cached payload.
+      revalidateTag('org', { expire: 0 });
 
       // Audit log
       await recordAuditLog({
