@@ -3,7 +3,7 @@
 import { useState, useMemo } from 'react';
 import { usePathname } from 'next/navigation';
 import Link from 'next/link';
-import { Menu, X, LogOut, CalendarDays, Network, UsersRound, Shield, Building2, XCircle, MapPin, ClipboardList, FileText } from 'lucide-react';
+import { Menu, X, LogOut, CalendarDays, Network, UsersRound, Shield, Building2, XCircle, MapPin, ClipboardList, FileText, CpuAi } from 'lucide-react';
 import { authClient } from '@/lib/auth-client';
 import { useNotifications, PRIORITY_COLORS, getPriorityIcon } from '@/hooks/useNotifications';
 import { TopBarNotificationBell } from '@/components/dashboard/TopBarNotificationBell';
@@ -18,7 +18,15 @@ type NavGroup = { label: string; items: NavItem[] };
  * lives only under /dashboard/admin and never appears here.
  */
 const navGroups: NavGroup[] = [
-  { label: 'Workspace', items: [{ href: '/dashboard/tenant/calendar', label: 'Calendar', icon: CalendarDays }] },
+  {
+    label: 'Workspace',
+    items: [
+      { href: '/dashboard/tenant/calendar', label: 'Calendar', icon: CalendarDays },
+      // Org-scoped AI assistant — the agent resolves the caller's active org from
+      // their verified session, so the bot only sees this tenant's data.
+      { href: '/dashboard/tenant/ai', label: 'AI Assistant', icon: CpuAi },
+    ],
+  },
   {
     label: 'My Organization',
     items: [
@@ -53,7 +61,7 @@ export default function TenantDashboardLayout({ children }: { children: React.Re
   // Full-bleed pages (no content padding) so their canvases + slide-in panels
   // anchor edge-to-edge between the top bar and the footer rail — same rule as admin.
   const isFullScreenPage =
-    isCalendarPage || pathname === '/dashboard/tenant/org-chart' || pathname === '/dashboard/tenant/map';
+    isCalendarPage || pathname === '/dashboard/tenant/org-chart' || pathname === '/dashboard/tenant/map' || pathname === '/dashboard/tenant/ai';
   const { notifications, isConnected, dismissNotification, clearNotifications } = useNotifications();
 
   const handleLogout = async () => {
