@@ -716,6 +716,8 @@ Advisories are remediated to zero when the fix is reachable within the current m
 
 Residual below-high findings (moderate, dev-time only — no action tracked): `minimatch <11.0.1` ([GHSA-g3hv-75wg-m249](https://github.com/advisories/GHSA-g3hv-75wg-m249)) under the ESLint/typescript-eslint toolchain (fixed only in minimatch 11; no installed range reaches it without an eslint 10 major) and `postcss-selector-parser` (build-time only, pinned `^6.1.5` via `overrides`).
 
+**Transitive override — `effect` (temporary).** The high-severity ReDoS in `effect <=3.22.0` ([GHSA-7589-6fvf-x4pw](https://github.com/advisories/GHSA-7589-6fvf-x4pw), via `@prisma/config@7.10.1` → exact pin `effect@3.20.0`) was cleared on 2026-11-26 with an npm `overrides` pin (`"effect": "^3.22.1"` → resolves 3.22.5) because no stable Prisma release fixes the pin (7.10.1 is latest stable; 8.x is RC-only, and `npm audit fix --force` would downgrade to prisma@6). `effect` is dev-only (Prisma CLI config loading — never in app runtime), so the override is low-risk. **Remove the override when a stable Prisma ships with `@prisma/config` pinning `effect >= 3.22.1`** — re-check `npm view @prisma/config version` + its `dependencies.effect` at that point.
+
 ---
 
 ## Appendix A: API Route Security Summary
@@ -777,5 +779,5 @@ This document covers security-specific details. For broader architectural contex
 
 ---
 
-*Last updated: 2026-11-15 — §2 bearer section gained the agent-iframe embed (`?agentToken`*** server-to-server auth, credential-door diagram); §5 calendar model corrected (no `CalendarRecurrence` model) + all-day events; §7 CSP table brought current with `proxy.ts`, per-request `frame-src` for the agent origin, and the Google Maps host allowlists; env table gained `NIPP_AGENT_URL`. Earlier: 2026-11-01 — Prisma 7 migration cleared the deepmerge-ts accepted-risk row in §10.*
+*Last updated: 2026-11-26 — §10 gained the temporary `effect` override note (GHSA-7589 ReDoS cleared via npm `overrides`, to be removed when a stable Prisma fixes its pin). Earlier: 2026-11-15 — §2 bearer section gained the agent-iframe embed (`?agentToken`*** server-to-server auth, credential-door diagram); §5 calendar model corrected (no `CalendarRecurrence` model) + all-day events; §7 CSP table brought current with `proxy.ts`, per-request `frame-src` for the agent origin, and the Google Maps host allowlists; env table gained `NIPP_AGENT_URL`. Earlier: 2026-11-01 — Prisma 7 migration cleared the deepmerge-ts accepted-risk row in §10.*
 *Document owner: Engineering Team*
