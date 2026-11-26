@@ -44,6 +44,10 @@ vi.mock('@/lib/logger', () => ({
   logger: { info: vi.fn(), warn: vi.fn(), error: vi.fn() },
 }));
 
+vi.mock('next/cache', () => ({
+  revalidateTag: vi.fn(),
+}));
+
 const globalDb = (await import('@/lib/tenant-db')).default;
 const { recordAuditLog } = await import('@/lib/audit-log');
 const { auth } = await import('@/lib/auth');
